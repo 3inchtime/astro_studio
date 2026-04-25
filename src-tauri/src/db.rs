@@ -89,6 +89,31 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);"
         )?;
 
+        migrate_step(&conn,
+            "CREATE TABLE IF NOT EXISTS folders (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );"
+        )?;
+
+        migrate_step(&conn,
+            "CREATE TABLE IF NOT EXISTS folder_images (
+                folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+                image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                added_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (folder_id, image_id)
+            );"
+        )?;
+
+        migrate_step(&conn,
+            "CREATE INDEX IF NOT EXISTS idx_folder_images_image_id ON folder_images(image_id);"
+        )?;
+
+        migrate_step(&conn,
+            "INSERT OR IGNORE INTO folders (id, name, created_at) VALUES ('default', '默认收藏', datetime('now'));"
+        )?;
+
         Ok(())
     }
 
