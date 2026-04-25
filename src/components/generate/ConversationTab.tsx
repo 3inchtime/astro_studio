@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 interface Tab {
   id: string;
@@ -10,10 +10,11 @@ interface ConversationTabProps {
   activeId: string | null;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onNew: () => void;
 }
 
-export default function ConversationTab({ tabs, activeId, onSelect, onClose }: ConversationTabProps) {
-  if (tabs.length <= 1) return null;
+export default function ConversationTab({ tabs, activeId, onSelect, onClose, onNew }: ConversationTabProps) {
+  if (tabs.length === 0) return null;
 
   return (
     <div className="flex items-center gap-1 border-b border-border-subtle bg-surface/80 px-4 py-2 overflow-x-auto backdrop-blur-sm">
@@ -28,14 +29,23 @@ export default function ConversationTab({ tabs, activeId, onSelect, onClose }: C
           }`}
         >
           <span className="max-w-[90px] truncate">{tab.title}</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); onClose(tab.id); }}
-            className="ml-0.5 rounded p-0.5 hover:bg-border/30"
-          >
-            <X size={10} />
-          </button>
+          {tabs.length > 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(tab.id); }}
+              className="ml-0.5 rounded p-0.5 hover:bg-border/30"
+            >
+              <X size={10} />
+            </button>
+          )}
         </div>
       ))}
+      <button
+        onClick={onNew}
+        className="flex shrink-0 items-center justify-center rounded-[8px] p-1.5 text-muted transition-colors hover:bg-subtle hover:text-foreground"
+        title="New conversation"
+      >
+        <Plus size={12} strokeWidth={2} />
+      </button>
     </div>
   );
 }

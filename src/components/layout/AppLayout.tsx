@@ -131,6 +131,10 @@ export default function AppLayout() {
               setActiveConversationId(id);
               navigate("/generate");
             }}
+            onNewConversation={() => {
+              setActiveConversationId(null);
+              navigate("/generate");
+            }}
           />
         </aside>
 

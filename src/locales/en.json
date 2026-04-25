@@ -11,6 +11,7 @@
   "sidebar.yesterday": "Yesterday",
   "sidebar.previous7Days": "Previous 7 Days",
   "sidebar.older": "Older",
+  "sidebar.newConversation": "New Conversation",
 
   "generate.placeholder": "Describe the image you want to generate...",
   "generate.emptyTitle": "What will you create?",

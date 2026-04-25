@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Search, Image as ImageIcon, MessageSquare } from "lucide-react";
+import { Search, Image as ImageIcon, MessageSquare, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getConversations, toAssetUrl } from "../../lib/api";
 import { formatTimeAgo } from "../../lib/utils";
@@ -9,6 +9,7 @@ import type { Conversation } from "../../types";
 interface ConversationListProps {
   activeConversationId: string | null;
   onSelectConversation: (id: string) => void;
+  onNewConversation: () => void;
 }
 
 function groupByDate(conversations: Conversation[], t: (key: string) => string) {
@@ -38,6 +39,7 @@ function groupByDate(conversations: Conversation[], t: (key: string) => string) 
 export default function ConversationList({
   activeConversationId,
   onSelectConversation,
+  onNewConversation,
 }: ConversationListProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState("");
@@ -140,6 +142,14 @@ export default function ConversationList({
             </div>
           ))
         )}
+
+        <button
+          onClick={onNewConversation}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-border-subtle px-3 py-2.5 text-[11px] font-medium text-muted transition-all hover:border-primary/30 hover:bg-primary/4 hover:text-primary"
+        >
+          <Plus size={12} strokeWidth={2} />
+          {t("sidebar.newConversation")}
+        </button>
       </div>
     </div>
   );
