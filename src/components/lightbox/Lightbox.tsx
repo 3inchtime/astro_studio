@@ -13,23 +13,27 @@ import {
 } from "lucide-react";
 import { toAssetUrl, copyImageToClipboard, saveImageToFile } from "../../lib/api";
 import { useTranslation } from "react-i18next";
+import FavoriteButton from "../favorites/FavoriteButton";
+import FolderSelector from "../favorites/FolderSelector";
 
 interface LightboxProps {
   images: string[];
   initialIndex: number;
   onClose: () => void;
   onDelete?: (imagePath: string) => void;
+  imageId?: string;
 }
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3.0;
 
-export default function Lightbox({ images, initialIndex, onClose, onDelete }: LightboxProps) {
+export default function Lightbox({ images, initialIndex, onClose, onDelete, imageId }: LightboxProps) {
   const { t } = useTranslation();
   const [index, setIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [showFolderSelector, setShowFolderSelector] = useState(false);
   const lastPoint = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -185,7 +189,19 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete }: Li
               <Icon size={16} strokeWidth={1.8} />
             </button>
           ))}
+          {imageId && (
+            <button
+              onClick={() => setShowFolderSelector(true)}
+              title="Add to folder"
+              className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+            >
+              <FavoriteButton imageId={imageId} size={16} />
+            </button>
+          )}
         </div>
+        {showFolderSelector && imageId && (
+          <FolderSelector imageId={imageId} onClose={() => setShowFolderSelector(false)} />
+        )}
       </motion.div>
     </AnimatePresence>
   );
