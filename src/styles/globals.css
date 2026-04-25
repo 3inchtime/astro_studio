@@ -256,6 +256,33 @@
   animation: breathe 3s ease-in-out infinite;
 }
 
+/* Dream bubble loading animation */
+@keyframes bubble-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-12px) scale(1.1);
+    opacity: 1;
+  }
+}
+
+@keyframes bubble-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(79, 106, 255, 0.15), 0 0 20px rgba(124, 92, 252, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(79, 106, 255, 0.3), 0 0 40px rgba(124, 92, 252, 0.15);
+  }
+}
+
+@keyframes bubble-shimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
