@@ -64,5 +64,14 @@
   "time.justNow": "Just now",
   "time.minutesAgo": "{{count}}m ago",
   "time.hoursAgo": "{{count}}h ago",
-  "time.daysAgo": "{{count}}d ago"
+  "time.daysAgo": "{{count}}d ago",
+
+  "favorites": {
+    "title": "Favorites",
+    "search": "Search favorites",
+    "noImages": "No favorites yet",
+    "emptyHint": "Star images to save them here",
+    "detail": "Details",
+    "manageFolders": "Manage folders"
+  }
 }

@@ -64,5 +64,14 @@
   "time.justNow": "刚刚",
   "time.minutesAgo": "{{count}}分钟前",
   "time.hoursAgo": "{{count}}小时前",
-  "time.daysAgo": "{{count}}天前"
+  "time.daysAgo": "{{count}}天前",
+
+  "favorites": {
+    "title": "收藏",
+    "search": "搜索收藏",
+    "noImages": "暂无收藏",
+    "emptyHint": "收藏的图片会显示在这里",
+    "detail": "详情",
+    "manageFolders": "管理文件夹"
+  }
 }
