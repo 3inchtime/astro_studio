@@ -126,10 +126,10 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
               initial={{ opacity: 0, scale: 0.85, filter: "blur(8px)" }}
               animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
               transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-              className="rounded-[16px] overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
+              className="inline-block rounded-[16px] overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
             >
               <ImageGrid
-                images={[{ path: message.imagePath, thumbnail: message.thumbnailPath }]}
+                images={[{ path: message.imagePath, thumbnail: message.thumbnailPath, imageId: `${message.generationId}_0` }]}
                 onImageClick={(path, images, idx) => onImageClick(path, images, idx)}
               />
             </motion.div>
