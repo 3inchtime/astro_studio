@@ -4,6 +4,8 @@ import { searchGenerations, deleteGeneration, toAssetUrl } from "../lib/api";
 import type { GenerationResult } from "../types";
 import { Search, Trash2, X, Image as ImageIcon, Calendar, Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import FavoriteButton from "../components/favorites/FavoriteButton";
+import FolderSelector from "../components/favorites/FolderSelector";
 
 export default function GalleryPage() {
   const { t } = useTranslation();
@@ -13,6 +15,7 @@ export default function GalleryPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
+  const [folderSelectorImageId, setFolderSelectorImageId] = useState<string | null>(null);
 
   async function loadGenerations(p: number, q?: string) {
     const result = await searchGenerations(q || query || undefined, p);
@@ -110,6 +113,13 @@ export default function GalleryPage() {
                           className="aspect-square w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                           loading="lazy"
                         />
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <FavoriteButton
+                            imageId={`${result.generation.id}_0`}
+                            size={14}
+                            onClick={() => setFolderSelectorImageId(`${result.generation.id}_0`)}
+                          />
+                        </div>
                       </div>
                     )}
                     <div className="px-3 py-2.5">
@@ -236,6 +246,10 @@ export default function GalleryPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {folderSelectorImageId && (
+        <FolderSelector imageId={folderSelectorImageId} onClose={() => setFolderSelectorImageId(null)} />
+      )}
     </div>
   );
 }
