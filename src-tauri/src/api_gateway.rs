@@ -1,3 +1,4 @@
+use crate::config::ApiConfig;
 use crate::models::*;
 
 #[async_trait::async_trait]
@@ -18,10 +19,10 @@ pub struct GptImageEngine {
 }
 
 impl GptImageEngine {
-    pub fn new() -> Self {
+    pub fn new(config: &ApiConfig) -> Self {
         Self {
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(config.timeout_secs))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
         }
@@ -52,7 +53,7 @@ impl ImageEngine for GptImageEngine {
             "quality": quality,
         });
 
-        log::debug!("Sending image generation request to {}", url);
+        log::info!("Sending image generation request to {} — model: {}, size: {}, quality: {}", url, ENGINE_GPT_IMAGE_2, size, quality);
 
         let response = self
             .client
@@ -71,9 +72,11 @@ impl ImageEngine for GptImageEngine {
             .map_err(|e| format!("Read body failed: {}", e))?;
 
         if !status.is_success() {
-            log::error!("API error {}: {}", status, &body_text[..body_text.len().min(500)]);
+            log::error!("API error {} — response: {}", status, &body_text[..body_text.len().min(500)]);
             return Err(format!("API error {}: {}", status, body_text));
         }
+
+        log::info!("API responded {} ({} bytes)", status, body_text.len());
 
         let api_response: OpenAiImageResponse = serde_json::from_str(&body_text)
             .map_err(|e| format!("Parse response failed: {}. Body: {}", e, &body_text[..body_text.len().min(300)]))?;
@@ -91,7 +94,7 @@ impl ImageEngine for GptImageEngine {
             return Err(format!("No images returned. Response: {}", &body_text[..body_text.len().min(500)]));
         }
 
-        log::debug!("Generated {} image(s)", images.len());
+        log::info!("Decoded {} image(s) from response", images.len());
         Ok(images)
     }
 

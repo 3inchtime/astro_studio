@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use image::GenericImageView;
 
 const THUMBNAIL_SIZE: u32 = 256;
