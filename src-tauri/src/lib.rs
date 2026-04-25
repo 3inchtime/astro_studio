@@ -1,4 +1,5 @@
 mod api_gateway;
+mod config;
 mod db;
 mod file_manager;
 mod models;
@@ -13,6 +14,7 @@ use tauri::{Emitter, Manager};
 
 #[tauri::command]
 fn save_api_key(db: tauri::State<'_, Database>, key: String) -> Result<(), String> {
+    log::info!("Saving API key");
     db.set_setting(SETTING_API_KEY, &key)
 }
 
@@ -23,6 +25,7 @@ fn get_api_key(db: tauri::State<'_, Database>) -> Result<Option<String>, String>
 
 #[tauri::command]
 fn save_base_url(db: tauri::State<'_, Database>, url: String) -> Result<(), String> {
+    log::info!("Saving base URL: {}", url);
     db.set_setting(SETTING_BASE_URL, &url)
 }
 
@@ -46,6 +49,38 @@ async fn generate_image(
     let quality = quality.unwrap_or_else(|| "high".to_string());
     let generation_id = uuid::Uuid::new_v4().to_string();
 
+    let conversation_id = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let recent: Option<(String, String)> = conn.query_row(
+            "SELECT conversation_id, created_at FROM generations \
+             WHERE conversation_id IS NOT NULL \
+             ORDER BY created_at DESC LIMIT 1",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ).ok();
+
+        match recent {
+            Some((conv_id, created_at_str)) => {
+                let recent_time = chrono::NaiveDateTime::parse_from_str(&created_at_str, "%Y-%m-%d %H:%M:%S")
+                    .unwrap_or_else(|_| chrono::Local::now().naive_local());
+                let now = chrono::Local::now().naive_local();
+                let diff = now - recent_time;
+                if diff.num_minutes() <= 30 {
+                    conn.execute(
+                        "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?1",
+                        params![conv_id],
+                    ).ok();
+                    conv_id
+                } else {
+                    create_new_conversation(&conn, &prompt)?
+                }
+            }
+            None => create_new_conversation(&conn, &prompt)?,
+        }
+    };
+
+    log::info!("[{}] Generating image — prompt: {:?}, size: {}, quality: {}", generation_id, prompt, size, quality);
+
     let api_key = db.get_setting(SETTING_API_KEY)?
         .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
     let base_url = db.get_setting(SETTING_BASE_URL)?
@@ -66,14 +101,15 @@ async fn generate_image(
 
     match result {
         Ok(images_data) => {
+            log::info!("[{}] API returned {} image(s), saving to disk...", generation_id, images_data.len());
             let mut image_paths = Vec::new();
 
             let conn = db.conn.lock().map_err(|e| e.to_string())?;
             let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
             tx.execute(
-                "INSERT INTO generations (id, prompt, engine, size, quality, status) VALUES (?1, ?2, ?3, ?4, ?5, 'processing')",
-                params![generation_id, prompt, ENGINE_GPT_IMAGE_2, size, quality],
+                "INSERT INTO generations (id, prompt, engine, size, quality, status, conversation_id) VALUES (?1, ?2, ?3, ?4, ?5, 'processing', ?6)",
+                params![generation_id, prompt, ENGINE_GPT_IMAGE_2, size, quality, conversation_id],
             ).map_err(|e| e.to_string())?;
 
             for (i, data) in images_data.iter().enumerate() {
@@ -94,6 +130,8 @@ async fn generate_image(
 
             tx.commit().map_err(|e| e.to_string())?;
 
+            log::info!("[{}] Generation completed — {} image(s) saved", generation_id, image_paths.len());
+
             let _ = app.emit("generation:complete", serde_json::json!({
                 "generation_id": generation_id,
                 "status": "completed"
@@ -102,6 +140,8 @@ async fn generate_image(
             Ok(GenerateResult { generation_id, image_paths })
         }
         Err(e) => {
+            log::error!("[{}] Generation failed: {}", generation_id, e);
+
             let conn = db.conn.lock().map_err(|e| e.to_string())?;
             conn.execute(
                 "UPDATE generations SET status = 'failed' WHERE id = ?1",
@@ -250,6 +290,7 @@ fn delete_generation(
     db: tauri::State<'_, Database>,
     id: String,
 ) -> Result<(), String> {
+    log::info!("Deleting generation {}", id);
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
@@ -279,22 +320,166 @@ fn delete_generation(
     Ok(())
 }
 
+fn create_new_conversation(conn: &rusqlite::Connection, prompt: &str) -> Result<String, String> {
+    let conv_id = uuid::Uuid::new_v4().to_string();
+    let title = if prompt.len() > 40 { format!("{}...", &prompt[..40]) } else { prompt.to_string() };
+    conn.execute(
+        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, datetime('now'), datetime('now'))",
+        params![conv_id, title],
+    ).map_err(|e| e.to_string())?;
+    Ok(conv_id)
+}
+
+fn conversations_base_sql() -> String {
+    "SELECT c.id, c.title, c.created_at, c.updated_at, \
+     (SELECT COUNT(*) FROM generations WHERE conversation_id = c.id) as generation_count, \
+     (SELECT i.thumbnail_path FROM generations g JOIN images i ON i.generation_id = g.id \
+      WHERE g.conversation_id = c.id ORDER BY g.created_at DESC LIMIT 1) as latest_thumbnail \
+     FROM conversations c \
+     ORDER BY c.updated_at DESC".to_string()
+}
+
+#[tauri::command]
+fn get_conversations(
+    db: tauri::State<'_, Database>,
+    query: Option<String>,
+) -> Result<Vec<Conversation>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // Backfill: assign orphaned generations to new conversations
+    let mut orphans: Vec<(String, String, String)> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, prompt, created_at FROM generations WHERE conversation_id IS NULL ORDER BY created_at ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        }).map_err(|e| e.to_string())?;
+        for row in rows {
+            if let Ok(r) = row { orphans.push(r); }
+        }
+    }
+
+    for (gen_id, prompt, created_at) in &orphans {
+        let conv_id = uuid::Uuid::new_v4().to_string();
+        let title = if prompt.len() > 40 { format!("{}...", &prompt[..40]) } else { prompt.clone() };
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            params![conv_id, title, created_at, created_at],
+        ).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE generations SET conversation_id = ?1 WHERE id = ?2",
+            params![conv_id, gen_id],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Now query conversations
+    let (sql, query_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(q) = &query {
+        if !q.is_empty() {
+            let pattern = format!("%{}%", q);
+            (
+                "SELECT c.id, c.title, c.created_at, c.updated_at, \
+                 (SELECT COUNT(*) FROM generations WHERE conversation_id = c.id) as generation_count, \
+                 (SELECT i.thumbnail_path FROM generations g JOIN images i ON i.generation_id = g.id \
+                  WHERE g.conversation_id = c.id ORDER BY g.created_at DESC LIMIT 1) as latest_thumbnail \
+                 FROM conversations c \
+                 WHERE c.title LIKE ?1 \
+                 ORDER BY c.updated_at DESC".to_string(),
+                vec![Box::new(pattern)],
+            )
+        } else {
+            (conversations_base_sql(), vec![])
+        }
+    } else {
+        (conversations_base_sql(), vec![])
+    };
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = query_params.iter().map(|p| p.as_ref()).collect();
+    let conversations = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok(Conversation {
+            id: row.get("id")?,
+            title: row.get("title")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+            generation_count: row.get("generation_count")?,
+            latest_thumbnail: row.get("latest_thumbnail")?,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(conversations)
+}
+
+#[tauri::command]
+fn get_conversation_generations(
+    db: tauri::State<'_, Database>,
+    conversation_id: String,
+) -> Result<Vec<GenerationResult>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare("SELECT * FROM generations WHERE conversation_id = ?1 ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let generations: Vec<Generation> = stmt
+        .query_map(params![conversation_id], row_to_generation)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let gen_ids: Vec<&str> = generations.iter().map(|g| g.id.as_str()).collect();
+    let mut image_map: std::collections::HashMap<String, Vec<GeneratedImage>> =
+        std::collections::HashMap::new();
+
+    if !gen_ids.is_empty() {
+        let placeholders: Vec<&str> = gen_ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "SELECT * FROM images WHERE generation_id IN ({})",
+            placeholders.join(",")
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> = gen_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let mut img_stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let images = img_stmt
+            .query_map(params.as_slice(), row_to_image)
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok());
+        for img in images {
+            image_map.entry(img.generation_id.clone()).or_default().push(img);
+        }
+    }
+
+    let results = generations.into_iter().map(|gen| {
+        let images = image_map.remove(&gen.id).unwrap_or_default();
+        GenerationResult { generation: gen, images }
+    }).collect();
+
+    Ok(results)
+}
+
 // --- App entry point ---
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let app_config = config::AppConfig::load();
+    config::init_logger(&app_config.log);
+
     let db_path = dirs::data_dir()
         .expect("Cannot determine app data directory")
         .join("astro-studio")
         .join("astro_studio.db");
 
+    log::info!("Database path: {}", db_path.display());
+    log::info!("Config path: {}", config::AppConfig::config_path().display());
+
     let database = Database::open(&db_path).expect("Failed to open database");
     database.run_migrations().expect("Failed to run migrations");
 
-    let engine = api_gateway::GptImageEngine::new();
+    let engine = api_gateway::GptImageEngine::new(&app_config.api);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(app_config)
         .manage(database)
         .manage(engine)
         .invoke_handler(tauri::generate_handler![
@@ -305,6 +490,8 @@ pub fn run() {
             generate_image,
             search_generations,
             delete_generation,
+            get_conversations,
+            get_conversation_generations,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Cannot determine app data dir");
@@ -320,9 +507,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 use window_vibrancy::apply_vibrancy;
-                use window_vibrancy::NSVisualEffectViewMaterial;
+                use window_vibrancy::NSVisualEffectMaterial;
                 let window = app.get_webview_window("main").unwrap();
-                let _ = apply_vibrancy(&window, NSVisualEffectViewMaterial::HudWindow, None, None);
+                let _ = apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None);
             }
             Ok(())
         })
