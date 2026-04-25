@@ -37,7 +37,7 @@ const PANEL_CONFIGS = [
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleThemeWithEvent } = useTheme();
   const { t } = useTranslation();
   const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export default function AppLayout() {
 
           <div className="mt-auto">
             <button
-              onClick={toggleTheme}
+              onClick={toggleThemeWithEvent}
               className="flex h-10 w-10 items-center justify-center rounded-[10px] text-muted transition-colors hover:text-foreground hover:bg-subtle"
             >
               <AnimatePresence mode="wait" initial={false}>
