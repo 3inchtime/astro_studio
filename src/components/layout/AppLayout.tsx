@@ -2,6 +2,7 @@ import { createContext, useContext, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Image, Settings, Sparkles, Sun, Moon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "../../hooks/useTheme";
 import { useResizable } from "../../hooks/useResizable";
 import { ResizeHandle } from "./ResizeHandle";
@@ -22,9 +23,9 @@ export function useLayoutContext() {
 }
 
 const navItems = [
-  { to: "/generate", icon: Sparkles, label: "Generate" },
-  { to: "/gallery", icon: Image, label: "Gallery" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+  { to: "/generate", icon: Sparkles, labelKey: "nav.generate" },
+  { to: "/gallery", icon: Image, labelKey: "nav.gallery" },
+  { to: "/settings", icon: Settings, labelKey: "nav.settings" },
 ];
 
 const PANEL_CONFIGS = [
@@ -37,6 +38,7 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { t } = useTranslation();
   const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
@@ -55,11 +57,11 @@ export default function AppLayout() {
           </NavLink>
 
           <nav className="flex flex-1 flex-col items-center gap-1">
-            {navItems.map(({ to, icon: Icon, label }) => (
+            {navItems.map(({ to, icon: Icon, labelKey }) => (
               <NavLink
                 key={to}
                 to={to}
-                title={label}
+                title={t(labelKey)}
                 className={({ isActive }) =>
                   `relative flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-200 ${
                     isActive
