@@ -195,11 +195,12 @@ export default function GeneratePage() {
         ),
       );
       // Add tab for the new conversation
-      const title = prompt.length > 20 ? prompt.slice(0, 20) + "..." : prompt;
+      const tabTitle = prompt.length > 20 ? prompt.slice(0, 20) + "..." : prompt;
       setTabs((prev) => {
-        if (prev.some((tab) => tab.id === result.generation_id)) return prev;
-        return [...prev, { id: result.generation_id, title }];
+        if (prev.some((tab) => tab.id === result.conversation_id)) return prev;
+        return [...prev, { id: result.conversation_id, title: tabTitle }];
       });
+      setActiveConversationId(result.conversation_id);
     } catch (e) {
       setMessages((prev) =>
         prev.map((m) =>

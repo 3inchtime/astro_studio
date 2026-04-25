@@ -44,6 +44,7 @@ pub struct SearchResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GenerateResult {
     pub generation_id: String,
+    pub conversation_id: String,
     pub image_paths: Vec<String>,
 }
 

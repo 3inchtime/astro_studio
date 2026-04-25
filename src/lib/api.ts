@@ -23,7 +23,7 @@ export async function getBaseUrl(): Promise<string> {
   return invoke("get_base_url");
 }
 
-export async function generateImage(params: GenerationParams): Promise<{ generation_id: string; image_paths: string[] }> {
+export async function generateImage(params: GenerationParams): Promise<{ generation_id: string; conversation_id: string; image_paths: string[] }> {
   return invoke("generate_image", {
     prompt: params.prompt,
     size: params.size,

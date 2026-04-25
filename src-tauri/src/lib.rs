@@ -137,7 +137,7 @@ async fn generate_image(
                 "status": "completed"
             }));
 
-            Ok(GenerateResult { generation_id, image_paths })
+            Ok(GenerateResult { generation_id, conversation_id, image_paths })
         }
         Err(e) => {
             log::error!("[{}] Generation failed: {}", generation_id, e);
