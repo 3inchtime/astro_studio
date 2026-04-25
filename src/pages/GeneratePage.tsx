@@ -226,7 +226,7 @@ export default function GeneratePage() {
         {messages.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="mx-auto max-w-[900px] space-y-6 px-6 py-6">
+          <div className="mx-auto max-w-[700px] space-y-7 px-6 py-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} />
@@ -236,88 +236,92 @@ export default function GeneratePage() {
         )}
       </div>
 
-      <div className="border-t border-border-subtle bg-surface shadow-panel px-6 py-4">
-        <div className="mx-auto flex max-w-[900px] items-end gap-2.5">
-          <div ref={dropdownRef} className="flex shrink-0 gap-1.5">
-            <div className="relative">
-              <button
-                onClick={() => { setShowModelDropdown(!showModelDropdown); setShowSizeDropdown(false); }}
-                className="flex h-[34px] items-center gap-1 rounded-[8px] border border-border-subtle bg-subtle/50 px-2.5 text-[11px] text-muted transition-all duration-150 hover:border-border hover:bg-surface"
-              >
-                Astro v2
-                <ChevronDown size={10} className="opacity-50" />
-              </button>
-              <AnimatePresence>
-                {showModelDropdown && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -3, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -3, scale: 0.98 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute bottom-full left-0 mb-1.5 w-40 rounded-[10px] border border-border bg-surface shadow-float py-1 z-50"
-                  >
-                    {["Astro v2.0", "GPT Image"].map((name, i) => (
-                      <button
-                        key={name}
-                        onClick={() => setShowModelDropdown(false)}
-                        className={cn(
-                          "flex w-full items-center gap-2 px-3 py-2 text-[12px] transition-colors",
-                          i === 0 ? "text-primary bg-primary/4" : "text-muted hover:bg-subtle"
-                        )}
-                      >
-                        <span className={cn("h-1.5 w-1.5 rounded-full", i === 0 ? "bg-primary" : "bg-border")} />
-                        {name}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="relative">
-              <button
-                onClick={() => { setShowSizeDropdown(!showSizeDropdown); setShowModelDropdown(false); }}
-                className="flex h-[34px] items-center gap-1 rounded-[8px] border border-border-subtle bg-subtle/50 px-2.5 text-[11px] text-muted transition-all duration-150 hover:border-border hover:bg-surface"
-              >
-                {currentSizeLabel}
-                <ChevronDown size={10} className="opacity-50" />
-              </button>
-              <AnimatePresence>
-                {showSizeDropdown && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -3, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -3, scale: 0.98 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute bottom-full left-0 mb-1.5 w-36 rounded-[10px] border border-border bg-surface shadow-float py-1 z-50"
-                  >
-                    {sizes.map((s) => (
-                      <button
-                        key={s.value}
-                        onClick={() => { setSize(s.value); setShowSizeDropdown(false); }}
-                        className={cn(
-                          "flex w-full items-center justify-between px-3 py-2 text-[12px] transition-colors",
-                          size === s.value ? "text-primary bg-primary/4" : "text-muted hover:bg-subtle"
-                        )}
-                      >
-                        <span>{s.label}</span>
-                        <span className="text-[10px] opacity-50">{t(s.descKey)}</span>
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+      {/* Settings bar */}
+      <div ref={dropdownRef} className="flex items-center gap-4 border-t border-border-subtle bg-subtle/30 px-6 py-2.5">
+        <div className="mx-auto flex w-full max-w-[700px] items-center gap-4">
+          <div className="relative">
+            <button
+              onClick={() => { setShowModelDropdown(!showModelDropdown); setShowSizeDropdown(false); }}
+              className="flex items-center gap-1 rounded-[8px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[12px] text-foreground transition-all hover:border-border"
+            >
+              Astro v2
+              <ChevronDown size={10} className="opacity-50" />
+            </button>
+            <AnimatePresence>
+              {showModelDropdown && (
+                <motion.div
+                  initial={{ opacity: 0, y: -3, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -3, scale: 0.98 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute bottom-full left-0 mb-1.5 w-40 rounded-[10px] border border-border bg-surface shadow-float py-1 z-50"
+                >
+                  {["Astro v2.0", "GPT Image"].map((name, i) => (
+                    <button
+                      key={name}
+                      onClick={() => setShowModelDropdown(false)}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-2 text-[12px] transition-colors",
+                        i === 0 ? "text-primary bg-primary/4" : "text-muted hover:bg-subtle"
+                      )}
+                    >
+                      <span className={cn("h-1.5 w-1.5 rounded-full", i === 0 ? "bg-primary" : "bg-border")} />
+                      {name}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="flex-1 relative">
+          <div className="relative">
+            <button
+              onClick={() => { setShowSizeDropdown(!showSizeDropdown); setShowModelDropdown(false); }}
+              className="flex items-center gap-1 rounded-[8px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[12px] text-foreground transition-all hover:border-border"
+            >
+              {currentSizeLabel}
+              <ChevronDown size={10} className="opacity-50" />
+            </button>
+            <AnimatePresence>
+              {showSizeDropdown && (
+                <motion.div
+                  initial={{ opacity: 0, y: -3, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -3, scale: 0.98 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute bottom-full left-0 mb-1.5 w-36 rounded-[10px] border border-border bg-surface shadow-float py-1 z-50"
+                >
+                  {sizes.map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => { setSize(s.value); setShowSizeDropdown(false); }}
+                      className={cn(
+                        "flex w-full items-center justify-between px-3 py-2 text-[12px] transition-colors",
+                        size === s.value ? "text-primary bg-primary/4" : "text-muted hover:bg-subtle"
+                      )}
+                    >
+                      <span>{s.label}</span>
+                      <span className="text-[10px] opacity-50">{t(s.descKey)}</span>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+
+      {/* Input area */}
+      <div className="bg-surface px-6 pt-4 pb-5">
+        <div className="mx-auto max-w-[700px]">
+          <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
             <textarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={t("generate.placeholder")}
-              rows={1}
-              className="w-full resize-none rounded-[10px] border border-border-subtle bg-subtle/30 px-4 py-2.5 pr-10 text-[13px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-primary/30 focus:bg-surface focus:shadow-card transition-all duration-200"
+              rows={2}
+              className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[110px]"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -325,17 +329,16 @@ export default function GeneratePage() {
                 }
               }}
             />
+            <motion.button
+              onClick={handleGenerate}
+              disabled={!prompt.trim()}
+              whileHover={{ scale: 1.02, y: -1 }}
+              whileTap={{ scale: 0.97 }}
+              className="absolute right-3 bottom-3 flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
+            >
+              <ArrowUp size={15} strokeWidth={2.5} />
+            </motion.button>
           </div>
-
-          <motion.button
-            onClick={handleGenerate}
-            disabled={!prompt.trim()}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.96 }}
-            className="gradient-primary breathe flex h-[38px] shrink-0 items-center gap-2 rounded-[10px] px-5 text-[13px] font-medium text-white shadow-button transition-shadow hover:shadow-float disabled:opacity-30 disabled:pointer-events-none disabled:animate-none"
-          >
-            <ArrowUp size={16} strokeWidth={2.5} />
-          </motion.button>
         </div>
       </div>
 
