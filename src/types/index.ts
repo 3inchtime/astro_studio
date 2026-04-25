@@ -59,15 +59,3 @@ export interface Message {
 
 export type ImageSize = "1024x1024" | "1536x1024" | "1024x1536" | "auto";
 export type ImageQuality = "low" | "medium" | "high";
-
-// TODO: Remove Task when GeneratePage is rewritten (Task 3 redesign)
-export interface Task {
-  id: string;
-  prompt: string;
-  size: string;
-  quality: string;
-  status: "processing" | "completed" | "failed";
-  imagePath: string | null;
-  error: string | null;
-  createdAt: number;
-}
