@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { GenerationParams, SearchResult } from "../types";
+import type { GenerationParams, SearchResult, Conversation, GenerationResult } from "../types";
 
 export function toAssetUrl(filePath: string): string {
   return convertFileSrc(filePath.replace(/\\/g, "/"));
@@ -40,6 +40,24 @@ export async function searchGenerations(
 
 export async function deleteGeneration(id: string): Promise<void> {
   await invoke("delete_generation", { id });
+}
+
+export async function getConversations(query?: string): Promise<Conversation[]> {
+  return invoke("get_conversations", { query: query || null });
+}
+
+export async function getConversationGenerations(
+  conversationId: string,
+): Promise<GenerationResult[]> {
+  return invoke("get_conversation_generations", { conversationId });
+}
+
+export async function copyImageToClipboard(imagePath: string): Promise<void> {
+  await invoke("copy_image_to_clipboard", { imagePath });
+}
+
+export async function saveImageToFile(imagePath: string): Promise<void> {
+  await invoke("save_image_to_file", { imagePath });
 }
 
 function onGenerationEvent<T>(event: string, handler: (data: T) => void) {
