@@ -10,9 +10,9 @@ dist-ssr/
 npm-debug.log*
 
 # Environment
-*.local
 .env
 .env.*
+*.local
 
 # Editor
 .vscode/*
@@ -32,9 +32,14 @@ Desktop.ini
 
 # Rust / Tauri
 src-tauri/target/
+src-tauri/Cargo.lock
 
 # Claude Code
 .claude/
-.vscode/
-docs/
 CLAUDE.md
+
+# Doc
+docs/
+
+# MCP
+.playwright-mcp/
