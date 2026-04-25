@@ -125,7 +125,7 @@ export default function ConversationList({
                       </p>
                       <div className="mt-0.5 flex items-center gap-1.5">
                         <span className="text-[10px] text-muted/60">
-                          {formatTimeAgo(conv.updated_at)}
+                          {formatTimeAgo(conv.updated_at, t)}
                         </span>
                         {conv.generation_count > 1 && (
                           <span className="rounded-[4px] bg-primary/8 px-1 text-[9px] font-medium text-primary">

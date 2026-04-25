@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { saveApiKey, getApiKey, saveBaseUrl, getBaseUrl } from "../lib/api";
-import { Eye, EyeOff, Check, Key, Globe, Info, Zap } from "lucide-react";
+import { Eye, EyeOff, Check, Key, Globe, Info, Zap, Languages } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
@@ -28,6 +29,9 @@ export default function SettingsPage() {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [urlSaved, setUrlSaved] = useState(false);
 
+  const { t, i18n } = useTranslation();
+  const [language, setLanguage] = useState(i18n.language);
+
   useEffect(() => {
     getApiKey().then((key) => {
       if (key) setApiKey(key);
@@ -36,6 +40,11 @@ export default function SettingsPage() {
       setBaseUrl(url);
     });
   }, []);
+
+  function handleLanguageChange(lang: string) {
+    i18n.changeLanguage(lang);
+    setLanguage(lang);
+  }
 
   async function handleSaveKey() {
     await saveApiKey(apiKey);
@@ -62,7 +71,7 @@ export default function SettingsPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-6 text-[16px] font-semibold text-foreground tracking-tight"
         >
-          Settings
+          {t("settings.title")}
         </motion.h2>
 
         <div className="space-y-3">
@@ -79,10 +88,10 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 className="text-[13px] font-semibold text-foreground">
-                  API Key
+                  {t("settings.apiKey")}
                 </h3>
                 <p className="mt-0.5 text-[11px] text-muted/60">
-                  Encrypted and stored locally on your device
+                  {t("settings.apiKeyDesc")}
                 </p>
               </div>
             </div>
@@ -93,7 +102,7 @@ export default function SettingsPage() {
                 value={displayKey}
                 onChange={(e) => { setApiKey(e.target.value); setKeySaved(false); }}
                 onFocus={() => { if (!showKey) setShowKey(true); }}
-                placeholder="sk-..."
+                placeholder={t("settings.apiKeyPlaceholder")}
                 className="h-[36px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 pr-9 text-[12px] text-foreground placeholder:text-muted/40 focus:outline-none focus:border-primary/25 focus:bg-surface focus:shadow-card transition-all duration-200"
               />
               <button
@@ -113,9 +122,9 @@ export default function SettingsPage() {
               {keySaved ? (
                 <>
                   <Check size={13} className="text-success" />
-                  <span className="text-success">Saved</span>
+                  <span className="text-success">{t("settings.saved")}</span>
                 </>
-              ) : "Save Key"}
+              ) : t("settings.saveKey")}
             </motion.button>
           </motion.div>
 
@@ -132,10 +141,10 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 className="text-[13px] font-semibold text-foreground">
-                  API Endpoint
+                  {t("settings.endpoint")}
                 </h3>
                 <p className="mt-0.5 text-[11px] text-muted/60">
-                  OpenAI-compatible endpoint for image generation
+                  {t("settings.endpointDesc")}
                 </p>
               </div>
             </div>
@@ -156,14 +165,45 @@ export default function SettingsPage() {
               {urlSaved ? (
                 <>
                   <Check size={13} className="text-success" />
-                  <span className="text-success">Saved</span>
+                  <span className="text-success">{t("settings.saved")}</span>
                 </>
-              ) : "Save URL"}
+              ) : t("settings.saveUrl")}
             </motion.button>
           </motion.div>
 
           <motion.div
             custom={2}
+            variants={cardVariants}
+            initial="hidden"
+            animate="visible"
+            className="rounded-[12px] border border-border-subtle bg-surface p-5 shadow-card"
+          >
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-primary/5 border border-primary/10">
+                <Languages size={14} className="text-primary" strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-[13px] font-semibold text-foreground">
+                  {t("settings.language")}
+                </h3>
+                <p className="mt-0.5 text-[11px] text-muted/60">
+                  {t("settings.languageDesc")}
+                </p>
+              </div>
+            </div>
+
+            <select
+              value={language.startsWith("zh") ? "zh-CN" : "en"}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              className="h-[36px] w-full appearance-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground focus:outline-none focus:border-primary/25 focus:bg-surface focus:shadow-card transition-all duration-200"
+            >
+              <option value="en">English</option>
+              <option value="zh-CN">简体中文</option>
+            </select>
+          </motion.div>
+
+          <motion.div
+            custom={3}
             variants={cardVariants}
             initial="hidden"
             animate="visible"
@@ -175,7 +215,7 @@ export default function SettingsPage() {
               </div>
               <div className="flex-1">
                 <h3 className="text-[13px] font-semibold text-foreground">
-                  About
+                  {t("settings.about")}
                 </h3>
                 <div className="mt-2 flex items-center gap-2">
                   <div className="flex h-5 w-5 items-center justify-center rounded-[6px] gradient-primary">
@@ -187,9 +227,9 @@ export default function SettingsPage() {
                   <span className="text-[10px] text-muted/50">v0.1.0</span>
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted/60 leading-relaxed">
-                  AI Image Generation Desktop Client
+                  {t("settings.aboutDesc")}
                   <br />
-                  Powered by GPT Image
+                  {t("settings.poweredBy")}
                 </p>
               </div>
             </div>
