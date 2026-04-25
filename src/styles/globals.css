@@ -1,0 +1,254 @@
+@import "tailwindcss";
+
+/* ============================================
+   Astro Studio Design System v3
+   Refined Minimalism — Warm Neutrals, Cool Accents
+   ============================================ */
+
+@theme {
+  /* Border Radius — precise, slightly warmer */
+  --radius-window: 12px;
+  --radius-card: 10px;
+  --radius-button: 10px;
+  --radius-button-sm: 8px;
+  --radius-input: 10px;
+  --radius-thumbnail: 10px;
+  --radius-badge: 6px;
+
+  /* Primary — shifted from cold blue to a richer, warmer blue-violet */
+  --color-primary: #4F6AFF;
+  --color-primary-foreground: #FFFFFF;
+  --color-accent: #7C5CFC;
+  --color-lavender: #B8A9FF;
+  --color-lavender-light: #EDE9FE;
+
+  /* Neutrals — warm stone palette, not cold grey */
+  --color-background: #F8F7F4;
+  --color-surface: #FFFFFF;
+  --color-surface-elevated: #FFFFFF;
+  --color-border: #E8E4DD;
+  --color-border-subtle: #F0EDE7;
+  --color-foreground: #2D2A26;
+  --color-muted: #8A8580;
+  --color-subtle: #F2F0EC;
+
+  /* Bubble */
+  --color-bubble: #ECE9F7;
+
+  /* Semantic */
+  --color-success: #2E9E6E;
+  --color-warning: #D4912A;
+  --color-error: #D14545;
+  --color-info: #4F6AFF;
+
+  /* Glass */
+  --color-glass: rgba(255, 255, 252, 0.78);
+  --color-glass-strong: rgba(255, 255, 252, 0.92);
+  --color-glass-dark: rgba(255, 255, 252, 0.52);
+
+  /* Shadows — warm-tinted, ultra-soft */
+  --shadow-card: 0 1px 2px rgba(45, 42, 38, 0.03), 0 4px 16px rgba(45, 42, 38, 0.04);
+  --shadow-float: 0 2px 4px rgba(45, 42, 38, 0.04), 0 12px 32px rgba(45, 42, 38, 0.06);
+  --shadow-panel: 0 -1px 4px rgba(45, 42, 38, 0.02), 0 -4px 20px rgba(45, 42, 38, 0.04);
+  --shadow-button: 0 1px 3px rgba(45, 42, 38, 0.06);
+  --shadow-inset: inset 0 1px 2px rgba(45, 42, 38, 0.04);
+
+  /* Typography */
+  --font-sans: "Geist Sans", "SF Pro Text", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", "Cascadia Code", ui-monospace, monospace;
+
+  /* Easing */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-expo: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.0, 0, 0.2, 1);
+
+  /* Spacing */
+  --spacing-unit: 4px;
+}
+
+/* Dark mode overrides */
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --color-background: #161418;
+    --color-surface: #1E1B22;
+    --color-surface-elevated: #26232C;
+    --color-border: #322E38;
+    --color-border-subtle: #28242E;
+    --color-foreground: #EAE6E0;
+    --color-muted: #918B85;
+    --color-subtle: #242028;
+    --color-bubble: rgba(79, 106, 255, 0.1);
+    --color-lavender-light: rgba(124, 92, 252, 0.12);
+    --color-glass: rgba(30, 27, 34, 0.78);
+    --color-glass-strong: rgba(30, 27, 34, 0.92);
+    --color-glass-dark: rgba(30, 27, 34, 0.52);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.12);
+    --shadow-float: 0 2px 4px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.16);
+    --shadow-panel: 0 -1px 4px rgba(0, 0, 0, 0.16), 0 -4px 20px rgba(0, 0, 0, 0.12);
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+    letter-spacing: -0.01em;
+  }
+
+  /* Scrollbar — near invisible, appears on hover */
+  ::-webkit-scrollbar {
+    width: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted);
+  }
+
+  /* Selection */
+  ::selection {
+    background-color: var(--color-primary);
+    color: white;
+  }
+}
+
+/* ── Glass Utilities ── */
+
+@utility glass {
+  background-color: var(--color-glass);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+@utility glass-strong {
+  background-color: var(--color-glass-strong);
+  backdrop-filter: blur(32px) saturate(200%);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+}
+
+@utility glass-float {
+  background-color: var(--color-glass);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+/* ── Shadow Utilities ── */
+
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+
+@utility shadow-float {
+  box-shadow: var(--shadow-float);
+}
+
+@utility shadow-panel {
+  box-shadow: var(--shadow-panel);
+}
+
+/* ── Gradient ── */
+
+@utility gradient-primary {
+  background: linear-gradient(135deg, #4F6AFF 0%, #7C5CFC 100%);
+}
+
+@utility gradient-primary-hover {
+  background: linear-gradient(135deg, #3D58E8 0%, #6B4AE8 100%);
+}
+
+/* Subtle gradient mesh for backgrounds */
+@utility gradient-mesh {
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 40%, rgba(79, 106, 255, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 80% 60%, rgba(124, 92, 252, 0.04) 0%, transparent 70%),
+    var(--color-background);
+}
+
+/* ── Animations ── */
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@utility shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-subtle) 25%,
+    var(--color-border-subtle) 37%,
+    var(--color-subtle) 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 106, 255, 0.24); }
+  50% { box-shadow: 0 0 0 6px rgba(79, 106, 255, 0); }
+}
+
+@utility pulse-glow {
+  animation: pulse-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@utility float-in {
+  animation: float-in 0.45s var(--ease-expo) forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@utility fade-in {
+  animation: fade-in 0.25s var(--ease-expo) forwards;
+}
+
+/* Breathing glow for the generate button */
+@keyframes breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.08); }
+}
+
+@utility breathe {
+  animation: breathe 3s ease-in-out infinite;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
+  }
+}
