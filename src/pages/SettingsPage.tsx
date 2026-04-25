@@ -65,7 +65,7 @@ export default function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-md p-8">
+      <div className="mx-auto max-w-lg p-8">
         <motion.h2
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
