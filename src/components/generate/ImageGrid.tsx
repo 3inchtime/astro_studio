@@ -14,9 +14,10 @@ interface ImageGridProps {
   images: ImageItem[];
   onImageClick: (imagePath: string, allImages: string[], index: number, imageId: string) => void;
   onDelete?: (generationId: string) => void;
+  onFavoriteClick?: (imageId: string) => void;
 }
 
-export default function ImageGrid({ images, onImageClick, onDelete }: ImageGridProps) {
+export default function ImageGrid({ images, onImageClick, onDelete, onFavoriteClick }: ImageGridProps) {
   if (images.length === 0) return null;
 
   const allPaths = images.map((img) => img.path);
@@ -61,7 +62,7 @@ export default function ImageGrid({ images, onImageClick, onDelete }: ImageGridP
               <Trash2 size={16} />
             </button>
             <div className="w-px h-5 bg-border mx-1" />
-            <FavoriteButton imageId={img.imageId} size={16} />
+            <FavoriteButton imageId={img.imageId} size={16} openSelector={onFavoriteClick ? () => onFavoriteClick(img.imageId) : undefined} />
           </div>
         </div>
       ))}
