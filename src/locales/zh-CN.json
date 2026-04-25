@@ -72,6 +72,7 @@
     "noImages": "暂无收藏",
     "emptyHint": "收藏的图片会显示在这里",
     "detail": "详情",
-    "manageFolders": "管理文件夹"
+    "manageFolders": "管理文件夹",
+    "addToFolder": "加入收藏夹"
   }
 }

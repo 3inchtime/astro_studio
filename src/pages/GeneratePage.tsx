@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { generateImage, getConversationGenerations } from "../lib/api";
+import { generateImage, getConversationGenerations, deleteGeneration } from "../lib/api";
 import { cn } from "../lib/utils";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import MessageBubble from "../components/generate/MessageBubble";
@@ -217,6 +217,11 @@ export default function GeneratePage() {
     setLightboxState({ images: allImages, index, imageId });
   }, []);
 
+  const handleDeleteFromBubble = useCallback(async (generationId: string) => {
+    await deleteGeneration(generationId);
+    setMessages((prev) => prev.filter((m) => m.generationId !== generationId));
+  }, []);
+
   const currentSizeLabel = sizes.find((s) => s.value === size)?.label ?? "1:1";
 
   return (
@@ -230,7 +235,7 @@ export default function GeneratePage() {
           <div className="mx-auto max-w-[900px] space-y-7 px-6 py-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} />
+                <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} onDelete={handleDeleteFromBubble} />
               ))}
             </AnimatePresence>
           </div>
@@ -349,6 +354,13 @@ export default function GeneratePage() {
           initialIndex={lightboxState.index}
           onClose={() => setLightboxState(null)}
           imageId={lightboxState.imageId}
+          onDelete={async (_imagePath) => {
+            if (!lightboxState.imageId) return;
+            const generationId = lightboxState.imageId.replace(/_0$/, "");
+            await deleteGeneration(generationId);
+            setMessages((prev) => prev.filter((m) => m.generationId !== generationId));
+            setLightboxState(null);
+          }}
         />
       )}
     </div>

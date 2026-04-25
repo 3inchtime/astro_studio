@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { toAssetUrl, copyImageToClipboard } from "../../lib/api";
+import { toAssetUrl, copyImageToClipboard, saveImageToFile } from "../../lib/api";
 import { Copy, Download, Trash2 } from "lucide-react";
 import FavoriteButton from "../favorites/FavoriteButton";
 
@@ -7,14 +7,16 @@ interface ImageItem {
   path: string;
   thumbnail?: string;
   imageId: string;
+  generationId: string;
 }
 
 interface ImageGridProps {
   images: ImageItem[];
   onImageClick: (imagePath: string, allImages: string[], index: number, imageId: string) => void;
+  onDelete?: (generationId: string) => void;
 }
 
-export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
+export default function ImageGrid({ images, onImageClick, onDelete }: ImageGridProps) {
   if (images.length === 0) return null;
 
   const allPaths = images.map((img) => img.path);
@@ -46,10 +48,16 @@ export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
             >
               <Copy size={16} />
             </button>
-            <button className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors">
+            <button
+              onClick={() => saveImageToFile(img.path)}
+              className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors"
+            >
               <Download size={16} />
             </button>
-            <button className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors">
+            <button
+              onClick={() => { if (onDelete && confirm("Delete this image?")) onDelete(img.generationId); }}
+              className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors"
+            >
               <Trash2 size={16} />
             </button>
             <div className="w-px h-5 bg-border mx-1" />
