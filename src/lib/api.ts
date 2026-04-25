@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { GenerationParams, SearchResult, Conversation, GenerationResult } from "../types";
+import type { GenerationParams, SearchResult, Conversation, GenerationResult, Folder } from "../types";
 
 export function toAssetUrl(filePath: string): string {
   return convertFileSrc(filePath.replace(/\\/g, "/"));
@@ -80,4 +80,40 @@ export function onGenerationFailed(
   handler: (data: { generation_id: string; error: string }) => void,
 ) {
   return onGenerationEvent("generation:failed", handler);
+}
+
+export async function createFolder(name: string): Promise<Folder> {
+  return invoke("create_folder", { name });
+}
+
+export async function renameFolder(id: string, name: string): Promise<void> {
+  return invoke("rename_folder", { id, name });
+}
+
+export async function deleteFolder(id: string): Promise<void> {
+  return invoke("delete_folder", { id });
+}
+
+export async function getFolders(): Promise<Folder[]> {
+  return invoke("get_folders");
+}
+
+export async function addImageToFolders(imageId: string, folderIds: string[]): Promise<void> {
+  return invoke("add_image_to_folders", { imageId, folderIds });
+}
+
+export async function removeImageFromFolders(imageId: string, folderIds: string[]): Promise<void> {
+  return invoke("remove_image_from_folders", { imageId, folderIds });
+}
+
+export async function getImageFolders(imageId: string): Promise<string[]> {
+  return invoke("get_image_folders", { imageId });
+}
+
+export async function getFavoriteImages(
+  folderId?: string,
+  query?: string,
+  page?: number,
+): Promise<SearchResult> {
+  return invoke("get_favorite_images", { folderId: folderId || null, query: query || null, page });
 }
