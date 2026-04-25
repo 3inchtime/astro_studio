@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import type { Message } from "../../types";
 import ImageGrid from "./ImageGrid";
+import FolderSelector from "../favorites/FolderSelector";
 import { useTranslation } from "react-i18next";
 
 interface MessageBubbleProps {
   message: Message;
   onImageClick: (imagePath: string, allImages: string[], index: number, imageId: string) => void;
   onDelete?: (generationId: string) => void;
+  onFavoriteClick?: (imageId: string) => void;
 }
 
 function DreamBubbles() {
@@ -70,8 +73,9 @@ function DreamBubbles() {
   );
 }
 
-export default function MessageBubble({ message, onImageClick, onDelete }: MessageBubbleProps) {
+export default function MessageBubble({ message, onImageClick, onDelete, onFavoriteClick }: MessageBubbleProps) {
   const { t } = useTranslation();
+  const [folderSelectorImageId, setFolderSelectorImageId] = useState<string | null>(null);
 
   if (message.role === "user") {
     return (
@@ -133,6 +137,7 @@ export default function MessageBubble({ message, onImageClick, onDelete }: Messa
                 images={[{ path: message.imagePath!, thumbnail: message.thumbnailPath, imageId: `${message.generationId}_0`, generationId: message.generationId! }]}
                 onImageClick={(path, images, idx, imgId) => onImageClick(path, images, idx, imgId)}
                 onDelete={onDelete}
+                onFavoriteClick={onFavoriteClick}
               />
             </motion.div>
           )}
@@ -154,6 +159,10 @@ export default function MessageBubble({ message, onImageClick, onDelete }: Messa
           )}
         </AnimatePresence>
       </div>
+
+      {folderSelectorImageId && (
+        <FolderSelector imageId={folderSelectorImageId} onClose={() => setFolderSelectorImageId(null)} />
+      )}
     </motion.div>
   );
 }

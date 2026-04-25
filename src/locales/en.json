@@ -73,6 +73,9 @@
     "emptyHint": "Star images to save them here",
     "detail": "Details",
     "manageFolders": "Manage folders",
-    "addToFolder": "Add to folder"
+    "addToFolder": "Add to folder",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "newFolder": "New folder"
   }
 }

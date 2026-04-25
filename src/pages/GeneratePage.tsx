@@ -6,6 +6,7 @@ import { useLayoutContext } from "../components/layout/AppLayout";
 import MessageBubble from "../components/generate/MessageBubble";
 import ConversationTab from "../components/generate/ConversationTab";
 import Lightbox from "../components/lightbox/Lightbox";
+import FolderSelector from "../components/favorites/FolderSelector";
 import type { ImageSize, ImageQuality, Message, GenerationResult } from "../types";
 import { useTranslation } from "react-i18next";
 import {
@@ -68,6 +69,7 @@ export default function GeneratePage() {
     index: number;
     imageId: string;
   } | null>(null);
+  const [folderSelectorImageId, setFolderSelectorImageId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -235,7 +237,7 @@ export default function GeneratePage() {
           <div className="mx-auto max-w-[900px] space-y-7 px-6 py-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} onDelete={handleDeleteFromBubble} />
+                <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} onDelete={handleDeleteFromBubble} onFavoriteClick={setFolderSelectorImageId} />
               ))}
             </AnimatePresence>
           </div>
@@ -362,6 +364,10 @@ export default function GeneratePage() {
             setLightboxState(null);
           }}
         />
+      )}
+
+      {folderSelectorImageId && (
+        <FolderSelector imageId={folderSelectorImageId} onClose={() => setFolderSelectorImageId(null)} />
       )}
     </div>
   );

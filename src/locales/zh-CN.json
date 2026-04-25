@@ -73,6 +73,9 @@
     "emptyHint": "收藏的图片会显示在这里",
     "detail": "详情",
     "manageFolders": "管理文件夹",
-    "addToFolder": "加入收藏夹"
+    "addToFolder": "加入收藏夹",
+    "cancel": "取消",
+    "confirm": "确定",
+    "newFolder": "新建文件夹"
   }
 }
