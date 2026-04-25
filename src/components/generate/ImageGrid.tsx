@@ -1,9 +1,12 @@
 import { motion } from "framer-motion";
-import { toAssetUrl } from "../../lib/api";
+import { toAssetUrl, copyImageToClipboard } from "../../lib/api";
+import { Copy, Download, Trash2 } from "lucide-react";
+import FavoriteButton from "../favorites/FavoriteButton";
 
 interface ImageItem {
   path: string;
   thumbnail?: string;
+  imageId: string;
 }
 
 interface ImageGridProps {
@@ -21,22 +24,37 @@ export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="w-full"
+      className="inline-block"
     >
       {images.map((img, i) => (
-        <div
-          key={img.path}
-          onClick={() => onImageClick(img.path, allPaths, i)}
-          className="group relative cursor-pointer overflow-hidden w-full"
-          style={{ maxHeight: "calc(100vh - 260px)" }}
-        >
-          <img
-            src={toAssetUrl(img.thumbnail || img.path)}
-            alt="Generated"
-            className="w-full block transition-transform duration-500 group-hover:scale-[1.02]"
-            style={{ maxHeight: "calc(100vh - 260px)", objectFit: "contain", objectPosition: "top" }}
-            loading="lazy"
-          />
+        <div key={img.path} className="inline-block">
+          <div
+            onClick={() => onImageClick(img.path, allPaths, i)}
+            className="group relative cursor-pointer overflow-hidden rounded-[16px]"
+          >
+            <img
+              src={toAssetUrl(img.thumbnail || img.path)}
+              alt="Generated"
+              className="block h-[50vh] w-auto transition-transform duration-500 group-hover:scale-[1.02]"
+              loading="lazy"
+            />
+          </div>
+          <div className="flex items-center justify-center gap-1 mt-2">
+            <button
+              onClick={() => copyImageToClipboard(img.path)}
+              className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors"
+            >
+              <Copy size={16} />
+            </button>
+            <button className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors">
+              <Download size={16} />
+            </button>
+            <button className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors">
+              <Trash2 size={16} />
+            </button>
+            <div className="w-px h-5 bg-border mx-1" />
+            <FavoriteButton imageId={img.imageId} size={16} />
+          </div>
         </div>
       ))}
     </motion.div>
