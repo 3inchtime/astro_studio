@@ -21,19 +21,18 @@ export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-col gap-2"
     >
       {images.map((img, i) => (
         <div
           key={img.path}
           onClick={() => onImageClick(img.path, allPaths, i)}
-          className="group relative cursor-pointer overflow-hidden rounded-[12px] bg-surface shadow-card"
+          className="group relative cursor-pointer overflow-hidden"
           style={{ maxHeight: "calc(100vh - 260px)" }}
         >
           <img
             src={toAssetUrl(img.thumbnail || img.path)}
             alt="Generated"
-            className="w-full h-auto max-h-[calc(100vh-260px)] object-contain transition-transform duration-500 group-hover:scale-[1.02]"
+            className="w-full h-auto max-h-[calc(100vh-260px)] object-contain block transition-transform duration-500 group-hover:scale-[1.02]"
             loading="lazy"
           />
         </div>

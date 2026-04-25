@@ -103,11 +103,13 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
         <Sparkles size={14} className="text-white" strokeWidth={2.5} />
       </div>
       <div className="max-w-[80%] flex-1 min-w-0">
-        <div className="rounded-[20px] rounded-bl-[6px] bg-surface border border-border-subtle px-5 py-3.5 shadow-sm overflow-hidden">
-          <AnimatePresence mode="wait">
-            {message.status === "processing" && (
+        <AnimatePresence mode="wait">
+          {message.status === "processing" && (
+            <div
+              key="loading"
+              className="rounded-[20px] rounded-bl-[6px] bg-surface border border-border-subtle px-5 py-3.5 shadow-sm"
+            >
               <motion.div
-                key="loading"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0, scale: 1.05, filter: "blur(4px)" }}
@@ -115,26 +117,30 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
               >
                 <DreamBubbles />
               </motion.div>
-            )}
+            </div>
+          )}
 
-            {message.status === "complete" && message.imagePath && (
-              <motion.div
-                key="image"
-                initial={{ opacity: 0, scale: 0.85, filter: "blur(8px)" }}
-                animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-                className="rounded-[16px] overflow-hidden border-[3px] border-white shadow-[0_8px_20px_rgba(0,0,0,0.1)] -mx-1 -my-1"
-              >
-                <ImageGrid
-                  images={[{ path: message.imagePath, thumbnail: message.thumbnailPath }]}
-                  onImageClick={(path, images, idx) => onImageClick(path, images, idx)}
-                />
-              </motion.div>
-            )}
+          {message.status === "complete" && message.imagePath && (
+            <motion.div
+              key="image"
+              initial={{ opacity: 0, scale: 0.85, filter: "blur(8px)" }}
+              animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+              transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+              className="rounded-[16px] overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
+            >
+              <ImageGrid
+                images={[{ path: message.imagePath, thumbnail: message.thumbnailPath }]}
+                onImageClick={(path, images, idx) => onImageClick(path, images, idx)}
+              />
+            </motion.div>
+          )}
 
-            {message.status === "failed" && (
+          {message.status === "failed" && (
+            <div
+              key="error"
+              className="rounded-[20px] rounded-bl-[6px] bg-surface border border-border-subtle px-5 py-3.5 shadow-sm"
+            >
               <motion.div
-                key="error"
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
@@ -142,9 +148,9 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
               >
                 {message.error || t("generate.generationFailed")}
               </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );
