@@ -98,6 +98,17 @@
     border-color: var(--color-border);
   }
 
+  /* Theme transition — smooth color change on toggle */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: background-color 0.4s var(--ease-expo),
+                color 0.3s var(--ease-expo),
+                border-color 0.3s var(--ease-expo),
+                box-shadow 0.3s var(--ease-expo) !important;
+  }
+
   body {
     font-family: var(--font-sans);
     background-color: var(--color-background);
