@@ -195,7 +195,7 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete, imag
               title={t("favorites.addToFolder")}
               className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
             >
-              <FavoriteButton imageId={imageId} size={16} />
+              <FavoriteButton imageId={imageId} size={16} onClick={() => setShowFolderSelector(true)} />
             </button>
           )}
         </div>
