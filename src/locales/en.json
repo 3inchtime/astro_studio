@@ -1,6 +1,7 @@
 {
   "nav.generate": "Generate",
   "nav.gallery": "Gallery",
+  "nav.favorites": "Favorites",
   "nav.settings": "Settings",
 
   "sidebar.conversations": "Conversations",

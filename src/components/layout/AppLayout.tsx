@@ -1,7 +1,7 @@
 import { createContext, useContext, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Image, Settings, Sparkles, Sun, Moon } from "lucide-react";
+import { Image, Settings, Sparkles, Sun, Moon, Heart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../../hooks/useTheme";
 import { useResizable } from "../../hooks/useResizable";
@@ -25,6 +25,7 @@ export function useLayoutContext() {
 const navItems = [
   { to: "/generate", icon: Sparkles, labelKey: "nav.generate" },
   { to: "/gallery", icon: Image, labelKey: "nav.gallery" },
+  { to: "/favorites", icon: Heart, labelKey: "nav.favorites" },
   { to: "/settings", icon: Settings, labelKey: "nav.settings" },
 ];
 
