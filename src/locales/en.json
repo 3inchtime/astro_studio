@@ -72,6 +72,7 @@
     "noImages": "No favorites yet",
     "emptyHint": "Star images to save them here",
     "detail": "Details",
-    "manageFolders": "Manage folders"
+    "manageFolders": "Manage folders",
+    "addToFolder": "Add to folder"
   }
 }

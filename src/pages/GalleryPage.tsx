@@ -230,6 +230,12 @@ export default function GalleryPage() {
               </div>
 
               <div className="mt-6 space-y-2">
+                <button
+                  onClick={() => setFolderSelectorImageId(`${selected.generation.id}_0`)}
+                  className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
+                >
+                  {t("favorites.manageFolders")}
+                </button>
                 <button className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground">
                   <Download size={13} />
                   {t("gallery.saveImage")}

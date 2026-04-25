@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 interface MessageBubbleProps {
   message: Message;
   onImageClick: (imagePath: string, allImages: string[], index: number, imageId: string) => void;
+  onDelete?: (generationId: string) => void;
 }
 
 function DreamBubbles() {
@@ -69,7 +70,7 @@ function DreamBubbles() {
   );
 }
 
-export default function MessageBubble({ message, onImageClick }: MessageBubbleProps) {
+export default function MessageBubble({ message, onImageClick, onDelete }: MessageBubbleProps) {
   const { t } = useTranslation();
 
   if (message.role === "user") {
@@ -129,8 +130,9 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
               className="inline-block rounded-[16px] overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
             >
               <ImageGrid
-                images={[{ path: message.imagePath, thumbnail: message.thumbnailPath, imageId: `${message.generationId}_0` }]}
+                images={[{ path: message.imagePath!, thumbnail: message.thumbnailPath, imageId: `${message.generationId}_0`, generationId: message.generationId! }]}
                 onImageClick={(path, images, idx, imgId) => onImageClick(path, images, idx, imgId)}
+                onDelete={onDelete}
               />
             </motion.div>
           )}
