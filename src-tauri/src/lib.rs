@@ -457,6 +457,51 @@ fn get_conversation_generations(
     Ok(results)
 }
 
+// --- Lightbox commands ---
+
+#[tauri::command]
+fn copy_image_to_clipboard(image_path: String) -> Result<(), String> {
+    let data = std::fs::read(&image_path)
+        .map_err(|e| format!("Read image failed: {}", e))?;
+    let img = image::load_from_memory(&data)
+        .map_err(|e| format!("Decode image failed: {}", e))?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Clipboard access failed: {}", e))?;
+    clipboard.set_image(arboard::ImageData {
+        width: w as usize,
+        height: h as usize,
+        bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+    }).map_err(|e| format!("Copy to clipboard failed: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn save_image_to_file(image_path: String) -> Result<(), String> {
+    let file_name = std::path::Path::new(&image_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("image.png");
+
+    let save_path = rfd::AsyncFileDialog::new()
+        .set_file_name(file_name)
+        .add_filter("PNG Image", &["png"])
+        .save_file()
+        .await
+        .ok_or_else(|| "Save cancelled".to_string())?;
+
+    let save_path = save_path.path().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        std::fs::copy(&image_path, &save_path)
+            .map(|_| ())
+            .map_err(|e| format!("Save failed: {}", e))
+    }).await
+        .map_err(|e| e.to_string())?
+}
+
 // --- App entry point ---
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -492,6 +537,8 @@ pub fn run() {
             delete_generation,
             get_conversations,
             get_conversation_generations,
+            copy_image_to_clipboard,
+            save_image_to_file,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Cannot determine app data dir");
