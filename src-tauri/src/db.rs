@@ -2,6 +2,17 @@ use rusqlite::{Connection, params};
 use std::path::Path;
 use std::sync::Mutex;
 
+fn migrate_step(conn: &Connection, sql: &str) -> Result<(), String> {
+    conn.execute_batch(sql).or_else(|e| {
+        let msg = e.to_string();
+        if msg.contains("already exists") || msg.contains("duplicate column") {
+            Ok(())
+        } else {
+            Err(format!("Migration failed: {}", msg))
+        }
+    })
+}
+
 pub struct Database {
     pub conn: Mutex<Connection>,
 }
@@ -56,6 +67,28 @@ impl Database {
             "#,
         )
         .map_err(|e| format!("Migration failed: {}", e))?;
+
+        migrate_step(&conn,
+            "CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );"
+        )?;
+
+        migrate_step(&conn,
+            "ALTER TABLE generations ADD COLUMN conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL;"
+        )?;
+
+        migrate_step(&conn,
+            "CREATE INDEX IF NOT EXISTS idx_generations_conversation_id ON generations(conversation_id);"
+        )?;
+
+        migrate_step(&conn,
+            "CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);"
+        )?;
+
         Ok(())
     }
 

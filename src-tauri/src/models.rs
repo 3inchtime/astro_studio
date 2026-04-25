@@ -59,3 +59,13 @@ pub struct OpenAiImageData {
     pub url: Option<String>,
     pub revised_prompt: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Conversation {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub generation_count: i32,
+    pub latest_thumbnail: Option<String>,
+}
