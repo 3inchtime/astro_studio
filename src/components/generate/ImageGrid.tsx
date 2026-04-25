@@ -28,12 +28,12 @@ export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
           key={img.path}
           onClick={() => onImageClick(img.path, allPaths, i)}
           className="group relative cursor-pointer overflow-hidden rounded-[12px] bg-surface shadow-card"
-          style={{ maxHeight: "70vh" }}
+          style={{ maxHeight: "calc(100vh - 260px)" }}
         >
           <img
             src={toAssetUrl(img.thumbnail || img.path)}
             alt="Generated"
-            className="w-full h-auto object-contain transition-transform duration-500 group-hover:scale-[1.02]"
+            className="w-full h-auto max-h-[calc(100vh-260px)] object-contain transition-transform duration-500 group-hover:scale-[1.02]"
             loading="lazy"
           />
         </div>
