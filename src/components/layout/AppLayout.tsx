@@ -87,19 +87,6 @@ export default function AppLayout() {
           </nav>
 
           <div className="mt-auto flex flex-col items-center gap-1">
-            <NavLink
-              to="/settings"
-              title={t("nav.settings")}
-              className={({ isActive }) =>
-                `flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-200 ${
-                  isActive
-                    ? "text-primary bg-primary/6 shadow-card"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`
-              }
-            >
-              <Settings size={20} strokeWidth={1.6} />
-            </NavLink>
             <button
               onClick={toggleThemeWithEvent}
               className="flex h-10 w-10 items-center justify-center rounded-[10px] text-muted transition-colors hover:text-foreground hover:bg-subtle"
@@ -128,6 +115,19 @@ export default function AppLayout() {
                 )}
               </AnimatePresence>
             </button>
+            <NavLink
+              to="/settings"
+              title={t("nav.settings")}
+              className={({ isActive }) =>
+                `flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-200 ${
+                  isActive
+                    ? "text-primary bg-primary/6 shadow-card"
+                    : "text-muted hover:text-foreground hover:bg-subtle"
+                }`
+              }
+            >
+              <Settings size={20} strokeWidth={1.6} />
+            </NavLink>
           </div>
         </aside>
 
