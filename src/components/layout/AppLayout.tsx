@@ -1,9 +1,12 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useState, useCallback } from "react";
-import { Image, Settings, Sparkles, Clock, User, Search } from "lucide-react";
+import { Image, Settings, Sparkles, Clock, Search, Sun, Moon } from "lucide-react";
 import { searchGenerations, toAssetUrl } from "../../lib/api";
 import { formatTimeAgo } from "../../lib/utils";
+import { useTheme } from "../../hooks/useTheme";
+import { useResizable } from "../../hooks/useResizable";
+import { ResizeHandle } from "./ResizeHandle";
 import type { GenerationResult } from "../../types";
 
 const navItems = [
@@ -12,10 +15,18 @@ const navItems = [
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
+const PANEL_CONFIGS = [
+  { min: 48, default: 64, max: 80 },
+  { min: 180, default: 260, max: 400 },
+  { min: 400, default: 600, max: null },
+];
+
 export default function AppLayout() {
   const location = useLocation();
   const [history, setHistory] = useState<GenerationResult[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
+  const { theme, toggleTheme } = useTheme();
+  const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
 
   const loadHistory = useCallback((q?: string) => {
     searchGenerations(q || undefined, 1).then((res) => {
@@ -23,9 +34,7 @@ export default function AppLayout() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   useEffect(() => {
     if (historyQuery) {
@@ -38,7 +47,11 @@ export default function AppLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background gradient-mesh">
-      <aside className="flex w-16 shrink-0 flex-col items-center border-r border-border-subtle py-6">
+      {/* Nav Rail */}
+      <aside
+        className="flex shrink-0 flex-col items-center border-r border-border-subtle py-6"
+        style={{ width: widths[0] }}
+      >
         <NavLink to="/generate" className="mb-8 group">
           <div className="relative flex h-9 w-9 items-center justify-center rounded-[10px] gradient-primary shadow-button transition-transform duration-200 group-hover:scale-105">
             <Sparkles size={15} className="text-white" strokeWidth={2.5} />
@@ -76,19 +89,48 @@ export default function AppLayout() {
         </nav>
 
         <div className="mt-auto">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-subtle border border-border-subtle transition-colors hover:border-border">
-            <User size={14} className="text-muted" strokeWidth={1.8} />
-          </div>
+          <button
+            onClick={toggleTheme}
+            className="flex h-10 w-10 items-center justify-center rounded-[10px] text-muted transition-colors hover:text-foreground hover:bg-subtle"
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              {theme === "dark" ? (
+                <motion.div
+                  key="moon"
+                  initial={{ rotate: -90, scale: 0, opacity: 0 }}
+                  animate={{ rotate: 0, scale: 1, opacity: 1 }}
+                  exit={{ rotate: 90, scale: 0, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                >
+                  <Moon size={18} strokeWidth={1.8} />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="sun"
+                  initial={{ rotate: 90, scale: 0, opacity: 0 }}
+                  animate={{ rotate: 0, scale: 1, opacity: 1 }}
+                  exit={{ rotate: -90, scale: 0, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                >
+                  <Sun size={18} strokeWidth={1.8} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </button>
         </div>
       </aside>
 
-      <aside className="flex w-[220px] shrink-0 flex-col border-r border-border-subtle">
+      <ResizeHandle onMouseDown={onHandleDown(0)} />
+
+      {/* History Sidebar */}
+      <aside
+        className="flex shrink-0 flex-col border-r border-border-subtle"
+        style={{ width: widths[1] }}
+      >
         <div className="px-4 pt-5 pb-3">
           <div className="flex items-center gap-2 mb-3">
             <Clock size={13} className="text-muted" strokeWidth={1.8} />
-            <span className="text-[13px] font-semibold text-foreground tracking-tight">
-              History
-            </span>
+            <span className="text-[13px] font-semibold text-foreground tracking-tight">History</span>
           </div>
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" strokeWidth={2} />
@@ -100,13 +142,10 @@ export default function AppLayout() {
             />
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto px-2.5 pb-4">
           {history.length === 0 ? (
             <div className="px-2 pt-6 text-center">
-              <p className="text-[12px] text-muted/50">
-                {historyQuery ? "No results" : "No history yet"}
-              </p>
+              <p className="text-[12px] text-muted/50">{historyQuery ? "No results" : "No history yet"}</p>
             </div>
           ) : (
             <div className="flex flex-col gap-0.5">
@@ -122,12 +161,7 @@ export default function AppLayout() {
                   >
                     <div className="h-9 w-9 shrink-0 overflow-hidden rounded-[8px] bg-subtle border border-border-subtle">
                       {img ? (
-                        <img
-                          src={toAssetUrl(img.thumbnail_path)}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
+                        <img src={toAssetUrl(img.thumbnail_path)} alt="" className="h-full w-full object-cover" loading="lazy" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
                           <Image size={14} className="text-muted/30" />
@@ -138,9 +172,7 @@ export default function AppLayout() {
                       <p className="truncate text-[12px] leading-snug text-foreground/80 group-hover:text-foreground transition-colors">
                         {item.generation.prompt}
                       </p>
-                      <p className="mt-0.5 text-[10px] text-muted/60">
-                        {formatTimeAgo(item.generation.created_at)}
-                      </p>
+                      <p className="mt-0.5 text-[10px] text-muted/60">{formatTimeAgo(item.generation.created_at)}</p>
                     </div>
                   </motion.button>
                 );
@@ -150,7 +182,10 @@ export default function AppLayout() {
         </div>
       </aside>
 
-      <main className="relative flex-1 overflow-hidden">
+      <ResizeHandle onMouseDown={onHandleDown(1)} />
+
+      {/* Main Content */}
+      <main className="relative flex-1 overflow-hidden" style={{ minWidth: widths[2] }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={location.pathname}
