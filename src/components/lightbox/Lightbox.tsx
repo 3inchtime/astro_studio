@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toAssetUrl, copyImageToClipboard, saveImageToFile } from "../../lib/api";
+import { useTranslation } from "react-i18next";
 
 interface LightboxProps {
   images: string[];
@@ -24,6 +25,7 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3.0;
 
 export default function Lightbox({ images, initialIndex, onClose, onDelete }: LightboxProps) {
+  const { t } = useTranslation();
   const [index, setIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -107,7 +109,7 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete }: Li
   }, [currentPath]);
 
   const handleDelete = useCallback(() => {
-    if (onDelete && confirm("Delete this image?")) {
+    if (onDelete && confirm(t("lightbox.deleteConfirm"))) {
       onDelete(currentPath);
     }
   }, [currentPath, onDelete]);
@@ -144,7 +146,7 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete }: Li
         >
           <img
             src={toAssetUrl(currentPath)}
-            alt="Preview"
+            alt={t("lightbox.preview")}
             className="max-h-[80vh] max-w-[80vw] object-contain select-none"
             style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
             onDoubleClick={toggleZoom}
@@ -167,12 +169,12 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete }: Li
         {/* Toolbar */}
         <div className="flex items-center justify-center gap-1 px-4 py-3">
           {[
-            { icon: ZoomIn, label: "Zoom In", onClick: () => setZoom((z) => Math.min(MAX_ZOOM, z + 0.25)) },
-            { icon: ZoomOut, label: "Zoom Out", onClick: () => setZoom((z) => Math.max(MIN_ZOOM, z - 0.25)) },
-            { icon: RotateCcw, label: "Reset", onClick: resetView },
-            { icon: Copy, label: "Copy", onClick: handleCopy },
-            { icon: Download, label: "Download", onClick: handleDownload },
-            ...(onDelete ? [{ icon: Trash2, label: "Delete", onClick: handleDelete }] : []),
+            { icon: ZoomIn, label: t("lightbox.zoomIn"), onClick: () => setZoom((z) => Math.min(MAX_ZOOM, z + 0.25)) },
+            { icon: ZoomOut, label: t("lightbox.zoomOut"), onClick: () => setZoom((z) => Math.max(MIN_ZOOM, z - 0.25)) },
+            { icon: RotateCcw, label: t("lightbox.reset"), onClick: resetView },
+            { icon: Copy, label: t("lightbox.copy"), onClick: handleCopy },
+            { icon: Download, label: t("lightbox.download"), onClick: handleDownload },
+            ...(onDelete ? [{ icon: Trash2, label: t("lightbox.delete"), onClick: handleDelete }] : []),
           ].map(({ icon: Icon, label, onClick }) => (
             <button
               key={label}
