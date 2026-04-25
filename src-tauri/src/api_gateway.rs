@@ -19,12 +19,9 @@ pub struct GptImageEngine {
 }
 
 impl GptImageEngine {
-    pub fn new(config: &ApiConfig) -> Self {
+    pub fn new(_config: &ApiConfig) -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(config.timeout_secs))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            client: reqwest::Client::new(),
         }
     }
 }

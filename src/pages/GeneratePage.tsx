@@ -226,7 +226,7 @@ export default function GeneratePage() {
         {messages.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="mx-auto max-w-[700px] space-y-7 px-6 py-6">
+          <div className="mx-auto max-w-[900px] space-y-7 px-6 py-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} />
@@ -238,7 +238,7 @@ export default function GeneratePage() {
 
       {/* Settings bar */}
       <div ref={dropdownRef} className="flex items-center gap-4 border-t border-border-subtle bg-subtle/30 px-6 py-2.5">
-        <div className="mx-auto flex w-full max-w-[700px] items-center gap-4">
+        <div className="mx-auto flex w-full max-w-[900px] items-center gap-4">
           <div className="relative">
             <button
               onClick={() => { setShowModelDropdown(!showModelDropdown); setShowSizeDropdown(false); }}
@@ -313,7 +313,7 @@ export default function GeneratePage() {
 
       {/* Input area */}
       <div className="bg-surface px-6 pt-4 pb-5">
-        <div className="mx-auto max-w-[700px]">
+        <div className="mx-auto max-w-[900px]">
           <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
             <textarea
               ref={textareaRef}
