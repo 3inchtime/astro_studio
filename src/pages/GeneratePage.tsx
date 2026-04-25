@@ -66,6 +66,7 @@ export default function GeneratePage() {
   const [lightboxState, setLightboxState] = useState<{
     images: string[];
     index: number;
+    imageId: string;
   } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -212,8 +213,8 @@ export default function GeneratePage() {
     }
   }
 
-  const handleImageClick = useCallback((_imagePath: string, allImages: string[], index: number) => {
-    setLightboxState({ images: allImages, index });
+  const handleImageClick = useCallback((_imagePath: string, allImages: string[], index: number, imageId: string) => {
+    setLightboxState({ images: allImages, index, imageId });
   }, []);
 
   const currentSizeLabel = sizes.find((s) => s.value === size)?.label ?? "1:1";
@@ -347,6 +348,7 @@ export default function GeneratePage() {
           images={lightboxState.images}
           initialIndex={lightboxState.index}
           onClose={() => setLightboxState(null)}
+          imageId={lightboxState.imageId}
         />
       )}
     </div>

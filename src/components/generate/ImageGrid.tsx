@@ -11,7 +11,7 @@ interface ImageItem {
 
 interface ImageGridProps {
   images: ImageItem[];
-  onImageClick: (imagePath: string, allImages: string[], index: number) => void;
+  onImageClick: (imagePath: string, allImages: string[], index: number, imageId: string) => void;
 }
 
 export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
@@ -29,7 +29,7 @@ export default function ImageGrid({ images, onImageClick }: ImageGridProps) {
       {images.map((img, i) => (
         <div key={img.path} className="inline-block">
           <div
-            onClick={() => onImageClick(img.path, allPaths, i)}
+            onClick={() => onImageClick(img.path, allPaths, i, img.imageId)}
             className="group relative cursor-pointer overflow-hidden rounded-[16px]"
           >
             <img

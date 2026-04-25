@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 
 interface MessageBubbleProps {
   message: Message;
-  onImageClick: (imagePath: string, allImages: string[], index: number) => void;
+  onImageClick: (imagePath: string, allImages: string[], index: number, imageId: string) => void;
 }
 
 function DreamBubbles() {
@@ -130,7 +130,7 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
             >
               <ImageGrid
                 images={[{ path: message.imagePath, thumbnail: message.thumbnailPath, imageId: `${message.generationId}_0` }]}
-                onImageClick={(path, images, idx) => onImageClick(path, images, idx)}
+                onImageClick={(path, images, idx, imgId) => onImageClick(path, images, idx, imgId)}
               />
             </motion.div>
           )}
