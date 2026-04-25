@@ -322,7 +322,11 @@ fn delete_generation(
 
 fn create_new_conversation(conn: &rusqlite::Connection, prompt: &str) -> Result<String, String> {
     let conv_id = uuid::Uuid::new_v4().to_string();
-    let title = if prompt.len() > 40 { format!("{}...", &prompt[..40]) } else { prompt.to_string() };
+    let title: String = if prompt.chars().count() > 40 {
+        prompt.chars().take(40).collect::<String>() + "..."
+    } else {
+        prompt.to_string()
+    };
     conn.execute(
         "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, datetime('now'), datetime('now'))",
         params![conv_id, title],
@@ -362,7 +366,11 @@ fn get_conversations(
 
     for (gen_id, prompt, created_at) in &orphans {
         let conv_id = uuid::Uuid::new_v4().to_string();
-        let title = if prompt.len() > 40 { format!("{}...", &prompt[..40]) } else { prompt.clone() };
+        let title: String = if prompt.chars().count() > 40 {
+            prompt.chars().take(40).collect::<String>() + "..."
+        } else {
+            prompt.clone()
+        };
         conn.execute(
             "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
             params![conv_id, title, created_at, created_at],
