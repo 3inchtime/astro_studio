@@ -502,6 +502,266 @@ async fn save_image_to_file(image_path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 
+// --- Folder commands ---
+
+#[tauri::command]
+fn create_folder(db: tauri::State<'_, Database>, name: String) -> Result<Folder, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO folders (id, name, created_at) VALUES (?1, ?2, datetime('now'))",
+        params![id, name],
+    ).map_err(|e| e.to_string())?;
+    Ok(Folder {
+        id,
+        name,
+        created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+    })
+}
+
+#[tauri::command]
+fn rename_folder(db: tauri::State<'_, Database>, id: String, name: String) -> Result<(), String> {
+    if id == "default" {
+        return Err("默认收藏文件夹不可重命名".to_string());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("UPDATE folders SET name = ?1 WHERE id = ?2", params![name, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_folder(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    if id == "default" {
+        return Err("默认收藏文件夹不可删除".to_string());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM folders WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_folders(db: tauri::State<'_, Database>) -> Result<Vec<Folder>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, created_at FROM folders ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let folders = stmt
+        .query_map([], |row| {
+            Ok(Folder {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(folders)
+}
+
+#[tauri::command]
+fn add_image_to_folders(
+    db: tauri::State<'_, Database>,
+    image_id: String,
+    folder_ids: Vec<String>,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    for fid in &folder_ids {
+        conn.execute(
+            "INSERT OR IGNORE INTO folder_images (folder_id, image_id, added_at) VALUES (?1, ?2, datetime('now'))",
+            params![fid, image_id],
+        ).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_image_from_folders(
+    db: tauri::State<'_, Database>,
+    image_id: String,
+    folder_ids: Vec<String>,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    for fid in &folder_ids {
+        conn.execute(
+            "DELETE FROM folder_images WHERE folder_id = ?1 AND image_id = ?2",
+            params![fid, image_id],
+        ).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_image_folders(db: tauri::State<'_, Database>, image_id: String) -> Result<Vec<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT folder_id FROM folder_images WHERE image_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let folder_ids = stmt
+        .query_map(params![image_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(folder_ids)
+}
+
+#[tauri::command]
+fn get_favorite_images(
+    db: tauri::State<'_, Database>,
+    folder_id: Option<String>,
+    query: Option<String>,
+    page: Option<i32>,
+) -> Result<SearchResult, String> {
+    let page = page.unwrap_or(1);
+    let page_size = 20;
+    let offset = (page - 1) * page_size;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // Build base query
+    let (count, generations) = if let Some(fid) = &folder_id {
+        let pattern = query.as_ref().map(|q| format!("%{}%", q));
+        let (cnt, gens) = if let Some(p) = &pattern {
+            let count: i32 = conn.query_row(
+                "SELECT COUNT(DISTINCT g.id) FROM generations g
+                 JOIN images i ON i.generation_id = g.id
+                 JOIN folder_images fi ON fi.image_id = i.id
+                 WHERE fi.folder_id = ?1 AND g.prompt LIKE ?2",
+                params![fid, p],
+                |row| row.get(0),
+            ).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT g.* FROM generations g
+                 JOIN images i ON i.generation_id = g.id
+                 JOIN folder_images fi ON fi.image_id = i.id
+                 WHERE fi.folder_id = ?1 AND g.prompt LIKE ?2
+                 ORDER BY fi.added_at DESC LIMIT ?3 OFFSET ?4"
+            ).map_err(|e| e.to_string())?;
+            let gens: Vec<Generation> = stmt.query_map(params![fid, p, page_size, offset], row_to_generation)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            (count, gens)
+        } else {
+            let count: i32 = conn.query_row(
+                "SELECT COUNT(DISTINCT g.id) FROM generations g
+                 JOIN images i ON i.generation_id = g.id
+                 JOIN folder_images fi ON fi.image_id = i.id
+                 WHERE fi.folder_id = ?1",
+                params![fid],
+                |row| row.get(0),
+            ).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT g.* FROM generations g
+                 JOIN images i ON i.generation_id = g.id
+                 JOIN folder_images fi ON fi.image_id = i.id
+                 WHERE fi.folder_id = ?1
+                 ORDER BY fi.added_at DESC LIMIT ?2 OFFSET ?3"
+            ).map_err(|e| e.to_string())?;
+            let gens = stmt.query_map(params![fid, page_size, offset], row_to_generation)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            (count, gens)
+        };
+        (cnt, gens)
+    } else if let Some(q) = &query {
+        if !q.is_empty() {
+            let pattern = format!("%{}%", q);
+            let count: i32 = conn.query_row(
+                "SELECT COUNT(DISTINCT g.id) FROM generations g
+                 JOIN images i ON i.generation_id = g.id
+                 JOIN folder_images fi ON fi.image_id = i.id
+                 WHERE g.prompt LIKE ?1",
+                params![&pattern],
+                |row| row.get(0),
+            ).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT g.* FROM generations g
+                 JOIN images i ON i.generation_id = g.id
+                 JOIN folder_images fi ON fi.image_id = i.id
+                 WHERE g.prompt LIKE ?1
+                 ORDER BY g.created_at DESC LIMIT ?2 OFFSET ?3"
+            ).map_err(|e| e.to_string())?;
+            let gens = stmt.query_map(params![&pattern, page_size, offset], row_to_generation)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            (count, gens)
+        } else {
+            return get_all_favorites(&conn, page_size, offset);
+        }
+    } else {
+        return get_all_favorites(&conn, page_size, offset);
+    };
+
+    let gen_ids: Vec<&str> = generations.iter().map(|g| g.id.as_str()).collect();
+    let mut image_map: std::collections::HashMap<String, Vec<GeneratedImage>> = std::collections::HashMap::new();
+    if !gen_ids.is_empty() {
+        let placeholders: Vec<&str> = gen_ids.iter().map(|_| "?").collect();
+        let sql = format!("SELECT * FROM images WHERE generation_id IN ({})", placeholders.join(","));
+        let params: Vec<&dyn rusqlite::types::ToSql> = gen_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let images = stmt.query_map(params.as_slice(), row_to_image)
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok());
+        for img in images {
+            image_map.entry(img.generation_id.clone()).or_default().push(img);
+        }
+    }
+
+    let results = generations.into_iter().map(|gen| {
+        let images = image_map.remove(&gen.id).unwrap_or_default();
+        GenerationResult { generation: gen, images }
+    }).collect();
+
+    Ok(SearchResult { generations: results, total: count, page, page_size })
+}
+
+fn get_all_favorites(conn: &rusqlite::Connection, page_size: i32, offset: i32) -> Result<SearchResult, String> {
+    let count: i32 = conn.query_row(
+        "SELECT COUNT(DISTINCT g.id) FROM generations g
+         JOIN images i ON i.generation_id = g.id
+         JOIN folder_images fi ON fi.image_id = i.id",
+        [],
+        |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT g.* FROM generations g
+         JOIN images i ON i.generation_id = g.id
+         JOIN folder_images fi ON fi.image_id = i.id
+         ORDER BY g.created_at DESC LIMIT ?1 OFFSET ?2"
+    ).map_err(|e| e.to_string())?;
+    let generations: Vec<Generation> = stmt.query_map(params![page_size, offset], row_to_generation)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let gen_ids: Vec<&str> = generations.iter().map(|g| g.id.as_str()).collect();
+    let mut image_map: std::collections::HashMap<String, Vec<GeneratedImage>> = std::collections::HashMap::new();
+    if !gen_ids.is_empty() {
+        let placeholders: Vec<&str> = gen_ids.iter().map(|_| "?").collect();
+        let sql = format!("SELECT * FROM images WHERE generation_id IN ({})", placeholders.join(","));
+        let params: Vec<&dyn rusqlite::types::ToSql> = gen_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let mut img_stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let images = img_stmt.query_map(params.as_slice(), row_to_image)
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok());
+        for img in images {
+            image_map.entry(img.generation_id.clone()).or_default().push(img);
+        }
+    }
+
+    let results = generations.into_iter().map(|gen| {
+        let images = image_map.remove(&gen.id).unwrap_or_default();
+        GenerationResult { generation: gen, images }
+    }).collect();
+
+    Ok(SearchResult { generations: results, total: count, page: 1, page_size })
+}
+
 // --- App entry point ---
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -539,6 +799,14 @@ pub fn run() {
             get_conversation_generations,
             copy_image_to_clipboard,
             save_image_to_file,
+            create_folder,
+            rename_folder,
+            delete_folder,
+            get_folders,
+            add_image_to_folders,
+            remove_image_from_folders,
+            get_image_folders,
+            get_favorite_images,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Cannot determine app data dir");
