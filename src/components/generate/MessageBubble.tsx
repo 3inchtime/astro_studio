@@ -102,7 +102,7 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full gradient-primary shadow-card">
         <Sparkles size={14} className="text-white" strokeWidth={2.5} />
       </div>
-      <div className="max-w-[80%] flex-1 min-w-0">
+      <div className="flex-1 min-w-0">
         <AnimatePresence mode="wait">
           {message.status === "processing" && (
             <div
