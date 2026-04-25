@@ -113,6 +113,43 @@ export default function GeneratePage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const handleNewConversation = useCallback(() => {
+    setActiveConversationId(null);
+    setMessages([]);
+    setPrompt("");
+  }, [setActiveConversationId]);
+
+  // Add tab when active conversation changes (e.g. from sidebar click)
+  useEffect(() => {
+    if (activeConversationId) {
+      setTabs((prev) => {
+        if (prev.some((tab) => tab.id === activeConversationId)) return prev;
+        // Load conversation generations to get the title from the first prompt
+        getConversationGenerations(activeConversationId).then((gens) => {
+          if (gens.length > 0) {
+            const firstPrompt = gens[0].generation.prompt;
+            const title = firstPrompt.length > 20 ? firstPrompt.slice(0, 20) + "..." : firstPrompt;
+            setTabs((prev2) => {
+              const exists = prev2.some((tab) => tab.id === activeConversationId);
+              if (exists) return prev2;
+              return [...prev2, { id: activeConversationId, title }];
+            });
+          } else {
+            setTabs((prev2) => {
+              const exists = prev2.some((tab) => tab.id === activeConversationId);
+              if (exists) return prev2;
+              return [...prev2, { id: activeConversationId, title: "New" }];
+            });
+          }
+        }).catch(() => {});
+        // Add placeholder immediately
+        const placeholder = prev.some((tab) => tab.id === activeConversationId);
+        if (placeholder) return prev;
+        return [...prev, { id: activeConversationId, title: "..." }];
+      });
+    }
+  }, [activeConversationId]);
+
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
@@ -157,6 +194,12 @@ export default function GeneratePage() {
             : m
         ),
       );
+      // Add tab for the new conversation
+      const title = prompt.length > 20 ? prompt.slice(0, 20) + "..." : prompt;
+      setTabs((prev) => {
+        if (prev.some((tab) => tab.id === result.generation_id)) return prev;
+        return [...prev, { id: result.generation_id, title }];
+      });
     } catch (e) {
       setMessages((prev) =>
         prev.map((m) =>
@@ -176,7 +219,7 @@ export default function GeneratePage() {
 
   return (
     <div className="flex h-full flex-col">
-      <ConversationTab tabs={tabs} activeId={activeConversationId} onSelect={(id) => setActiveConversationId(id)} onClose={closeTab} />
+      <ConversationTab tabs={tabs} activeId={activeConversationId} onSelect={(id) => setActiveConversationId(id)} onClose={closeTab} onNew={handleNewConversation} />
 
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (

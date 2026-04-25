@@ -11,6 +11,7 @@
   "sidebar.yesterday": "昨天",
   "sidebar.previous7Days": "最近 7 天",
   "sidebar.older": "更早",
+  "sidebar.newConversation": "新建对话",
 
   "generate.placeholder": "描述你想要生成的图像...",
   "generate.emptyTitle": "你想创作什么？",
