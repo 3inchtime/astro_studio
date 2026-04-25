@@ -59,3 +59,9 @@ export interface Message {
 
 export type ImageSize = "1024x1024" | "1536x1024" | "1024x1536" | "auto";
 export type ImageQuality = "low" | "medium" | "high";
+
+export interface Folder {
+  id: string;
+  name: string;
+  created_at: string;
+}
