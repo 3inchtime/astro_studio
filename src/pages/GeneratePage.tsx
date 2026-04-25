@@ -7,6 +7,7 @@ import MessageBubble from "../components/generate/MessageBubble";
 import ConversationTab from "../components/generate/ConversationTab";
 import Lightbox from "../components/lightbox/Lightbox";
 import type { ImageSize, ImageQuality, Message, GenerationResult } from "../types";
+import { useTranslation } from "react-i18next";
 import {
   Image as ImageIcon,
   ChevronDown,
@@ -15,10 +16,10 @@ import {
 
 const DEFAULT_QUALITY: ImageQuality = "high";
 
-const sizes: { value: ImageSize; label: string; desc: string }[] = [
-  { value: "1024x1024", label: "1:1", desc: "Square" },
-  { value: "1536x1024", label: "3:2", desc: "Landscape" },
-  { value: "1024x1536", label: "2:3", desc: "Portrait" },
+const sizes: { value: ImageSize; label: string; descKey: string }[] = [
+  { value: "1024x1024", label: "1:1", descKey: "generate.square" },
+  { value: "1536x1024", label: "3:2", descKey: "generate.landscape" },
+  { value: "1024x1536", label: "2:3", descKey: "generate.portrait" },
 ];
 
 interface OpenTab {
@@ -54,6 +55,7 @@ function generationsToMessages(generations: GenerationResult[]): Message[] {
 }
 
 export default function GeneratePage() {
+  const { t } = useTranslation();
   const { activeConversationId, setActiveConversationId } = useLayoutContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -255,7 +257,7 @@ export default function GeneratePage() {
                         )}
                       >
                         <span>{s.label}</span>
-                        <span className="text-[10px] opacity-50">{s.desc}</span>
+                        <span className="text-[10px] opacity-50">{t(s.descKey)}</span>
                       </button>
                     ))}
                   </motion.div>
@@ -269,7 +271,7 @@ export default function GeneratePage() {
               ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="描述你想要生成的图像..."
+              placeholder={t("generate.placeholder")}
               rows={1}
               className="w-full resize-none rounded-[10px] border border-border-subtle bg-subtle/30 px-4 py-2.5 pr-10 text-[13px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-primary/30 focus:bg-surface focus:shadow-card transition-all duration-200"
               onKeyDown={(e) => {
@@ -305,6 +307,7 @@ export default function GeneratePage() {
 }
 
 function EmptyState() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
       <motion.div
@@ -319,9 +322,9 @@ function EmptyState() {
           </div>
           <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary/30 animate-pulse" />
         </div>
-        <p className="text-[15px] font-semibold text-foreground tracking-tight">What will you create?</p>
+        <p className="text-[15px] font-semibold text-foreground tracking-tight">{t("generate.emptyTitle")}</p>
         <p className="mt-2 max-w-[260px] text-[13px] leading-relaxed text-muted">
-          Describe an image below and press Enter to bring your imagination to life.
+          {t("generate.emptySubtitle")}
         </p>
       </motion.div>
     </div>

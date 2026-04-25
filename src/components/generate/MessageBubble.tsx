@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { Sparkles, Loader2 } from "lucide-react";
 import type { Message } from "../../types";
 import ImageGrid from "./ImageGrid";
+import { useTranslation } from "react-i18next";
 
 interface MessageBubbleProps {
   message: Message;
@@ -9,6 +10,7 @@ interface MessageBubbleProps {
 }
 
 export default function MessageBubble({ message, onImageClick }: MessageBubbleProps) {
+  const { t } = useTranslation();
   if (message.role === "user") {
     return (
       <motion.div
@@ -41,7 +43,7 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-[12px] text-muted">
               <Loader2 size={13} className="animate-spin text-primary" />
-              Generating...
+              {t("generate.generating")}
             </div>
             <div className="grid grid-cols-2 gap-2">
               {[0, 1, 2, 3].map((i) => (
@@ -60,7 +62,7 @@ export default function MessageBubble({ message, onImageClick }: MessageBubblePr
 
         {message.status === "failed" && (
           <div className="rounded-[10px] border border-error/20 bg-error/4 p-3 text-[12px] text-error">
-            {message.error || "Generation failed"}
+            {message.error || t("generate.generationFailed")}
           </div>
         )}
       </div>
