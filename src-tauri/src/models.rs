@@ -70,3 +70,10 @@ pub struct Conversation {
     pub generation_count: i32,
     pub latest_thumbnail: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+}
