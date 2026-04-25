@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { searchGenerations, deleteGeneration, toAssetUrl } from "../lib/api";
 import type { GenerationResult } from "../types";
 import { Search, Trash2, X, Image as ImageIcon, Calendar, Download } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export default function GalleryPage() {
+  const { t } = useTranslation();
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
@@ -42,7 +44,7 @@ export default function GalleryPage() {
         <div className="flex items-center justify-between border-b border-border-subtle px-6 py-4">
           <div className="flex items-center gap-3">
             <h2 className="text-[15px] font-semibold text-foreground tracking-tight">
-              Gallery
+              {t("gallery.title")}
             </h2>
             {total > 0 && (
               <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[10px] font-medium text-muted tabular-nums">
@@ -57,7 +59,7 @@ export default function GalleryPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="Search prompts..."
+              placeholder={t("gallery.search")}
               className="h-[30px] w-52 rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-border focus:bg-surface transition-colors"
             />
           </div>
@@ -76,10 +78,10 @@ export default function GalleryPage() {
                   <ImageIcon size={24} className="text-lavender" strokeWidth={1.4} />
                 </div>
                 <p className="text-[14px] font-medium text-foreground tracking-tight">
-                  No images yet
+                  {t("gallery.noImages")}
                 </p>
                 <p className="mt-1 text-[12px] text-muted">
-                  Generated images will appear here
+                  {t("gallery.emptyHint")}
                 </p>
               </motion.div>
             </div>
@@ -128,7 +130,7 @@ export default function GalleryPage() {
                 disabled={page <= 1}
                 className="h-[28px] rounded-[8px] px-3 text-[11px] text-muted hover:bg-subtle disabled:opacity-30 transition-all"
               >
-                Prev
+                {t("gallery.prev")}
               </button>
               <span className="px-2 text-[11px] text-muted tabular-nums">
                 {page} / {totalPages}
@@ -138,7 +140,7 @@ export default function GalleryPage() {
                 disabled={page >= totalPages}
                 className="h-[28px] rounded-[8px] px-3 text-[11px] text-muted hover:bg-subtle disabled:opacity-30 transition-all"
               >
-                Next
+                {t("gallery.next")}
               </button>
             </div>
           )}
@@ -157,7 +159,7 @@ export default function GalleryPage() {
             <div className="p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-[13px] font-semibold text-foreground tracking-tight">
-                  Detail
+                  {t("gallery.detail")}
                 </h3>
                 <button
                   onClick={() => setSelected(null)}
@@ -185,7 +187,7 @@ export default function GalleryPage() {
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                    Prompt
+                    {t("gallery.prompt")}
                   </span>
                   <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">
                     {selected.generation.prompt}
@@ -194,7 +196,7 @@ export default function GalleryPage() {
                 <div className="flex gap-5">
                   <div>
                     <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                      Size
+                      {t("gallery.size")}
                     </span>
                     <p className="mt-0.5 text-[13px] text-foreground/80">
                       {selected.generation.size}
@@ -202,7 +204,7 @@ export default function GalleryPage() {
                   </div>
                   <div>
                     <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                      Quality
+                      {t("gallery.quality")}
                     </span>
                     <p className="mt-0.5 text-[13px] text-foreground/80">
                       {selected.generation.quality}
@@ -220,14 +222,14 @@ export default function GalleryPage() {
               <div className="mt-6 space-y-2">
                 <button className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground">
                   <Download size={13} />
-                  Save Image
+                  {t("gallery.saveImage")}
                 </button>
                 <button
                   onClick={() => handleDelete(selected.generation.id)}
                   className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-error/10 py-2.5 text-[12px] font-medium text-error/60 transition-all hover:border-error/20 hover:bg-error/4 hover:text-error"
                 >
                   <Trash2 size={13} />
-                  Delete
+                  {t("gallery.delete")}
                 </button>
               </div>
             </div>
