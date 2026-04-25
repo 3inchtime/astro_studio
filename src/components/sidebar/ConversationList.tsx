@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Search, Image as ImageIcon, MessageSquare } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getConversations, toAssetUrl } from "../../lib/api";
 import { formatTimeAgo } from "../../lib/utils";
 import type { Conversation } from "../../types";
@@ -10,17 +11,17 @@ interface ConversationListProps {
   onSelectConversation: (id: string) => void;
 }
 
-function groupByDate(conversations: Conversation[]) {
+function groupByDate(conversations: Conversation[], t: (key: string) => string) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today.getTime() - 86400000);
   const weekAgo = new Date(today.getTime() - 7 * 86400000);
 
   const groups: { label: string; items: Conversation[] }[] = [
-    { label: "Today", items: [] },
-    { label: "Yesterday", items: [] },
-    { label: "Previous 7 Days", items: [] },
-    { label: "Older", items: [] },
+    { label: t("sidebar.today"), items: [] },
+    { label: t("sidebar.yesterday"), items: [] },
+    { label: t("sidebar.previous7Days"), items: [] },
+    { label: t("sidebar.older"), items: [] },
   ];
 
   for (const conv of conversations) {
@@ -40,6 +41,7 @@ export default function ConversationList({
 }: ConversationListProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState("");
+  const { t } = useTranslation();
 
   const load = useCallback((q?: string) => {
     getConversations(q).then(setConversations).catch(() => {});
@@ -56,7 +58,7 @@ export default function ConversationList({
     }
   }, [query, load]);
 
-  const groups = groupByDate(conversations);
+  const groups = groupByDate(conversations, t);
 
   return (
     <div className="flex h-full flex-col">
@@ -64,7 +66,7 @@ export default function ConversationList({
         <div className="flex items-center gap-2 mb-3">
           <MessageSquare size={13} className="text-muted" strokeWidth={1.8} />
           <span className="text-[13px] font-semibold text-foreground tracking-tight">
-            Conversations
+            {t("sidebar.conversations")}
           </span>
         </div>
         <div className="relative">
@@ -72,7 +74,7 @@ export default function ConversationList({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search..."
+            placeholder={t("sidebar.search")}
             className="h-[28px] w-full rounded-[8px] border border-border-subtle bg-subtle/50 pl-7 pr-2 text-[12px] text-foreground placeholder:text-muted/60 focus:outline-none focus:border-border focus:bg-surface transition-colors"
           />
         </div>
@@ -82,7 +84,7 @@ export default function ConversationList({
         {conversations.length === 0 ? (
           <div className="px-2 pt-6 text-center">
             <p className="text-[12px] text-muted/50">
-              {query ? "No results" : "No conversations yet"}
+              {query ? t("sidebar.noResults") : t("sidebar.noConversations")}
             </p>
           </div>
         ) : (
