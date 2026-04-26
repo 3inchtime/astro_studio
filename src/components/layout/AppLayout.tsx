@@ -1,21 +1,25 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Image, Settings, Sparkles, Sun, Moon, Heart } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../../hooks/useTheme";
 import { useResizable } from "../../hooks/useResizable";
+import appLogo from "../../assets/logo.png";
 import { ResizeHandle } from "./ResizeHandle";
 import ConversationList from "../sidebar/ConversationList";
+import { createConversation } from "../../lib/api";
 
 interface LayoutContextType {
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
+  refreshConversations: () => void;
 }
 
 export const LayoutContext = createContext<LayoutContextType>({
   activeConversationId: null,
   setActiveConversationId: () => {},
+  refreshConversations: () => {},
 });
 
 export function useLayoutContext() {
@@ -28,8 +32,9 @@ const navItems = [
   { to: "/favorites", icon: Heart, labelKey: "nav.favorites" },
 ];
 
+const NAV_RAIL_WIDTH = 64;
+
 const PANEL_CONFIGS = [
-  { min: 48, default: 64, max: 80 },
   { min: 180, default: 260, max: 400 },
   { min: 400, default: 600, max: null },
 ];
@@ -41,22 +46,46 @@ export default function AppLayout() {
   const { t } = useTranslation();
   const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [conversationRefreshKey, setConversationRefreshKey] = useState(0);
+  const refreshConversations = useCallback(() => {
+    setConversationRefreshKey((key) => key + 1);
+  }, []);
+  const selectConversation = useCallback((id: string) => {
+    setActiveConversationId(id);
+    navigate("/generate");
+  }, [navigate]);
+  const selectInitialConversation = useCallback((id: string) => {
+    setActiveConversationId((current) => current ?? id);
+  }, []);
+  const createNewConversation = useCallback(() => {
+    createConversation().then((conversation) => {
+      setActiveConversationId(conversation.id);
+      refreshConversations();
+    }).catch(() => {
+      setActiveConversationId(null);
+    });
+    navigate("/generate");
+  }, [navigate, refreshConversations]);
 
   return (
-    <LayoutContext.Provider value={{ activeConversationId, setActiveConversationId }}>
+    <LayoutContext.Provider value={{ activeConversationId, setActiveConversationId, refreshConversations }}>
       <div className="flex h-screen overflow-hidden bg-background gradient-mesh">
         {/* Nav Rail */}
         <aside
           className="flex shrink-0 flex-col items-center border-r border-border-subtle py-6"
-          style={{ width: widths[0] }}
+          style={{ width: NAV_RAIL_WIDTH }}
         >
-          <NavLink to="/generate" className="mb-8 group">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-[10px] gradient-primary shadow-button transition-transform duration-200 group-hover:scale-105">
-              <Sparkles size={15} className="text-white" strokeWidth={2.5} />
+          <NavLink to="/generate" className="mb-10 group">
+            <div className="relative h-9 w-9 overflow-hidden rounded-[10px] shadow-button transition-transform duration-200 group-hover:scale-105">
+              <img
+                src={appLogo}
+                alt="Astro Studio"
+                className="h-full w-full object-cover"
+              />
             </div>
           </NavLink>
 
-          <nav className="flex flex-1 flex-col items-center gap-1">
+          <nav className="flex flex-1 flex-col items-center gap-3">
             {navItems.map(({ to, icon: Icon, labelKey }) => (
               <NavLink
                 key={to}
@@ -86,7 +115,7 @@ export default function AppLayout() {
             ))}
           </nav>
 
-          <div className="mt-auto flex flex-col items-center gap-1">
+          <div className="mt-auto flex flex-col items-center gap-3">
             <button
               onClick={toggleThemeWithEvent}
               className="flex h-10 w-10 items-center justify-center rounded-[10px] text-muted transition-colors hover:text-foreground hover:bg-subtle"
@@ -131,30 +160,24 @@ export default function AppLayout() {
           </div>
         </aside>
 
-        <ResizeHandle onMouseDown={onHandleDown(0)} />
-
         {/* Conversation Sidebar */}
         <aside
           className="flex shrink-0 flex-col border-r border-border-subtle"
-          style={{ width: widths[1] }}
+          style={{ width: widths[0] }}
         >
           <ConversationList
             activeConversationId={activeConversationId}
-            onSelectConversation={(id) => {
-              setActiveConversationId(id);
-              navigate("/generate");
-            }}
-            onNewConversation={() => {
-              setActiveConversationId(null);
-              navigate("/generate");
-            }}
+            refreshKey={conversationRefreshKey}
+            onSelectConversation={selectConversation}
+            onInitialConversation={selectInitialConversation}
+            onNewConversation={createNewConversation}
           />
         </aside>
 
-        <ResizeHandle onMouseDown={onHandleDown(1)} />
+        <ResizeHandle onMouseDown={onHandleDown(0)} />
 
         {/* Main Content */}
-        <main className="relative flex-1 overflow-hidden" style={{ minWidth: widths[2] }}>
+        <main className="relative flex-1 overflow-hidden" style={{ minWidth: widths[1] }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

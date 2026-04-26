@@ -1,7 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { GenerationParams, SearchResult, Conversation, GenerationResult, Folder } from "../types";
+import type {
+  EditSourceImage,
+  GenerationParams,
+  SearchResult,
+  Conversation,
+  GenerationResult,
+  Folder,
+  LogSearchResult,
+  LogSettings,
+  LogEntry,
+  GenerateResponse,
+  TrashSettings,
+  AppFontSize,
+  ImageModel,
+} from "../types";
 
 export function toAssetUrl(filePath: string): string {
   return convertFileSrc(filePath.replace(/\\/g, "/"));
@@ -23,26 +37,78 @@ export async function getBaseUrl(): Promise<string> {
   return invoke("get_base_url");
 }
 
-export async function generateImage(params: GenerationParams): Promise<{ generation_id: string; conversation_id: string; image_paths: string[] }> {
+export async function getImageModel(): Promise<ImageModel> {
+  return invoke("get_image_model");
+}
+
+export async function saveImageModel(model: ImageModel): Promise<void> {
+  await invoke("save_image_model", { model });
+}
+
+export async function generateImage(
+  params: GenerationParams,
+): Promise<GenerateResponse> {
   return invoke("generate_image", {
     prompt: params.prompt,
     size: params.size,
     quality: params.quality,
+    outputFormat: params.outputFormat,
+    imageCount: params.imageCount,
+    conversationId: params.conversationId ?? null,
   });
+}
+
+export async function editImage(
+  params: GenerationParams & { sourceImagePaths: string[] },
+): Promise<GenerateResponse> {
+  return invoke("edit_image", {
+    prompt: params.prompt,
+    sourceImagePaths: params.sourceImagePaths,
+    size: params.size,
+    quality: params.quality,
+    outputFormat: params.outputFormat,
+    imageCount: params.imageCount,
+    conversationId: params.conversationId ?? null,
+  });
+}
+
+export async function pickSourceImages(): Promise<string[]> {
+  return invoke("pick_source_images");
 }
 
 export async function searchGenerations(
   query?: string,
   page?: number,
+  onlyDeleted?: boolean,
 ): Promise<SearchResult> {
-  return invoke("search_generations", { query: query || null, page });
+  return invoke("search_generations", {
+    query: query || null,
+    page,
+    onlyDeleted: onlyDeleted || null,
+  });
 }
 
 export async function deleteGeneration(id: string): Promise<void> {
   await invoke("delete_generation", { id });
 }
 
-export async function getConversations(query?: string): Promise<Conversation[]> {
+export async function restoreGeneration(id: string): Promise<void> {
+  await invoke("restore_generation", { id });
+}
+
+export async function permanentlyDeleteGeneration(id: string): Promise<void> {
+  await invoke("permanently_delete_generation", { id });
+}
+
+export async function createConversation(
+  title?: string,
+): Promise<Conversation> {
+  return invoke("create_conversation", { title: title || null });
+}
+
+export async function getConversations(
+  query?: string,
+): Promise<Conversation[]> {
   return invoke("get_conversations", { query: query || null });
 }
 
@@ -58,6 +124,23 @@ export async function copyImageToClipboard(imagePath: string): Promise<void> {
 
 export async function saveImageToFile(imagePath: string): Promise<void> {
   await invoke("save_image_to_file", { imagePath });
+}
+
+export function messageImageToEditSource(image: {
+  path: string;
+  imageId?: string;
+  generationId?: string;
+}): EditSourceImage {
+  const normalizedPath = image.path.replace(/\\/g, "/");
+  const fileName = normalizedPath.split("/").pop() || "source-image";
+
+  return {
+    id: `${image.imageId ?? image.generationId ?? "source"}:${normalizedPath}`,
+    path: image.path,
+    label: fileName,
+    imageId: image.imageId,
+    generationId: image.generationId,
+  };
 }
 
 function onGenerationEvent<T>(event: string, handler: (data: T) => void) {
@@ -98,11 +181,17 @@ export async function getFolders(): Promise<Folder[]> {
   return invoke("get_folders");
 }
 
-export async function addImageToFolders(imageId: string, folderIds: string[]): Promise<void> {
+export async function addImageToFolders(
+  imageId: string,
+  folderIds: string[],
+): Promise<void> {
   return invoke("add_image_to_folders", { imageId, folderIds });
 }
 
-export async function removeImageFromFolders(imageId: string, folderIds: string[]): Promise<void> {
+export async function removeImageFromFolders(
+  imageId: string,
+  folderIds: string[],
+): Promise<void> {
   return invoke("remove_image_from_folders", { imageId, folderIds });
 }
 
@@ -115,5 +204,62 @@ export async function getFavoriteImages(
   query?: string,
   page?: number,
 ): Promise<SearchResult> {
-  return invoke("get_favorite_images", { folderId: folderId || null, query: query || null, page });
+  return invoke("get_favorite_images", {
+    folderId: folderId || null,
+    query: query || null,
+    page,
+  });
+}
+
+export async function getLogs(
+  logType?: string,
+  level?: string,
+  page?: number,
+  pageSize?: number,
+): Promise<LogSearchResult> {
+  return invoke("get_logs", {
+    logType: logType || null,
+    level: level || null,
+    page,
+    pageSize,
+  });
+}
+
+export async function getLogDetail(id: string): Promise<LogEntry> {
+  return invoke("get_log_detail", { id });
+}
+
+export async function readLogResponseFile(path: string): Promise<string> {
+  return invoke("read_log_response_file", { path });
+}
+
+export async function clearLogs(beforeDays?: number): Promise<number> {
+  return invoke("clear_logs", { beforeDays: beforeDays || null });
+}
+
+export async function getLogSettings(): Promise<LogSettings> {
+  return invoke("get_log_settings");
+}
+
+export async function saveLogSettings(
+  enabled: boolean,
+  retentionDays: number,
+): Promise<void> {
+  await invoke("save_log_settings", { enabled, retentionDays });
+}
+
+export async function getTrashSettings(): Promise<TrashSettings> {
+  return invoke("get_trash_settings");
+}
+
+export async function saveTrashSettings(retentionDays: number): Promise<void> {
+  await invoke("save_trash_settings", { retentionDays });
+}
+
+export async function getFontSize(): Promise<AppFontSize> {
+  return invoke("get_font_size");
+}
+
+export async function saveFontSize(fontSize: AppFontSize): Promise<void> {
+  await invoke("save_font_size", { fontSize });
 }

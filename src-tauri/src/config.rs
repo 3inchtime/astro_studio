@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 const CONFIG_FILE: &str = "astro_studio.toml";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct AppConfig {
     pub log: LogConfig,
@@ -33,16 +33,6 @@ pub struct StorageConfig {
     pub thumbnail_size: u32,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            log: LogConfig::default(),
-            api: ApiConfig::default(),
-            storage: StorageConfig::default(),
-        }
-    }
-}
-
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
@@ -56,7 +46,7 @@ impl Default for LogConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            timeout_secs: 120,
+            timeout_secs: 0,
             max_retries: 0,
         }
     }
@@ -107,7 +97,8 @@ impl AppConfig {
         fs::create_dir_all(&dir).map_err(|e| format!("Create config dir failed: {}", e))?;
 
         let path = Self::config_path();
-        let content = toml::to_string_pretty(self).map_err(|e| format!("Serialize config failed: {}", e))?;
+        let content =
+            toml::to_string_pretty(self).map_err(|e| format!("Serialize config failed: {}", e))?;
         fs::write(&path, content).map_err(|e| format!("Write config failed: {}", e))?;
 
         log::info!("Config saved to {}", path.display());
@@ -119,9 +110,7 @@ pub fn init_logger(config: &LogConfig) {
     let mut builder = env_logger::Builder::new();
     builder
         .format_timestamp_millis()
-        .filter_level(
-            config.level.parse().unwrap_or(log::LevelFilter::Info),
-        )
+        .filter_level(config.level.parse().unwrap_or(log::LevelFilter::Info))
         .init();
 }
 
@@ -135,7 +124,7 @@ mod tests {
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.log.level, "info");
-        assert_eq!(parsed.api.timeout_secs, 120);
+        assert_eq!(parsed.api.timeout_secs, 0);
         assert_eq!(parsed.storage.thumbnail_size, 256);
     }
 }
