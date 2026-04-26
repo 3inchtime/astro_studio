@@ -121,6 +121,42 @@ Download the installer for your platform from [Releases](https://github.com/3inc
 
 After first launch, complete your API configuration and Astro Studio is ready to serve as your unified desktop entry point for third-party image generation services.
 
+## Build Locally
+
+If you want to run Astro Studio from source, prepare the local toolchain first:
+
+- Node.js `22+`
+- npm `11+`
+- Rust stable toolchain
+- Platform dependencies required by Tauri on your OS
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the desktop app in development mode:
+
+```bash
+npm run tauri dev
+```
+
+If you only want to run the frontend in the browser:
+
+```bash
+npm run dev
+```
+
+Create production builds:
+
+```bash
+npm run build
+npm run tauri build
+```
+
+Current automated GitHub releases publish Windows artifacts. If you build macOS locally for your own use, the app can run normally on your machine, but public distribution still requires Apple signing and notarization.
+
 ## Roadmap
 
 - [ ] Add support for more third-party image generation services
