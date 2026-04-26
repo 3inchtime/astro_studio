@@ -1,54 +1,76 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { generateImage, getConversationGenerations, deleteGeneration } from "../lib/api";
-import { cn } from "../lib/utils";
+import {
+  editImage,
+  generateImage,
+  getConversationGenerations,
+  getImageModel,
+  deleteGeneration,
+  messageImageToEditSource,
+  pickSourceImages,
+  toAssetUrl,
+} from "../lib/api";
+import { consumePendingEditSources } from "../lib/editSources";
 import { useLayoutContext } from "../components/layout/AppLayout";
+import ConfirmDialog from "../components/common/ConfirmDialog";
 import MessageBubble from "../components/generate/MessageBubble";
-import ConversationTab from "../components/generate/ConversationTab";
 import Lightbox from "../components/lightbox/Lightbox";
 import FolderSelector from "../components/favorites/FolderSelector";
-import type { ImageSize, ImageQuality, Message, GenerationResult } from "../types";
+import type {
+  EditSourceImage,
+  ImageOutputFormat,
+  ImageModel,
+  ImageQuality,
+  ImageSize,
+  Message,
+  MessageImage,
+  GenerationResult,
+  RetryGenerationRequest,
+} from "../types";
 import { useTranslation } from "react-i18next";
-import {
-  Image as ImageIcon,
-  ChevronDown,
-  ArrowUp,
-} from "lucide-react";
-
-const DEFAULT_QUALITY: ImageQuality = "high";
+import { Image as ImageIcon, ArrowUp, Cpu, ImagePlus, X, Wand2 } from "lucide-react";
 
 const sizes: { value: ImageSize; label: string; descKey: string }[] = [
+  { value: "auto", label: "Auto", descKey: "generate.auto" },
   { value: "1024x1024", label: "1:1", descKey: "generate.square" },
   { value: "1536x1024", label: "3:2", descKey: "generate.landscape" },
   { value: "1024x1536", label: "2:3", descKey: "generate.portrait" },
 ];
 
-interface OpenTab {
-  id: string;
-  title: string;
-}
+const qualityOptions: ImageQuality[] = ["auto", "high", "medium", "low"];
+const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
+const imageCountOptions = [1, 2, 3, 4];
 
 function generationsToMessages(generations: GenerationResult[]): Message[] {
   const messages: Message[] = [];
   for (const gr of generations) {
+    const images: MessageImage[] = gr.images.map((img) => ({
+      imageId: img.id,
+      generationId: img.generation_id,
+      path: img.file_path,
+      thumbnailPath: img.thumbnail_path,
+    }));
     messages.push({
       id: `user-${gr.generation.id}`,
       role: "user",
       content: gr.generation.prompt,
+      sourceImages: [],
       status: "complete",
       createdAt: gr.generation.created_at,
     });
-    const img = gr.images[0];
     messages.push({
       id: `assistant-${gr.generation.id}`,
       role: "assistant",
       content: "",
       generationId: gr.generation.id,
-      imagePath: img?.file_path,
-      thumbnailPath: img?.thumbnail_path,
-      status: gr.generation.status === "completed" ? "complete"
-        : gr.generation.status === "failed" ? "failed"
-        : "processing",
+      images,
+      error: gr.generation.error_message ?? undefined,
+      status:
+        gr.generation.status === "completed"
+          ? "complete"
+          : gr.generation.status === "failed"
+            ? "failed"
+            : "processing",
       createdAt: gr.generation.created_at,
     });
   }
@@ -57,34 +79,47 @@ function generationsToMessages(generations: GenerationResult[]): Message[] {
 
 export default function GeneratePage() {
   const { t } = useTranslation();
-  const { activeConversationId, setActiveConversationId } = useLayoutContext();
+  const {
+    activeConversationId,
+    setActiveConversationId,
+    refreshConversations,
+  } = useLayoutContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [size, setSize] = useState<ImageSize>("1024x1024");
-  const [tabs, setTabs] = useState<OpenTab[]>([]);
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const [showSizeDropdown, setShowSizeDropdown] = useState(false);
+  const [size, setSize] = useState<ImageSize>("auto");
+  const [quality, setQuality] = useState<ImageQuality>("auto");
+  const [outputFormat, setOutputFormat] = useState<ImageOutputFormat>("png");
+  const [imageCount, setImageCount] = useState(1);
+  const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
+  const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
   const [lightboxState, setLightboxState] = useState<{
-    images: string[];
+    images: MessageImage[];
     index: number;
-    imageId: string;
   } | null>(null);
-  const [folderSelectorImageId, setFolderSelectorImageId] = useState<string | null>(null);
+  const [folderSelectorImageId, setFolderSelectorImageId] = useState<
+    string | null
+  >(null);
+  const [pendingDeleteGenerationId, setPendingDeleteGenerationId] = useState<
+    string | null
+  >(null);
+  const [isDeletingGeneration, setIsDeletingGeneration] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
+
+  const loadConversationMessages = useCallback(async (conversationId: string) => {
+    const generations = await getConversationGenerations(conversationId);
+    setMessages(generationsToMessages(generations));
+  }, []);
 
   useEffect(() => {
     if (!activeConversationId) {
       setMessages([]);
       return;
     }
-    getConversationGenerations(activeConversationId).then((gens) => {
-      setMessages(generationsToMessages(gens));
-    }).catch(() => {});
-  }, [activeConversationId]);
+    loadConversationMessages(activeConversationId).catch(() => {});
+  }, [activeConversationId, loadConversationMessages]);
 
   useEffect(() => {
     if (autoScrollRef.current && scrollRef.current) {
@@ -101,143 +136,238 @@ export default function GeneratePage() {
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + "px";
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 120) + "px";
     }
   }, [prompt]);
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowModelDropdown(false);
-        setShowSizeDropdown(false);
-      }
+    const pendingSources = consumePendingEditSources();
+    if (pendingSources.length > 0) {
+      setEditSources((current) => mergeEditSources(current, pendingSources));
     }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const handleNewConversation = useCallback(() => {
-    setActiveConversationId(null);
-    setMessages([]);
-    setPrompt("");
-  }, [setActiveConversationId]);
-
-  // Add tab when active conversation changes (e.g. from sidebar click)
   useEffect(() => {
-    if (activeConversationId) {
-      setTabs((prev) => {
-        if (prev.some((tab) => tab.id === activeConversationId)) return prev;
-        // Load conversation generations to get the title from the first prompt
-        getConversationGenerations(activeConversationId).then((gens) => {
-          if (gens.length > 0) {
-            const firstPrompt = gens[0].generation.prompt;
-            const title = firstPrompt.length > 20 ? firstPrompt.slice(0, 20) + "..." : firstPrompt;
-            setTabs((prev2) => {
-              const exists = prev2.some((tab) => tab.id === activeConversationId);
-              if (exists) return prev2;
-              return [...prev2, { id: activeConversationId, title }];
-            });
-          } else {
-            setTabs((prev2) => {
-              const exists = prev2.some((tab) => tab.id === activeConversationId);
-              if (exists) return prev2;
-              return [...prev2, { id: activeConversationId, title: "New" }];
-            });
-          }
-        }).catch(() => {});
-        // Add placeholder immediately
-        const placeholder = prev.some((tab) => tab.id === activeConversationId);
-        if (placeholder) return prev;
-        return [...prev, { id: activeConversationId, title: "..." }];
-      });
-    }
-  }, [activeConversationId]);
+    getImageModel().then(setImageModel).catch(() => {});
+  }, []);
 
-  const closeTab = useCallback((id: string) => {
-    setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id);
-      if (activeConversationId === id && next.length > 0) {
-        setActiveConversationId(next[next.length - 1].id);
-      } else if (next.length === 0) {
-        setActiveConversationId(null);
+  const handleAddUploadedSources = useCallback(async () => {
+    const paths = await pickSourceImages();
+    if (paths.length === 0) return;
+
+    setEditSources((current) =>
+      mergeEditSources(
+        current,
+        paths.map((path) => createUploadedEditSource(path)),
+      ),
+    );
+    textareaRef.current?.focus();
+  }, []);
+
+  const handleUseImageAsSource = useCallback((image: MessageImage) => {
+    setEditSources((current) =>
+      mergeEditSources(current, [messageImageToEditSource(image)]),
+    );
+    textareaRef.current?.focus();
+  }, []);
+
+  const handleRemoveEditSource = useCallback((sourceId: string) => {
+    setEditSources((current) =>
+      current.filter((source) => source.id !== sourceId),
+    );
+  }, []);
+
+  const submitGenerationRequest = useCallback(
+    async (request: RetryGenerationRequest) => {
+      const promptText = request.prompt.trim();
+      if (!promptText) return;
+
+      const tempId = crypto.randomUUID();
+      const retryRequest: RetryGenerationRequest = {
+        ...request,
+        prompt: promptText,
+        editSources: request.editSources.map((source) => ({ ...source })),
+      };
+      const userMsg: Message = {
+        id: `user-${tempId}`,
+        role: "user",
+        content: promptText,
+        sourceImages: editSourcesToMessageImages(retryRequest.editSources, tempId),
+        status: "complete",
+        createdAt: new Date().toISOString(),
+      };
+      const assistantMsg: Message = {
+        id: `assistant-${tempId}`,
+        role: "assistant",
+        content: "",
+        generationId: tempId,
+        status: "processing",
+        retryRequest,
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      autoScrollRef.current = true;
+
+      try {
+        const result =
+          retryRequest.editSources.length > 0
+            ? await editImage({
+                prompt: promptText,
+                sourceImagePaths: retryRequest.editSources.map(
+                  (source) => source.path,
+                ),
+                size: retryRequest.size,
+                quality: retryRequest.quality,
+                outputFormat: retryRequest.outputFormat,
+                imageCount: retryRequest.imageCount,
+                conversationId: retryRequest.conversationId,
+              })
+            : await generateImage({
+                prompt: promptText,
+                size: retryRequest.size,
+                quality: retryRequest.quality,
+                outputFormat: retryRequest.outputFormat,
+                imageCount: retryRequest.imageCount,
+                conversationId: retryRequest.conversationId,
+              });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === `assistant-${tempId}`
+              ? {
+                  ...m,
+                  id: `assistant-${result.generation_id}`,
+                  generationId: result.generation_id,
+                  images: result.images.map((img) => ({
+                    imageId: img.id,
+                    generationId: img.generation_id,
+                    path: img.file_path,
+                    thumbnailPath: img.thumbnail_path,
+                  })),
+                  status: "complete" as const,
+                }
+              : m,
+          ),
+        );
+        setEditSources([]);
+        setActiveConversationId(result.conversation_id);
+        await loadConversationMessages(result.conversation_id);
+        refreshConversations();
+      } catch (e) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === `assistant-${tempId}`
+              ? {
+                  ...m,
+                  status: "failed" as const,
+                  error: String(e),
+                  retryRequest,
+                }
+              : m,
+          ),
+        );
+        refreshConversations();
       }
-      return next;
-    });
-  }, [activeConversationId, setActiveConversationId]);
+    },
+    [loadConversationMessages, refreshConversations, setActiveConversationId],
+  );
 
   async function handleGenerate() {
-    if (!prompt.trim()) return;
+    const promptText = prompt.trim();
+    if (!promptText) return;
 
-    const tempId = crypto.randomUUID();
-    const userMsg: Message = {
-      id: `user-${tempId}`,
-      role: "user",
-      content: prompt,
-      status: "complete",
-      createdAt: new Date().toISOString(),
-    };
-    const assistantMsg: Message = {
-      id: `assistant-${tempId}`,
-      role: "assistant",
-      content: "",
-      status: "processing",
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    autoScrollRef.current = true;
     setPrompt("");
-
-    try {
-      const result = await generateImage({ prompt, size, quality: DEFAULT_QUALITY });
-      const imagePath = result.image_paths[0] || undefined;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === `assistant-${tempId}`
-            ? { ...m, id: `assistant-${result.generation_id}`, generationId: result.generation_id, imagePath, status: "complete" as const }
-            : m
-        ),
-      );
-      // Add tab for the new conversation
-      const tabTitle = prompt.length > 20 ? prompt.slice(0, 20) + "..." : prompt;
-      setTabs((prev) => {
-        if (prev.some((tab) => tab.id === result.conversation_id)) return prev;
-        return [...prev, { id: result.conversation_id, title: tabTitle }];
-      });
-      setActiveConversationId(result.conversation_id);
-    } catch (e) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === `assistant-${tempId}`
-            ? { ...m, status: "failed" as const, error: String(e) }
-            : m
-        ),
-      );
-    }
+    await submitGenerationRequest({
+      prompt: promptText,
+      size,
+      quality,
+      outputFormat,
+      imageCount,
+      conversationId: activeConversationId,
+      editSources: editSources.map((source) => ({ ...source })),
+    });
   }
 
-  const handleImageClick = useCallback((_imagePath: string, allImages: string[], index: number, imageId: string) => {
-    setLightboxState({ images: allImages, index, imageId });
+  const handleImageClick = useCallback(
+    (images: MessageImage[], index: number) => {
+      setLightboxState({ images, index });
+    },
+    [],
+  );
+
+  const handleDeleteFromBubble = useCallback(
+    async (generationId: string) => {
+      setIsDeletingGeneration(true);
+      try {
+        await deleteGeneration(generationId);
+        setMessages((prev) =>
+          prev.filter(
+            (m) =>
+              m.generationId !== generationId &&
+              m.id !== `user-${generationId}`,
+          ),
+        );
+        setLightboxState((current) => {
+          if (!current) return null;
+          return current.images.some(
+            (image) => image.generationId === generationId,
+          )
+            ? null
+            : current;
+        });
+        refreshConversations();
+      } finally {
+        setIsDeletingGeneration(false);
+        setPendingDeleteGenerationId(null);
+      }
+    },
+    [refreshConversations],
+  );
+
+  const handleRequestDeleteGeneration = useCallback((generationId: string) => {
+    setPendingDeleteGenerationId(generationId);
   }, []);
 
-  const handleDeleteFromBubble = useCallback(async (generationId: string) => {
-    await deleteGeneration(generationId);
-    setMessages((prev) => prev.filter((m) => m.generationId !== generationId));
-  }, []);
+  const handleCancelDeleteGeneration = useCallback(() => {
+    if (isDeletingGeneration) return;
+    setPendingDeleteGenerationId(null);
+  }, [isDeletingGeneration]);
 
-  const currentSizeLabel = sizes.find((s) => s.value === size)?.label ?? "1:1";
+  const handleConfirmDeleteGeneration = useCallback(async () => {
+    if (!pendingDeleteGenerationId || isDeletingGeneration) return;
+    await handleDeleteFromBubble(pendingDeleteGenerationId);
+  }, [handleDeleteFromBubble, isDeletingGeneration, pendingDeleteGenerationId]);
+
+  const handleRetryMessage = useCallback(
+    async (message: Message) => {
+      if (!message.retryRequest) return;
+      await submitGenerationRequest(message.retryRequest);
+    },
+    [submitGenerationRequest],
+  );
 
   return (
     <div className="flex h-full flex-col">
-      <ConversationTab tabs={tabs} activeId={activeConversationId} onSelect={(id) => setActiveConversationId(id)} onClose={closeTab} onNew={handleNewConversation} />
-
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto"
+      >
         {messages.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="mx-auto max-w-[900px] space-y-7 px-6 py-6">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} onImageClick={handleImageClick} onDelete={handleDeleteFromBubble} onFavoriteClick={setFolderSelectorImageId} />
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onImageClick={handleImageClick}
+                  onDelete={handleRequestDeleteGeneration}
+                  onEditImage={handleUseImageAsSource}
+                  onFavoriteClick={setFolderSelectorImageId}
+                  onRetry={(message) => void handleRetryMessage(message)}
+                />
               ))}
             </AnimatePresence>
           </div>
@@ -245,77 +375,49 @@ export default function GeneratePage() {
       </div>
 
       {/* Settings bar */}
-      <div ref={dropdownRef} className="flex items-center gap-4 border-t border-border-subtle bg-subtle/30 px-6 py-2.5">
-        <div className="mx-auto flex w-full max-w-[900px] items-center gap-4">
-          <div className="relative">
-            <button
-              onClick={() => { setShowModelDropdown(!showModelDropdown); setShowSizeDropdown(false); }}
-              className="flex items-center gap-1 rounded-[8px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[12px] text-foreground transition-all hover:border-border"
-            >
-              Astro v2
-              <ChevronDown size={10} className="opacity-50" />
-            </button>
-            <AnimatePresence>
-              {showModelDropdown && (
-                <motion.div
-                  initial={{ opacity: 0, y: -3, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -3, scale: 0.98 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute bottom-full left-0 mb-1.5 w-40 rounded-[10px] border border-border bg-surface shadow-float py-1 z-50"
-                >
-                  {["Astro v2.0", "GPT Image"].map((name, i) => (
-                    <button
-                      key={name}
-                      onClick={() => setShowModelDropdown(false)}
-                      className={cn(
-                        "flex w-full items-center gap-2 px-3 py-2 text-[12px] transition-colors",
-                        i === 0 ? "text-primary bg-primary/4" : "text-muted hover:bg-subtle"
-                      )}
-                    >
-                      <span className={cn("h-1.5 w-1.5 rounded-full", i === 0 ? "bg-primary" : "bg-border")} />
-                      {name}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <div className="relative">
-            <button
-              onClick={() => { setShowSizeDropdown(!showSizeDropdown); setShowModelDropdown(false); }}
-              className="flex items-center gap-1 rounded-[8px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[12px] text-foreground transition-all hover:border-border"
-            >
-              {currentSizeLabel}
-              <ChevronDown size={10} className="opacity-50" />
-            </button>
-            <AnimatePresence>
-              {showSizeDropdown && (
-                <motion.div
-                  initial={{ opacity: 0, y: -3, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -3, scale: 0.98 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute bottom-full left-0 mb-1.5 w-36 rounded-[10px] border border-border bg-surface shadow-float py-1 z-50"
-                >
-                  {sizes.map((s) => (
-                    <button
-                      key={s.value}
-                      onClick={() => { setSize(s.value); setShowSizeDropdown(false); }}
-                      className={cn(
-                        "flex w-full items-center justify-between px-3 py-2 text-[12px] transition-colors",
-                        size === s.value ? "text-primary bg-primary/4" : "text-muted hover:bg-subtle"
-                      )}
-                    >
-                      <span>{s.label}</span>
-                      <span className="text-[10px] opacity-50">{t(s.descKey)}</span>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+      <div className="border-t border-border-subtle bg-subtle/30 px-6 py-3">
+        <div className="mx-auto flex w-full max-w-[900px] flex-wrap items-center gap-3">
+          <InfoField
+            label={t("generate.modelLabel")}
+            value={imageModel}
+            icon={<Cpu size={13} className="text-primary/80" strokeWidth={2} />}
+          />
+          <SelectField
+            label={t("generate.sizeLabel")}
+            value={size}
+            onChange={(value) => setSize(value as ImageSize)}
+            options={sizes.map((item) => ({
+              value: item.value,
+              label: `${item.label} · ${t(item.descKey)}`,
+            }))}
+          />
+          <SelectField
+            label={t("generate.qualityLabel")}
+            value={quality}
+            onChange={(value) => setQuality(value as ImageQuality)}
+            options={qualityOptions.map((value) => ({
+              value,
+              label: t(`generate.quality.${value}`),
+            }))}
+          />
+          <SelectField
+            label={t("generate.countLabel")}
+            value={String(imageCount)}
+            onChange={(value) => setImageCount(Number(value))}
+            options={imageCountOptions.map((value) => ({
+              value: String(value),
+              label: t("generate.countValue", { count: value }),
+            }))}
+          />
+          <SelectField
+            label={t("generate.formatLabel")}
+            value={outputFormat}
+            onChange={(value) => setOutputFormat(value as ImageOutputFormat)}
+            options={outputFormatOptions.map((value) => ({
+              value,
+              label: t(`generate.format.${value}`),
+            }))}
+          />
         </div>
       </div>
 
@@ -323,19 +425,69 @@ export default function GeneratePage() {
       <div className="bg-surface px-6 pt-4 pb-5">
         <div className="mx-auto max-w-[900px]">
           <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <button
+                onClick={() => void handleAddUploadedSources()}
+                className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:border-border hover:text-foreground"
+              >
+                <ImagePlus size={14} />
+                {t("generate.uploadSource")}
+              </button>
+
+              {editSources.length > 0 && (
+                <button
+                  onClick={() => setEditSources([])}
+                  className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+                >
+                  {t("generate.clearSources")}
+                </button>
+              )}
+            </div>
+
+            {editSources.length > 0 && (
+              <div className="mb-3">
+                <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground/80">
+                  <Wand2 size={14} className="text-primary" />
+                  {t("generate.editingSources", { count: editSources.length })}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {editSources.map((source) => (
+                    <div
+                      key={source.id}
+                      className="relative overflow-hidden rounded-[12px] border border-border-subtle bg-surface"
+                    >
+                      <img
+                        src={toAssetUrl(source.path)}
+                        alt={source.label}
+                        className="h-20 w-20 object-cover"
+                      />
+                      <button
+                        onClick={() => handleRemoveEditSource(source.id)}
+                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                        title={t("generate.removeSource")}
+                      >
+                        <X size={12} />
+                      </button>
+                      <div className="max-w-20 truncate px-2 py-1 text-[10px] text-muted">
+                        {source.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={t("generate.placeholder")}
+              placeholder={
+                editSources.length > 0
+                  ? t("generate.editPlaceholder")
+                  : t("generate.placeholder")
+              }
               rows={2}
               className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[110px]"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleGenerate();
-                }
-              }}
             />
             <motion.button
               onClick={handleGenerate}
@@ -350,25 +502,125 @@ export default function GeneratePage() {
         </div>
       </div>
 
-      {lightboxState && (
-        <Lightbox
-          images={lightboxState.images}
-          initialIndex={lightboxState.index}
-          onClose={() => setLightboxState(null)}
-          imageId={lightboxState.imageId}
-          onDelete={async (_imagePath) => {
-            if (!lightboxState.imageId) return;
-            const generationId = lightboxState.imageId.replace(/_0$/, "");
-            await deleteGeneration(generationId);
-            setMessages((prev) => prev.filter((m) => m.generationId !== generationId));
-            setLightboxState(null);
-          }}
+      <AnimatePresence>
+        {lightboxState && (
+          <Lightbox
+            images={lightboxState.images}
+            initialIndex={lightboxState.index}
+            onClose={() => setLightboxState(null)}
+            onEditImage={(image) => {
+              handleUseImageAsSource(image);
+              setLightboxState(null);
+            }}
+            onDelete={handleRequestDeleteGeneration}
+          />
+        )}
+      </AnimatePresence>
+
+      {folderSelectorImageId && (
+        <FolderSelector
+          imageId={folderSelectorImageId}
+          onClose={() => setFolderSelectorImageId(null)}
         />
       )}
 
-      {folderSelectorImageId && (
-        <FolderSelector imageId={folderSelectorImageId} onClose={() => setFolderSelectorImageId(null)} />
-      )}
+      <ConfirmDialog
+        open={pendingDeleteGenerationId !== null}
+        title={t("lightbox.deleteConfirm")}
+        confirmLabel={t("favorites.confirm")}
+        cancelLabel={t("favorites.cancel")}
+        onConfirm={() => void handleConfirmDeleteGeneration()}
+        onCancel={handleCancelDeleteGeneration}
+        loading={isDeletingGeneration}
+      />
+    </div>
+  );
+}
+
+function mergeEditSources(
+  current: EditSourceImage[],
+  incoming: EditSourceImage[],
+): EditSourceImage[] {
+  const byPath = new Map(current.map((source) => [source.path, source]));
+
+  for (const source of incoming) {
+    byPath.set(source.path, source);
+  }
+
+  return Array.from(byPath.values());
+}
+
+function createUploadedEditSource(path: string): EditSourceImage {
+  const normalizedPath = path.replace(/\\/g, "/");
+  const fileName = normalizedPath.split("/").pop() || "source-image";
+
+  return {
+    id: `${crypto.randomUUID()}:${normalizedPath}`,
+    path,
+    label: fileName,
+  };
+}
+
+function editSourcesToMessageImages(
+  sources: EditSourceImage[],
+  generationId: string,
+): MessageImage[] {
+  return sources.map((source, index) => ({
+    imageId: source.imageId ?? `${generationId}-source-${index}`,
+    generationId: source.generationId ?? generationId,
+    path: source.path,
+    thumbnailPath: source.path,
+  }));
+}
+
+interface SelectFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string; disabled?: boolean }>;
+}
+
+function SelectField({ label, value, onChange, options }: SelectFieldProps) {
+  return (
+    <label className="flex min-w-[124px] flex-col gap-1">
+      <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted/60">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-[34px] rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-colors focus:border-border focus:outline-none"
+      >
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+interface InfoFieldProps {
+  label: string;
+  value: string;
+  icon?: React.ReactNode;
+}
+
+function InfoField({ label, value, icon }: InfoFieldProps) {
+  return (
+    <div className="flex min-w-[124px] flex-col gap-1">
+      <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted/60">
+        {label}
+      </span>
+      <div className="flex h-[34px] items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-foreground">
+        {icon}
+        <span className="truncate">{value}</span>
+      </div>
     </div>
   );
 }
@@ -389,7 +641,9 @@ function EmptyState() {
           </div>
           <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary/30 animate-pulse" />
         </div>
-        <p className="text-[15px] font-semibold text-foreground tracking-tight">{t("generate.emptyTitle")}</p>
+        <p className="text-[15px] font-semibold text-foreground tracking-tight">
+          {t("generate.emptyTitle")}
+        </p>
         <p className="mt-2 max-w-[260px] text-[13px] leading-relaxed text-muted">
           {t("generate.emptySubtitle")}
         </p>

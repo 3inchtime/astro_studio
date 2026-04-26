@@ -1,115 +1,134 @@
-# Astro Studio
+<p align="center">
+  <img src="src/assets/logo.png" alt="Astro Studio" width="360" />
+</p>
+
+<h1 align="center">Astro Studio</h1>
 
 <p align="center">
-  <strong>跨平台 AI 图像生成桌面客户端</strong>
+  A desktop platform for connecting the image generation APIs you choose
+  <br />
+  Freedom to plug in the third-party image generation services that fit your workflow.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri" alt="Tauri 2.0" />
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react" alt="React 19" />
-  <img src="https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Rust-1.80+-000000?logo=rust" alt="Rust" />
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey" alt="Platform" />
+  <img src="https://img.shields.io/badge/Product-AI%20Image%20Studio-5b7cff" alt="Product" />
+  <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
 </p>
 
 ---
 
-Astro Studio 是一个深度集成系统底层的专业级 AI 图像生成桌面客户端。它聚合 GPT Image 等多引擎推理能力，通过极简通透的原生界面，让创意表达毫不费力。
+Astro Studio is a desktop platform built for AI image creation. Its goal is not to lock you into a single model provider, but to give you a cleaner way to connect third-party image generation APIs and manage different services, models, and ongoing creative work from one place.
 
-## 核心特性
+It is designed to solve more than a single generation request. The real focus is turning image generation into a stable, usable, long-term creative workflow.
 
-- **多引擎聚合** — 同时接入多种 AI 图像生成引擎，一个 Prompt 获取不同风格结果
-- **Canvas 对比模式** — 并排展示不同引擎生成结果，拖拽对比，快速锁定最佳方案
-- **智能 Prompt 增强** — 本地 NLP 模型自动补全风格化描述，保护隐私且离线可用
-- **本地化数据管理** — 所有历史、Prompt 和 API 密钥加密存储于本地 SQLite，零云依赖
-- **即时搜索** — 支持对海量历史图片进行全文搜索，秒级定位
-- **原生体验** — 毛玻璃界面、物理动效、系统级窗口融合（Windows Mica / macOS Vibrancy）
-- **零依赖分发** — macOS `.dmg` / Windows `.msi`，安装即用
+## Product Positioning
 
-## 技术栈
+Astro Studio is not a single-model demo shell, and it is not just another web tool optimized for one-off image outputs.
 
-| 层级 | 技术 | 用途 |
-|------|------|------|
-| 原生运行时 | Tauri 2.0 | 跨平台桌面容器，~10MB 安装包 |
-| 前端 | React 19 + TypeScript | UI 渲染 |
-| 构建 | Vite 7.0 | 快速 HMR |
-| 样式 | Tailwind CSS 4.0 | 原子化设计系统 |
-| 动画 | Framer Motion | 物理弹性过渡 |
-| 原生效果 | window-vibrancy | 毛玻璃 / Mica / Vibrancy |
-| 后端 | Rust | API 网关、文件管理、加密存储 |
-| 数据库 | SQLite (rusqlite) | 本地持久化 |
+It is closer to a creator-owned image generation workspace:
 
-## 快速开始
+- You can freely configure third-party image generation APIs
+- You can bring different providers into one desktop entry point
+- You can generate, review, filter, favorite, and continue editing in the same space
+- You can turn your creative history into a long-term, manageable asset library
 
-### 环境要求
+If you do not want your workflow tied to a single platform, Astro Studio is built for exactly that way of working.
 
-- [Node.js](https://nodejs.org/) >= 18
-- [Rust](https://rustup.rs/) >= 1.80
-- [Tauri CLI](https://tauri.app/start/prerequisites/)
+## Compatibility Progress
 
-### 安装与开发
+- [x] `gpt-image-2`
+- [ ] `Nano Banana`
+- [ ] More third-party image generation APIs
 
-```bash
-# 克隆仓库
-git clone https://github.com/3inchtime/astro_studio.git
-cd astro_studio
+## Why This Product Exists
 
-# 安装前端依赖
-npm install
+Many AI image products focus heavily on model capability, but give much less attention to what happens after the image is generated:
 
-# 启动开发模式（前端 HMR + Rust 编译）
-npm run tauri dev
-```
+- History becomes messy very quickly
+- Good results are hard to organize
+- Iteration is awkward once context is lost
+- Switching providers often means relearning the whole workflow
 
-### 构建发布
+Astro Studio tries to reorganize those scattered steps and turn image generation from isolated experiments into a continuous creative process.
 
-```bash
-# 构建生产版本
-npm run tauri build
-```
+## Core Value
 
-构建产物位于 `src-tauri/target/release/bundle/`。
+### Open Connection
 
-## 项目结构
+Astro Studio is not centered around a preset platform. It supports configurable API keys, base URLs, and model endpoints so you can connect third-party image generation services on your own terms.
 
-```
-astro_studio/
-├── src/                      # 前端源码
-│   ├── pages/                # 页面组件
-│   │   ├── GeneratePage.tsx  # 图像生成（对话式交互）
-│   │   ├── GalleryPage.tsx   # 生成历史画廊
-│   │   └── SettingsPage.tsx  # API 密钥与配置
-│   ├── components/
-│   │   └── layout/
-│   │       └── AppLayout.tsx # 三栏布局（图标栏 + 历史 + 内容）
-│   ├── styles/
-│   │   └── globals.css       # 设计系统 Token
-│   ├── lib/
-│   │   ├── api.ts            # Tauri IPC 封装
-│   │   └── utils.ts          # 工具函数
-│   └── types/
-│       └── index.ts          # TypeScript 类型定义
-├── src-tauri/                # Rust 后端
-│   ├── src/
-│   │   ├── lib.rs            # Tauri 命令注册与窗口配置
-│   │   ├── api_gateway.rs    # 多引擎调度
-│   │   ├── db.rs             # SQLite 数据层
-│   │   ├── models.rs         # 数据模型
-│   │   └── file_manager.rs   # 图片文件管理
-│   └── tauri.conf.json       # Tauri 窗口与打包配置
-├── docs/                     # 架构文档
-└── package.json
-```
+### Unified Entry Point
 
-## 设计系统
+Whether you use official services, proxy gateways, or compatible third-party providers, the goal is to keep everything inside one desktop interface instead of splitting your work across multiple dashboards.
 
-界面遵循 **极简主义 + 毛玻璃** 视觉哲学：
+### Built For Ongoing Creation
 
-- 窗口圆角 12px / 卡片圆角 8px
-- Electric Blue → Violet 渐变作为核心行动色
-- 多层柔和阴影建立层级
-- Framer Motion 物理动效驱动所有交互过渡
+It focuses on more than successful generation. History, review, favorites, continued editing, and later iteration all matter, so your output does not disappear the moment it is created.
 
-## 许可证
+### Desktop-First Experience
 
-MIT License
+Compared with browser tools, Astro Studio emphasizes stability, focus, and repeat use. It is meant to feel like a creative workspace you open every day, not just a webpage you visit occasionally.
+
+## Who It Is For
+
+- Designers, illustrators, and content creators who generate images frequently
+- Individuals or small teams using more than one image generation service
+- People who want freedom to switch API providers without platform lock-in
+- Users who want their history, favorites, assets, and configuration to live in a long-term desktop environment
+
+## What You Can Do With It
+
+- Start image generation quickly from a prompt
+- Connect your own third-party image generation APIs
+- Create one consistent entry point across services and models
+- Browse your full history and revisit past creative outputs
+- Favorite images and organize them into folders
+- Continue editing and iterating from existing images
+- Search past results more efficiently
+- Manage the full creative process in a more stable desktop environment
+
+## Current Experience Highlights
+
+- Custom API connection
+- Image generation and continued editing
+- Persistent conversation history
+- Gallery browsing
+- Favorites organization
+- Trash and recovery flow
+- Local creative management
+
+## What We Believe
+
+Astro Studio believes the future of image creation tools should not be limited to being an accessory for a single model. It should be a more neutral, open, and durable platform.
+
+Models will change. Providers will change. Interfaces will change. But creators should not lose control of their workflow every time the ecosystem shifts.
+
+That is why Astro Studio is built to return choice to the user:
+
+- Choose who to connect
+- Choose how to work
+- Choose how to preserve creative history
+- Choose how to organize your asset world
+
+## Get It
+
+Download the installer for your platform from [Releases](https://github.com/3inchtime/astro_studio/releases).
+
+After first launch, complete your API configuration and Astro Studio is ready to serve as your unified desktop entry point for third-party image generation services.
+
+## Roadmap
+
+- [ ] Add support for more third-party image generation services
+- [ ] Improve the multi-provider switching experience
+- [ ] Build stronger project-based creative management
+- [ ] Expand image editing and reference-image workflows
+- [ ] Continue refining favorites, filtering, and asset organization
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

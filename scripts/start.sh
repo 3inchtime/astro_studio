@@ -25,17 +25,20 @@ if lsof -ti:1420 > /dev/null 2>&1; then
     lsof -ti:1420 | xargs kill -9 2>/dev/null || true
 fi
 
-TAURI_PIDS=$(pgrep -f "tauri dev" 2>/dev/null || true)
-if [ -n "$TAURI_PIDS" ]; then
-    echo "Found running Tauri processes, killing..."
-    echo "$TAURI_PIDS" | xargs kill -9 2>/dev/null || true
-fi
-
-RUST_PIDS=$(pgrep -f "astro_studio" 2>/dev/null || true)
-if [ -n "$RUST_PIDS" ]; then
-    echo "Found running Astro Studio processes, killing..."
-    echo "$RUST_PIDS" | xargs kill -9 2>/dev/null || true
-fi
+for PATTERN in \
+    "tauri dev" \
+    "cargo run --no-default-features" \
+    "target/debug/astro-studio" \
+    "/Applications/Astro Studio.app/Contents/MacOS/astro-studio" \
+    "Astro Studio.app/Contents/MacOS/astro-studio" \
+    "astro-studio"
+do
+    MATCHING_PIDS=$(pgrep -f "$PATTERN" 2>/dev/null || true)
+    if [ -n "$MATCHING_PIDS" ]; then
+        echo "Found processes matching '$PATTERN', killing..."
+        echo "$MATCHING_PIDS" | xargs kill -9 2>/dev/null || true
+    fi
+done
 
 sleep 1
 

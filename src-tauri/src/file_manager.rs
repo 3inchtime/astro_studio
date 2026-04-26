@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use image::GenericImageView;
+use std::path::PathBuf;
 
 const THUMBNAIL_SIZE: u32 = 256;
 
@@ -22,21 +22,38 @@ impl FileManager {
         Ok(())
     }
 
-    pub fn save_image(&self, generation_id: &str, data: &[u8]) -> Result<SavedImage, String> {
-        let now = chrono::Local::now();
-        let date_path = now.format("%Y/%m/%d").to_string();
-        let filename = format!("{}.png", generation_id);
+    pub fn save_image_at(
+        &self,
+        generation_id: &str,
+        data: &[u8],
+        output_format: &str,
+        created_at: Option<&str>,
+    ) -> Result<SavedImage, String> {
+        let date_path = created_at
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| {
+                value
+                    .with_timezone(&chrono::Local)
+                    .format("%Y/%m/%d")
+                    .to_string()
+            })
+            .unwrap_or_else(|| chrono::Local::now().format("%Y/%m/%d").to_string());
+        let extension = match output_format {
+            "jpeg" => "jpeg",
+            "webp" => "webp",
+            _ => "png",
+        };
+        let filename = format!("{}.{}", generation_id, extension);
 
         let image_dir = self.base_dir.join("images").join(&date_path);
         std::fs::create_dir_all(&image_dir)
             .map_err(|e| format!("Create date dir failed: {}", e))?;
 
         let file_path = image_dir.join(&filename);
-        std::fs::write(&file_path, data)
-            .map_err(|e| format!("Write image failed: {}", e))?;
+        std::fs::write(&file_path, data).map_err(|e| format!("Write image failed: {}", e))?;
 
-        let img = image::load_from_memory(data)
-            .map_err(|e| format!("Decode image failed: {}", e))?;
+        let img =
+            image::load_from_memory(data).map_err(|e| format!("Decode image failed: {}", e))?;
         let (width, height) = img.dimensions();
 
         let thumb_path = self.generate_thumbnail(&img, &date_path, generation_id)?;
@@ -62,7 +79,8 @@ impl FileManager {
 
         let thumb = img.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
         let thumb_path = thumb_dir.join(format!("{}_thumb.png", generation_id));
-        thumb.save(&thumb_path)
+        thumb
+            .save(&thumb_path)
             .map_err(|e| format!("Save thumbnail failed: {}", e))?;
 
         Ok(thumb_path.to_string_lossy().to_string())

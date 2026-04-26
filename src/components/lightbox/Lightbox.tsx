@@ -10,24 +10,36 @@ import {
   Copy,
   Download,
   Trash2,
+  Wand2,
 } from "lucide-react";
-import { toAssetUrl, copyImageToClipboard, saveImageToFile } from "../../lib/api";
+import {
+  toAssetUrl,
+  copyImageToClipboard,
+  saveImageToFile,
+} from "../../lib/api";
 import { useTranslation } from "react-i18next";
 import FavoriteButton from "../favorites/FavoriteButton";
 import FolderSelector from "../favorites/FolderSelector";
+import type { MessageImage } from "../../types";
 
 interface LightboxProps {
-  images: string[];
+  images: MessageImage[];
   initialIndex: number;
   onClose: () => void;
-  onDelete?: (imagePath: string) => void;
-  imageId?: string;
+  onEditImage?: (image: MessageImage) => void;
+  onDelete?: (generationId: string) => void;
 }
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3.0;
 
-export default function Lightbox({ images, initialIndex, onClose, onDelete, imageId }: LightboxProps) {
+export default function Lightbox({
+  images,
+  initialIndex,
+  onClose,
+  onEditImage,
+  onDelete,
+}: LightboxProps) {
   const { t } = useTranslation();
   const [index, setIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
@@ -37,7 +49,13 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete, imag
   const lastPoint = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const currentPath = images[index];
+  const currentImage = images[index];
+  const currentPath = currentImage?.path;
+  const transitionEase: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+  if (!currentImage || !currentPath) {
+    return null;
+  }
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -47,20 +65,26 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete, imag
     });
   }, []);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (zoom > 1) {
-      setIsPanning(true);
-      lastPoint.current = { x: e.clientX, y: e.clientY };
-    }
-  }, [zoom]);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (zoom > 1) {
+        setIsPanning(true);
+        lastPoint.current = { x: e.clientX, y: e.clientY };
+      }
+    },
+    [zoom],
+  );
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isPanning) return;
-    const dx = e.clientX - lastPoint.current.x;
-    const dy = e.clientY - lastPoint.current.y;
-    lastPoint.current = { x: e.clientX, y: e.clientY };
-    setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-  }, [isPanning]);
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isPanning) return;
+      const dx = e.clientX - lastPoint.current.x;
+      const dy = e.clientY - lastPoint.current.y;
+      lastPoint.current = { x: e.clientX, y: e.clientY };
+      setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+    },
+    [isPanning],
+  );
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false);
@@ -97,6 +121,7 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete, imag
   }, [onClose, goPrev, goNext]);
 
   const handleCopy = useCallback(async () => {
+    if (!currentPath) return;
     try {
       await copyImageToClipboard(currentPath);
     } catch {
@@ -105,6 +130,7 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete, imag
   }, [currentPath]);
 
   const handleDownload = useCallback(async () => {
+    if (!currentPath) return;
     try {
       await saveImageToFile(currentPath);
     } catch {
@@ -113,96 +139,198 @@ export default function Lightbox({ images, initialIndex, onClose, onDelete, imag
   }, [currentPath]);
 
   const handleDelete = useCallback(() => {
-    if (onDelete && confirm(t("lightbox.deleteConfirm"))) {
-      onDelete(currentPath);
+    if (currentImage?.generationId && onDelete) {
+      onDelete(currentImage.generationId);
     }
-  }, [currentPath, onDelete]);
+  }, [currentImage, onDelete]);
 
   return (
-    <AnimatePresence>
+    <motion.div
+      initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
+      animate={{ opacity: 1, backdropFilter: "blur(10px)" }}
+      exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
+      transition={{ duration: 0.28, ease: transitionEase }}
+      className="fixed inset-0 z-50 flex flex-col bg-black/88"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 1.04 }}
+          transition={{ duration: 0.45, ease: transitionEase }}
+          className="absolute left-1/2 top-1/2 h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(124,92,252,0.22)_0%,rgba(79,106,255,0.12)_32%,transparent_72%)]"
+        />
+      </div>
+
+      {/* Header */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
-        className="fixed inset-0 z-50 flex flex-col bg-black/90 backdrop-blur-sm"
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        initial={{ opacity: 0, y: -16 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -12 }}
+        transition={{ duration: 0.3, ease: transitionEase }}
+        className="relative flex items-center justify-between px-4 py-3"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3">
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-[8px] text-white/70 hover:bg-white/10 hover:text-white transition-colors">
-            <X size={18} />
-          </button>
-          <span className="text-[13px] text-white/50">{index + 1} / {images.length}</span>
-          <div className="w-8" />
-        </div>
-
-        {/* Image area */}
-        <div
-          ref={containerRef}
-          className="flex flex-1 items-center justify-center overflow-hidden"
-          onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          style={{ cursor: zoom > 1 ? (isPanning ? "grabbing" : "grab") : "default" }}
+        <button
+          onClick={onClose}
+          className="flex h-8 w-8 items-center justify-center rounded-[8px] text-white/70 hover:bg-white/10 hover:text-white transition-colors"
         >
-          <img
-            src={toAssetUrl(currentPath)}
-            alt={t("lightbox.preview")}
-            className="max-h-[80vh] max-w-[80vw] object-contain select-none"
-            style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
-            onDoubleClick={toggleZoom}
-            draggable={false}
-          />
-        </div>
+          <X size={18} />
+        </button>
+        <span className="text-[13px] text-white/50">
+          {index + 1} / {images.length}
+        </span>
+        <div className="w-8" />
+      </motion.div>
 
-        {/* Navigation arrows */}
-        {images.length > 1 && (
-          <>
-            <button onClick={goPrev} className="absolute left-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors">
-              <ChevronLeft size={20} />
-            </button>
-            <button onClick={goNext} className="absolute right-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors">
-              <ChevronRight size={20} />
-            </button>
-          </>
-        )}
-
-        {/* Toolbar */}
-        <div className="flex items-center justify-center gap-1 px-4 py-3">
-          {[
-            { icon: ZoomIn, label: t("lightbox.zoomIn"), onClick: () => setZoom((z) => Math.min(MAX_ZOOM, z + 0.25)) },
-            { icon: ZoomOut, label: t("lightbox.zoomOut"), onClick: () => setZoom((z) => Math.max(MIN_ZOOM, z - 0.25)) },
-            { icon: RotateCcw, label: t("lightbox.reset"), onClick: resetView },
-            { icon: Copy, label: t("lightbox.copy"), onClick: handleCopy },
-            { icon: Download, label: t("lightbox.download"), onClick: handleDownload },
-            ...(onDelete ? [{ icon: Trash2, label: t("lightbox.delete"), onClick: handleDelete }] : []),
-          ].map(({ icon: Icon, label, onClick }) => (
-            <button
-              key={label}
-              onClick={onClick}
-              title={label}
-              className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+      {/* Image area */}
+      <div
+        ref={containerRef}
+        className="relative flex flex-1 items-center justify-center overflow-hidden px-5 pb-2"
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          cursor: zoom > 1 ? (isPanning ? "grabbing" : "grab") : "default",
+        }}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 26, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 16, scale: 0.98 }}
+          transition={{ duration: 0.42, ease: transitionEase }}
+          className="relative flex max-h-[82vh] max-w-[84vw] items-center justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] px-4 py-4 shadow-[0_24px_80px_rgba(0,0,0,0.42)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_48%)]" />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentPath}
+              initial={{ opacity: 0, y: 24, scale: 0.94, filter: "blur(14px)" }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -18, scale: 1.03, filter: "blur(10px)" }}
+              transition={{ duration: 0.42, ease: transitionEase }}
+              className="relative flex items-center justify-center"
             >
-              <Icon size={16} strokeWidth={1.8} />
-            </button>
-          ))}
-          {imageId && (
-            <button
+              <img
+                src={toAssetUrl(currentPath)}
+                alt={t("lightbox.preview")}
+                className="max-h-[76vh] max-w-[78vw] object-contain select-none"
+                style={{
+                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                }}
+                onDoubleClick={toggleZoom}
+                draggable={false}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      </div>
+
+      {/* Navigation arrows */}
+      {images.length > 1 && (
+        <>
+          <motion.button
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -12 }}
+            transition={{ duration: 0.28, ease: transitionEase }}
+            onClick={goPrev}
+            className="absolute left-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors"
+          >
+            <ChevronLeft size={20} />
+          </motion.button>
+          <motion.button
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 12 }}
+            transition={{ duration: 0.28, ease: transitionEase }}
+            onClick={goNext}
+            className="absolute right-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors"
+          >
+            <ChevronRight size={20} />
+          </motion.button>
+        </>
+      )}
+
+      {/* Toolbar */}
+      <motion.div
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 14 }}
+        transition={{ duration: 0.32, ease: transitionEase }}
+        className="relative flex items-center justify-center gap-1 px-4 py-3"
+      >
+        {[
+          {
+            icon: ZoomIn,
+            label: t("lightbox.zoomIn"),
+            onClick: () => setZoom((z) => Math.min(MAX_ZOOM, z + 0.25)),
+          },
+          {
+            icon: ZoomOut,
+            label: t("lightbox.zoomOut"),
+            onClick: () => setZoom((z) => Math.max(MIN_ZOOM, z - 0.25)),
+          },
+          { icon: RotateCcw, label: t("lightbox.reset"), onClick: resetView },
+          { icon: Copy, label: t("lightbox.copy"), onClick: handleCopy },
+          {
+            icon: Download,
+            label: t("lightbox.download"),
+            onClick: handleDownload,
+          },
+          ...(onEditImage
+            ? [
+                {
+                  icon: Wand2,
+                  label: t("lightbox.edit"),
+                  onClick: () => onEditImage(currentImage),
+                },
+              ]
+            : []),
+          ...(onDelete
+            ? [
+                {
+                  icon: Trash2,
+                  label: t("lightbox.delete"),
+                  onClick: handleDelete,
+                },
+              ]
+            : []),
+        ].map(({ icon: Icon, label, onClick }) => (
+          <button
+            key={label}
+            onClick={onClick}
+            title={label}
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          >
+            <Icon size={16} strokeWidth={1.8} />
+          </button>
+        ))}
+        {currentImage?.imageId && (
+          <button
+            onClick={() => setShowFolderSelector(true)}
+            title={t("favorites.addToFolder")}
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          >
+            <FavoriteButton
+              imageId={currentImage.imageId}
+              size={16}
               onClick={() => setShowFolderSelector(true)}
-              title={t("favorites.addToFolder")}
-              className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
-            >
-              <FavoriteButton imageId={imageId} size={16} onClick={() => setShowFolderSelector(true)} />
-            </button>
-          )}
-        </div>
-        {showFolderSelector && imageId && (
-          <FolderSelector imageId={imageId} onClose={() => setShowFolderSelector(false)} />
+            />
+          </button>
         )}
       </motion.div>
-    </AnimatePresence>
+      {showFolderSelector && currentImage?.imageId && (
+        <FolderSelector
+          imageId={currentImage.imageId}
+          onClose={() => setShowFolderSelector(false)}
+        />
+      )}
+    </motion.div>
   );
 }

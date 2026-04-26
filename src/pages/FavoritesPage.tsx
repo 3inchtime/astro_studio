@@ -1,42 +1,63 @@
 import { useEffect, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { getFavoriteImages, toAssetUrl } from "../lib/api";
+import { AnimatePresence } from "framer-motion";
+import { deleteGeneration, getFavoriteImages } from "../lib/api";
 import type { GenerationResult } from "../types";
-import { Search, X, Image as ImageIcon, Calendar, Trash2 } from "lucide-react";
+import { Folder, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useFolders } from "../hooks/useFolders";
 import FolderSelector from "../components/favorites/FolderSelector";
-import FavoriteButton from "../components/favorites/FavoriteButton";
-import { deleteGeneration } from "../lib/api";
+import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
+import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
+import GenerationGrid from "../components/gallery/GenerationGrid";
+import PaginationControls from "../components/gallery/PaginationControls";
 
 export default function FavoritesPage() {
   const { t } = useTranslation();
+  const { folders, reload: reloadFolders } = useFolders();
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [query, setQuery] = useState("");
+  const [selectedFolderId, setSelectedFolderId] = useState("");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
   const [folderSelectorImageId, setFolderSelectorImageId] = useState<string | null>(null);
 
-  const loadFavorites = useCallback(async (p: number, q?: string) => {
-    const result = await getFavoriteImages(undefined, q || query || undefined, p);
+  const loadFavorites = useCallback(async (p: number, q?: string, folderId?: string) => {
+    const result = await getFavoriteImages(
+      folderId || selectedFolderId || undefined,
+      q?.trim() || query.trim() || undefined,
+      p,
+    );
     setResults(result.generations);
     setTotal(result.total);
     setPage(result.page);
-  }, [query]);
+  }, [query, selectedFolderId]);
 
   useEffect(() => {
     loadFavorites(1);
   }, []);
 
   function handleSearch() {
-    loadFavorites(1, query);
+    loadFavorites(1, query, selectedFolderId);
+  }
+
+  function handleFolderFilterChange(folderId: string) {
+    setSelectedFolderId(folderId);
+    setSelected(null);
+    loadFavorites(1, query, folderId);
   }
 
   async function handleDelete(id: string) {
     await deleteGeneration(id);
-    loadFavorites(page, query);
+    loadFavorites(page, query, selectedFolderId);
     if (selected?.generation.id === id) setSelected(null);
+  }
+
+  function handleFolderSelectorClose() {
+    setFolderSelectorImageId(null);
+    reloadFolders();
+    loadFavorites(page, query, selectedFolderId);
   }
 
   const totalPages = Math.ceil(total / pageSize);
@@ -44,7 +65,7 @@ export default function FavoritesPage() {
   return (
     <div className="flex h-full">
       <div className="flex flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-border-subtle px-6 py-4">
+        <div className="flex flex-col gap-3 border-b border-border-subtle px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-[15px] font-semibold text-foreground tracking-tight">
               {t("favorites.title")}
@@ -56,179 +77,63 @@ export default function FavoritesPage() {
             )}
           </div>
 
-          <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60" strokeWidth={2} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder={t("favorites.search")}
-              className="h-[30px] w-52 rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-border focus:bg-surface transition-colors"
-            />
+          <div className="flex w-full min-w-0 items-center gap-2 lg:w-auto">
+            <div className="relative min-w-0 flex-1 lg:flex-none">
+              <Folder size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60" strokeWidth={2} />
+              <select
+                value={selectedFolderId}
+                onChange={(e) => handleFolderFilterChange(e.target.value)}
+                className="h-[30px] w-full appearance-none rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-7 text-[12px] text-foreground transition-colors focus:border-border focus:bg-surface focus:outline-none lg:w-40"
+                title={t("favorites.folderFilter")}
+                aria-label={t("favorites.folderFilter")}
+              >
+                <option value="">{t("favorites.allFolders")}</option>
+                {folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="relative min-w-0 flex-1 lg:flex-none">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60" strokeWidth={2} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                placeholder={t("favorites.search")}
+                className="h-[30px] w-full rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-border focus:bg-surface transition-colors lg:w-52"
+              />
+            </div>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
           {results.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center">
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                className="flex flex-col items-center"
-              >
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-[14px] bg-gradient-to-br from-primary/6 to-accent/4 border border-border-subtle">
-                  <ImageIcon size={24} className="text-lavender" strokeWidth={1.4} />
-                </div>
-                <p className="text-[14px] font-medium text-foreground tracking-tight">
-                  {t("favorites.noImages")}
-                </p>
-                <p className="mt-1 text-[12px] text-muted">
-                  {t("favorites.emptyHint")}
-                </p>
-              </motion.div>
-            </div>
+            <EmptyCollectionState title={t("favorites.noImages")} subtitle={t("favorites.emptyHint")} />
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {results.map((result, i) => {
-                const img = result.images[0];
-                if (!img) return null;
-                const imageId = `${result.generation.id}_0`;
-                return (
-                  <motion.div
-                    key={result.generation.id}
-                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ delay: i * 0.03, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                    className="group relative"
-                  >
-                    <div
-                      onClick={() => setSelected(result)}
-                      className="cursor-pointer overflow-hidden rounded-[12px] bg-surface border border-border-subtle shadow-card transition-all duration-300 hover:shadow-float hover:border-border hover:-translate-y-0.5"
-                    >
-                      {img && (
-                        <div className="relative overflow-hidden">
-                          <img
-                            src={toAssetUrl(img.thumbnail_path)}
-                            alt={result.generation.prompt}
-                            className="aspect-square w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                            loading="lazy"
-                          />
-                          <div className="absolute top-2 right-2">
-                            <FavoriteButton imageId={imageId} size={14} />
-                          </div>
-                        </div>
-                      )}
-                      <div className="px-3 py-2.5">
-                        <p className="line-clamp-2 text-[11px] leading-snug text-muted group-hover:text-foreground/70 transition-colors">
-                          {result.generation.prompt}
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
+            <GenerationGrid results={results} onSelect={setSelected} />
           )}
 
-          {totalPages > 1 && (
-            <div className="mt-6 flex items-center justify-center gap-2">
-              <button onClick={() => loadFavorites(page - 1)} disabled={page <= 1}
-                className="h-[28px] rounded-[8px] px-3 text-[11px] text-muted hover:bg-subtle disabled:opacity-30 transition-all">
-                {t("gallery.prev")}
-              </button>
-              <span className="px-2 text-[11px] text-muted tabular-nums">{page} / {totalPages}</span>
-              <button onClick={() => loadFavorites(page + 1)} disabled={page >= totalPages}
-                className="h-[28px] rounded-[8px] px-3 text-[11px] text-muted hover:bg-subtle disabled:opacity-30 transition-all">
-                {t("gallery.next")}
-              </button>
-            </div>
-          )}
+          <PaginationControls page={page} totalPages={totalPages} onPageChange={(p) => loadFavorites(p, query, selectedFolderId)} />
         </div>
       </div>
 
       <AnimatePresence>
         {selected && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 340, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="w-[340px] h-full overflow-y-auto overflow-hidden border-l border-border-subtle bg-surface"
-          >
-            <div className="p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-[13px] font-semibold text-foreground tracking-tight">
-                  {t("favorites.detail")}
-                </h3>
-                <button onClick={() => setSelected(null)}
-                  className="flex h-6 w-6 items-center justify-center rounded-[8px] text-muted hover:bg-subtle transition-colors">
-                  <X size={14} />
-                </button>
-              </div>
-
-              {selected.images[0] && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className="mb-4 overflow-hidden rounded-[12px] border border-border-subtle"
-                >
-                  <img src={toAssetUrl(selected.images[0].file_path)} alt={selected.generation.prompt} className="w-full" />
-                </motion.div>
-              )}
-
-              <div className="space-y-3">
-                <div>
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                    {t("gallery.prompt")}
-                  </span>
-                  <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">
-                    {selected.generation.prompt}
-                  </p>
-                </div>
-                <div className="flex gap-5">
-                  <div>
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                      {t("gallery.size")}
-                    </span>
-                    <p className="mt-0.5 text-[13px] text-foreground/80">{selected.generation.size}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                      {t("gallery.quality")}
-                    </span>
-                    <p className="mt-0.5 text-[13px] text-foreground/80">{selected.generation.quality}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Calendar size={11} className="text-muted/40" />
-                  <span className="text-[11px] text-muted/60">{selected.generation.created_at}</span>
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-2">
-                <button
-                  onClick={() => setFolderSelectorImageId(`${selected.generation.id}_0`)}
-                  className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
-                >
-                  {t("favorites.manageFolders")}
-                </button>
-                <button
-                  onClick={() => handleDelete(selected.generation.id)}
-                  className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-error/10 py-2.5 text-[12px] font-medium text-error/60 transition-all hover:border-error/20 hover:bg-error/4 hover:text-error"
-                >
-                  <Trash2 size={13} />
-                  {t("gallery.delete")}
-                </button>
-              </div>
-            </div>
-          </motion.div>
+          <GenerationDetailPanel
+            result={selected}
+            title={t("favorites.detail")}
+            onClose={() => setSelected(null)}
+            onDelete={(id) => void handleDelete(id)}
+            onManageFolders={setFolderSelectorImageId}
+          />
         )}
       </AnimatePresence>
 
       {folderSelectorImageId && (
-        <FolderSelector imageId={folderSelectorImageId} onClose={() => setFolderSelectorImageId(null)} />
+        <FolderSelector imageId={folderSelectorImageId} onClose={handleFolderSelectorClose} />
       )}
     </div>
   );

@@ -72,6 +72,31 @@
 @layer base {
   :root {
     color-scheme: light;
+    --app-font-scale: 1;
+    --loading-shell-bg:
+      radial-gradient(ellipse 62% 60% at 18% 22%, rgba(99, 123, 255, 0.18), transparent 72%),
+      radial-gradient(ellipse 55% 48% at 82% 16%, rgba(245, 168, 209, 0.15), transparent 70%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 240, 233, 0.96));
+    --loading-panel-border: rgba(128, 120, 182, 0.18);
+    --loading-panel-shadow: 0 14px 36px rgba(56, 52, 84, 0.12);
+    --loading-core-bg:
+      radial-gradient(circle at 40% 34%, rgba(255, 255, 255, 0.95), rgba(226, 232, 255, 0.62) 25%, rgba(149, 165, 255, 0.28) 56%, transparent 74%),
+      radial-gradient(circle at 62% 72%, rgba(255, 161, 208, 0.3), transparent 58%);
+    --loading-core-glow: rgba(113, 126, 255, 0.36);
+    --loading-ring: rgba(130, 122, 188, 0.28);
+    --loading-ring-shadow: rgba(112, 126, 241, 0.16);
+    --loading-mist-a: rgba(116, 137, 255, 0.26);
+    --loading-mist-b: rgba(245, 154, 202, 0.2);
+    --loading-beam: rgba(188, 197, 255, 0.36);
+    --loading-copy: rgba(43, 41, 36, 0.94);
+    --loading-copy-muted: rgba(70, 67, 62, 0.74);
+    --loading-ticker-bg: rgba(255, 255, 255, 0.4);
+    --loading-ticker-dot: rgba(110, 123, 196, 0.6);
+    --loading-ticker-fade: rgba(248, 247, 244, 0.94);
+    --loading-progress-track: rgba(118, 112, 166, 0.2);
+    --loading-progress-glow-start: rgba(151, 170, 255, 0.2);
+    --loading-progress-glow-mid: rgba(128, 111, 255, 0.94);
+    --loading-progress-glow-end: rgba(245, 171, 216, 0.72);
   }
 
   .dark {
@@ -92,6 +117,42 @@
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.12);
     --shadow-float: 0 2px 4px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.16);
     --shadow-panel: 0 -1px 4px rgba(0, 0, 0, 0.16), 0 -4px 20px rgba(0, 0, 0, 0.12);
+    --loading-shell-bg:
+      radial-gradient(ellipse 62% 60% at 18% 22%, rgba(90, 116, 255, 0.24), transparent 72%),
+      radial-gradient(ellipse 55% 48% at 82% 16%, rgba(228, 130, 186, 0.18), transparent 70%),
+      linear-gradient(180deg, rgba(16, 20, 36, 0.95), rgba(10, 13, 24, 0.98));
+    --loading-panel-border: rgba(218, 224, 255, 0.1);
+    --loading-panel-shadow: 0 20px 50px rgba(0, 0, 0, 0.36);
+    --loading-core-bg:
+      radial-gradient(circle at 40% 34%, rgba(255, 255, 255, 0.95), rgba(228, 235, 255, 0.48) 24%, rgba(141, 155, 255, 0.3) 56%, transparent 74%),
+      radial-gradient(circle at 62% 72%, rgba(247, 152, 208, 0.24), transparent 58%);
+    --loading-core-glow: rgba(126, 136, 255, 0.46);
+    --loading-ring: rgba(216, 222, 255, 0.22);
+    --loading-ring-shadow: rgba(134, 147, 255, 0.2);
+    --loading-mist-a: rgba(111, 132, 255, 0.28);
+    --loading-mist-b: rgba(241, 145, 203, 0.22);
+    --loading-beam: rgba(208, 219, 255, 0.28);
+    --loading-copy: rgba(246, 249, 255, 0.96);
+    --loading-copy-muted: rgba(217, 223, 243, 0.74);
+    --loading-ticker-bg: rgba(255, 255, 255, 0.06);
+    --loading-ticker-dot: rgba(198, 207, 255, 0.58);
+    --loading-ticker-fade: rgba(13, 16, 28, 0.95);
+    --loading-progress-track: rgba(214, 221, 255, 0.14);
+    --loading-progress-glow-start: rgba(157, 179, 255, 0.12);
+    --loading-progress-glow-mid: rgba(136, 120, 255, 0.92);
+    --loading-progress-glow-end: rgba(245, 168, 214, 0.68);
+  }
+
+  :root[data-font-size="small"] {
+    --app-font-scale: 0.92;
+  }
+
+  :root[data-font-size="medium"] {
+    --app-font-scale: 1;
+  }
+
+  :root[data-font-size="large"] {
+    --app-font-scale: 1.1;
   }
 
   * {
@@ -138,6 +199,38 @@
   ::selection {
     background-color: var(--color-primary);
     color: white;
+  }
+
+  [class~="text-[9px]"] {
+    font-size: calc(9px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[10px]"] {
+    font-size: calc(10px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[11px]"] {
+    font-size: calc(11px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[12px]"] {
+    font-size: calc(12px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[13px]"] {
+    font-size: calc(13px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[14px]"] {
+    font-size: calc(14px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[15px]"] {
+    font-size: calc(15px * var(--app-font-scale)) !important;
+  }
+
+  [class~="text-[16px]"] {
+    font-size: calc(16px * var(--app-font-scale)) !important;
   }
 }
 
@@ -256,31 +349,261 @@
   animation: breathe 3s ease-in-out infinite;
 }
 
-/* Dream bubble loading animation */
-@keyframes bubble-float {
+/* Generation loading scene */
+@keyframes loading-orb-breathe {
   0%, 100% {
-    transform: translateY(0) scale(1);
-    opacity: 0.6;
+    transform: scale(0.96);
+    opacity: 0.84;
+    filter: brightness(0.98);
   }
   50% {
-    transform: translateY(-12px) scale(1.1);
+    transform: scale(1.04);
+    opacity: 1;
+    filter: brightness(1.08);
+  }
+}
+
+@keyframes loading-orb-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes loading-spark-orbit {
+  0%, 100% {
+    transform: translateY(0) scale(0.85);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-2px) scale(1.08);
     opacity: 1;
   }
 }
 
-@keyframes bubble-glow {
-  0%, 100% {
-    box-shadow: 0 0 8px rgba(79, 106, 255, 0.15), 0 0 20px rgba(124, 92, 252, 0.08);
+@keyframes loading-dot-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.38;
   }
-  50% {
-    box-shadow: 0 0 16px rgba(79, 106, 255, 0.3), 0 0 40px rgba(124, 92, 252, 0.15);
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
   }
 }
 
-@keyframes bubble-shimmer {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+@keyframes loading-progress-flow {
+  0% {
+    transform: translateX(-58%);
+    opacity: 0.68;
+  }
+  100% {
+    transform: translateX(58%);
+    opacity: 1;
+  }
+}
+
+.generation-loading-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 12px;
+  width: min(100%, 420px);
+  overflow: hidden;
+  border-radius: 22px 22px 22px 10px;
+  border: 1px solid var(--loading-panel-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.18)),
+    var(--loading-shell-bg);
+  box-shadow: 0 10px 28px rgba(45, 42, 38, 0.08);
+  backdrop-filter: blur(14px) saturate(145%);
+  -webkit-backdrop-filter: blur(14px) saturate(145%);
+}
+
+.generation-loading-shell::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  bottom: -8px;
+  width: 18px;
+  height: 18px;
+  border-left: 1px solid var(--loading-panel-border);
+  border-bottom: 1px solid var(--loading-panel-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.12));
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+  transform: rotate(-8deg);
+}
+
+.generation-loading-scene {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 0 14px 14px;
+}
+
+.generation-loading-orb {
+  position: relative;
+  display: flex;
+  height: 44px;
+  width: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+.generation-loading-orb-halo,
+.generation-loading-orb-ring,
+.generation-loading-orb-core {
+  position: absolute;
+  border-radius: 999px;
+}
+
+.generation-loading-orb-halo {
+  inset: -8px;
+  background: radial-gradient(circle, rgba(124, 92, 252, 0.18), transparent 68%);
+  filter: blur(8px);
+  animation: loading-orb-breathe 3.6s ease-in-out infinite;
+}
+
+.generation-loading-orb-ring {
+  inset: 3px;
+  border: 1px solid var(--loading-ring);
+  box-shadow: 0 0 18px var(--loading-ring-shadow);
+  animation: loading-orb-spin 8.4s linear infinite;
+}
+
+.generation-loading-orb-core {
+  inset: 11px;
+  background: var(--loading-core-bg);
+  box-shadow: 0 0 18px var(--loading-core-glow);
+  animation: loading-orb-breathe 3.2s ease-in-out infinite;
+}
+
+.generation-loading-spark {
+  position: absolute;
+  height: 5px;
+  width: 5px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(184, 169, 255, 0.88));
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.4);
+  animation: loading-spark-orbit 2.6s ease-in-out infinite;
+}
+
+.generation-loading-spark-a {
+  top: 4px;
+  right: 9px;
+}
+
+.generation-loading-spark-b {
+  bottom: 7px;
+  right: 2px;
+  animation-delay: 0.5s;
+}
+
+.generation-loading-spark-c {
+  left: 4px;
+  top: 19px;
+  animation-delay: 1s;
+}
+
+.generation-loading-copy {
+  position: relative;
+  min-width: 0;
+  padding: 14px 16px 14px 0;
+}
+
+.generation-loading-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  color: var(--loading-copy);
+}
+
+.generation-loading-subtitle {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--loading-copy-muted);
+}
+
+.generation-loading-meta {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.generation-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.generation-loading-dots > span {
+  height: 5px;
+  width: 5px;
+  border-radius: 999px;
+  background: var(--loading-ticker-dot);
+  animation: loading-dot-bounce 1.25s ease-in-out infinite;
+}
+
+.generation-loading-dots > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.generation-loading-dots > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.generation-loading-progress {
+  position: relative;
+  height: 4px;
+  flex: 1;
+  min-width: 72px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--loading-progress-track);
+}
+
+.generation-loading-progress > span {
+  position: absolute;
+  inset: 0;
+  margin: auto 0;
+  width: 58%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--loading-progress-glow-start),
+    var(--loading-progress-glow-mid),
+    var(--loading-progress-glow-end)
+  );
+  animation: loading-progress-flow 2.7s ease-in-out infinite alternate;
+}
+
+@media (max-width: 720px) {
+  .generation-loading-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 10px;
+    width: min(100%, 360px);
+  }
+
+  .generation-loading-scene {
+    padding: 12px 0 12px 12px;
+  }
+
+  .generation-loading-copy {
+    padding: 12px 14px 12px 0;
+  }
+
+  .generation-loading-title {
+    font-size: 12px;
+  }
+
+  .generation-loading-subtitle {
+    font-size: 10px;
+  }
 }
 
 /* Reduced motion */

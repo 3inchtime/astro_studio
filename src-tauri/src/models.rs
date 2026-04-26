@@ -1,9 +1,55 @@
 use serde::{Deserialize, Serialize};
 
 pub const ENGINE_GPT_IMAGE_2: &str = "gpt-image-2";
+pub const SETTING_IMAGE_MODEL: &str = "image_model";
 pub const SETTING_API_KEY: &str = "api_key";
 pub const SETTING_BASE_URL: &str = "base_url";
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+pub const DEFAULT_IMAGE_SIZE: &str = "auto";
+pub const DEFAULT_IMAGE_QUALITY: &str = "auto";
+pub const DEFAULT_IMAGE_BACKGROUND: &str = "auto";
+pub const DEFAULT_OUTPUT_FORMAT: &str = "png";
+pub const DEFAULT_IMAGE_COUNT: u8 = 1;
+pub const DEFAULT_PAGE_SIZE: i32 = 20;
+pub const SETTING_LOG_ENABLED: &str = "log_enabled";
+pub const SETTING_LOG_RETENTION_DAYS: &str = "log_retention_days";
+pub const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
+pub const SETTING_TRASH_RETENTION_DAYS: &str = "trash_retention_days";
+pub const DEFAULT_TRASH_RETENTION_DAYS: u32 = 30;
+pub const SETTING_FONT_SIZE: &str = "font_size";
+pub const DEFAULT_FONT_SIZE: &str = "medium";
+pub const DEFAULT_IMAGE_MODEL: &str = ENGINE_GPT_IMAGE_2;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub id: String,
+    pub timestamp: String,
+    pub log_type: String,
+    pub level: String,
+    pub message: String,
+    pub generation_id: Option<String>,
+    pub metadata: Option<String>,
+    pub response_file: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LogSearchResult {
+    pub logs: Vec<LogEntry>,
+    pub total: i32,
+    pub page: i32,
+    pub page_size: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogSettings {
+    pub enabled: bool,
+    pub retention_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashSettings {
+    pub retention_days: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Generation {
@@ -13,7 +59,9 @@ pub struct Generation {
     pub size: String,
     pub quality: String,
     pub status: String,
+    pub error_message: Option<String>,
     pub created_at: String,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,7 +93,7 @@ pub struct SearchResult {
 pub struct GenerateResult {
     pub generation_id: String,
     pub conversation_id: String,
-    pub image_paths: Vec<String>,
+    pub images: Vec<GeneratedImage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +116,7 @@ pub struct Conversation {
     pub created_at: String,
     pub updated_at: String,
     pub generation_count: i32,
+    pub latest_generation_at: Option<String>,
     pub latest_thumbnail: Option<String>,
 }
 

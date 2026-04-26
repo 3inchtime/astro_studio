@@ -3,12 +3,14 @@ import { motion } from "framer-motion";
 import { Search, Image as ImageIcon, MessageSquare, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getConversations, toAssetUrl } from "../../lib/api";
-import { formatTimeAgo } from "../../lib/utils";
+import { formatConversationTime, toLocalDate } from "../../lib/utils";
 import type { Conversation } from "../../types";
 
 interface ConversationListProps {
   activeConversationId: string | null;
+  refreshKey: number;
   onSelectConversation: (id: string) => void;
+  onInitialConversation: (id: string) => void;
   onNewConversation: () => void;
 }
 
@@ -26,7 +28,7 @@ function groupByDate(conversations: Conversation[], t: (key: string) => string) 
   ];
 
   for (const conv of conversations) {
-    const date = new Date(conv.updated_at);
+    const date = toLocalDate(conv.latest_generation_at ?? conv.updated_at);
     if (date >= today) groups[0].items.push(conv);
     else if (date >= yesterday) groups[1].items.push(conv);
     else if (date >= weekAgo) groups[2].items.push(conv);
@@ -38,7 +40,9 @@ function groupByDate(conversations: Conversation[], t: (key: string) => string) 
 
 export default function ConversationList({
   activeConversationId,
+  refreshKey,
   onSelectConversation,
+  onInitialConversation,
   onNewConversation,
 }: ConversationListProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -46,10 +50,13 @@ export default function ConversationList({
   const { t } = useTranslation();
 
   const load = useCallback((q?: string) => {
-    getConversations(q).then(setConversations).catch(() => {});
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+    getConversations(q).then((items) => {
+      setConversations(items);
+      if (!q && !activeConversationId && items.length > 0) {
+        onInitialConversation(items[0].id);
+      }
+    }).catch(() => {});
+  }, [activeConversationId, onInitialConversation]);
 
   useEffect(() => {
     if (query) {
@@ -58,14 +65,14 @@ export default function ConversationList({
     } else {
       load();
     }
-  }, [query, load]);
+  }, [query, refreshKey, load]);
 
   const groups = groupByDate(conversations, t);
 
   return (
     <div className="flex h-full flex-col">
       <div className="px-4 pt-5 pb-3">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="mb-3 flex items-center gap-2">
           <MessageSquare size={13} className="text-muted" strokeWidth={1.8} />
           <span className="text-[13px] font-semibold text-foreground tracking-tight">
             {t("sidebar.conversations")}
@@ -83,6 +90,25 @@ export default function ConversationList({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-4">
+        <button
+          onClick={onNewConversation}
+          className="mb-3 flex w-full items-center gap-2.5 rounded-[10px] border border-dashed border-border-subtle px-2 py-2 text-left transition-all hover:border-primary/30 hover:bg-primary/4"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-border-subtle bg-subtle">
+            <Plus size={14} className="text-primary" strokeWidth={2} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] leading-snug text-foreground">
+              {t("sidebar.newConversation")}
+            </p>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <span className="text-[10px] text-muted/60">
+                {t("sidebar.conversations")}
+              </span>
+            </div>
+          </div>
+        </button>
+
         {conversations.length === 0 ? (
           <div className="px-2 pt-6 text-center">
             <p className="text-[12px] text-muted/50">
@@ -127,7 +153,7 @@ export default function ConversationList({
                       </p>
                       <div className="mt-0.5 flex items-center gap-1.5">
                         <span className="text-[10px] text-muted/60">
-                          {formatTimeAgo(conv.updated_at, t)}
+                          {formatConversationTime(conv.latest_generation_at ?? conv.updated_at)}
                         </span>
                         {conv.generation_count > 1 && (
                           <span className="rounded-[4px] bg-primary/8 px-1 text-[9px] font-medium text-primary">
@@ -142,14 +168,6 @@ export default function ConversationList({
             </div>
           ))
         )}
-
-        <button
-          onClick={onNewConversation}
-          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-border-subtle px-3 py-2.5 text-[11px] font-medium text-muted transition-all hover:border-primary/30 hover:bg-primary/4 hover:text-primary"
-        >
-          <Plus size={12} strokeWidth={2} />
-          {t("sidebar.newConversation")}
-        </button>
       </div>
     </div>
   );
