@@ -22,19 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS Apple Silicon
-            os: macos-14
-            args: --target aarch64-apple-darwin --bundles app
-            rust_target: aarch64-apple-darwin
-            release_arch: aarch64
           - name: Windows
             os: windows-latest
             args: ""
-          - name: macOS Intel
-            os: macos-15-intel
-            args: --target x86_64-apple-darwin --bundles app
-            rust_target: x86_64-apple-darwin
-            release_arch: x64
 
     runs-on: ${{ matrix.os }}
 
@@ -47,12 +37,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-
-      - name: Install Rust toolchain for macOS
-        if: ${{ startsWith(matrix.os, 'macos-') }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
 
       - name: Install Rust toolchain for Windows
         if: ${{ matrix.os == 'windows-latest' }}
@@ -91,55 +75,3 @@ jobs:
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: astro-studio-[platform]-[arch]-[bundle]
           releaseAssetNamePattern: astro-studio_[version]_[platform]_[arch][setup][ext]
-
-      - name: Package macOS DMG manually
-        if: ${{ startsWith(matrix.os, 'macos-') }}
-        id: package_macos_dmg
-        shell: bash
-        run: |
-          set -euo pipefail
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg
-
-          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          APP_DIR="src-tauri/target/${{ matrix.rust_target }}/release/bundle/macos"
-          APP_PATH=$(find "$APP_DIR" -maxdepth 1 -name "*.app" -type d | head -1 || true)
-
-          if [ -z "$APP_PATH" ]; then
-            echo "No .app bundle found under $APP_DIR" >&2
-            exit 1
-          fi
-
-          mkdir -p release-assets
-          DMG_NAME="astro-studio_${VERSION}_macos_${{ matrix.release_arch }}.dmg"
-          STAGE_DIR="$RUNNER_TEMP/dmg-stage-${{ matrix.release_arch }}"
-          rm -rf "$STAGE_DIR"
-          mkdir -p "$STAGE_DIR"
-          ditto "$APP_PATH" "$STAGE_DIR/Astro Studio.app"
-
-          create-dmg \
-            --volname "Astro Studio" \
-            --window-size 660 400 \
-            --window-pos 200 120 \
-            --icon-size 96 \
-            --icon "Astro Studio.app" 180 220 \
-            --hide-extension "Astro Studio.app" \
-            --app-drop-link 480 220 \
-            --no-internet-enable \
-            "release-assets/$DMG_NAME" \
-            "$STAGE_DIR"
-
-          rm -rf "$STAGE_DIR"
-          echo "dmg_path=release-assets/$DMG_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Upload macOS DMG workflow artifact
-        if: ${{ startsWith(matrix.os, 'macos-') && !startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: astro-studio-macos-${{ matrix.release_arch }}-dmg
-          path: ${{ steps.package_macos_dmg.outputs.dmg_path }}
-
-      - name: Upload macOS DMG release asset
-        if: ${{ startsWith(matrix.os, 'macos-') && startsWith(github.ref, 'refs/tags/v') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ steps.package_macos_dmg.outputs.dmg_path }}
