@@ -9,6 +9,7 @@ vi.mock("react-i18next", () => ({
       ({
         "generate.generationFailed": "Generation failed",
         "generate.retry": "Retry",
+        "generate.editPrompt": "Edit prompt",
       })[key] ?? key,
   }),
 }));
@@ -26,6 +27,29 @@ vi.mock("./GenerationLoadingScene", () => ({
 }));
 
 describe("MessageBubble", () => {
+  it("shows an edit prompt button for user messages", () => {
+    const onEditPrompt = vi.fn();
+    const message: Message = {
+      id: "user-1",
+      role: "user",
+      content: "A cinematic portrait of a fox astronaut",
+      status: "complete",
+      createdAt: "2026-04-26T00:00:00Z",
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        onImageClick={vi.fn()}
+        onEditPrompt={onEditPrompt}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
+
+    expect(onEditPrompt).toHaveBeenCalledWith(message);
+  });
+
   it("shows a retry button for failed messages with retry data", () => {
     const onRetry = vi.fn();
     const message: Message = {
