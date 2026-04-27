@@ -92,6 +92,9 @@ export default function GeneratePage() {
   const [imageCount, setImageCount] = useState(1);
   const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
+  const [editingPromptMessageId, setEditingPromptMessageId] = useState<
+    string | null
+  >(null);
   const [lightboxState, setLightboxState] = useState<{
     images: MessageImage[];
     index: number;
@@ -277,6 +280,7 @@ export default function GeneratePage() {
     if (!promptText) return;
 
     setPrompt("");
+    setEditingPromptMessageId(null);
     await submitGenerationRequest({
       prompt: promptText,
       size,
@@ -346,6 +350,23 @@ export default function GeneratePage() {
     [submitGenerationRequest],
   );
 
+  const handleEditPrompt = useCallback((message: Message) => {
+    setPrompt(message.content);
+    setEditSources(
+      message.sourceImages?.map((image) => messageImageToEditSource(image)) ?? [],
+    );
+    setEditingPromptMessageId(message.id);
+    autoScrollRef.current = false;
+    textareaRef.current?.focus();
+  }, []);
+
+  const handleCancelPromptEdit = useCallback(() => {
+    setPrompt("");
+    setEditSources([]);
+    setEditingPromptMessageId(null);
+    textareaRef.current?.focus();
+  }, []);
+
   return (
     <div className="flex h-full flex-col">
       <div
@@ -365,6 +386,7 @@ export default function GeneratePage() {
                   onImageClick={handleImageClick}
                   onDelete={handleRequestDeleteGeneration}
                   onEditImage={handleUseImageAsSource}
+                  onEditPrompt={handleEditPrompt}
                   onFavoriteClick={setFolderSelectorImageId}
                   onRetry={(message) => void handleRetryMessage(message)}
                 />
@@ -425,6 +447,20 @@ export default function GeneratePage() {
       <div className="bg-surface px-6 pt-4 pb-5">
         <div className="mx-auto max-w-[900px]">
           <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
+            {editingPromptMessageId && (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
+                <div className="text-[12px] font-medium text-foreground/80">
+                  {t("generate.editingPrompt")}
+                </div>
+                <button
+                  onClick={handleCancelPromptEdit}
+                  className="text-[12px] font-medium text-primary transition-colors hover:text-primary/80"
+                >
+                  {t("generate.cancelEditPrompt")}
+                </button>
+              </div>
+            )}
+
             <div className="mb-3 flex items-center justify-between gap-3">
               <button
                 onClick={() => void handleAddUploadedSources()}
