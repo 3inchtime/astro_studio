@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod file_manager;
 mod models;
+mod runtime_logs;
 
 use api_gateway::ImageEngine;
 use chrono::{SecondsFormat, Utc};
@@ -1690,6 +1691,11 @@ fn get_logs(
 }
 
 #[tauri::command]
+fn get_runtime_logs(limit: Option<usize>) -> Result<Vec<RuntimeLogEntry>, String> {
+    Ok(runtime_logs::recent_logs(limit.unwrap_or(200)))
+}
+
+#[tauri::command]
 fn get_log_detail(db: tauri::State<'_, Database>, id: String) -> Result<LogEntry, String> {
     db.get_log(&id)?.ok_or_else(|| "Log not found".to_string())
 }
@@ -1811,6 +1817,7 @@ pub fn run() {
             get_image_folders,
             get_favorite_images,
             get_logs,
+            get_runtime_logs,
             get_log_detail,
             read_log_response_file,
             clear_logs,
@@ -1820,6 +1827,8 @@ pub fn run() {
             save_trash_settings,
         ])
         .setup(|app| {
+            runtime_logs::attach_app_handle(app.handle().clone());
+
             let app_data_dir = app
                 .path()
                 .app_data_dir()
