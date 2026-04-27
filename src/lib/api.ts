@@ -11,6 +11,7 @@ import type {
   LogSearchResult,
   LogSettings,
   LogEntry,
+  RuntimeLogEntry,
   GenerateResponse,
   TrashSettings,
   AppFontSize,
@@ -165,6 +166,10 @@ export function onGenerationFailed(
   return onGenerationEvent("generation:failed", handler);
 }
 
+export function onRuntimeLog(handler: (data: RuntimeLogEntry) => void) {
+  return onGenerationEvent("runtime-log:new", handler);
+}
+
 export async function createFolder(name: string): Promise<Folder> {
   return invoke("create_folder", { name });
 }
@@ -223,6 +228,10 @@ export async function getLogs(
     page,
     pageSize,
   });
+}
+
+export async function getRuntimeLogs(limit?: number): Promise<RuntimeLogEntry[]> {
+  return invoke("get_runtime_logs", { limit });
 }
 
 export async function getLogDetail(id: string): Promise<LogEntry> {

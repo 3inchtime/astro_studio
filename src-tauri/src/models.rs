@@ -32,6 +32,15 @@ pub struct LogEntry {
     pub response_file: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeLogEntry {
+    pub sequence: u64,
+    pub timestamp: String,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LogSearchResult {
     pub logs: Vec<LogEntry>,

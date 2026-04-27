@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -6,13 +6,21 @@ import {
   getLogs, clearLogs, getLogSettings, saveLogSettings,
   readLogResponseFile, getTrashSettings, saveTrashSettings,
   getFontSize, getImageModel, saveFontSize, saveImageModel,
+  getRuntimeLogs, onRuntimeLog,
 } from "../lib/api";
 import {
   Check, Cpu, Eye, EyeOff, Globe, Key, Languages, SlidersHorizontal,
   FileText, Trash2, ChevronLeft, ChevronRight, Type, X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { AppFontSize, ImageModel, LogEntry, LogSettings, TrashSettings } from "../types";
+import type {
+  AppFontSize,
+  ImageModel,
+  LogEntry,
+  LogSettings,
+  RuntimeLogEntry,
+  TrashSettings,
+} from "../types";
 import {
   APP_FONT_SIZE_OPTIONS,
   applyAppFontSize,
@@ -89,6 +97,19 @@ function formatStructuredText(value: string): string {
   }
 }
 
+function mergeRuntimeLogs(current: RuntimeLogEntry[], incoming: RuntimeLogEntry[]): RuntimeLogEntry[] {
+  const merged = [...current];
+  const seen = new Set(current.map((log) => log.sequence));
+
+  for (const entry of incoming) {
+    if (seen.has(entry.sequence)) continue;
+    merged.push(entry);
+    seen.add(entry.sequence);
+  }
+
+  return merged.slice(-200);
+}
+
 export default function SettingsPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">("general");
@@ -117,6 +138,9 @@ export default function SettingsPage() {
   const [logSettings, setLogSettings] = useState<LogSettings>({ enabled: true, retention_days: 7 });
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const [responseContent, setResponseContent] = useState<string | null>(null);
+  const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogEntry[]>([]);
+  const [autoScrollRuntimeLogs, setAutoScrollRuntimeLogs] = useState(true);
+  const runtimeLogsRef = useRef<HTMLDivElement | null>(null);
 
   const pageSize = 20;
 
@@ -150,6 +174,45 @@ export default function SettingsPage() {
   useEffect(() => {
     if (activeTab === "logs") fetchLogs();
   }, [activeTab, fetchLogs]);
+
+  useEffect(() => {
+    if (activeTab !== "logs") return;
+
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    onRuntimeLog((entry) => {
+      if (cancelled) return;
+      setRuntimeLogs((current) => mergeRuntimeLogs(current, [entry]));
+    }).then((dispose) => {
+      if (cancelled) {
+        dispose();
+        return;
+      }
+      unlisten = dispose;
+    }).catch(() => {
+      unlisten = undefined;
+    });
+
+    getRuntimeLogs(200).then((entries) => {
+      if (cancelled) return;
+      setRuntimeLogs((current) => mergeRuntimeLogs(current, entries));
+    }).catch(() => {
+      if (!cancelled) setRuntimeLogs([]);
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!autoScrollRuntimeLogs || activeTab !== "logs") return;
+    const container = runtimeLogsRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [activeTab, autoScrollRuntimeLogs, runtimeLogs]);
 
   function handleLanguageChange(lang: string) {
     i18n.changeLanguage(lang);
@@ -520,6 +583,74 @@ export default function SettingsPage() {
               transition={{ duration: 0.2 }}
             >
               <div className="space-y-4">
+                <div className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border-subtle px-4 py-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]" />
+                        <h3 className="text-[13px] font-semibold text-foreground">{t("log.liveTitle")}</h3>
+                        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
+                          {t("log.liveConnected")}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted/60">{t("log.liveDesc")}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 rounded-[8px] border border-border-subtle bg-subtle/20 px-3 py-1.5 text-[11px] text-muted/70">
+                        <input
+                          type="checkbox"
+                          checked={autoScrollRuntimeLogs}
+                          onChange={(e) => setAutoScrollRuntimeLogs(e.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-border-subtle"
+                        />
+                        {t("log.autoScroll")}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setRuntimeLogs([])}
+                        className="flex h-[30px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[11px] text-muted transition-all hover:border-border hover:text-foreground"
+                      >
+                        <X size={12} />
+                        {t("log.clearView")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    ref={runtimeLogsRef}
+                    className="h-[320px] overflow-y-auto bg-[#171412] px-4 py-3 font-mono text-[11px] leading-5 text-stone-200"
+                  >
+                    {runtimeLogs.length === 0 ? (
+                      <div className="flex h-full flex-col items-center justify-center text-center text-stone-400/80">
+                        <p className="text-[12px] font-medium">{t("log.liveEmpty")}</p>
+                        <p className="mt-1 max-w-md text-[11px]">{t("log.liveHint")}</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {runtimeLogs.map((log) => (
+                          <div key={log.sequence} className="rounded-[8px] border border-white/5 bg-white/[0.03] px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="text-stone-500">{log.timestamp}</span>
+                              <span className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold uppercase ${levelColors[log.level] || "bg-stone-700 text-stone-100"}`}>
+                                {log.level}
+                              </span>
+                              <span className="text-stone-400">{log.target}</span>
+                            </div>
+                            <p className="mt-1 whitespace-pre-wrap break-words text-stone-100">{log.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-border-subtle px-4 py-2.5">
+                    <span className="text-[11px] text-muted/50">
+                      {t("log.liveRecent", { count: runtimeLogs.length })}
+                    </span>
+                    <span className="text-[11px] text-muted/40">runtime-log:new</span>
+                  </div>
+                </div>
+
                 {/* Filter bar */}
                 <div className="flex flex-wrap items-center gap-3">
                   <select

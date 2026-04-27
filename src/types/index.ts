@@ -116,6 +116,14 @@ export interface LogEntry {
   response_file: string | null;
 }
 
+export interface RuntimeLogEntry {
+  sequence: number;
+  timestamp: string;
+  level: "debug" | "info" | "warn" | "error" | string;
+  target: string;
+  message: string;
+}
+
 export interface LogSearchResult {
   logs: LogEntry[];
   total: number;
