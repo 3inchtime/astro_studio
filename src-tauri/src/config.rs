@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::runtime_logs;
+
 const CONFIG_FILE: &str = "astro_studio.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -107,11 +109,7 @@ impl AppConfig {
 }
 
 pub fn init_logger(config: &LogConfig) {
-    let mut builder = env_logger::Builder::new();
-    builder
-        .format_timestamp_millis()
-        .filter_level(config.level.parse().unwrap_or(log::LevelFilter::Info))
-        .init();
+    runtime_logs::init_logger(config.level.parse().unwrap_or(log::LevelFilter::Info));
 }
 
 #[cfg(test)]
