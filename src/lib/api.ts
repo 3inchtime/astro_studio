@@ -16,6 +16,7 @@ import type {
   TrashSettings,
   AppFontSize,
   ImageModel,
+  EndpointSettings,
 } from "../types";
 
 export function toAssetUrl(filePath: string): string {
@@ -36,6 +37,21 @@ export async function saveBaseUrl(url: string): Promise<void> {
 
 export async function getBaseUrl(): Promise<string> {
   return invoke("get_base_url");
+}
+
+export async function getEndpointSettings(): Promise<EndpointSettings> {
+  return invoke("get_endpoint_settings");
+}
+
+export async function saveEndpointSettings(
+  settings: EndpointSettings,
+): Promise<void> {
+  await invoke("save_endpoint_settings", {
+    mode: settings.mode,
+    baseUrl: settings.base_url,
+    generationUrl: settings.generation_url,
+    editUrl: settings.edit_url,
+  });
 }
 
 export async function getImageModel(): Promise<ImageModel> {
