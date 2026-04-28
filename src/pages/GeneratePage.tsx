@@ -18,6 +18,9 @@ import Lightbox from "../components/lightbox/Lightbox";
 import FolderSelector from "../components/favorites/FolderSelector";
 import type {
   EditSourceImage,
+  ImageBackground,
+  ImageInputFidelity,
+  ImageModeration,
   ImageOutputFormat,
   ImageModel,
   ImageQuality,
@@ -39,6 +42,9 @@ const sizes: { value: ImageSize; label: string; descKey: string }[] = [
 
 const qualityOptions: ImageQuality[] = ["auto", "high", "medium", "low"];
 const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
+const backgroundOptions: ImageBackground[] = ["auto", "opaque", "transparent"];
+const moderationOptions: ImageModeration[] = ["auto", "low"];
+const inputFidelityOptions: ImageInputFidelity[] = ["high", "low"];
 const imageCountOptions = [1, 2, 3, 4];
 
 function generationsToMessages(generations: GenerationResult[]): Message[] {
@@ -88,7 +94,11 @@ export default function GeneratePage() {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<ImageSize>("auto");
   const [quality, setQuality] = useState<ImageQuality>("auto");
+  const [background, setBackground] = useState<ImageBackground>("auto");
   const [outputFormat, setOutputFormat] = useState<ImageOutputFormat>("png");
+  const [moderation, setModeration] = useState<ImageModeration>("auto");
+  const [inputFidelity, setInputFidelity] =
+    useState<ImageInputFidelity>("high");
   const [imageCount, setImageCount] = useState(1);
   const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
@@ -168,6 +178,26 @@ export default function GeneratePage() {
     textareaRef.current?.focus();
   }, []);
 
+  const handleBackgroundChange = useCallback(
+    (value: ImageBackground) => {
+      setBackground(value);
+      if (value === "transparent" && outputFormat === "jpeg") {
+        setOutputFormat("png");
+      }
+    },
+    [outputFormat],
+  );
+
+  const handleOutputFormatChange = useCallback(
+    (value: ImageOutputFormat) => {
+      setOutputFormat(value);
+      if (value === "jpeg" && background === "transparent") {
+        setBackground("auto");
+      }
+    },
+    [background],
+  );
+
   const handleUseImageAsSource = useCallback((image: MessageImage) => {
     setEditSources((current) =>
       mergeEditSources(current, [messageImageToEditSource(image)]),
@@ -222,7 +252,10 @@ export default function GeneratePage() {
                 ),
                 size: retryRequest.size,
                 quality: retryRequest.quality,
+                background: retryRequest.background,
                 outputFormat: retryRequest.outputFormat,
+                moderation: retryRequest.moderation,
+                inputFidelity: retryRequest.inputFidelity,
                 imageCount: retryRequest.imageCount,
                 conversationId: retryRequest.conversationId,
               })
@@ -230,7 +263,9 @@ export default function GeneratePage() {
                 prompt: promptText,
                 size: retryRequest.size,
                 quality: retryRequest.quality,
+                background: retryRequest.background,
                 outputFormat: retryRequest.outputFormat,
+                moderation: retryRequest.moderation,
                 imageCount: retryRequest.imageCount,
                 conversationId: retryRequest.conversationId,
               });
@@ -285,7 +320,10 @@ export default function GeneratePage() {
       prompt: promptText,
       size,
       quality,
+      background,
       outputFormat,
+      moderation,
+      inputFidelity,
       imageCount,
       conversationId: activeConversationId,
       editSources: editSources.map((source) => ({ ...source })),
@@ -367,6 +405,9 @@ export default function GeneratePage() {
     textareaRef.current?.focus();
   }, []);
 
+  const showInputFidelity = editSources.length > 0;
+  const parameterColumnCount = showInputFidelity ? 8 : 7;
+
   return (
     <div className="flex h-full flex-col">
       <div
@@ -397,49 +438,94 @@ export default function GeneratePage() {
       </div>
 
       {/* Settings bar */}
-      <div className="border-t border-border-subtle bg-subtle/30 px-6 py-3">
-        <div className="mx-auto flex w-full max-w-[900px] flex-wrap items-center gap-3">
-          <InfoField
-            label={t("generate.modelLabel")}
-            value={imageModel}
-            icon={<Cpu size={13} className="text-primary/80" strokeWidth={2} />}
-          />
-          <SelectField
-            label={t("generate.sizeLabel")}
-            value={size}
-            onChange={(value) => setSize(value as ImageSize)}
-            options={sizes.map((item) => ({
-              value: item.value,
-              label: `${item.label} · ${t(item.descKey)}`,
-            }))}
-          />
-          <SelectField
-            label={t("generate.qualityLabel")}
-            value={quality}
-            onChange={(value) => setQuality(value as ImageQuality)}
-            options={qualityOptions.map((value) => ({
-              value,
-              label: t(`generate.quality.${value}`),
-            }))}
-          />
-          <SelectField
-            label={t("generate.countLabel")}
-            value={String(imageCount)}
-            onChange={(value) => setImageCount(Number(value))}
-            options={imageCountOptions.map((value) => ({
-              value: String(value),
-              label: t("generate.countValue", { count: value }),
-            }))}
-          />
-          <SelectField
-            label={t("generate.formatLabel")}
-            value={outputFormat}
-            onChange={(value) => setOutputFormat(value as ImageOutputFormat)}
-            options={outputFormatOptions.map((value) => ({
-              value,
-              label: t(`generate.format.${value}`),
-            }))}
-          />
+      <div className="border-t border-border-subtle bg-subtle/30 px-4 py-2.5 sm:px-6">
+        <div
+          role="toolbar"
+          aria-label={t("generate.parametersLabel")}
+          className="mx-auto w-full max-w-[900px] overflow-hidden"
+        >
+          <div
+            data-testid="generation-parameter-row"
+            className="grid w-full min-w-0 grid-rows-1 items-center gap-1.5 whitespace-nowrap"
+            style={{
+              gridTemplateColumns: `repeat(${parameterColumnCount}, minmax(0, 1fr))`,
+            }}
+          >
+            <InfoField
+              label={t("generate.modelLabel")}
+              value={imageModel}
+              icon={<Cpu size={13} className="text-primary/80" strokeWidth={2} />}
+            />
+            <SelectField
+              label={t("generate.sizeLabel")}
+              value={size}
+              onChange={(value) => setSize(value as ImageSize)}
+              options={sizes.map((item) => ({
+                value: item.value,
+                label: `${item.label} · ${t(item.descKey)}`,
+              }))}
+            />
+            <SelectField
+              label={t("generate.qualityLabel")}
+              value={quality}
+              onChange={(value) => setQuality(value as ImageQuality)}
+              options={qualityOptions.map((value) => ({
+                value,
+                label: t(`generate.quality.${value}`),
+              }))}
+            />
+            <SelectField
+              label={t("generate.backgroundLabel")}
+              value={background}
+              onChange={(value) => handleBackgroundChange(value as ImageBackground)}
+              options={backgroundOptions.map((value) => ({
+                value,
+                label: t(`generate.background.${value}`),
+                disabled: outputFormat === "jpeg" && value === "transparent",
+              }))}
+            />
+            <SelectField
+              label={t("generate.countLabel")}
+              value={String(imageCount)}
+              onChange={(value) => setImageCount(Number(value))}
+              options={imageCountOptions.map((value) => ({
+                value: String(value),
+                label: t("generate.countValue", { count: value }),
+              }))}
+            />
+            <SelectField
+              label={t("generate.formatLabel")}
+              value={outputFormat}
+              onChange={(value) =>
+                handleOutputFormatChange(value as ImageOutputFormat)
+              }
+              options={outputFormatOptions.map((value) => ({
+                value,
+                label: t(`generate.format.${value}`),
+                disabled: background === "transparent" && value === "jpeg",
+              }))}
+            />
+            <SelectField
+              label={t("generate.moderationLabel")}
+              value={moderation}
+              onChange={(value) => setModeration(value as ImageModeration)}
+              options={moderationOptions.map((value) => ({
+                value,
+                label: t(`generate.moderation.${value}`),
+              }))}
+            />
+            {showInputFidelity && (
+              <SelectField
+                label={t("generate.inputFidelityLabel")}
+                value={inputFidelity}
+                onChange={(value) => setInputFidelity(value as ImageInputFidelity)}
+                options={inputFidelityOptions.map((value) => ({
+                  value,
+                  label: t(`generate.inputFidelity.${value}`),
+                }))}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -528,6 +614,7 @@ export default function GeneratePage() {
             <motion.button
               onClick={handleGenerate}
               disabled={!prompt.trim()}
+              aria-label={t("generate.submit")}
               whileHover={{ scale: 1.02, y: -1 }}
               whileTap={{ scale: 0.97 }}
               className="absolute right-3 bottom-3 flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
@@ -618,14 +705,17 @@ interface SelectFieldProps {
 
 function SelectField({ label, value, onChange, options }: SelectFieldProps) {
   return (
-    <label className="flex min-w-[124px] flex-col gap-1">
-      <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted/60">
+    <label className="flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] border border-border-subtle bg-surface px-2 text-[12px] text-foreground transition-colors focus-within:border-border">
+      <span
+        className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
+        title={label}
+      >
         {label}
       </span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-[34px] rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-colors focus:border-border focus:outline-none"
+        className="min-w-0 flex-1 truncate bg-transparent text-[12px] font-medium text-foreground focus:outline-none"
       >
         {options.map((option) => (
           <option
@@ -649,11 +739,14 @@ interface InfoFieldProps {
 
 function InfoField({ label, value, icon }: InfoFieldProps) {
   return (
-    <div className="flex min-w-[124px] flex-col gap-1">
-      <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted/60">
+    <div className="flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] border border-border-subtle bg-surface px-2 text-[12px] text-foreground">
+      <span
+        className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
+        title={label}
+      >
         {label}
       </span>
-      <div className="flex h-[34px] items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-foreground">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
         {icon}
         <span className="truncate">{value}</span>
       </div>

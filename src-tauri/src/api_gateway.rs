@@ -1,12 +1,164 @@
 use crate::config::ApiConfig;
 use crate::models::*;
 use reqwest::multipart::{Form, Part};
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
 pub struct EngineImagesResult {
     pub images: Vec<Vec<u8>>,
     pub response_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum GptImageRequestKind {
+    Generate,
+    Edit,
+}
+
+#[cfg(test)]
+fn build_generation_request_body(
+    model: &str,
+    prompt: &str,
+    size: &str,
+    quality: &str,
+    background: &str,
+    output_format: &str,
+    image_count: u8,
+) -> serde_json::Value {
+    build_generation_request_body_with_controls(
+        model,
+        prompt,
+        size,
+        quality,
+        background,
+        output_format,
+        DEFAULT_OUTPUT_COMPRESSION,
+        DEFAULT_IMAGE_MODERATION,
+        DEFAULT_IMAGE_STREAM,
+        DEFAULT_PARTIAL_IMAGES,
+        image_count,
+    )
+}
+
+fn build_generation_request_body_with_controls(
+    model: &str,
+    prompt: &str,
+    size: &str,
+    quality: &str,
+    background: &str,
+    output_format: &str,
+    output_compression: u8,
+    moderation: &str,
+    stream: bool,
+    partial_images: u8,
+    image_count: u8,
+) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "n": image_count,
+        "size": size,
+        "quality": quality,
+        "background": background,
+        "output_format": output_format,
+        "output_compression": output_compression,
+        "moderation": moderation,
+        "stream": stream,
+        "partial_images": partial_images,
+    })
+}
+
+#[cfg(test)]
+fn build_edit_text_fields(
+    model: &str,
+    prompt: &str,
+    size: &str,
+    quality: &str,
+    background: &str,
+    input_fidelity: &str,
+    output_format: &str,
+    image_count: u8,
+) -> Vec<(&'static str, String)> {
+    build_edit_text_fields_with_controls(
+        model,
+        prompt,
+        size,
+        quality,
+        background,
+        input_fidelity,
+        output_format,
+        DEFAULT_OUTPUT_COMPRESSION,
+        DEFAULT_IMAGE_MODERATION,
+        DEFAULT_IMAGE_STREAM,
+        DEFAULT_PARTIAL_IMAGES,
+        image_count,
+    )
+}
+
+fn build_edit_text_fields_with_controls(
+    model: &str,
+    prompt: &str,
+    size: &str,
+    quality: &str,
+    background: &str,
+    input_fidelity: &str,
+    output_format: &str,
+    output_compression: u8,
+    moderation: &str,
+    stream: bool,
+    partial_images: u8,
+    image_count: u8,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("model", model.to_string()),
+        ("prompt", prompt.to_string()),
+        ("n", image_count.to_string()),
+        ("size", size.to_string()),
+        ("quality", quality.to_string()),
+        ("background", background.to_string()),
+        ("input_fidelity", input_fidelity.to_string()),
+        ("output_format", output_format.to_string()),
+        ("output_compression", output_compression.to_string()),
+        ("moderation", moderation.to_string()),
+        ("stream", stream.to_string()),
+        ("partial_images", partial_images.to_string()),
+    ]
+}
+
+fn with_302_image_query_defaults(endpoint_url: &str, kind: GptImageRequestKind) -> String {
+    let Ok(mut url) = reqwest::Url::parse(endpoint_url) else {
+        return endpoint_url.to_string();
+    };
+
+    let is_302_endpoint = url
+        .host_str()
+        .map(|host| host.eq("302.ai") || host.ends_with(".302.ai"))
+        .unwrap_or(false);
+    if !is_302_endpoint {
+        return endpoint_url.to_string();
+    }
+
+    let existing_keys = url
+        .query_pairs()
+        .map(|(key, _)| key.into_owned())
+        .collect::<HashSet<_>>();
+
+    {
+        let mut pairs = url.query_pairs_mut();
+        if !existing_keys.contains("response_format") {
+            pairs.append_pair("response_format", "url");
+        }
+        if kind == GptImageRequestKind::Generate && !existing_keys.contains("async") {
+            pairs.append_pair("async", "false");
+        }
+    }
+
+    url.to_string()
+}
+
+fn edit_image_part_field_name() -> &'static str {
+    "image"
 }
 
 #[async_trait::async_trait]
@@ -18,11 +170,7 @@ pub trait ImageEngine: Send + Sync {
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
-        size: &str,
-        quality: &str,
-        background: &str,
-        output_format: &str,
-        image_count: u8,
+        options: &GptImageRequestOptions,
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String>;
@@ -35,10 +183,7 @@ pub trait ImageEngine: Send + Sync {
         endpoint_url: &str,
         prompt: &str,
         source_image_paths: &[String],
-        size: &str,
-        quality: &str,
-        output_format: &str,
-        image_count: u8,
+        options: &GptImageRequestOptions,
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String>;
@@ -101,15 +246,11 @@ impl ImageEngine for GptImageEngine {
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
-        size: &str,
-        quality: &str,
-        background: &str,
-        output_format: &str,
-        image_count: u8,
+        options: &GptImageRequestOptions,
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
-        let url = endpoint_url.trim().to_string();
+        let url = with_302_image_query_defaults(endpoint_url.trim(), GptImageRequestKind::Generate);
 
         if let Some(db) = db {
             let masked_key = if api_key.len() > 8 {
@@ -118,19 +259,23 @@ impl ImageEngine for GptImageEngine {
                 "sk-****".to_string()
             };
             let req_meta = serde_json::json!({
-                "url": url,
+                "url": &url,
                 "model": model,
-                "size": size,
-                "quality": quality,
-                "background": background,
-                "output_format": output_format,
-                "image_count": image_count,
+                "size": &options.size,
+                "quality": &options.quality,
+                "background": &options.background,
+                "output_format": &options.output_format,
+                "output_compression": options.output_compression,
+                "moderation": &options.moderation,
+                "stream": options.stream,
+                "partial_images": options.partial_images,
+                "image_count": options.image_count,
                 "api_key": masked_key,
             });
             let _ = db.insert_log(
                 "api_request",
                 "info",
-                &format!("POST {} — model: {}, size: {}", url, model, size),
+                &format!("POST {} — model: {}, size: {}", url, model, options.size),
                 Some(generation_id),
                 Some(&req_meta.to_string()),
                 None,
@@ -141,25 +286,33 @@ impl ImageEngine for GptImageEngine {
             return Err("API key not set".to_string());
         }
 
-        let request_body = serde_json::json!({
-            "model": model,
-            "prompt": prompt,
-            "n": image_count,
-            "size": size,
-            "quality": quality,
-            "background": background,
-            "output_format": output_format,
-        });
+        let request_body = build_generation_request_body_with_controls(
+            model,
+            prompt,
+            &options.size,
+            &options.quality,
+            &options.background,
+            &options.output_format,
+            options.output_compression,
+            &options.moderation,
+            options.stream,
+            options.partial_images,
+            options.image_count,
+        );
 
         log::info!(
-            "Sending image generation request to {} — model: {}, size: {}, quality: {}, background: {}, output_format: {}, count: {}",
+            "Sending image generation request to {} — model: {}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
             url,
             model,
-            size,
-            quality,
-            background,
-            output_format,
-            image_count
+            options.size,
+            options.quality,
+            options.background,
+            options.output_format,
+            options.output_compression,
+            options.moderation,
+            options.stream,
+            options.partial_images,
+            options.image_count
         );
 
         let mut last_error = None;
@@ -304,14 +457,11 @@ impl ImageEngine for GptImageEngine {
         endpoint_url: &str,
         prompt: &str,
         source_image_paths: &[String],
-        size: &str,
-        quality: &str,
-        output_format: &str,
-        image_count: u8,
+        options: &GptImageRequestOptions,
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
-        let url = endpoint_url.trim().to_string();
+        let url = with_302_image_query_defaults(endpoint_url.trim(), GptImageRequestKind::Edit);
 
         if source_image_paths.is_empty() {
             return Err("At least one source image is required for editing.".to_string());
@@ -324,13 +474,19 @@ impl ImageEngine for GptImageEngine {
                 "sk-****".to_string()
             };
             let req_meta = serde_json::json!({
-                "url": url,
+                "url": &url,
                 "model": model,
                 "source_image_count": source_image_paths.len(),
-                "size": size,
-                "quality": quality,
-                "output_format": output_format,
-                "image_count": image_count,
+                "size": &options.size,
+                "quality": &options.quality,
+                "background": &options.background,
+                "input_fidelity": &options.input_fidelity,
+                "output_format": &options.output_format,
+                "output_compression": options.output_compression,
+                "moderation": &options.moderation,
+                "stream": options.stream,
+                "partial_images": options.partial_images,
+                "image_count": options.image_count,
                 "api_key": masked_key,
             });
             let _ = db.insert_log(
@@ -355,28 +511,26 @@ impl ImageEngine for GptImageEngine {
         let prepared_images = self.prepare_edit_images(source_image_paths).await?;
 
         log::info!(
-            "Sending image edit request to {} — model: {}, source_images: {}, size: {}, quality: {}, output_format: {}, count: {}",
+            "Sending image edit request to {} — model: {}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
             url,
             model,
             prepared_images.len(),
-            size,
-            quality,
-            output_format,
-            image_count
+            options.size,
+            options.quality,
+            options.background,
+            options.input_fidelity,
+            options.output_format,
+            options.output_compression,
+            options.moderation,
+            options.stream,
+            options.partial_images,
+            options.image_count
         );
 
         let mut last_error = None;
 
         for attempt in 0..=self.max_retries {
-            let form = self.build_edit_form(
-                model,
-                prompt,
-                size,
-                quality,
-                output_format,
-                image_count,
-                &prepared_images,
-            )?;
+            let form = self.build_edit_form(model, prompt, options, &prepared_images)?;
 
             let response = self
                 .edit_client
@@ -683,19 +837,26 @@ impl GptImageEngine {
         &self,
         model: &str,
         prompt: &str,
-        size: &str,
-        quality: &str,
-        output_format: &str,
-        image_count: u8,
+        options: &GptImageRequestOptions,
         source_images: &[PreparedEditImage],
     ) -> Result<Form, String> {
-        let mut form = Form::new()
-            .text("model", model.to_string())
-            .text("prompt", prompt.to_string())
-            .text("n", image_count.to_string())
-            .text("size", size.to_string())
-            .text("quality", quality.to_string())
-            .text("output_format", output_format.to_string());
+        let mut form = Form::new();
+        for (key, value) in build_edit_text_fields_with_controls(
+            model,
+            prompt,
+            &options.size,
+            &options.quality,
+            &options.background,
+            &options.input_fidelity,
+            &options.output_format,
+            options.output_compression,
+            &options.moderation,
+            options.stream,
+            options.partial_images,
+            options.image_count,
+        ) {
+            form = form.text(key, value);
+        }
 
         for image in source_images {
             let part = Part::bytes(image.bytes.clone())
@@ -703,11 +864,7 @@ impl GptImageEngine {
                 .mime_str(&image.mime_type)
                 .map_err(|e| e.to_string())?;
 
-            if source_images.len() == 1 {
-                form = form.part("image", part);
-            } else {
-                form = form.part("image[]", part);
-            }
+            form = form.part(edit_image_part_field_name(), part);
         }
 
         Ok(form)
@@ -731,5 +888,124 @@ fn mime_type_for_path(path: &str) -> &'static str {
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("webp") => "image/webp",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn generation_request_body_includes_gpt_image_2_control_parameters() {
+        let body = build_generation_request_body(
+            "gpt-image-2",
+            "A cinematic observatory above the clouds",
+            "1536x1024",
+            "high",
+            "auto",
+            "webp",
+            2,
+        );
+
+        assert_eq!(
+            body,
+            json!({
+                "model": "gpt-image-2",
+                "prompt": "A cinematic observatory above the clouds",
+                "n": 2,
+                "size": "1536x1024",
+                "quality": "high",
+                "background": "auto",
+                "output_format": "webp",
+                "output_compression": 100,
+                "moderation": "auto",
+                "stream": false,
+                "partial_images": 0,
+            })
+        );
+    }
+
+    #[test]
+    fn edit_text_fields_include_gpt_image_2_control_parameters() {
+        let fields = build_edit_text_fields(
+            "gpt-image-2",
+            "Keep the logo crisp and make the background nocturnal",
+            "1024x1024",
+            "auto",
+            "auto",
+            "high",
+            "png",
+            1,
+        );
+        let fields: HashMap<_, _> = fields.into_iter().collect();
+
+        assert_eq!(fields.get("model").map(String::as_str), Some("gpt-image-2"));
+        assert_eq!(
+            fields.get("prompt").map(String::as_str),
+            Some("Keep the logo crisp and make the background nocturnal")
+        );
+        assert_eq!(fields.get("n").map(String::as_str), Some("1"));
+        assert_eq!(fields.get("size").map(String::as_str), Some("1024x1024"));
+        assert_eq!(fields.get("quality").map(String::as_str), Some("auto"));
+        assert_eq!(fields.get("background").map(String::as_str), Some("auto"));
+        assert_eq!(
+            fields.get("input_fidelity").map(String::as_str),
+            Some("high")
+        );
+        assert_eq!(fields.get("output_format").map(String::as_str), Some("png"));
+        assert_eq!(
+            fields.get("output_compression").map(String::as_str),
+            Some("100")
+        );
+        assert_eq!(fields.get("moderation").map(String::as_str), Some("auto"));
+        assert_eq!(fields.get("stream").map(String::as_str), Some("false"));
+        assert_eq!(fields.get("partial_images").map(String::as_str), Some("0"));
+    }
+
+    #[test]
+    fn gpt_image_302_urls_receive_sync_url_response_defaults() {
+        assert_eq!(
+            with_302_image_query_defaults(
+                "https://api.302.ai/v1/images/generations",
+                GptImageRequestKind::Generate
+            ),
+            "https://api.302.ai/v1/images/generations?response_format=url&async=false"
+        );
+        assert_eq!(
+            with_302_image_query_defaults(
+                "https://api.302.ai/v1/images/edits",
+                GptImageRequestKind::Edit
+            ),
+            "https://api.302.ai/v1/images/edits?response_format=url"
+        );
+    }
+
+    #[test]
+    fn gpt_image_302_url_defaults_preserve_existing_query_values() {
+        assert_eq!(
+            with_302_image_query_defaults(
+                "https://api.302.ai/v1/images/generations?response_format=b64_json&async=true",
+                GptImageRequestKind::Generate
+            ),
+            "https://api.302.ai/v1/images/generations?response_format=b64_json&async=true"
+        );
+    }
+
+    #[test]
+    fn non_302_urls_are_left_unchanged() {
+        assert_eq!(
+            with_302_image_query_defaults(
+                "https://api.openai.com/v1/images/generations",
+                GptImageRequestKind::Generate
+            ),
+            "https://api.openai.com/v1/images/generations"
+        );
+    }
+
+    #[test]
+    fn edit_image_parts_use_documented_image_field_name_for_every_source() {
+        assert_eq!(edit_image_part_field_name(), "image");
     }
 }
