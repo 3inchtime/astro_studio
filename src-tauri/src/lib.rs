@@ -53,6 +53,115 @@ fn normalize_image_model(model: &str) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ImageEndpointKind {
+    Generate,
+    Edit,
+}
+
+fn normalize_endpoint_mode(mode: &str) -> &'static str {
+    match mode {
+        ENDPOINT_MODE_FULL_URL => ENDPOINT_MODE_FULL_URL,
+        _ => ENDPOINT_MODE_BASE_URL,
+    }
+}
+
+fn endpoint_value_or_default(value: Option<String>, default_value: &str) -> String {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_value.to_string())
+}
+
+fn build_image_endpoint_url(base_url: &str, kind: ImageEndpointKind) -> String {
+    let path = match kind {
+        ImageEndpointKind::Generate => "images/generations",
+        ImageEndpointKind::Edit => "images/edits",
+    };
+    format!("{}/{}", base_url.trim_end_matches('/'), path)
+}
+
+fn read_endpoint_settings(db: &Database) -> Result<EndpointSettings, String> {
+    Ok(EndpointSettings {
+        mode: normalize_endpoint_mode(
+            db.get_setting(SETTING_ENDPOINT_MODE)?
+                .as_deref()
+                .unwrap_or(ENDPOINT_MODE_BASE_URL),
+        )
+        .to_string(),
+        base_url: endpoint_value_or_default(db.get_setting(SETTING_BASE_URL)?, DEFAULT_BASE_URL),
+        generation_url: endpoint_value_or_default(
+            db.get_setting(SETTING_GENERATION_URL)?,
+            DEFAULT_GENERATION_URL,
+        ),
+        edit_url: endpoint_value_or_default(db.get_setting(SETTING_EDIT_URL)?, DEFAULT_EDIT_URL),
+    })
+}
+
+fn image_endpoint_url_for_settings(settings: &EndpointSettings, kind: ImageEndpointKind) -> String {
+    if settings.mode == ENDPOINT_MODE_FULL_URL {
+        return match kind {
+            ImageEndpointKind::Generate => settings.generation_url.clone(),
+            ImageEndpointKind::Edit => settings.edit_url.clone(),
+        };
+    }
+
+    build_image_endpoint_url(&settings.base_url, kind)
+}
+
+fn resolve_image_endpoint_url(db: &Database, kind: ImageEndpointKind) -> Result<String, String> {
+    let settings = read_endpoint_settings(db)?;
+    Ok(image_endpoint_url_for_settings(&settings, kind))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_url_mode_builds_image_endpoint_paths() {
+        assert_eq!(
+            build_image_endpoint_url("https://api.example.test/v1/", ImageEndpointKind::Generate),
+            "https://api.example.test/v1/images/generations"
+        );
+        assert_eq!(
+            build_image_endpoint_url("https://api.example.test/v1", ImageEndpointKind::Edit),
+            "https://api.example.test/v1/images/edits"
+        );
+    }
+
+    #[test]
+    fn endpoint_mode_normalizes_to_supported_values() {
+        assert_eq!(
+            normalize_endpoint_mode(ENDPOINT_MODE_FULL_URL),
+            ENDPOINT_MODE_FULL_URL
+        );
+        assert_eq!(
+            normalize_endpoint_mode("unsupported"),
+            ENDPOINT_MODE_BASE_URL
+        );
+    }
+
+    #[test]
+    fn full_url_mode_uses_separate_generation_and_edit_urls() {
+        let settings = EndpointSettings {
+            mode: ENDPOINT_MODE_FULL_URL.to_string(),
+            base_url: "https://unused.example.test/v1".to_string(),
+            generation_url: "https://gateway.example.test/create".to_string(),
+            edit_url: "https://gateway.example.test/edit".to_string(),
+        };
+
+        assert_eq!(
+            image_endpoint_url_for_settings(&settings, ImageEndpointKind::Generate),
+            "https://gateway.example.test/create"
+        );
+        assert_eq!(
+            image_endpoint_url_for_settings(&settings, ImageEndpointKind::Edit),
+            "https://gateway.example.test/edit"
+        );
+    }
+}
+
 #[cfg(all(debug_assertions, target_os = "macos"))]
 fn set_macos_development_app_icon() {
     use objc2::{AllocAnyThread, MainThreadMarker};
@@ -97,6 +206,38 @@ fn get_base_url(db: tauri::State<'_, Database>) -> Result<String, String> {
     Ok(db
         .get_setting(SETTING_BASE_URL)?
         .unwrap_or_else(|| DEFAULT_BASE_URL.to_string()))
+}
+
+#[tauri::command]
+fn get_endpoint_settings(db: tauri::State<'_, Database>) -> Result<EndpointSettings, String> {
+    read_endpoint_settings(db.inner())
+}
+
+#[tauri::command]
+fn save_endpoint_settings(
+    db: tauri::State<'_, Database>,
+    mode: String,
+    base_url: String,
+    generation_url: String,
+    edit_url: String,
+) -> Result<(), String> {
+    let mode = normalize_endpoint_mode(&mode);
+    let base_url = endpoint_value_or_default(Some(base_url), DEFAULT_BASE_URL);
+    let generation_url = endpoint_value_or_default(Some(generation_url), DEFAULT_GENERATION_URL);
+    let edit_url = endpoint_value_or_default(Some(edit_url), DEFAULT_EDIT_URL);
+
+    log::info!(
+        "Saving endpoint settings: mode={}, base_url={}, generation_url={}, edit_url={}",
+        mode,
+        base_url,
+        generation_url,
+        edit_url
+    );
+
+    db.set_setting(SETTING_ENDPOINT_MODE, mode)?;
+    db.set_setting(SETTING_BASE_URL, &base_url)?;
+    db.set_setting(SETTING_GENERATION_URL, &generation_url)?;
+    db.set_setting(SETTING_EDIT_URL, &edit_url)
 }
 
 #[tauri::command]
@@ -491,9 +632,7 @@ async fn generate_image(
             .unwrap_or(DEFAULT_IMAGE_MODEL),
     )
     .to_string();
-    let base_url = db
-        .get_setting(SETTING_BASE_URL)?
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+    let endpoint_url = resolve_image_endpoint_url(db.inner(), ImageEndpointKind::Generate)?;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     {
@@ -525,7 +664,7 @@ async fn generate_image(
             &generation_id,
             &model,
             &api_key,
-            &base_url,
+            &endpoint_url,
             &prompt,
             &size,
             &quality,
@@ -693,9 +832,7 @@ async fn edit_image(
             .unwrap_or(DEFAULT_IMAGE_MODEL),
     )
     .to_string();
-    let base_url = db
-        .get_setting(SETTING_BASE_URL)?
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+    let endpoint_url = resolve_image_endpoint_url(db.inner(), ImageEndpointKind::Edit)?;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     {
@@ -727,7 +864,7 @@ async fn edit_image(
             &generation_id,
             &model,
             &api_key,
-            &base_url,
+            &endpoint_url,
             &prompt,
             &source_image_paths,
             &size,
@@ -1792,6 +1929,8 @@ pub fn run() {
             get_api_key,
             save_base_url,
             get_base_url,
+            get_endpoint_settings,
+            save_endpoint_settings,
             get_font_size,
             save_font_size,
             get_image_model,

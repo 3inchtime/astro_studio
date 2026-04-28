@@ -142,3 +142,11 @@ export interface TrashSettings {
 
 export type AppFontSize = "small" | "medium" | "large";
 export type ImageModel = "gpt-image-2";
+export type EndpointMode = "base_url" | "full_url";
+
+export interface EndpointSettings {
+  mode: EndpointMode;
+  base_url: string;
+  generation_url: string;
+  edit_url: string;
+}
