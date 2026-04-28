@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
-import { clearLogs, toAssetUrl } from "./api";
+import {
+  clearLogs,
+  addPromptFavoriteToFolders,
+  createPromptFolder,
+  createPromptFavorite,
+  deletePromptFolder,
+  deletePromptFavorite,
+  getPromptFavoriteFolders,
+  getPromptFolders,
+  getPromptFavorites,
+  removePromptFavoriteFromFolders,
+  toAssetUrl,
+} from "./api";
 
 const tauriApi = vi.hoisted(() => ({
   convertFileSrc: vi.fn((path: string) => path),
@@ -21,6 +33,76 @@ describe("api log commands", () => {
     await clearLogs(0);
 
     expect(tauriApi.invoke).toHaveBeenCalledWith("clear_logs", { beforeDays: 0 });
+  });
+});
+
+describe("api prompt favorite commands", () => {
+  beforeEach(() => {
+    tauriApi.invoke.mockReset();
+  });
+
+  it("creates prompt favorites through Tauri IPC", async () => {
+    tauriApi.invoke.mockResolvedValue({
+      id: "favorite-1",
+      prompt: "A silver forest",
+      created_at: "2026-04-28T00:00:00Z",
+      updated_at: "2026-04-28T00:00:00Z",
+    });
+
+    await createPromptFavorite("A silver forest");
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("create_prompt_favorite", {
+      prompt: "A silver forest",
+    });
+  });
+
+  it("reads and deletes prompt favorites through Tauri IPC", async () => {
+    tauriApi.invoke.mockResolvedValue([]);
+
+    await getPromptFavorites("forest", "folder-1");
+    await deletePromptFavorite("favorite-1");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "get_prompt_favorites", {
+      query: "forest",
+      folderId: "folder-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "delete_prompt_favorite", {
+      id: "favorite-1",
+    });
+  });
+
+  it("manages prompt favorite folders through Tauri IPC", async () => {
+    tauriApi.invoke.mockResolvedValue([]);
+
+    await getPromptFolders();
+    await createPromptFolder("Characters");
+    await addPromptFavoriteToFolders("favorite-1", ["folder-1"]);
+    await removePromptFavoriteFromFolders("favorite-1", ["folder-2"]);
+    await getPromptFavoriteFolders("favorite-1");
+    await deletePromptFolder("folder-3");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "get_prompt_folders");
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "create_prompt_folder", {
+      name: "Characters",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      3,
+      "add_prompt_favorite_to_folders",
+      { favoriteId: "favorite-1", folderIds: ["folder-1"] },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      4,
+      "remove_prompt_favorite_from_folders",
+      { favoriteId: "favorite-1", folderIds: ["folder-2"] },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      5,
+      "get_prompt_favorite_folders",
+      { favoriteId: "favorite-1" },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(6, "delete_prompt_folder", {
+      id: "folder-3",
+    });
   });
 });
 
