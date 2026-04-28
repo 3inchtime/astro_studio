@@ -7,6 +7,9 @@ const getImageModel = vi.fn();
 const generateImage = vi.fn();
 const editImage = vi.fn();
 const pickSourceImages = vi.fn();
+const createPromptFavorite = vi.fn();
+const getPromptFavorites = vi.fn();
+const deletePromptFavorite = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -30,6 +33,13 @@ vi.mock("react-i18next", () => ({
         "generate.clearSources": "Clear sources",
         "generate.editingPrompt": "Editing previous prompt",
         "generate.cancelEditPrompt": "Cancel edit",
+        "generate.favoritePrompt": "Favorite prompt",
+        "generate.removePromptFavorite": "Remove prompt favorite",
+        "generate.promptFavorites": "Prompt favorites",
+        "generate.promptFavoritesCount": `${options?.count} saved`,
+        "generate.noPromptFavorites": "No prompt favorites yet",
+        "generate.deletePromptFavorite": "Delete prompt favorite",
+        "generate.closePromptFavorites": "Close prompt favorites",
         "generate.editingSources":
           options?.count === 1
             ? "Editing 1 source image"
@@ -59,12 +69,15 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../lib/api", () => ({
+  createPromptFavorite: (...args: unknown[]) => createPromptFavorite(...args),
   deleteGeneration: vi.fn(),
+  deletePromptFavorite: (...args: unknown[]) => deletePromptFavorite(...args),
   editImage: (...args: unknown[]) => editImage(...args),
   generateImage: (...args: unknown[]) => generateImage(...args),
   getConversationGenerations: (...args: unknown[]) =>
     getConversationGenerations(...args),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
+  getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
   messageImageToEditSource: (image: {
     path: string;
     imageId?: string;
@@ -100,12 +113,25 @@ vi.mock("../components/generate/MessageBubble", () => ({
   default: ({
     message,
     onEditPrompt,
+    onFavoritePrompt,
+    isPromptFavorited,
   }: {
     message: { id: string; role: string; content: string };
     onEditPrompt?: (message: { id: string; role: string; content: string }) => void;
+    onFavoritePrompt?: (message: {
+      id: string;
+      role: string;
+      content: string;
+    }) => void;
+    isPromptFavorited?: boolean;
   }) =>
     message.role === "user" ? (
-      <button onClick={() => onEditPrompt?.(message)}>Edit prompt</button>
+      <div>
+        <button onClick={() => onEditPrompt?.(message)}>Edit prompt</button>
+        <button onClick={() => onFavoritePrompt?.(message)}>
+          {isPromptFavorited ? "Remove prompt favorite" : "Favorite prompt"}
+        </button>
+      </div>
     ) : null,
 }));
 
@@ -124,6 +150,9 @@ describe("GeneratePage", () => {
     generateImage.mockReset();
     editImage.mockReset();
     pickSourceImages.mockReset();
+    createPromptFavorite.mockReset();
+    getPromptFavorites.mockReset();
+    deletePromptFavorite.mockReset();
 
     getConversationGenerations.mockResolvedValue([
       {
@@ -144,6 +173,14 @@ describe("GeneratePage", () => {
       },
     ]);
     getImageModel.mockResolvedValue("gpt-image-2");
+    getPromptFavorites.mockResolvedValue([]);
+    createPromptFavorite.mockImplementation(async (prompt: string) => ({
+      id: "favorite-1",
+      prompt,
+      created_at: "2026-04-28T00:00:00Z",
+      updated_at: "2026-04-28T00:00:00Z",
+    }));
+    deletePromptFavorite.mockResolvedValue(undefined);
     generateImage.mockResolvedValue({
       generation_id: "generation-new",
       conversation_id: "conversation-1",
@@ -169,6 +206,25 @@ describe("GeneratePage", () => {
     expect(screen.getByDisplayValue("A dramatic mountain temple at sunrise")).toBeInTheDocument();
     expect(screen.getByText("Editing previous prompt")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel edit" })).toBeInTheDocument();
+  });
+
+  it("saves a sent prompt as a prompt favorite from the message actions", async () => {
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Favorite prompt" }));
+
+    await waitFor(() => {
+      expect(createPromptFavorite).toHaveBeenCalledWith(
+        "A dramatic mountain temple at sunrise",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: "Remove prompt favorite" }),
+    ).toBeInTheDocument();
   });
 
   it("submits selected generation parameters from the settings bar", async () => {

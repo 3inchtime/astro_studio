@@ -179,6 +179,55 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_generation_recoveries_state ON generation_recoveries(request_state);",
         )?;
 
+        migrate_step(
+            &conn,
+            "CREATE TABLE IF NOT EXISTS prompt_favorites (
+                id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL COLLATE NOCASE,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            );",
+        )?;
+
+        migrate_step(
+            &conn,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_favorites_prompt ON prompt_favorites(prompt);",
+        )?;
+
+        migrate_step(
+            &conn,
+            "CREATE INDEX IF NOT EXISTS idx_prompt_favorites_updated_at ON prompt_favorites(updated_at);",
+        )?;
+
+        migrate_step(
+            &conn,
+            "CREATE TABLE IF NOT EXISTS prompt_folders (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            );",
+        )?;
+
+        migrate_step(
+            &conn,
+            "CREATE TABLE IF NOT EXISTS prompt_folder_favorites (
+                folder_id TEXT NOT NULL REFERENCES prompt_folders(id) ON DELETE CASCADE,
+                prompt_favorite_id TEXT NOT NULL REFERENCES prompt_favorites(id) ON DELETE CASCADE,
+                added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                PRIMARY KEY (folder_id, prompt_favorite_id)
+            );",
+        )?;
+
+        migrate_step(
+            &conn,
+            "CREATE INDEX IF NOT EXISTS idx_prompt_folder_favorites_favorite_id ON prompt_folder_favorites(prompt_favorite_id);",
+        )?;
+
+        migrate_step(
+            &conn,
+            "INSERT OR IGNORE INTO prompt_folders (id, name, created_at) VALUES ('default', 'Default', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));",
+        )?;
+
         Ok(())
     }
 

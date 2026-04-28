@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Pencil, RotateCcw, Sparkles } from "lucide-react";
+import { Pencil, RotateCcw, Sparkles, Star } from "lucide-react";
 import { toAssetUrl } from "../../lib/api";
 import type { Message, MessageImage } from "../../types";
 import ImageGrid from "./ImageGrid";
@@ -12,6 +12,8 @@ interface MessageBubbleProps {
   onDelete?: (generationId: string) => void;
   onEditImage?: (image: MessageImage) => void;
   onEditPrompt?: (message: Message) => void;
+  onFavoritePrompt?: (message: Message) => void;
+  isPromptFavorited?: boolean;
   onFavoriteClick?: (imageId: string) => void;
   onRetry?: (message: Message) => void;
   chatViewportHeight?: number;
@@ -23,6 +25,8 @@ export default function MessageBubble({
   onDelete,
   onEditImage,
   onEditPrompt,
+  onFavoritePrompt,
+  isPromptFavorited,
   onFavoriteClick,
   onRetry,
   chatViewportHeight,
@@ -72,15 +76,45 @@ export default function MessageBubble({
               </div>
             )}
           </div>
-          {onEditPrompt && (
-            <button
-              onClick={() => onEditPrompt(message)}
-              className="mt-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-primary/70 opacity-0 shadow-sm ring-1 ring-primary/18 transition-all hover:bg-primary/6 hover:text-primary focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary/25 group-hover:opacity-100"
-              aria-label={t("generate.editPrompt")}
-              title={t("generate.editPrompt")}
-            >
-              <Pencil size={13} />
-            </button>
+          {(onFavoritePrompt || onEditPrompt) && (
+            <div className="mt-2 flex shrink-0 flex-col gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+              {onFavoritePrompt && (
+                <button
+                  onClick={() => onFavoritePrompt(message)}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm ring-1 transition-all focus:outline-none focus:ring-2 focus:ring-primary/25 ${
+                    isPromptFavorited
+                      ? "text-primary ring-primary/18 hover:bg-primary/6"
+                      : "text-primary/70 ring-primary/18 hover:bg-primary/6 hover:text-primary"
+                  }`}
+                  aria-label={
+                    isPromptFavorited
+                      ? t("generate.removePromptFavorite")
+                      : t("generate.favoritePrompt")
+                  }
+                  title={
+                    isPromptFavorited
+                      ? t("generate.removePromptFavorite")
+                      : t("generate.favoritePrompt")
+                  }
+                >
+                  {isPromptFavorited ? (
+                    <Star size={13} fill="currentColor" />
+                  ) : (
+                    <Star size={13} />
+                  )}
+                </button>
+              )}
+              {onEditPrompt && (
+                <button
+                  onClick={() => onEditPrompt(message)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-primary/70 shadow-sm ring-1 ring-primary/18 transition-all hover:bg-primary/6 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
+                  aria-label={t("generate.editPrompt")}
+                  title={t("generate.editPrompt")}
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
+            </div>
           )}
         </div>
       </motion.div>
