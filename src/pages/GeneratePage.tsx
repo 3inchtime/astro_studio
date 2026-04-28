@@ -1,10 +1,13 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  createPromptFavorite,
+  deletePromptFavorite,
   editImage,
   generateImage,
   getConversationGenerations,
   getImageModel,
+  getPromptFavorites,
   deleteGeneration,
   messageImageToEditSource,
   pickSourceImages,
@@ -28,10 +31,18 @@ import type {
   Message,
   MessageImage,
   GenerationResult,
+  PromptFavorite,
   RetryGenerationRequest,
 } from "../types";
 import { useTranslation } from "react-i18next";
-import { Image as ImageIcon, ArrowUp, Cpu, ImagePlus, X, Wand2 } from "lucide-react";
+import {
+  Image as ImageIcon,
+  ArrowUp,
+  Cpu,
+  ImagePlus,
+  X,
+  Wand2,
+} from "lucide-react";
 
 const sizes: { value: ImageSize; label: string; descKey: string }[] = [
   { value: "auto", label: "Auto", descKey: "generate.auto" },
@@ -117,6 +128,10 @@ export default function GeneratePage() {
   >(null);
   const [isDeletingGeneration, setIsDeletingGeneration] = useState(false);
   const [chatViewportHeight, setChatViewportHeight] = useState(0);
+  const [promptFavorites, setPromptFavorites] = useState<PromptFavorite[]>([]);
+  const [promptFavoriteActionKey, setPromptFavoriteActionKey] = useState<
+    string | null
+  >(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -126,6 +141,20 @@ export default function GeneratePage() {
     const generations = await getConversationGenerations(conversationId);
     setMessages(generationsToMessages(generations));
   }, []);
+
+  const loadPromptFavorites = useCallback(async () => {
+    const favorites = await getPromptFavorites();
+    setPromptFavorites(favorites);
+  }, []);
+
+  const promptFavoriteByPrompt = useMemo(() => {
+    return new Map(
+      promptFavorites.map((favorite) => [
+        normalizePromptFavorite(favorite.prompt),
+        favorite,
+      ]),
+    );
+  }, [promptFavorites]);
 
   useEffect(() => {
     if (!activeConversationId) {
@@ -189,6 +218,10 @@ export default function GeneratePage() {
   useEffect(() => {
     getImageModel().then(setImageModel).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadPromptFavorites().catch(() => {});
+  }, [loadPromptFavorites]);
 
   const handleAddUploadedSources = useCallback(async () => {
     const paths = await pickSourceImages();
@@ -430,6 +463,34 @@ export default function GeneratePage() {
     textareaRef.current?.focus();
   }, []);
 
+  const handleTogglePromptFavorite = useCallback(
+    async (value: string) => {
+      const promptText = value.trim();
+      if (!promptText) return;
+
+      const normalizedPrompt = normalizePromptFavorite(promptText);
+      if (promptFavoriteActionKey === normalizedPrompt) return;
+
+      const existing = promptFavoriteByPrompt.get(normalizedPrompt);
+      setPromptFavoriteActionKey(normalizedPrompt);
+      try {
+        if (existing) {
+          await deletePromptFavorite(existing.id);
+          setPromptFavorites((current) =>
+            current.filter((favorite) => favorite.id !== existing.id),
+          );
+          return;
+        }
+
+        const favorite = await createPromptFavorite(promptText);
+        setPromptFavorites((current) => upsertPromptFavorite(current, favorite));
+      } finally {
+        setPromptFavoriteActionKey(null);
+      }
+    },
+    [promptFavoriteActionKey, promptFavoriteByPrompt],
+  );
+
   const showInputFidelity = editSources.length > 0;
   const parameterColumnCount = showInputFidelity ? 8 : 7;
 
@@ -453,6 +514,15 @@ export default function GeneratePage() {
                   onDelete={handleRequestDeleteGeneration}
                   onEditImage={handleUseImageAsSource}
                   onEditPrompt={handleEditPrompt}
+                  onFavoritePrompt={(message) =>
+                    void handleTogglePromptFavorite(message.content)
+                  }
+                  isPromptFavorited={
+                    msg.role === "user" &&
+                    promptFavoriteByPrompt.has(
+                      normalizePromptFavorite(msg.content),
+                    )
+                  }
                   onFavoriteClick={setFolderSelectorImageId}
                   onRetry={(message) => void handleRetryMessage(message)}
                   chatViewportHeight={chatViewportHeight}
@@ -574,13 +644,15 @@ export default function GeneratePage() {
             )}
 
             <div className="mb-3 flex items-center justify-between gap-3">
-              <button
-                onClick={() => void handleAddUploadedSources()}
-                className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:border-border hover:text-foreground"
-              >
-                <ImagePlus size={14} />
-                {t("generate.uploadSource")}
-              </button>
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  onClick={() => void handleAddUploadedSources()}
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:border-border hover:text-foreground"
+                >
+                  <ImagePlus size={14} />
+                  {t("generate.uploadSource")}
+                </button>
+              </div>
 
               {editSources.length > 0 && (
                 <button
@@ -720,6 +792,25 @@ function editSourcesToMessageImages(
     path: source.path,
     thumbnailPath: source.path,
   }));
+}
+
+function normalizePromptFavorite(prompt: string): string {
+  return prompt.trim().toLocaleLowerCase();
+}
+
+function upsertPromptFavorite(
+  current: PromptFavorite[],
+  favorite: PromptFavorite,
+): PromptFavorite[] {
+  const normalized = normalizePromptFavorite(favorite.prompt);
+  return [
+    favorite,
+    ...current.filter(
+      (item) =>
+        item.id !== favorite.id &&
+        normalizePromptFavorite(item.prompt) !== normalized,
+    ),
+  ];
 }
 
 interface SelectFieldProps {

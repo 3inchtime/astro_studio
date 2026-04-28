@@ -9,7 +9,7 @@ use api_gateway::ImageEngine;
 use chrono::{SecondsFormat, Utc};
 use db::Database;
 use models::*;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use tauri::{Emitter, Manager};
 
@@ -1050,6 +1050,15 @@ fn row_to_generation(row: &rusqlite::Row) -> rusqlite::Result<Generation> {
     })
 }
 
+fn row_to_prompt_favorite(row: &rusqlite::Row) -> rusqlite::Result<PromptFavorite> {
+    Ok(PromptFavorite {
+        id: row.get("id")?,
+        prompt: row.get("prompt")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
 fn row_to_image(row: &rusqlite::Row) -> rusqlite::Result<GeneratedImage> {
     Ok(GeneratedImage {
         id: row.get("id")?,
@@ -1622,6 +1631,283 @@ async fn pick_source_images() -> Result<Vec<String>, String> {
         .collect())
 }
 
+// --- Prompt favorite commands ---
+
+#[tauri::command]
+fn create_prompt_favorite(
+    db: tauri::State<'_, Database>,
+    prompt: String,
+) -> Result<PromptFavorite, String> {
+    let prompt = prompt.trim().to_string();
+    if prompt.is_empty() {
+        return Err("Prompt cannot be empty".to_string());
+    }
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+
+    if let Some(existing) = conn
+        .query_row(
+            "SELECT id, prompt, created_at, updated_at FROM prompt_favorites WHERE prompt = ?1 COLLATE NOCASE",
+            params![&prompt],
+            row_to_prompt_favorite,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        conn.execute(
+            "UPDATE prompt_favorites SET prompt = ?1, updated_at = ?2 WHERE id = ?3",
+            params![&prompt, &timestamp, &existing.id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        return Ok(PromptFavorite {
+            prompt,
+            updated_at: timestamp,
+            ..existing
+        });
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO prompt_favorites (id, prompt, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+        params![&id, &prompt, &timestamp],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT OR IGNORE INTO prompt_folder_favorites (folder_id, prompt_favorite_id, added_at) VALUES ('default', ?1, ?2)",
+        params![&id, &timestamp],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(PromptFavorite {
+        id,
+        prompt,
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    })
+}
+
+#[tauri::command]
+fn get_prompt_favorites(
+    db: tauri::State<'_, Database>,
+    query: Option<String>,
+    folder_id: Option<String>,
+) -> Result<Vec<PromptFavorite>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let query = query
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let folder_id = folder_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    match (query, folder_id) {
+        (Some(query), Some(folder_id)) => {
+            let pattern = format!("%{}%", query);
+            let mut stmt = conn
+                .prepare(
+                    "SELECT pf.id, pf.prompt, pf.created_at, pf.updated_at
+                     FROM prompt_favorites pf
+                     JOIN prompt_folder_favorites pff ON pff.prompt_favorite_id = pf.id
+                     WHERE pff.folder_id = ?1 AND pf.prompt LIKE ?2
+                     ORDER BY pff.added_at DESC, pf.updated_at DESC",
+                )
+                .map_err(|e| e.to_string())?;
+            let favorites = stmt
+                .query_map(params![folder_id, pattern], row_to_prompt_favorite)
+                .map_err(|e| e.to_string())?
+                .filter_map(|row| row.ok())
+                .collect();
+            Ok(favorites)
+        }
+        (None, Some(folder_id)) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT pf.id, pf.prompt, pf.created_at, pf.updated_at
+                     FROM prompt_favorites pf
+                     JOIN prompt_folder_favorites pff ON pff.prompt_favorite_id = pf.id
+                     WHERE pff.folder_id = ?1
+                     ORDER BY pff.added_at DESC, pf.updated_at DESC",
+                )
+                .map_err(|e| e.to_string())?;
+            let favorites = stmt
+                .query_map(params![folder_id], row_to_prompt_favorite)
+                .map_err(|e| e.to_string())?
+                .filter_map(|row| row.ok())
+                .collect();
+            Ok(favorites)
+        }
+        (Some(query), None) => {
+            let pattern = format!("%{}%", query);
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, prompt, created_at, updated_at FROM prompt_favorites
+                     WHERE prompt LIKE ?1
+                     ORDER BY updated_at DESC, created_at DESC",
+                )
+                .map_err(|e| e.to_string())?;
+            let favorites = stmt
+                .query_map(params![pattern], row_to_prompt_favorite)
+                .map_err(|e| e.to_string())?
+                .filter_map(|row| row.ok())
+                .collect();
+            Ok(favorites)
+        }
+        (None, None) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, prompt, created_at, updated_at FROM prompt_favorites
+                     ORDER BY updated_at DESC, created_at DESC",
+                )
+                .map_err(|e| e.to_string())?;
+            let favorites = stmt
+                .query_map([], row_to_prompt_favorite)
+                .map_err(|e| e.to_string())?
+                .filter_map(|row| row.ok())
+                .collect();
+            Ok(favorites)
+        }
+    }
+}
+
+#[tauri::command]
+fn delete_prompt_favorite(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM prompt_favorites WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_prompt_folder(db: tauri::State<'_, Database>, name: String) -> Result<Folder, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Folder name cannot be empty".to_string());
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let created_at = current_timestamp();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO prompt_folders (id, name, created_at) VALUES (?1, ?2, ?3)",
+        params![id, name, &created_at],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Folder {
+        id,
+        name,
+        created_at,
+    })
+}
+
+#[tauri::command]
+fn rename_prompt_folder(
+    db: tauri::State<'_, Database>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    if id == "default" {
+        return Err("Default folder cannot be renamed".to_string());
+    }
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Folder name cannot be empty".to_string());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE prompt_folders SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_prompt_folder(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    if id == "default" {
+        return Err("Default folder cannot be deleted".to_string());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM prompt_folders WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_prompt_folders(db: tauri::State<'_, Database>) -> Result<Vec<Folder>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, created_at FROM prompt_folders ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let folders = stmt
+        .query_map([], |row| {
+            Ok(Folder {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|row| row.ok())
+        .collect();
+    Ok(folders)
+}
+
+#[tauri::command]
+fn add_prompt_favorite_to_folders(
+    db: tauri::State<'_, Database>,
+    favorite_id: String,
+    folder_ids: Vec<String>,
+) -> Result<(), String> {
+    let added_at = current_timestamp();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    for folder_id in &folder_ids {
+        conn.execute(
+            "INSERT OR IGNORE INTO prompt_folder_favorites (folder_id, prompt_favorite_id, added_at) VALUES (?1, ?2, ?3)",
+            params![folder_id, favorite_id, &added_at],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_prompt_favorite_from_folders(
+    db: tauri::State<'_, Database>,
+    favorite_id: String,
+    folder_ids: Vec<String>,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    for folder_id in &folder_ids {
+        conn.execute(
+            "DELETE FROM prompt_folder_favorites WHERE folder_id = ?1 AND prompt_favorite_id = ?2",
+            params![folder_id, favorite_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_prompt_favorite_folders(
+    db: tauri::State<'_, Database>,
+    favorite_id: String,
+) -> Result<Vec<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT folder_id FROM prompt_folder_favorites WHERE prompt_favorite_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let folder_ids = stmt
+        .query_map(params![favorite_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|row| row.ok())
+        .collect();
+    Ok(folder_ids)
+}
+
 // --- Folder commands ---
 
 #[tauri::command]
@@ -2033,6 +2319,16 @@ pub fn run() {
             copy_image_to_clipboard,
             save_image_to_file,
             pick_source_images,
+            create_prompt_favorite,
+            get_prompt_favorites,
+            delete_prompt_favorite,
+            create_prompt_folder,
+            rename_prompt_folder,
+            delete_prompt_folder,
+            get_prompt_folders,
+            add_prompt_favorite_to_folders,
+            remove_prompt_favorite_from_folders,
+            get_prompt_favorite_folders,
             create_folder,
             rename_folder,
             delete_folder,

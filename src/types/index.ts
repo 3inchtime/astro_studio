@@ -114,6 +114,13 @@ export interface Folder {
   created_at: string;
 }
 
+export interface PromptFavorite {
+  id: string;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LogEntry {
   id: string;
   timestamp: string;

@@ -18,6 +18,7 @@ import type {
   ImageModel,
   ImageInputFidelity,
   EndpointSettings,
+  PromptFavorite,
 } from "../types";
 
 export function toAssetUrl(filePath: string): string {
@@ -102,6 +103,65 @@ export async function editImage(
 
 export async function pickSourceImages(): Promise<string[]> {
   return invoke("pick_source_images");
+}
+
+export async function createPromptFavorite(
+  prompt: string,
+): Promise<PromptFavorite> {
+  return invoke("create_prompt_favorite", { prompt });
+}
+
+export async function getPromptFavorites(
+  query?: string,
+  folderId?: string,
+): Promise<PromptFavorite[]> {
+  return invoke("get_prompt_favorites", {
+    query: query || null,
+    folderId: folderId || null,
+  });
+}
+
+export async function deletePromptFavorite(id: string): Promise<void> {
+  await invoke("delete_prompt_favorite", { id });
+}
+
+export async function createPromptFolder(name: string): Promise<Folder> {
+  return invoke("create_prompt_folder", { name });
+}
+
+export async function renamePromptFolder(
+  id: string,
+  name: string,
+): Promise<void> {
+  return invoke("rename_prompt_folder", { id, name });
+}
+
+export async function deletePromptFolder(id: string): Promise<void> {
+  await invoke("delete_prompt_folder", { id });
+}
+
+export async function getPromptFolders(): Promise<Folder[]> {
+  return invoke("get_prompt_folders");
+}
+
+export async function addPromptFavoriteToFolders(
+  favoriteId: string,
+  folderIds: string[],
+): Promise<void> {
+  return invoke("add_prompt_favorite_to_folders", { favoriteId, folderIds });
+}
+
+export async function removePromptFavoriteFromFolders(
+  favoriteId: string,
+  folderIds: string[],
+): Promise<void> {
+  return invoke("remove_prompt_favorite_from_folders", { favoriteId, folderIds });
+}
+
+export async function getPromptFavoriteFolders(
+  favoriteId: string,
+): Promise<string[]> {
+  return invoke("get_prompt_favorite_folders", { favoriteId });
 }
 
 export async function searchGenerations(

@@ -169,3 +169,11 @@ pub struct Folder {
     pub name: String,
     pub created_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptFavorite {
+    pub id: String,
+    pub prompt: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
