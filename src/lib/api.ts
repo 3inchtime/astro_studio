@@ -270,7 +270,7 @@ export async function readLogResponseFile(path: string): Promise<string> {
 }
 
 export async function clearLogs(beforeDays?: number): Promise<number> {
-  return invoke("clear_logs", { beforeDays: beforeDays || null });
+  return invoke("clear_logs", { beforeDays: beforeDays ?? null });
 }
 
 export async function getLogSettings(): Promise<LogSettings> {
