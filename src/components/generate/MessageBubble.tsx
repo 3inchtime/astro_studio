@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { RotateCcw, Sparkles } from "lucide-react";
+import { Pencil, RotateCcw, Sparkles } from "lucide-react";
 import { toAssetUrl } from "../../lib/api";
 import type { Message, MessageImage } from "../../types";
 import ImageGrid from "./ImageGrid";
@@ -11,6 +11,7 @@ interface MessageBubbleProps {
   onImageClick: (images: MessageImage[], index: number) => void;
   onDelete?: (generationId: string) => void;
   onEditImage?: (image: MessageImage) => void;
+  onEditPrompt?: (message: Message) => void;
   onFavoriteClick?: (imageId: string) => void;
   onRetry?: (message: Message) => void;
 }
@@ -20,6 +21,7 @@ export default function MessageBubble({
   onImageClick,
   onDelete,
   onEditImage,
+  onEditPrompt,
   onFavoriteClick,
   onRetry,
 }: MessageBubbleProps) {
@@ -33,9 +35,9 @@ export default function MessageBubble({
         transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
         className="flex justify-end"
       >
-        <div className="max-w-[75%]">
-          <div className="rounded-[20px] rounded-br-[6px] bg-primary px-5 py-3.5 shadow-sm">
-            <p className="text-[14px] leading-[1.7] text-white whitespace-pre-wrap">
+        <div className="group flex max-w-[75%] items-start gap-2">
+          <div className="rounded-[20px] rounded-br-[6px] border border-primary/35 bg-white px-5 py-3.5 text-foreground shadow-[0_14px_34px_rgba(79,106,255,0.12)] selection:bg-primary/18 selection:text-foreground">
+            <p className="text-[14px] leading-[1.7] text-foreground whitespace-pre-wrap">
               {message.content}
             </p>
             {message.sourceImages && message.sourceImages.length > 0 && (
@@ -43,7 +45,7 @@ export default function MessageBubble({
                 {message.sourceImages.map((image, index) => (
                   <div
                     key={`${image.path}-${index}`}
-                    className="overflow-hidden rounded-[12px] border border-white/15 bg-white/10"
+                    className="overflow-hidden rounded-[12px] border border-primary/18 bg-primary/5"
                   >
                     <img
                       src={toAssetUrl(image.thumbnailPath || image.path)}
@@ -55,6 +57,16 @@ export default function MessageBubble({
               </div>
             )}
           </div>
+          {onEditPrompt && (
+            <button
+              onClick={() => onEditPrompt(message)}
+              className="mt-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-primary/70 opacity-0 shadow-sm ring-1 ring-primary/18 transition-all hover:bg-primary/6 hover:text-primary focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary/25 group-hover:opacity-100"
+              aria-label={t("generate.editPrompt")}
+              title={t("generate.editPrompt")}
+            >
+              <Pencil size={13} />
+            </button>
+          )}
         </div>
       </motion.div>
     );
