@@ -23,6 +23,34 @@ vi.mock("../favorites/FavoriteButton", () => ({
 }));
 
 describe("ImageGrid", () => {
+  it("renders single-image cards larger so portrait images stay wider than the action row", () => {
+    const { container } = render(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/portrait-image.png",
+            thumbnail: "/tmp/portrait-thumb.png",
+            imageId: "image-portrait",
+            generationId: "generation-portrait",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    const root = container.firstElementChild;
+    const item = container.querySelector('div[class*="w-fit"]');
+    const controls = screen
+      .getByRole("button", { name: "Delete" })
+      .parentElement;
+    const imageFrame = screen.getByAltText("Generated").parentElement;
+
+    expect(root).toHaveClass("inline-flex", "flex-col", "items-start");
+    expect(item).toHaveClass("w-fit");
+    expect(controls).toHaveClass("mx-auto", "w-fit");
+    expect(imageFrame).toHaveClass("h-72");
+  });
+
   it("passes the generation id to delete without relying on native confirm", () => {
     const onDelete = vi.fn();
 

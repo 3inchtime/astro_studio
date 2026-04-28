@@ -116,6 +116,7 @@ export default function GeneratePage() {
     string | null
   >(null);
   const [isDeletingGeneration, setIsDeletingGeneration] = useState(false);
+  const [chatViewportHeight, setChatViewportHeight] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -139,6 +140,30 @@ export default function GeneratePage() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+
+    const updateChatViewportHeight = () => {
+      setChatViewportHeight(scrollElement.clientHeight);
+    };
+
+    updateChatViewportHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateChatViewportHeight();
+    });
+    resizeObserver.observe(scrollElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
@@ -430,6 +455,7 @@ export default function GeneratePage() {
                   onEditPrompt={handleEditPrompt}
                   onFavoriteClick={setFolderSelectorImageId}
                   onRetry={(message) => void handleRetryMessage(message)}
+                  chatViewportHeight={chatViewportHeight}
                 />
               ))}
             </AnimatePresence>
