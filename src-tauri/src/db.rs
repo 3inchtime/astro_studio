@@ -319,7 +319,7 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT response_file FROM logs WHERE response_file IS NOT NULL AND timestamp < ?1",
+                "SELECT response_file FROM logs WHERE response_file IS NOT NULL AND timestamp <= ?1",
             )
             .map_err(|e| e.to_string())?;
         let files: Vec<String> = stmt
@@ -334,7 +334,7 @@ impl Database {
 
         let deleted = conn
             .execute(
-                "DELETE FROM logs WHERE timestamp < ?1",
+                "DELETE FROM logs WHERE timestamp <= ?1",
                 params![before_timestamp],
             )
             .map_err(|e| e.to_string())?;

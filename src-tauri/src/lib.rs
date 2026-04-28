@@ -25,6 +25,10 @@ fn current_timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+fn format_log_clear_cutoff(now: chrono::DateTime<Utc>, days: u32) -> String {
+    (now - chrono::Duration::days(days as i64)).to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
 fn active_generation_filter(alias: &str) -> String {
     format!("{alias}.deleted_at IS NULL")
 }
@@ -206,6 +210,16 @@ mod tests {
             image_endpoint_url_for_settings(&settings, ImageEndpointKind::Edit),
             "https://gateway.example.test/edit"
         );
+    }
+
+    #[test]
+    fn log_clear_cutoff_uses_database_timestamp_format() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-04-28T12:30:45Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        assert_eq!(format_log_clear_cutoff(now, 0), "2026-04-28T12:30:45Z");
+        assert_eq!(format_log_clear_cutoff(now, 7), "2026-04-21T12:30:45Z");
     }
 }
 
@@ -1918,8 +1932,7 @@ fn read_log_response_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn clear_logs(db: tauri::State<'_, Database>, before_days: Option<u32>) -> Result<u64, String> {
     let days = before_days.unwrap_or(DEFAULT_LOG_RETENTION_DAYS);
-    let before = chrono::Local::now() - chrono::Duration::days(days as i64);
-    let before_str = before.format("%Y-%m-%d %H:%M:%S").to_string();
+    let before_str = format_log_clear_cutoff(Utc::now(), days);
     db.clear_logs_before(&before_str)
 }
 

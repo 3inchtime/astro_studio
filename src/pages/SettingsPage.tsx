@@ -10,7 +10,7 @@ import {
 } from "../lib/api";
 import {
   Check, Cpu, Eye, EyeOff, Globe, Key, Languages, SlidersHorizontal,
-  FileText, Trash2, ChevronLeft, ChevronRight, Type, X,
+  FileText, Trash2, ChevronLeft, ChevronRight, Copy, Type, X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -27,6 +27,7 @@ import {
   applyAppFontSize,
   getStoredAppFontSize,
 } from "../lib/fontSize";
+import ConfirmDialog from "../components/common/ConfirmDialog";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_GENERATION_URL = "https://api.openai.com/v1/images/generations";
@@ -100,17 +101,72 @@ function formatStructuredText(value: string): string {
   }
 }
 
-function mergeRuntimeLogs(current: RuntimeLogEntry[], incoming: RuntimeLogEntry[]): RuntimeLogEntry[] {
-  const merged = [...current];
-  const seen = new Set(current.map((log) => log.sequence));
+function formatRuntimeLogEntry(log: RuntimeLogEntry): string {
+  return [
+    `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.target}`,
+    log.message,
+  ].join("\n");
+}
 
-  for (const entry of incoming) {
-    if (seen.has(entry.sequence)) continue;
-    merged.push(entry);
-    seen.add(entry.sequence);
+function formatRuntimeLogs(logs: RuntimeLogEntry[]): string {
+  return logs.map(formatRuntimeLogEntry).join("\n\n");
+}
+
+function formatPersistedLog(log: LogEntry, responseContent: string | null): string {
+  const lines = [
+    `Time: ${log.timestamp}`,
+    `Type: ${log.log_type}`,
+    `Level: ${log.level.toUpperCase()}`,
+  ];
+
+  if (log.generation_id) {
+    lines.push(`Generation ID: ${log.generation_id}`);
   }
 
-  return merged.slice(-200);
+  lines.push("Message:", log.message);
+
+  if (log.metadata) {
+    lines.push("", "Metadata:", formatStructuredText(log.metadata));
+  }
+
+  if (responseContent) {
+    lines.push("", "Raw Response:", formatStructuredText(responseContent));
+  }
+
+  return lines.join("\n");
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  textArea.remove();
+
+  if (!copied) {
+    throw new Error("Copy failed");
+  }
+}
+
+function mergeRuntimeLogs(current: RuntimeLogEntry[], incoming: RuntimeLogEntry[]): RuntimeLogEntry[] {
+  const bySequence = new Map<number, RuntimeLogEntry>();
+
+  for (const entry of [...current, ...incoming]) {
+    bySequence.set(entry.sequence, entry);
+  }
+
+  return Array.from(bySequence.values())
+    .sort((a, b) => b.sequence - a.sequence)
+    .slice(0, 200);
 }
 
 export default function SettingsPage() {
@@ -146,7 +202,11 @@ export default function SettingsPage() {
   const [responseContent, setResponseContent] = useState<string | null>(null);
   const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogEntry[]>([]);
   const [autoScrollRuntimeLogs, setAutoScrollRuntimeLogs] = useState(true);
+  const [copiedLogTarget, setCopiedLogTarget] = useState<"runtime" | "detail" | null>(null);
+  const [clearLogsOpen, setClearLogsOpen] = useState(false);
+  const [clearingLogs, setClearingLogs] = useState(false);
   const runtimeLogsRef = useRef<HTMLDivElement | null>(null);
+  const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pageSize = 20;
 
@@ -222,8 +282,16 @@ export default function SettingsPage() {
     if (!autoScrollRuntimeLogs || activeTab !== "logs") return;
     const container = runtimeLogsRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = 0;
   }, [activeTab, autoScrollRuntimeLogs, runtimeLogs]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedResetRef.current) {
+        clearTimeout(copiedResetRef.current);
+      }
+    };
+  }, []);
 
   function handleLanguageChange(lang: string) {
     i18n.changeLanguage(lang);
@@ -260,11 +328,21 @@ export default function SettingsPage() {
     setTimeout(() => setModelSaved(false), 2000);
   }
 
-  async function handleClearLogs() {
-    if (!confirm(t("log.clearConfirm"))) return;
-    await clearLogs();
-    setLogPage(1);
-    fetchLogs();
+  async function handleConfirmClearLogs() {
+    setClearingLogs(true);
+    try {
+      await clearLogs(0);
+      setLogs([]);
+      setTotalLogs(0);
+      setSelectedLog(null);
+      setResponseContent(null);
+      setLogPage(1);
+      setClearLogsOpen(false);
+    } catch {
+      // Keep the dialog open so the user can retry.
+    } finally {
+      setClearingLogs(false);
+    }
   }
 
   async function handleSaveRetention(days: number) {
@@ -296,6 +374,16 @@ export default function SettingsPage() {
         setResponseContent(content);
       } catch { /* ignore */ }
     }
+  }
+
+  async function handleCopyText(text: string, target: "runtime" | "detail") {
+    if (!text.trim()) return;
+    await copyTextToClipboard(text);
+    setCopiedLogTarget(target);
+    if (copiedResetRef.current) {
+      clearTimeout(copiedResetRef.current);
+    }
+    copiedResetRef.current = setTimeout(() => setCopiedLogTarget(null), 1600);
   }
 
   const totalPages = Math.ceil(totalLogs / pageSize);
@@ -676,6 +764,15 @@ export default function SettingsPage() {
                       </label>
                       <button
                         type="button"
+                        onClick={() => void handleCopyText(formatRuntimeLogs(runtimeLogs), "runtime")}
+                        disabled={runtimeLogs.length === 0}
+                        className="flex h-[30px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[11px] text-muted transition-all hover:border-border hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Copy size={12} />
+                        {copiedLogTarget === "runtime" ? t("log.copied") : t("log.copyRuntimeLogs")}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setRuntimeLogs([])}
                         className="flex h-[30px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[11px] text-muted transition-all hover:border-border hover:text-foreground"
                       >
@@ -758,7 +855,8 @@ export default function SettingsPage() {
                   </div>
 
                   <button
-                    onClick={handleClearLogs}
+                    type="button"
+                    onClick={() => setClearLogsOpen(true)}
                     className="ml-auto flex h-[34px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[12px] text-muted transition-all hover:border-red-300 hover:text-red-500"
                   >
                     <Trash2 size={12} />
@@ -842,12 +940,22 @@ export default function SettingsPage() {
                       <div className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
                         <div className="flex items-center justify-between border-b border-border-subtle px-4 py-2.5">
                           <span className="text-[12px] font-medium text-foreground">{t("log.detail")}</span>
-                          <button
-                            onClick={() => setSelectedLog(null)}
-                            className="flex h-6 w-6 items-center justify-center rounded-[6px] text-muted/40 hover:bg-subtle hover:text-muted"
-                          >
-                            <X size={13} />
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void handleCopyText(formatPersistedLog(selectedLog, responseContent), "detail")}
+                              className="flex h-7 items-center gap-1.5 rounded-[6px] border border-border-subtle px-2 text-[11px] text-muted transition-colors hover:border-border hover:text-foreground"
+                            >
+                              <Copy size={12} />
+                              {copiedLogTarget === "detail" ? t("log.copied") : t("log.copyLog")}
+                            </button>
+                            <button
+                              onClick={() => setSelectedLog(null)}
+                              className="flex h-6 w-6 items-center justify-center rounded-[6px] text-muted/40 hover:bg-subtle hover:text-muted"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
                         </div>
                         <div className="space-y-3 p-4">
                           <div className="grid grid-cols-[80px_1fr] gap-2 text-[12px]">
@@ -900,6 +1008,15 @@ export default function SettingsPage() {
           )}
         </AnimatePresence>
       </div>
+      <ConfirmDialog
+        open={clearLogsOpen}
+        title={t("log.clearConfirm")}
+        confirmLabel={t("log.clearLogs")}
+        cancelLabel={t("favorites.cancel")}
+        onConfirm={() => void handleConfirmClearLogs()}
+        onCancel={() => setClearLogsOpen(false)}
+        loading={clearingLogs}
+      />
     </div>
   );
 }
