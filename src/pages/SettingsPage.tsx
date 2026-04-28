@@ -2,11 +2,11 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
-  saveApiKey, getApiKey, saveBaseUrl, getBaseUrl,
+  saveApiKey, getApiKey,
   getLogs, clearLogs, getLogSettings, saveLogSettings,
   readLogResponseFile, getTrashSettings, saveTrashSettings,
   getFontSize, getImageModel, saveFontSize, saveImageModel,
-  getRuntimeLogs, onRuntimeLog,
+  getRuntimeLogs, onRuntimeLog, getEndpointSettings, saveEndpointSettings,
 } from "../lib/api";
 import {
   Check, Cpu, Eye, EyeOff, Globe, Key, Languages, SlidersHorizontal,
@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type {
   AppFontSize,
+  EndpointMode,
   ImageModel,
   LogEntry,
   LogSettings,
@@ -28,6 +29,8 @@ import {
 } from "../lib/fontSize";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_GENERATION_URL = "https://api.openai.com/v1/images/generations";
+const DEFAULT_EDIT_URL = "https://api.openai.com/v1/images/edits";
 const FONT_SIZE_LABEL_KEYS: Record<AppFontSize, string> = {
   small: "settings.fontSizeSmall",
   medium: "settings.fontSizeMedium",
@@ -118,7 +121,10 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
+  const [endpointMode, setEndpointMode] = useState<EndpointMode>("base_url");
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
+  const [generationUrl, setGenerationUrl] = useState(DEFAULT_GENERATION_URL);
+  const [editUrl, setEditUrl] = useState(DEFAULT_EDIT_URL);
   const [urlSaved, setUrlSaved] = useState(false);
   const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
   const [modelSaved, setModelSaved] = useState(false);
@@ -146,7 +152,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     getApiKey().then((key) => { if (key) setApiKey(key); });
-    getBaseUrl().then((url) => setBaseUrl(url));
+    getEndpointSettings().then((settings) => {
+      setEndpointMode(settings.mode);
+      setBaseUrl(settings.base_url);
+      setGenerationUrl(settings.generation_url);
+      setEditUrl(settings.edit_url);
+    });
     getImageModel().then((model) => setImageModel(model));
     getFontSize().then((size) => {
       setFontSize(size);
@@ -227,9 +238,18 @@ export default function SettingsPage() {
   }
 
   async function handleSaveUrl() {
-    const url = baseUrl.trim() || DEFAULT_BASE_URL;
-    await saveBaseUrl(url);
-    setBaseUrl(url);
+    const nextBaseUrl = baseUrl.trim() || DEFAULT_BASE_URL;
+    const nextGenerationUrl = generationUrl.trim() || DEFAULT_GENERATION_URL;
+    const nextEditUrl = editUrl.trim() || DEFAULT_EDIT_URL;
+    await saveEndpointSettings({
+      mode: endpointMode,
+      base_url: nextBaseUrl,
+      generation_url: nextGenerationUrl,
+      edit_url: nextEditUrl,
+    });
+    setBaseUrl(nextBaseUrl);
+    setGenerationUrl(nextGenerationUrl);
+    setEditUrl(nextEditUrl);
     setUrlSaved(true);
     setTimeout(() => setUrlSaved(false), 2000);
   }
@@ -543,32 +563,81 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div className="border-t border-border-subtle" />
-                  <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
-                    <div className="flex items-start gap-3">
+                  <div className="grid grid-cols-[128px_minmax(0,1fr)] items-start gap-4 p-5 sm:grid-cols-[220px_minmax(0,1fr)] sm:gap-6">
+                    <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
                         <Globe size={14} className="text-primary" strokeWidth={2} />
                       </div>
                       <div>
                         <h4 className="text-[13px] font-semibold text-foreground">{t("settings.endpoint")}</h4>
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
                       </div>
                     </div>
-                    <div className="flex min-w-0 flex-col gap-2 lg:flex-row">
-                      <input
-                        type="text"
-                        value={baseUrl}
-                        onChange={(e) => { setBaseUrl(e.target.value); setUrlSaved(false); }}
-                        placeholder={DEFAULT_BASE_URL}
-                        className="h-[38px] min-w-0 flex-1 rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
-                      />
-                      <motion.button
-                        type="button"
-                        onClick={handleSaveUrl}
-                        whileTap={{ scale: 0.97 }}
-                        className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
-                      >
-                        {urlSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveUrl")}
-                      </motion.button>
+                    <div className="min-w-0 space-y-3">
+                      <div className="grid gap-2 rounded-[10px] border border-border-subtle bg-subtle/20 p-1 sm:grid-cols-2">
+                        {(["base_url", "full_url"] as EndpointMode[]).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => { setEndpointMode(mode); setUrlSaved(false); }}
+                            className={`h-[34px] rounded-[8px] px-3 text-[12px] font-medium transition-all ${
+                              endpointMode === mode
+                                ? "bg-surface text-foreground shadow-card"
+                                : "text-muted/60 hover:text-foreground"
+                            }`}
+                          >
+                            {t(mode === "base_url" ? "settings.endpointBaseUrlMode" : "settings.endpointFullUrlMode")}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
+                        <p className="text-[11px] leading-relaxed text-muted/55">{t("settings.endpointModeHint")}</p>
+                      </div>
+
+                      {endpointMode === "base_url" ? (
+                        <input
+                          type="text"
+                          value={baseUrl}
+                          onChange={(e) => { setBaseUrl(e.target.value); setUrlSaved(false); }}
+                          placeholder={DEFAULT_BASE_URL}
+                          className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                        />
+                      ) : (
+                        <div className="grid gap-2">
+                          <label className="grid gap-1.5">
+                            <span className="text-[11px] font-medium text-muted/70">{t("settings.generationUrl")}</span>
+                            <input
+                              type="text"
+                              value={generationUrl}
+                              onChange={(e) => { setGenerationUrl(e.target.value); setUrlSaved(false); }}
+                              placeholder={DEFAULT_GENERATION_URL}
+                              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                            />
+                          </label>
+                          <label className="grid gap-1.5">
+                            <span className="text-[11px] font-medium text-muted/70">{t("settings.editUrl")}</span>
+                            <input
+                              type="text"
+                              value={editUrl}
+                              onChange={(e) => { setEditUrl(e.target.value); setUrlSaved(false); }}
+                              placeholder={DEFAULT_EDIT_URL}
+                              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      <div className="flex justify-end">
+                        <motion.button
+                          type="button"
+                          onClick={handleSaveUrl}
+                          whileTap={{ scale: 0.97 }}
+                          className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
+                        >
+                          {urlSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveUrl")}
+                        </motion.button>
+                      </div>
                     </div>
                   </div>
                 </motion.div>

@@ -4,7 +4,14 @@ pub const ENGINE_GPT_IMAGE_2: &str = "gpt-image-2";
 pub const SETTING_IMAGE_MODEL: &str = "image_model";
 pub const SETTING_API_KEY: &str = "api_key";
 pub const SETTING_BASE_URL: &str = "base_url";
+pub const SETTING_ENDPOINT_MODE: &str = "endpoint_mode";
+pub const SETTING_GENERATION_URL: &str = "generation_url";
+pub const SETTING_EDIT_URL: &str = "edit_url";
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+pub const ENDPOINT_MODE_BASE_URL: &str = "base_url";
+pub const ENDPOINT_MODE_FULL_URL: &str = "full_url";
+pub const DEFAULT_GENERATION_URL: &str = "https://api.openai.com/v1/images/generations";
+pub const DEFAULT_EDIT_URL: &str = "https://api.openai.com/v1/images/edits";
 pub const DEFAULT_IMAGE_SIZE: &str = "auto";
 pub const DEFAULT_IMAGE_QUALITY: &str = "auto";
 pub const DEFAULT_IMAGE_BACKGROUND: &str = "auto";
@@ -58,6 +65,14 @@ pub struct LogSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrashSettings {
     pub retention_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndpointSettings {
+    pub mode: String,
+    pub base_url: String,
+    pub generation_url: String,
+    pub edit_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

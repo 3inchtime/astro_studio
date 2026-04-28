@@ -16,7 +16,7 @@ pub trait ImageEngine: Send + Sync {
         generation_id: &str,
         model: &str,
         api_key: &str,
-        base_url: &str,
+        endpoint_url: &str,
         prompt: &str,
         size: &str,
         quality: &str,
@@ -32,7 +32,7 @@ pub trait ImageEngine: Send + Sync {
         generation_id: &str,
         model: &str,
         api_key: &str,
-        base_url: &str,
+        endpoint_url: &str,
         prompt: &str,
         source_image_paths: &[String],
         size: &str,
@@ -99,7 +99,7 @@ impl ImageEngine for GptImageEngine {
         generation_id: &str,
         model: &str,
         api_key: &str,
-        base_url: &str,
+        endpoint_url: &str,
         prompt: &str,
         size: &str,
         quality: &str,
@@ -109,7 +109,7 @@ impl ImageEngine for GptImageEngine {
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
-        let url = format!("{}/images/generations", base_url.trim_end_matches('/'));
+        let url = endpoint_url.trim().to_string();
 
         if let Some(db) = db {
             let masked_key = if api_key.len() > 8 {
@@ -301,7 +301,7 @@ impl ImageEngine for GptImageEngine {
         generation_id: &str,
         model: &str,
         api_key: &str,
-        base_url: &str,
+        endpoint_url: &str,
         prompt: &str,
         source_image_paths: &[String],
         size: &str,
@@ -311,7 +311,7 @@ impl ImageEngine for GptImageEngine {
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
-        let url = format!("{}/images/edits", base_url.trim_end_matches('/'));
+        let url = endpoint_url.trim().to_string();
 
         if source_image_paths.is_empty() {
             return Err("At least one source image is required for editing.".to_string());
