@@ -21,7 +21,7 @@ import type {
 } from "../types";
 
 export function toAssetUrl(filePath: string): string {
-  return convertFileSrc(filePath.replace(/\\/g, "/"));
+  return convertFileSrc(filePath);
 }
 
 export async function saveApiKey(key: string): Promise<void> {
