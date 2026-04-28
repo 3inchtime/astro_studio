@@ -155,16 +155,6 @@ export default function Lightbox({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 1.04 }}
-          transition={{ duration: 0.45, ease: transitionEase }}
-          className="absolute left-1/2 top-1/2 h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(124,92,252,0.22)_0%,rgba(79,106,255,0.12)_32%,transparent_72%)]"
-        />
-      </div>
-
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -16 }}
@@ -188,6 +178,7 @@ export default function Lightbox({
       {/* Image area */}
       <div
         ref={containerRef}
+        data-testid="image-preview-viewport"
         className="relative flex flex-1 items-center justify-center overflow-hidden px-5 pb-2"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
@@ -198,37 +189,28 @@ export default function Lightbox({
           cursor: zoom > 1 ? (isPanning ? "grabbing" : "grab") : "default",
         }}
       >
-        <motion.div
-          initial={{ opacity: 0, y: 26, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 16, scale: 0.98 }}
-          transition={{ duration: 0.42, ease: transitionEase }}
-          className="relative flex max-h-[82vh] max-w-[84vw] items-center justify-center overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] px-4 py-4 shadow-[0_24px_80px_rgba(0,0,0,0.42)]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_48%)]" />
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentPath}
-              initial={{ opacity: 0, y: 24, scale: 0.94, filter: "blur(14px)" }}
-              animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -18, scale: 1.03, filter: "blur(10px)" }}
-              transition={{ duration: 0.42, ease: transitionEase }}
-              className="relative flex items-center justify-center"
-            >
-              <img
-                src={toAssetUrl(currentPath)}
-                alt={t("lightbox.preview")}
-                className="max-h-[76vh] max-w-[78vw] object-contain select-none"
-                style={{
-                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                }}
-                onDoubleClick={toggleZoom}
-                draggable={false}
-              />
-            </motion.div>
-          </AnimatePresence>
-        </motion.div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentPath}
+            initial={{ opacity: 0, y: 24, scale: 0.94, filter: "blur(14px)" }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -18, scale: 1.03, filter: "blur(10px)" }}
+            transition={{ duration: 0.42, ease: transitionEase }}
+            className="relative flex h-full w-full items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={toAssetUrl(currentPath)}
+              alt={t("lightbox.preview")}
+              className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
+              style={{
+                transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+              }}
+              onDoubleClick={toggleZoom}
+              draggable={false}
+            />
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Navigation arrows */}

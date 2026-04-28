@@ -57,4 +57,38 @@ describe("Lightbox", () => {
 
     expect(onDelete).toHaveBeenCalledWith("generation-1");
   });
+
+  it("renders a direct image preview without a lightbox frame", () => {
+    render(
+      <Lightbox
+        images={[
+          {
+            imageId: "image-1",
+            generationId: "generation-1",
+            path: "/tmp/image.png",
+            thumbnailPath: "/tmp/thumb.png",
+          },
+        ]}
+        initialIndex={0}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const image = screen.getByAltText("Preview");
+    const viewport = screen.getByTestId("image-preview-viewport");
+
+    expect(viewport).toHaveClass("overflow-hidden");
+    expect(image.parentElement).toHaveClass("h-full", "w-full");
+    expect(image.parentElement).not.toHaveClass(
+      "rounded-[28px]",
+      "border",
+      "shadow-[0_24px_80px_rgba(0,0,0,0.42)]",
+    );
+
+    fireEvent.wheel(viewport, { deltaY: -1000 });
+
+    expect(image).toHaveStyle({
+      transform: "scale(2) translate(0px, 0px)",
+    });
+  });
 });
