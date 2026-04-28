@@ -44,9 +44,12 @@ export interface SearchResult {
 
 export interface GenerationParams {
   prompt: string;
-  size?: string;
-  quality?: string;
-  outputFormat?: string;
+  size?: ImageSize;
+  quality?: ImageQuality;
+  background?: ImageBackground;
+  outputFormat?: ImageOutputFormat;
+  outputCompression?: number;
+  moderation?: ImageModeration;
   imageCount?: number;
   conversationId?: string | null;
 }
@@ -70,7 +73,10 @@ export interface RetryGenerationRequest {
   prompt: string;
   size: ImageSize;
   quality: ImageQuality;
+  background: ImageBackground;
   outputFormat: ImageOutputFormat;
+  moderation: ImageModeration;
+  inputFidelity: ImageInputFidelity;
   imageCount: number;
   conversationId?: string | null;
   editSources: EditSourceImage[];
@@ -91,6 +97,9 @@ export interface Message {
 
 export type ImageSize = "1024x1024" | "1536x1024" | "1024x1536" | "auto";
 export type ImageQuality = "low" | "medium" | "high" | "auto";
+export type ImageBackground = "auto" | "opaque" | "transparent";
+export type ImageModeration = "auto" | "low";
+export type ImageInputFidelity = "low" | "high";
 export type ImageOutputFormat = "png" | "jpeg" | "webp";
 
 export interface GenerateResponse {

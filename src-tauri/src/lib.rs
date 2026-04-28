@@ -53,6 +53,53 @@ fn normalize_image_model(model: &str) -> &'static str {
     }
 }
 
+fn normalize_image_moderation(moderation: &str) -> &'static str {
+    match moderation {
+        "low" => "low",
+        _ => DEFAULT_IMAGE_MODERATION,
+    }
+}
+
+fn normalize_input_fidelity(input_fidelity: &str) -> &'static str {
+    match input_fidelity {
+        "low" => "low",
+        "high" => "high",
+        _ => DEFAULT_INPUT_FIDELITY,
+    }
+}
+
+fn image_request_options(
+    size: Option<String>,
+    quality: Option<String>,
+    background: Option<String>,
+    output_format: Option<String>,
+    output_compression: Option<u8>,
+    moderation: Option<String>,
+    input_fidelity: Option<String>,
+    image_count: Option<u8>,
+) -> GptImageRequestOptions {
+    GptImageRequestOptions {
+        size: size.unwrap_or_else(|| DEFAULT_IMAGE_SIZE.to_string()),
+        quality: quality.unwrap_or_else(|| DEFAULT_IMAGE_QUALITY.to_string()),
+        background: background.unwrap_or_else(|| DEFAULT_IMAGE_BACKGROUND.to_string()),
+        output_format: output_format.unwrap_or_else(|| DEFAULT_OUTPUT_FORMAT.to_string()),
+        output_compression: output_compression
+            .unwrap_or(DEFAULT_OUTPUT_COMPRESSION)
+            .min(100),
+        moderation: normalize_image_moderation(
+            moderation.as_deref().unwrap_or(DEFAULT_IMAGE_MODERATION),
+        )
+        .to_string(),
+        input_fidelity: normalize_input_fidelity(
+            input_fidelity.as_deref().unwrap_or(DEFAULT_INPUT_FIDELITY),
+        )
+        .to_string(),
+        stream: DEFAULT_IMAGE_STREAM,
+        partial_images: DEFAULT_PARTIAL_IMAGES,
+        image_count: image_count.unwrap_or(DEFAULT_IMAGE_COUNT).clamp(1, 4),
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum ImageEndpointKind {
     Generate,
@@ -573,20 +620,23 @@ async fn generate_image(
     quality: Option<String>,
     background: Option<String>,
     output_format: Option<String>,
+    output_compression: Option<u8>,
+    moderation: Option<String>,
     image_count: Option<u8>,
     conversation_id: Option<String>,
 ) -> Result<GenerateResult, String> {
-    let size = size.unwrap_or_else(|| DEFAULT_IMAGE_SIZE.to_string());
-    let quality = quality.unwrap_or_else(|| DEFAULT_IMAGE_QUALITY.to_string());
-    let background = background.unwrap_or_else(|| DEFAULT_IMAGE_BACKGROUND.to_string());
-    let output_format = output_format.unwrap_or_else(|| DEFAULT_OUTPUT_FORMAT.to_string());
-    let image_count = image_count.unwrap_or(DEFAULT_IMAGE_COUNT).clamp(1, 4);
+    let options = image_request_options(
+        size,
+        quality,
+        background,
+        output_format,
+        output_compression,
+        moderation,
+        None,
+        image_count,
+    );
     let generation_id = uuid::Uuid::new_v4().to_string();
     let created_at = current_timestamp();
-
-    if background == "transparent" {
-        return Err("gpt-image-2 does not support transparent backgrounds.".to_string());
-    }
 
     let conversation_id = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -594,30 +644,38 @@ async fn generate_image(
     };
 
     log::info!(
-        "[{}] Generating image — prompt: {:?}, size: {}, quality: {}, background: {}, output_format: {}, image_count: {}",
+        "[{}] Generating image — prompt: {:?}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, image_count: {}",
         generation_id,
         prompt,
-        size,
-        quality,
-        background,
-        output_format,
-        image_count
+        options.size,
+        options.quality,
+        options.background,
+        options.output_format,
+        options.output_compression,
+        options.moderation,
+        options.stream,
+        options.partial_images,
+        options.image_count
     );
 
     let _ = db.insert_log(
         "generation", "info",
         &format!(
             "Started — prompt: {:?}, size: {}, quality: {}, background: {}, output_format: {}, image_count: {}",
-            prompt, size, quality, background, output_format, image_count
+            prompt, options.size, options.quality, options.background, options.output_format, options.image_count
         ),
         Some(&generation_id),
         Some(&serde_json::json!({
             "prompt": prompt,
-            "size": size,
-            "quality": quality,
-            "background": background,
-            "output_format": output_format,
-            "image_count": image_count,
+            "size": &options.size,
+            "quality": &options.quality,
+            "background": &options.background,
+            "output_format": &options.output_format,
+            "output_compression": options.output_compression,
+            "moderation": &options.moderation,
+            "stream": options.stream,
+            "partial_images": options.partial_images,
+            "image_count": options.image_count,
             "conversation_id": conversation_id
         }).to_string()),
         None,
@@ -642,12 +700,12 @@ async fn generate_image(
             &generation_id,
             &prompt,
             &model,
-            &size,
-            &quality,
+            &options.size,
+            &options.quality,
             &conversation_id,
             &created_at,
             RECOVERY_KIND_GENERATE,
-            &output_format,
+            &options.output_format,
         )?;
     }
 
@@ -666,11 +724,7 @@ async fn generate_image(
             &api_key,
             &endpoint_url,
             &prompt,
-            &size,
-            &quality,
-            &background,
-            &output_format,
-            image_count,
+            &options,
             Some(&db),
             Some(&app_data_dir),
         )
@@ -694,7 +748,7 @@ async fn generate_image(
                 db.inner(),
                 &generation_id,
                 &created_at,
-                &output_format,
+                &options.output_format,
                 &engine_response.images,
             )?;
 
@@ -764,7 +818,11 @@ async fn edit_image(
     source_image_paths: Vec<String>,
     size: Option<String>,
     quality: Option<String>,
+    background: Option<String>,
+    input_fidelity: Option<String>,
     output_format: Option<String>,
+    output_compression: Option<u8>,
+    moderation: Option<String>,
     image_count: Option<u8>,
     conversation_id: Option<String>,
 ) -> Result<GenerateResult, String> {
@@ -772,10 +830,16 @@ async fn edit_image(
         return Err("Please select at least one source image.".to_string());
     }
 
-    let size = size.unwrap_or_else(|| DEFAULT_IMAGE_SIZE.to_string());
-    let quality = quality.unwrap_or_else(|| DEFAULT_IMAGE_QUALITY.to_string());
-    let output_format = output_format.unwrap_or_else(|| DEFAULT_OUTPUT_FORMAT.to_string());
-    let image_count = image_count.unwrap_or(DEFAULT_IMAGE_COUNT).clamp(1, 4);
+    let options = image_request_options(
+        size,
+        quality,
+        background,
+        output_format,
+        output_compression,
+        moderation,
+        input_fidelity,
+        image_count,
+    );
     let generation_id = uuid::Uuid::new_v4().to_string();
     let created_at = current_timestamp();
 
@@ -785,14 +849,20 @@ async fn edit_image(
     };
 
     log::info!(
-        "[{}] Editing image — prompt: {:?}, source_images: {}, size: {}, quality: {}, output_format: {}, image_count: {}",
+        "[{}] Editing image — prompt: {:?}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, image_count: {}",
         generation_id,
         prompt,
         source_image_paths.len(),
-        size,
-        quality,
-        output_format,
-        image_count
+        options.size,
+        options.quality,
+        options.background,
+        options.input_fidelity,
+        options.output_format,
+        options.output_compression,
+        options.moderation,
+        options.stream,
+        options.partial_images,
+        options.image_count
     );
 
     let _ = db.insert_log(
@@ -802,20 +872,26 @@ async fn edit_image(
             "Edit started — prompt: {:?}, source_images: {}, size: {}, quality: {}, output_format: {}, image_count: {}",
             prompt,
             source_image_paths.len(),
-            size,
-            quality,
-            output_format,
-            image_count
+            options.size,
+            options.quality,
+            options.output_format,
+            options.image_count
         ),
         Some(&generation_id),
         Some(
             &serde_json::json!({
                 "prompt": prompt,
                 "source_image_paths": source_image_paths.clone(),
-                "size": size,
-                "quality": quality,
-                "output_format": output_format,
-                "image_count": image_count,
+                "size": &options.size,
+                "quality": &options.quality,
+                "background": &options.background,
+                "input_fidelity": &options.input_fidelity,
+                "output_format": &options.output_format,
+                "output_compression": options.output_compression,
+                "moderation": &options.moderation,
+                "stream": options.stream,
+                "partial_images": options.partial_images,
+                "image_count": options.image_count,
                 "conversation_id": conversation_id
             })
             .to_string(),
@@ -842,12 +918,12 @@ async fn edit_image(
             &generation_id,
             &prompt,
             &model,
-            &size,
-            &quality,
+            &options.size,
+            &options.quality,
             &conversation_id,
             &created_at,
             RECOVERY_KIND_EDIT,
-            &output_format,
+            &options.output_format,
         )?;
     }
 
@@ -867,10 +943,7 @@ async fn edit_image(
             &endpoint_url,
             &prompt,
             &source_image_paths,
-            &size,
-            &quality,
-            &output_format,
-            image_count,
+            &options,
             Some(&db),
             Some(&app_data_dir),
         )
@@ -894,7 +967,7 @@ async fn edit_image(
                 db.inner(),
                 &generation_id,
                 &created_at,
-                &output_format,
+                &options.output_format,
                 &engine_response.images,
             )?;
 

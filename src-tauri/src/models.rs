@@ -16,6 +16,11 @@ pub const DEFAULT_IMAGE_SIZE: &str = "auto";
 pub const DEFAULT_IMAGE_QUALITY: &str = "auto";
 pub const DEFAULT_IMAGE_BACKGROUND: &str = "auto";
 pub const DEFAULT_OUTPUT_FORMAT: &str = "png";
+pub const DEFAULT_OUTPUT_COMPRESSION: u8 = 100;
+pub const DEFAULT_IMAGE_MODERATION: &str = "auto";
+pub const DEFAULT_INPUT_FIDELITY: &str = "high";
+pub const DEFAULT_IMAGE_STREAM: bool = false;
+pub const DEFAULT_PARTIAL_IMAGES: u8 = 0;
 pub const DEFAULT_IMAGE_COUNT: u8 = 1;
 pub const DEFAULT_PAGE_SIZE: i32 = 20;
 pub const SETTING_LOG_ENABLED: &str = "log_enabled";
@@ -73,6 +78,20 @@ pub struct EndpointSettings {
     pub base_url: String,
     pub generation_url: String,
     pub edit_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GptImageRequestOptions {
+    pub size: String,
+    pub quality: String,
+    pub background: String,
+    pub output_format: String,
+    pub output_compression: u8,
+    pub moderation: String,
+    pub input_fidelity: String,
+    pub stream: bool,
+    pub partial_images: u8,
+    pub image_count: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

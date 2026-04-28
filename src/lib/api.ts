@@ -16,6 +16,7 @@ import type {
   TrashSettings,
   AppFontSize,
   ImageModel,
+  ImageInputFidelity,
   EndpointSettings,
 } from "../types";
 
@@ -69,21 +70,31 @@ export async function generateImage(
     prompt: params.prompt,
     size: params.size,
     quality: params.quality,
+    background: params.background,
     outputFormat: params.outputFormat,
+    outputCompression: params.outputCompression,
+    moderation: params.moderation,
     imageCount: params.imageCount,
     conversationId: params.conversationId ?? null,
   });
 }
 
 export async function editImage(
-  params: GenerationParams & { sourceImagePaths: string[] },
+  params: GenerationParams & {
+    sourceImagePaths: string[];
+    inputFidelity?: ImageInputFidelity;
+  },
 ): Promise<GenerateResponse> {
   return invoke("edit_image", {
     prompt: params.prompt,
     sourceImagePaths: params.sourceImagePaths,
     size: params.size,
     quality: params.quality,
+    background: params.background,
+    inputFidelity: params.inputFidelity,
     outputFormat: params.outputFormat,
+    outputCompression: params.outputCompression,
+    moderation: params.moderation,
     imageCount: params.imageCount,
     conversationId: params.conversationId ?? null,
   });
