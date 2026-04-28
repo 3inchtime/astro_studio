@@ -40,14 +40,20 @@ export default function ImageGrid({
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className={isMultiImage ? "grid grid-cols-2 gap-3" : "inline-block"}
+      className={
+        isMultiImage
+          ? "grid grid-cols-2 gap-3"
+          : "inline-flex flex-col items-start"
+      }
     >
       {images.map((img, i) => (
-        <div key={img.path} className={isMultiImage ? "min-w-0" : "inline-block"}>
+        <div key={img.path} className={isMultiImage ? "min-w-0" : "w-fit"}>
           <div
             onClick={() => onImageClick(images, i)}
             className={`group relative cursor-pointer overflow-hidden rounded-[16px] bg-subtle/70 ${
-              isMultiImage ? "h-60 w-full" : "h-60 max-w-[min(72vw,32rem)]"
+              isMultiImage
+                ? "h-60 w-full"
+                : "inline-block h-72 w-fit max-w-[min(76vw,36rem)]"
             }`}
           >
             <img
@@ -61,7 +67,7 @@ export default function ImageGrid({
               loading="lazy"
             />
           </div>
-          <div className="flex items-center justify-center gap-1 mt-2">
+          <div className="mt-2 flex w-fit items-center justify-center gap-1 mx-auto">
             <button
               onClick={() => copyImageToClipboard(img.path)}
               className="p-2 rounded-full hover:bg-subtle text-muted hover:text-foreground transition-colors"
