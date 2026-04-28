@@ -1,19 +1,12 @@
 use crate::config::ApiConfig;
 use crate::models::*;
 use reqwest::multipart::{Form, Part};
-use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
 pub struct EngineImagesResult {
     pub images: Vec<Vec<u8>>,
     pub response_file: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum GptImageRequestKind {
-    Generate,
-    Edit,
 }
 
 #[cfg(test)]
@@ -126,39 +119,17 @@ fn build_edit_text_fields_with_controls(
     ]
 }
 
-fn with_302_image_query_defaults(endpoint_url: &str, kind: GptImageRequestKind) -> String {
-    let Ok(mut url) = reqwest::Url::parse(endpoint_url) else {
-        return endpoint_url.to_string();
-    };
-
-    let is_302_endpoint = url
-        .host_str()
-        .map(|host| host.eq("302.ai") || host.ends_with(".302.ai"))
-        .unwrap_or(false);
-    if !is_302_endpoint {
-        return endpoint_url.to_string();
-    }
-
-    let existing_keys = url
-        .query_pairs()
-        .map(|(key, _)| key.into_owned())
-        .collect::<HashSet<_>>();
-
-    {
-        let mut pairs = url.query_pairs_mut();
-        if !existing_keys.contains("response_format") {
-            pairs.append_pair("response_format", "url");
-        }
-        if kind == GptImageRequestKind::Generate && !existing_keys.contains("async") {
-            pairs.append_pair("async", "false");
-        }
-    }
-
-    url.to_string()
+fn image_endpoint_url(endpoint_url: &str) -> String {
+    endpoint_url.trim().to_string()
 }
 
 fn edit_image_part_field_name() -> &'static str {
     "image"
+}
+
+fn missing_image_count(requested: u8, received: usize) -> Option<u8> {
+    let requested = requested as usize;
+    (received < requested).then(|| (requested - received) as u8)
 }
 
 #[async_trait::async_trait]
@@ -250,7 +221,7 @@ impl ImageEngine for GptImageEngine {
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
-        let url = with_302_image_query_defaults(endpoint_url.trim(), GptImageRequestKind::Generate);
+        let url = image_endpoint_url(endpoint_url);
 
         if let Some(db) = db {
             let masked_key = if api_key.len() > 8 {
@@ -286,167 +257,189 @@ impl ImageEngine for GptImageEngine {
             return Err("API key not set".to_string());
         }
 
-        let request_body = build_generation_request_body_with_controls(
-            model,
-            prompt,
-            &options.size,
-            &options.quality,
-            &options.background,
-            &options.output_format,
-            options.output_compression,
-            &options.moderation,
-            options.stream,
-            options.partial_images,
-            options.image_count,
-        );
+        let mut images = Vec::with_capacity(options.image_count as usize);
+        let mut response_files = Vec::new();
 
-        log::info!(
-            "Sending image generation request to {} — model: {}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
-            url,
-            model,
-            options.size,
-            options.quality,
-            options.background,
-            options.output_format,
-            options.output_compression,
-            options.moderation,
-            options.stream,
-            options.partial_images,
-            options.image_count
-        );
+        while let Some(batch_count) = missing_image_count(options.image_count, images.len()) {
+            let mut batch_options = options.clone();
+            batch_options.image_count = batch_count;
 
-        let mut last_error = None;
+            let request_body = build_generation_request_body_with_controls(
+                model,
+                prompt,
+                &batch_options.size,
+                &batch_options.quality,
+                &batch_options.background,
+                &batch_options.output_format,
+                batch_options.output_compression,
+                &batch_options.moderation,
+                batch_options.stream,
+                batch_options.partial_images,
+                batch_options.image_count,
+            );
 
-        for attempt in 0..=self.max_retries {
-            let response = self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("Content-Type", "application/json")
-                .json(&request_body)
-                .send()
-                .await;
+            log::info!(
+                "Sending image generation request to {} — model: {}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
+                url,
+                model,
+                batch_options.size,
+                batch_options.quality,
+                batch_options.background,
+                batch_options.output_format,
+                batch_options.output_compression,
+                batch_options.moderation,
+                batch_options.stream,
+                batch_options.partial_images,
+                batch_options.image_count
+            );
 
-            let response = match response {
-                Ok(response) => response,
-                Err(e) => {
-                    let error = self.format_request_error(&url, &e, self.timeout_secs);
+            let mut last_error = None;
+            let mut batch_images = None;
+            let mut batch_response_file = None;
+
+            for attempt in 0..=self.max_retries {
+                let response = self
+                    .client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&request_body)
+                    .send()
+                    .await;
+
+                let response = match response {
+                    Ok(response) => response,
+                    Err(e) => {
+                        let error = self.format_request_error(&url, &e, self.timeout_secs);
+                        if let Some(db) = db {
+                            let _ = db.insert_log(
+                                "api_response", "error",
+                                &error,
+                                Some(generation_id),
+                                Some(&serde_json::json!({"attempt": attempt + 1, "max_retries": self.max_retries}).to_string()),
+                                None,
+                            );
+                        }
+                        if attempt < self.max_retries {
+                            log::warn!(
+                                "{}; retrying ({}/{})",
+                                error,
+                                attempt + 1,
+                                self.max_retries
+                            );
+                            last_error = Some(error);
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                };
+
+                let status = response.status();
+                let body_text = response
+                    .text()
+                    .await
+                    .map_err(|e| format!("Read body failed: {}", e))?;
+
+                if !status.is_success() {
+                    let response_file = self.write_response_body(log_dir, &body_text);
+                    let error = format!("API error {} from {}: {}", status, url, body_text);
+                    log::error!(
+                        "API error {} from {} — response preview: {}",
+                        status,
+                        url,
+                        Self::preview_text(&body_text, 500)
+                    );
                     if let Some(db) = db {
                         let _ = db.insert_log(
-                            "api_response", "error",
+                            "api_response",
+                            "error",
                             &error,
                             Some(generation_id),
-                            Some(&serde_json::json!({"attempt": attempt + 1, "max_retries": self.max_retries}).to_string()),
-                            None,
+                            Some(
+                                &serde_json::json!({
+                                    "url": &url,
+                                    "status": status.as_u16(),
+                                    "body_size": body_text.len(),
+                                    "body_preview": Self::preview_text(&body_text, 500),
+                                })
+                                .to_string(),
+                            ),
+                            response_file.as_deref(),
                         );
                     }
-                    if attempt < self.max_retries {
-                        log::warn!("{}; retrying ({}/{})", error, attempt + 1, self.max_retries);
+                    if status.is_server_error() && attempt < self.max_retries {
+                        log::warn!(
+                            "Retrying image generation ({}/{})",
+                            attempt + 1,
+                            self.max_retries
+                        );
                         last_error = Some(error);
                         continue;
                     }
                     return Err(error);
                 }
-            };
 
-            let status = response.status();
-            let body_text = response
-                .text()
-                .await
-                .map_err(|e| format!("Read body failed: {}", e))?;
+                log::info!("API responded {} ({} bytes)", status, body_text.len());
 
-            if !status.is_success() {
-                let response_file = self.write_response_body(log_dir, &body_text);
-                let error = format!("API error {} from {}: {}", status, url, body_text);
-                log::error!(
-                    "API error {} from {} — response preview: {}",
-                    status,
-                    url,
-                    Self::preview_text(&body_text, 500)
+                batch_response_file = self.log_response_body(
+                    db,
+                    log_dir,
+                    Some(generation_id),
+                    status.as_u16(),
+                    &body_text,
                 );
+
+                let decoded_images = self.decode_images_from_response(&body_text).await?;
+                log::info!("Decoded {} image(s) from response", decoded_images.len());
+                batch_images = Some(decoded_images);
+                break;
+            }
+
+            let batch_images = batch_images
+                .ok_or_else(|| last_error.unwrap_or_else(|| "Request failed".to_string()))?;
+            if let Some(response_file) = batch_response_file {
+                response_files.push(response_file);
+            }
+
+            let batch_image_count = batch_images.len();
+            Self::append_images_up_to_requested_count(
+                &mut images,
+                batch_images,
+                options.image_count,
+            );
+
+            if let Some(remaining) = missing_image_count(options.image_count, images.len()) {
+                let message = format!(
+                    "API returned {}/{} requested image(s) for this batch; requesting {} remaining image(s)",
+                    batch_image_count, batch_count, remaining
+                );
+                log::warn!("{}", message);
                 if let Some(db) = db {
                     let _ = db.insert_log(
-                        "api_response",
-                        "error",
-                        &error,
+                        "generation",
+                        "warn",
+                        &message,
                         Some(generation_id),
                         Some(
                             &serde_json::json!({
-                                "url": &url,
-                                "status": status.as_u16(),
-                                "body_size": body_text.len(),
-                                "body_preview": Self::preview_text(&body_text, 500),
+                                "batch_image_count": batch_image_count,
+                                "batch_requested_count": batch_count,
+                                "remaining_image_count": remaining,
+                                "requested_image_count": options.image_count,
                             })
                             .to_string(),
                         ),
-                        response_file.as_deref(),
+                        None,
                     );
                 }
-                if status.is_server_error() && attempt < self.max_retries {
-                    log::warn!(
-                        "Retrying image generation ({}/{})",
-                        attempt + 1,
-                        self.max_retries
-                    );
-                    last_error = Some(error);
-                    continue;
-                }
-                return Err(error);
             }
-
-            log::info!("API responded {} ({} bytes)", status, body_text.len());
-
-            let response_file = self.log_response_body(
-                db,
-                log_dir,
-                Some(generation_id),
-                status.as_u16(),
-                &body_text,
-            );
-
-            let api_response: OpenAiImageResponse =
-                serde_json::from_str(&body_text).map_err(|e| {
-                    format!(
-                        "Parse response failed: {}. Body: {}",
-                        e,
-                        &body_text[..body_text.len().min(300)]
-                    )
-                })?;
-
-            let mut images = Vec::new();
-            for data in &api_response.data {
-                if let Some(b64) = &data.b64_json {
-                    let bytes =
-                        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
-                            .map_err(|e| format!("Base64 decode failed: {}", e))?;
-                    images.push(bytes);
-                    continue;
-                }
-
-                if let Some(image_url) = &data.url {
-                    let bytes = self
-                        .download_image(image_url)
-                        .await
-                        .map_err(|e| format!("Download image failed: {}", e))?;
-                    images.push(bytes);
-                }
-            }
-
-            if images.is_empty() {
-                return Err(format!(
-                    "No images returned. Response: {}",
-                    &body_text[..body_text.len().min(500)]
-                ));
-            }
-
-            log::info!("Decoded {} image(s) from response", images.len());
-            return Ok(EngineImagesResult {
-                images,
-                response_file,
-            });
         }
 
-        Err(last_error.unwrap_or_else(|| "Request failed".to_string()))
+        let response_file = self.recoverable_response_file(log_dir, response_files, &images);
+        Ok(EngineImagesResult {
+            images,
+            response_file,
+        })
     }
 
     async fn edit(
@@ -461,7 +454,7 @@ impl ImageEngine for GptImageEngine {
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
-        let url = with_302_image_query_defaults(endpoint_url.trim(), GptImageRequestKind::Edit);
+        let url = image_endpoint_url(endpoint_url);
 
         if source_image_paths.is_empty() {
             return Err("At least one source image is required for editing.".to_string());
@@ -510,40 +503,94 @@ impl ImageEngine for GptImageEngine {
 
         let prepared_images = self.prepare_edit_images(source_image_paths).await?;
 
-        log::info!(
-            "Sending image edit request to {} — model: {}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
-            url,
-            model,
-            prepared_images.len(),
-            options.size,
-            options.quality,
-            options.background,
-            options.input_fidelity,
-            options.output_format,
-            options.output_compression,
-            options.moderation,
-            options.stream,
-            options.partial_images,
-            options.image_count
-        );
+        let mut images = Vec::with_capacity(options.image_count as usize);
+        let mut response_files = Vec::new();
 
-        let mut last_error = None;
+        while let Some(batch_count) = missing_image_count(options.image_count, images.len()) {
+            let mut batch_options = options.clone();
+            batch_options.image_count = batch_count;
 
-        for attempt in 0..=self.max_retries {
-            let form = self.build_edit_form(model, prompt, options, &prepared_images)?;
+            log::info!(
+                "Sending image edit request to {} — model: {}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
+                url,
+                model,
+                prepared_images.len(),
+                batch_options.size,
+                batch_options.quality,
+                batch_options.background,
+                batch_options.input_fidelity,
+                batch_options.output_format,
+                batch_options.output_compression,
+                batch_options.moderation,
+                batch_options.stream,
+                batch_options.partial_images,
+                batch_options.image_count
+            );
 
-            let response = self
-                .edit_client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .multipart(form)
-                .send()
-                .await;
+            let mut last_error = None;
+            let mut batch_images = None;
+            let mut batch_response_file = None;
 
-            let response = match response {
-                Ok(response) => response,
-                Err(e) => {
-                    let error = self.format_request_error(&url, &e, None);
+            for attempt in 0..=self.max_retries {
+                let form = self.build_edit_form(model, prompt, &batch_options, &prepared_images)?;
+
+                let response = self
+                    .edit_client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .multipart(form)
+                    .send()
+                    .await;
+
+                let response = match response {
+                    Ok(response) => response,
+                    Err(e) => {
+                        let error = self.format_request_error(&url, &e, None);
+                        if let Some(db) = db {
+                            let _ = db.insert_log(
+                                "api_response",
+                                "error",
+                                &error,
+                                Some(generation_id),
+                                Some(
+                                    &serde_json::json!({
+                                        "attempt": attempt + 1,
+                                        "max_retries": self.max_retries
+                                    })
+                                    .to_string(),
+                                ),
+                                None,
+                            );
+                        }
+                        if attempt < self.max_retries {
+                            log::warn!(
+                                "{}; retrying ({}/{})",
+                                error,
+                                attempt + 1,
+                                self.max_retries
+                            );
+                            last_error = Some(error);
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                };
+
+                let status = response.status();
+                let body_text = response
+                    .text()
+                    .await
+                    .map_err(|e| format!("Read body failed: {}", e))?;
+
+                if !status.is_success() {
+                    let response_file = self.write_response_body(log_dir, &body_text);
+                    let error = format!("API error {} from {}: {}", status, url, body_text);
+                    log::error!(
+                        "API error {} from {} — response preview: {}",
+                        status,
+                        url,
+                        Self::preview_text(&body_text, 500)
+                    );
                     if let Some(db) = db {
                         let _ = db.insert_log(
                             "api_response",
@@ -552,87 +599,126 @@ impl ImageEngine for GptImageEngine {
                             Some(generation_id),
                             Some(
                                 &serde_json::json!({
-                                    "attempt": attempt + 1,
-                                    "max_retries": self.max_retries
+                                    "url": &url,
+                                    "status": status.as_u16(),
+                                    "body_size": body_text.len(),
+                                    "body_preview": Self::preview_text(&body_text, 500),
                                 })
                                 .to_string(),
                             ),
-                            None,
+                            response_file.as_deref(),
                         );
                     }
-                    if attempt < self.max_retries {
-                        log::warn!("{}; retrying ({}/{})", error, attempt + 1, self.max_retries);
+                    if status.is_server_error() && attempt < self.max_retries {
+                        log::warn!("Retrying image edit ({}/{})", attempt + 1, self.max_retries);
                         last_error = Some(error);
                         continue;
                     }
                     return Err(error);
                 }
-            };
 
-            let status = response.status();
-            let body_text = response
-                .text()
-                .await
-                .map_err(|e| format!("Read body failed: {}", e))?;
+                log::info!("API responded {} ({} bytes)", status, body_text.len());
 
-            if !status.is_success() {
-                let response_file = self.write_response_body(log_dir, &body_text);
-                let error = format!("API error {} from {}: {}", status, url, body_text);
-                log::error!(
-                    "API error {} from {} — response preview: {}",
-                    status,
-                    url,
-                    Self::preview_text(&body_text, 500)
+                batch_response_file = self.log_response_body(
+                    db,
+                    log_dir,
+                    Some(generation_id),
+                    status.as_u16(),
+                    &body_text,
                 );
+
+                let decoded_images = self.decode_images_from_response(&body_text).await?;
+                log::info!(
+                    "Decoded {} image(s) from edit response",
+                    decoded_images.len()
+                );
+                batch_images = Some(decoded_images);
+                break;
+            }
+
+            let batch_images = batch_images
+                .ok_or_else(|| last_error.unwrap_or_else(|| "Request failed".to_string()))?;
+            if let Some(response_file) = batch_response_file {
+                response_files.push(response_file);
+            }
+
+            let batch_image_count = batch_images.len();
+            Self::append_images_up_to_requested_count(
+                &mut images,
+                batch_images,
+                options.image_count,
+            );
+
+            if let Some(remaining) = missing_image_count(options.image_count, images.len()) {
+                let message = format!(
+                    "API returned {}/{} requested image(s) for this edit batch; requesting {} remaining image(s)",
+                    batch_image_count, batch_count, remaining
+                );
+                log::warn!("{}", message);
                 if let Some(db) = db {
                     let _ = db.insert_log(
-                        "api_response",
-                        "error",
-                        &error,
+                        "generation",
+                        "warn",
+                        &message,
                         Some(generation_id),
                         Some(
                             &serde_json::json!({
-                                "url": &url,
-                                "status": status.as_u16(),
-                                "body_size": body_text.len(),
-                                "body_preview": Self::preview_text(&body_text, 500),
+                                "batch_image_count": batch_image_count,
+                                "batch_requested_count": batch_count,
+                                "remaining_image_count": remaining,
+                                "requested_image_count": options.image_count,
                             })
                             .to_string(),
                         ),
-                        response_file.as_deref(),
+                        None,
                     );
                 }
-                if status.is_server_error() && attempt < self.max_retries {
-                    log::warn!("Retrying image edit ({}/{})", attempt + 1, self.max_retries);
-                    last_error = Some(error);
-                    continue;
-                }
-                return Err(error);
             }
-
-            log::info!("API responded {} ({} bytes)", status, body_text.len());
-
-            let response_file = self.log_response_body(
-                db,
-                log_dir,
-                Some(generation_id),
-                status.as_u16(),
-                &body_text,
-            );
-
-            let images = self.decode_images_from_response(&body_text).await?;
-            log::info!("Decoded {} image(s) from edit response", images.len());
-            return Ok(EngineImagesResult {
-                images,
-                response_file,
-            });
         }
 
-        Err(last_error.unwrap_or_else(|| "Request failed".to_string()))
+        let response_file = self.recoverable_response_file(log_dir, response_files, &images);
+        Ok(EngineImagesResult {
+            images,
+            response_file,
+        })
     }
 }
 
 impl GptImageEngine {
+    fn append_images_up_to_requested_count(
+        images: &mut Vec<Vec<u8>>,
+        batch_images: Vec<Vec<u8>>,
+        requested_count: u8,
+    ) {
+        let remaining = (requested_count as usize).saturating_sub(images.len());
+        images.extend(batch_images.into_iter().take(remaining));
+    }
+
+    fn recoverable_response_file(
+        &self,
+        log_dir: Option<&std::path::Path>,
+        response_files: Vec<String>,
+        images: &[Vec<u8>],
+    ) -> Option<String> {
+        if response_files.len() <= 1 {
+            return response_files.into_iter().next();
+        }
+
+        let data = images
+            .iter()
+            .map(|bytes| {
+                serde_json::json!({
+                    "b64_json": base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        bytes
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let body_text = serde_json::json!({ "data": data }).to_string();
+        self.write_response_body(log_dir, &body_text)
+    }
+
     fn format_request_error(
         &self,
         fallback_url: &str,
@@ -965,41 +1051,27 @@ mod tests {
     }
 
     #[test]
-    fn gpt_image_302_urls_receive_sync_url_response_defaults() {
+    fn image_endpoint_urls_are_left_unchanged_for_every_base_url() {
         assert_eq!(
-            with_302_image_query_defaults(
-                "https://api.302.ai/v1/images/generations",
-                GptImageRequestKind::Generate
-            ),
-            "https://api.302.ai/v1/images/generations?response_format=url&async=false"
+            image_endpoint_url("https://api.302.ai/v1/images/generations"),
+            "https://api.302.ai/v1/images/generations"
         );
         assert_eq!(
-            with_302_image_query_defaults(
-                "https://api.302.ai/v1/images/edits",
-                GptImageRequestKind::Edit
-            ),
-            "https://api.302.ai/v1/images/edits?response_format=url"
+            image_endpoint_url("https://api.302.ai/v1/images/edits"),
+            "https://api.302.ai/v1/images/edits"
         );
-    }
-
-    #[test]
-    fn gpt_image_302_url_defaults_preserve_existing_query_values() {
         assert_eq!(
-            with_302_image_query_defaults(
-                "https://api.302.ai/v1/images/generations?response_format=b64_json&async=true",
-                GptImageRequestKind::Generate
+            image_endpoint_url("https://new.suxi.ai/v1/images/generations"),
+            "https://new.suxi.ai/v1/images/generations"
+        );
+        assert_eq!(
+            image_endpoint_url(
+                "https://api.302.ai/v1/images/generations?response_format=b64_json&async=true"
             ),
             "https://api.302.ai/v1/images/generations?response_format=b64_json&async=true"
         );
-    }
-
-    #[test]
-    fn non_302_urls_are_left_unchanged() {
         assert_eq!(
-            with_302_image_query_defaults(
-                "https://api.openai.com/v1/images/generations",
-                GptImageRequestKind::Generate
-            ),
+            image_endpoint_url("https://api.openai.com/v1/images/generations"),
             "https://api.openai.com/v1/images/generations"
         );
     }
@@ -1007,5 +1079,13 @@ mod tests {
     #[test]
     fn edit_image_parts_use_documented_image_field_name_for_every_source() {
         assert_eq!(edit_image_part_field_name(), "image");
+    }
+
+    #[test]
+    fn missing_image_count_requests_only_the_remaining_images() {
+        assert_eq!(missing_image_count(2, 0), Some(2));
+        assert_eq!(missing_image_count(2, 1), Some(1));
+        assert_eq!(missing_image_count(2, 2), None);
+        assert_eq!(missing_image_count(2, 3), None);
     }
 }
