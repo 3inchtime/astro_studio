@@ -1,6 +1,7 @@
 use crate::config::ApiConfig;
 use crate::models::*;
 use reqwest::multipart::{Form, Part};
+use serde_json::Value;
 use std::path::Path;
 use std::time::Duration;
 
@@ -123,6 +124,18 @@ fn image_endpoint_url(endpoint_url: &str) -> String {
     endpoint_url.trim().to_string()
 }
 
+fn is_gemini_model(model: &str) -> bool {
+    matches!(
+        model,
+        ENGINE_NANO_BANANA
+            | ENGINE_NANO_BANANA_2
+            | ENGINE_NANO_BANANA_PRO
+            | GEMINI_MODEL_NANO_BANANA
+            | GEMINI_MODEL_NANO_BANANA_2
+            | GEMINI_MODEL_NANO_BANANA_PRO
+    )
+}
+
 fn edit_image_part_field_name() -> &'static str {
     "image"
 }
@@ -130,6 +143,104 @@ fn edit_image_part_field_name() -> &'static str {
 fn missing_image_count(requested: u8, received: usize) -> Option<u8> {
     let requested = requested as usize;
     (received < requested).then(|| (requested - received) as u8)
+}
+
+struct GeminiInlineImage {
+    mime_type: String,
+    data: String,
+}
+
+fn gemini_aspect_ratio_for_size(size: &str) -> Option<&'static str> {
+    match size {
+        "1024x1024" => Some("1:1"),
+        "1536x1024" => Some("3:2"),
+        "1024x1536" => Some("2:3"),
+        _ => None,
+    }
+}
+
+fn gemini_output_mime_type(output_format: &str) -> &'static str {
+    match output_format {
+        "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
+    }
+}
+
+fn build_gemini_request_body(
+    prompt: &str,
+    inline_images: &[GeminiInlineImage],
+    options: &GptImageRequestOptions,
+) -> Value {
+    let mut parts = vec![serde_json::json!({ "text": prompt })];
+    for image in inline_images {
+        parts.push(serde_json::json!({
+            "inlineData": {
+                "mimeType": image.mime_type,
+                "data": image.data,
+            }
+        }));
+    }
+
+    let mut generation_config = serde_json::Map::new();
+    generation_config.insert(
+        "responseModalities".to_string(),
+        serde_json::json!(["TEXT", "IMAGE"]),
+    );
+    generation_config.insert(
+        "candidateCount".to_string(),
+        serde_json::json!(options.image_count),
+    );
+
+    let mut image_config = serde_json::Map::new();
+    if let Some(aspect_ratio) = gemini_aspect_ratio_for_size(&options.size) {
+        image_config.insert("aspectRatio".to_string(), serde_json::json!(aspect_ratio));
+    }
+    image_config.insert(
+        "outputMimeType".to_string(),
+        serde_json::json!(gemini_output_mime_type(&options.output_format)),
+    );
+    generation_config.insert("imageConfig".to_string(), Value::Object(image_config));
+
+    serde_json::json!({
+        "contents": [{ "parts": parts }],
+        "generationConfig": Value::Object(generation_config),
+    })
+}
+
+fn parse_gemini_images(response: &Value) -> Result<Vec<Vec<u8>>, String> {
+    let mut images = Vec::new();
+
+    if let Some(candidates) = response.get("candidates").and_then(Value::as_array) {
+        for candidate in candidates {
+            if let Some(parts) = candidate
+                .get("content")
+                .and_then(|content| content.get("parts"))
+                .and_then(Value::as_array)
+            {
+                for part in parts {
+                    if let Some(data) = part
+                        .get("inlineData")
+                        .and_then(|inline| inline.get("data"))
+                        .and_then(Value::as_str)
+                    {
+                        let bytes = base64::Engine::decode(
+                            &base64::engine::general_purpose::STANDARD,
+                            data,
+                        )
+                        .map_err(|e| format!("Base64 decode failed: {}", e))?;
+                        images.push(bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    if images.is_empty() {
+        return Err("Gemini response did not include any image data".to_string());
+    }
+
+    Ok(images)
 }
 
 #[async_trait::async_trait]
@@ -221,6 +332,22 @@ impl ImageEngine for GptImageEngine {
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
+        if is_gemini_model(model) {
+            return self
+                .request_gemini_images(
+                    generation_id,
+                    model,
+                    api_key,
+                    endpoint_url,
+                    prompt,
+                    &[],
+                    options,
+                    db,
+                    log_dir,
+                )
+                .await;
+        }
+
         let url = image_endpoint_url(endpoint_url);
 
         if let Some(db) = db {
@@ -454,6 +581,27 @@ impl ImageEngine for GptImageEngine {
         db: Option<&crate::db::Database>,
         log_dir: Option<&std::path::Path>,
     ) -> Result<EngineImagesResult, String> {
+        if is_gemini_model(model) {
+            if source_image_paths.is_empty() {
+                return Err("At least one source image is required for editing.".to_string());
+            }
+
+            let prepared_images = self.prepare_edit_images(source_image_paths).await?;
+            return self
+                .request_gemini_images(
+                    generation_id,
+                    model,
+                    api_key,
+                    endpoint_url,
+                    prompt,
+                    &prepared_images,
+                    options,
+                    db,
+                    log_dir,
+                )
+                .await;
+        }
+
         let url = image_endpoint_url(endpoint_url);
 
         if source_image_paths.is_empty() {
@@ -685,6 +833,184 @@ impl ImageEngine for GptImageEngine {
 }
 
 impl GptImageEngine {
+    async fn request_gemini_images(
+        &self,
+        generation_id: &str,
+        model: &str,
+        api_key: &str,
+        endpoint_url: &str,
+        prompt: &str,
+        source_images: &[PreparedEditImage],
+        options: &GptImageRequestOptions,
+        db: Option<&crate::db::Database>,
+        log_dir: Option<&std::path::Path>,
+    ) -> Result<EngineImagesResult, String> {
+        let url = image_endpoint_url(endpoint_url);
+
+        if let Some(db) = db {
+            let masked_key = if api_key.len() > 8 {
+                format!("{}...{}", &api_key[..3], &api_key[api_key.len() - 4..])
+            } else {
+                "sk-****".to_string()
+            };
+            let req_meta = serde_json::json!({
+                "url": &url,
+                "model": model,
+                "source_image_count": source_images.len(),
+                "size": &options.size,
+                "quality": &options.quality,
+                "background": &options.background,
+                "output_format": &options.output_format,
+                "output_compression": options.output_compression,
+                "moderation": &options.moderation,
+                "image_count": options.image_count,
+                "api_key": masked_key,
+            });
+            let _ = db.insert_log(
+                "api_request",
+                "info",
+                &format!(
+                    "POST {} — Gemini model: {}, source_images: {}",
+                    url,
+                    model,
+                    source_images.len()
+                ),
+                Some(generation_id),
+                Some(&req_meta.to_string()),
+                None,
+            );
+        }
+
+        if api_key.is_empty() {
+            return Err("API key not set".to_string());
+        }
+
+        let mut images = Vec::with_capacity(options.image_count as usize);
+        let mut response_files = Vec::new();
+
+        while let Some(batch_count) = missing_image_count(options.image_count, images.len()) {
+            let mut batch_options = options.clone();
+            batch_options.image_count = batch_count;
+            let inline_images = source_images
+                .iter()
+                .map(|image| GeminiInlineImage {
+                    mime_type: image.mime_type.clone(),
+                    data: base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        &image.bytes,
+                    ),
+                })
+                .collect::<Vec<_>>();
+            let request_body = build_gemini_request_body(prompt, &inline_images, &batch_options);
+
+            let mut last_error = None;
+            let mut batch_images = None;
+            let mut batch_response_file = None;
+
+            for attempt in 0..=self.max_retries {
+                let response = self
+                    .client
+                    .post(&url)
+                    .header("x-goog-api-key", api_key)
+                    .header("Content-Type", "application/json")
+                    .json(&request_body)
+                    .send()
+                    .await;
+
+                let response = match response {
+                    Ok(response) => response,
+                    Err(e) => {
+                        let error = self.format_request_error(&url, &e, self.timeout_secs);
+                        if let Some(db) = db {
+                            let _ = db.insert_log(
+                                "api_response",
+                                "error",
+                                &error,
+                                Some(generation_id),
+                                Some(
+                                    &serde_json::json!({
+                                        "attempt": attempt + 1,
+                                        "max_retries": self.max_retries
+                                    })
+                                    .to_string(),
+                                ),
+                                None,
+                            );
+                        }
+                        if attempt < self.max_retries {
+                            last_error = Some(error);
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                };
+
+                let status = response.status();
+                let body_text = response
+                    .text()
+                    .await
+                    .map_err(|e| format!("Read body failed: {}", e))?;
+
+                if !status.is_success() {
+                    let response_file = self.write_response_body(log_dir, &body_text);
+                    let error = format!("API error {} from {}: {}", status, url, body_text);
+                    if let Some(db) = db {
+                        let _ = db.insert_log(
+                            "api_response",
+                            "error",
+                            &error,
+                            Some(generation_id),
+                            Some(
+                                &serde_json::json!({
+                                    "url": &url,
+                                    "status": status.as_u16(),
+                                    "body_size": body_text.len(),
+                                    "body_preview": Self::preview_text(&body_text, 500),
+                                })
+                                .to_string(),
+                            ),
+                            response_file.as_deref(),
+                        );
+                    }
+                    if status.is_server_error() && attempt < self.max_retries {
+                        last_error = Some(error);
+                        continue;
+                    }
+                    return Err(error);
+                }
+
+                batch_response_file = self.log_response_body(
+                    db,
+                    log_dir,
+                    Some(generation_id),
+                    status.as_u16(),
+                    &body_text,
+                );
+                let decoded_images = self.decode_images_from_response(&body_text).await?;
+                batch_images = Some(decoded_images);
+                break;
+            }
+
+            let batch_images = batch_images
+                .ok_or_else(|| last_error.unwrap_or_else(|| "Request failed".to_string()))?;
+            if let Some(response_file) = batch_response_file {
+                response_files.push(response_file);
+            }
+
+            Self::append_images_up_to_requested_count(
+                &mut images,
+                batch_images,
+                options.image_count,
+            );
+        }
+
+        let response_file = self.recoverable_response_file(log_dir, response_files, &images);
+        Ok(EngineImagesResult {
+            images,
+            response_file,
+        })
+    }
+
     fn append_images_up_to_requested_count(
         images: &mut Vec<Vec<u8>>,
         batch_images: Vec<Vec<u8>>,
@@ -857,7 +1183,32 @@ impl GptImageEngine {
         &self,
         body_text: &str,
     ) -> Result<Vec<Vec<u8>>, String> {
-        let api_response: OpenAiImageResponse = serde_json::from_str(body_text).map_err(|e| {
+        if let Ok(api_response) = serde_json::from_str::<OpenAiImageResponse>(body_text) {
+            let mut images = Vec::new();
+            for data in &api_response.data {
+                if let Some(b64) = &data.b64_json {
+                    let bytes =
+                        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+                            .map_err(|e| format!("Base64 decode failed: {}", e))?;
+                    images.push(bytes);
+                    continue;
+                }
+
+                if let Some(image_url) = &data.url {
+                    let bytes = self
+                        .download_image(image_url)
+                        .await
+                        .map_err(|e| format!("Download image failed: {}", e))?;
+                    images.push(bytes);
+                }
+            }
+
+            if !images.is_empty() {
+                return Ok(images);
+            }
+        }
+
+        let value: Value = serde_json::from_str(body_text).map_err(|e| {
             format!(
                 "Parse response failed: {}. Body: {}",
                 e,
@@ -865,32 +1216,13 @@ impl GptImageEngine {
             )
         })?;
 
-        let mut images = Vec::new();
-        for data in &api_response.data {
-            if let Some(b64) = &data.b64_json {
-                let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
-                    .map_err(|e| format!("Base64 decode failed: {}", e))?;
-                images.push(bytes);
-                continue;
-            }
-
-            if let Some(image_url) = &data.url {
-                let bytes = self
-                    .download_image(image_url)
-                    .await
-                    .map_err(|e| format!("Download image failed: {}", e))?;
-                images.push(bytes);
-            }
-        }
-
-        if images.is_empty() {
-            return Err(format!(
-                "No images returned. Response: {}",
+        parse_gemini_images(&value).map_err(|error| {
+            format!(
+                "{}. Response: {}",
+                error,
                 &body_text[..body_text.len().min(500)]
-            ));
-        }
-
-        Ok(images)
+            )
+        })
     }
 
     async fn prepare_edit_images(
@@ -980,6 +1312,7 @@ fn mime_type_for_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -1087,5 +1420,55 @@ mod tests {
         assert_eq!(missing_image_count(2, 1), Some(1));
         assert_eq!(missing_image_count(2, 2), None);
         assert_eq!(missing_image_count(2, 3), None);
+    }
+
+    #[test]
+    fn builds_gemini_generate_request_body() {
+        let body = build_gemini_request_body(
+            "Draw a striped glass tiger",
+            &[],
+            &GptImageRequestOptions {
+                size: DEFAULT_IMAGE_SIZE.to_string(),
+                quality: DEFAULT_IMAGE_QUALITY.to_string(),
+                background: DEFAULT_IMAGE_BACKGROUND.to_string(),
+                output_format: DEFAULT_OUTPUT_FORMAT.to_string(),
+                output_compression: DEFAULT_OUTPUT_COMPRESSION,
+                moderation: DEFAULT_IMAGE_MODERATION.to_string(),
+                input_fidelity: DEFAULT_INPUT_FIDELITY.to_string(),
+                stream: DEFAULT_IMAGE_STREAM,
+                partial_images: DEFAULT_PARTIAL_IMAGES,
+                image_count: 2,
+            },
+        );
+
+        assert_eq!(
+            body["contents"][0]["parts"][0]["text"],
+            "Draw a striped glass tiger"
+        );
+        assert_eq!(body["generationConfig"]["candidateCount"], 2);
+        assert_eq!(
+            body["generationConfig"]["responseModalities"],
+            json!(["TEXT", "IMAGE"])
+        );
+    }
+
+    #[test]
+    fn parses_gemini_inline_image_response() {
+        let response = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "inlineData": {
+                            "mimeType": "image/png",
+                            "data": base64::engine::general_purpose::STANDARD.encode(b"png-bytes"),
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let images = parse_gemini_images(&response).unwrap();
+
+        assert_eq!(images, vec![b"png-bytes".to_vec()]);
     }
 }

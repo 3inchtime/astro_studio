@@ -2,11 +2,11 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
-  saveApiKey, getApiKey,
   getLogs, clearLogs, getLogSettings, saveLogSettings,
   readLogResponseFile, getTrashSettings, saveTrashSettings,
   getFontSize, getImageModel, saveFontSize, saveImageModel,
-  getRuntimeLogs, onRuntimeLog, getEndpointSettings, saveEndpointSettings,
+  getRuntimeLogs, onRuntimeLog, getModelApiKey, getModelEndpointSettings,
+  saveModelApiKey, saveModelEndpointSettings,
 } from "../lib/api";
 import {
   Check, Cpu, Eye, EyeOff, Globe, Key, Languages, SlidersHorizontal,
@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type {
   AppFontSize,
+  EndpointSettings,
   EndpointMode,
   ImageModel,
   LogEntry,
@@ -27,17 +28,68 @@ import {
   applyAppFontSize,
   getStoredAppFontSize,
 } from "../lib/fontSize";
+import {
+  IMAGE_MODEL_CATALOG,
+  getImageModelCatalogEntry,
+} from "../lib/modelCatalog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_GENERATION_URL = "https://api.openai.com/v1/images/generations";
-const DEFAULT_EDIT_URL = "https://api.openai.com/v1/images/edits";
+const DEFAULT_MODEL: ImageModel = "gpt-image-2";
+const DEFAULT_MODEL_ENTRY = getImageModelCatalogEntry(DEFAULT_MODEL);
 const FONT_SIZE_LABEL_KEYS: Record<AppFontSize, string> = {
   small: "settings.fontSizeSmall",
   medium: "settings.fontSizeMedium",
   large: "settings.fontSizeLarge",
 };
-const IMAGE_MODEL_OPTIONS: ImageModel[] = ["gpt-image-2"];
+
+function defaultBaseUrlForModel(model: ImageModel): string {
+  return getImageModelCatalogEntry(model).connectionDefaults.baseUrl;
+}
+
+function defaultGenerationUrlForModel(model: ImageModel): string {
+  return getImageModelCatalogEntry(model).connectionDefaults.generationUrl;
+}
+
+function defaultEditUrlForModel(model: ImageModel): string {
+  return getImageModelCatalogEntry(model).connectionDefaults.editUrl;
+}
+
+function defaultEndpointSettingsForModel(model: ImageModel): EndpointSettings {
+  return {
+    mode: "base_url",
+    base_url: defaultBaseUrlForModel(model),
+    generation_url: defaultGenerationUrlForModel(model),
+    edit_url: defaultEditUrlForModel(model),
+  };
+}
+
+function modelSupportsEdit(model: ImageModel): boolean {
+  return getImageModelCatalogEntry(model).supportsEdit;
+}
+
+function usesSharedEditEndpoint(model: ImageModel): boolean {
+  const { generationUrl, editUrl } = getImageModelCatalogEntry(model).connectionDefaults;
+
+  return generationUrl === editUrl;
+}
+
+function normalizeEndpointSettings(
+  model: ImageModel,
+  settings: EndpointSettings,
+): EndpointSettings {
+  const defaults = defaultEndpointSettingsForModel(model);
+  const generationUrl = settings.generation_url.trim() || defaults.generation_url;
+  const editUrl = !modelSupportsEdit(model) || usesSharedEditEndpoint(model)
+    ? generationUrl
+    : settings.edit_url.trim() || defaults.edit_url;
+
+  return {
+    mode: settings.mode,
+    base_url: settings.base_url.trim() || defaults.base_url,
+    generation_url: generationUrl,
+    edit_url: editUrl,
+  };
+}
 
 const cardVariants = {
   hidden: { opacity: 0, y: 10, scale: 0.98 },
@@ -178,11 +230,13 @@ export default function SettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [endpointMode, setEndpointMode] = useState<EndpointMode>("base_url");
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
-  const [generationUrl, setGenerationUrl] = useState(DEFAULT_GENERATION_URL);
-  const [editUrl, setEditUrl] = useState(DEFAULT_EDIT_URL);
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_MODEL_ENTRY.connectionDefaults.baseUrl);
+  const [generationUrl, setGenerationUrl] = useState(
+    DEFAULT_MODEL_ENTRY.connectionDefaults.generationUrl,
+  );
+  const [editUrl, setEditUrl] = useState(DEFAULT_MODEL_ENTRY.connectionDefaults.editUrl);
   const [urlSaved, setUrlSaved] = useState(false);
-  const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
+  const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_MODEL);
   const [modelSaved, setModelSaved] = useState(false);
   const { t, i18n } = useTranslation();
   const [language, setLanguage] = useState(i18n.language);
@@ -207,18 +261,28 @@ export default function SettingsPage() {
   const [clearingLogs, setClearingLogs] = useState(false);
   const runtimeLogsRef = useRef<HTMLDivElement | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const imageModelRef = useRef(imageModel);
+  const didUserSelectModelRef = useRef(false);
 
   const pageSize = 20;
 
   useEffect(() => {
-    getApiKey().then((key) => { if (key) setApiKey(key); });
-    getEndpointSettings().then((settings) => {
-      setEndpointMode(settings.mode);
-      setBaseUrl(settings.base_url);
-      setGenerationUrl(settings.generation_url);
-      setEditUrl(settings.edit_url);
+    imageModelRef.current = imageModel;
+  }, [imageModel]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getImageModel().then((model) => {
+      if (cancelled || didUserSelectModelRef.current) {
+        return;
+      }
+
+      setImageModel(model);
+    }).catch(() => {
+      // Ignore persisted model load failures and keep catalog default.
     });
-    getImageModel().then((model) => setImageModel(model));
+
     getFontSize().then((size) => {
       setFontSize(size);
       applyAppFontSize(size);
@@ -227,7 +291,66 @@ export default function SettingsPage() {
       setFontSize(storedFontSize);
       applyAppFontSize(storedFontSize);
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setApiKey("");
+    setShowKey(false);
+    setEndpointMode("base_url");
+    setBaseUrl(defaultBaseUrlForModel(imageModel));
+    setGenerationUrl(defaultGenerationUrlForModel(imageModel));
+    setEditUrl(defaultEditUrlForModel(imageModel));
+
+    getModelApiKey(imageModel).then((key) => {
+      if (cancelled) {
+        return;
+      }
+
+      setApiKey(key ?? "");
+      setShowKey(false);
+    }).catch(() => {
+      if (cancelled) {
+        return;
+      }
+
+      setApiKey("");
+      setShowKey(false);
+    });
+
+    getModelEndpointSettings(imageModel).then((settings) => {
+      if (cancelled) {
+        return;
+      }
+
+      const normalizedSettings = normalizeEndpointSettings(imageModel, settings);
+
+      setEndpointMode(normalizedSettings.mode);
+      setBaseUrl(normalizedSettings.base_url);
+      setGenerationUrl(normalizedSettings.generation_url);
+      setEditUrl(normalizedSettings.edit_url);
+    }).catch(() => {
+      if (cancelled) {
+        return;
+      }
+
+      const defaultSettings = defaultEndpointSettingsForModel(imageModel);
+
+      setEndpointMode(defaultSettings.mode);
+      setBaseUrl(defaultSettings.base_url);
+      setGenerationUrl(defaultSettings.generation_url);
+      setEditUrl(defaultSettings.edit_url);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageModel]);
 
   useEffect(() => {
     getLogSettings().then(setLogSettings);
@@ -299,22 +422,36 @@ export default function SettingsPage() {
   }
 
   async function handleSaveKey() {
-    await saveApiKey(apiKey);
+    const modelAtSaveStart = imageModel;
+
+    await saveModelApiKey(modelAtSaveStart, apiKey);
+    if (imageModelRef.current !== modelAtSaveStart) {
+      return;
+    }
+
     setShowKey(false);
     setKeySaved(true);
     setTimeout(() => setKeySaved(false), 2000);
   }
 
   async function handleSaveUrl() {
-    const nextBaseUrl = baseUrl.trim() || DEFAULT_BASE_URL;
-    const nextGenerationUrl = generationUrl.trim() || DEFAULT_GENERATION_URL;
-    const nextEditUrl = editUrl.trim() || DEFAULT_EDIT_URL;
-    await saveEndpointSettings({
+    const modelAtSaveStart = imageModel;
+    const nextBaseUrl = baseUrl.trim() || defaultBaseUrlForModel(imageModel);
+    const nextGenerationUrl =
+      generationUrl.trim() || defaultGenerationUrlForModel(imageModel);
+    const nextEditUrl = !modelSupportsEdit(imageModel) || usesSharedEditEndpoint(imageModel)
+      ? nextGenerationUrl
+      : editUrl.trim() || defaultEditUrlForModel(imageModel);
+    await saveModelEndpointSettings(modelAtSaveStart, {
       mode: endpointMode,
       base_url: nextBaseUrl,
       generation_url: nextGenerationUrl,
       edit_url: nextEditUrl,
     });
+    if (imageModelRef.current !== modelAtSaveStart) {
+      return;
+    }
+
     setBaseUrl(nextBaseUrl);
     setGenerationUrl(nextGenerationUrl);
     setEditUrl(nextEditUrl);
@@ -589,13 +726,16 @@ export default function SettingsPage() {
                       <select
                         value={imageModel}
                         onChange={(e) => {
+                          didUserSelectModelRef.current = true;
                           setImageModel(e.target.value as ImageModel);
                           setModelSaved(false);
+                          setKeySaved(false);
+                          setUrlSaved(false);
                         }}
                         className="h-[38px] w-full appearance-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                       >
-                        {IMAGE_MODEL_OPTIONS.map((model) => (
-                          <option key={model} value={model}>{model}</option>
+                        {IMAGE_MODEL_CATALOG.map(({ id, label }) => (
+                          <option key={id} value={id}>{label}</option>
                         ))}
                       </select>
                       <motion.button
@@ -688,7 +828,7 @@ export default function SettingsPage() {
                           type="text"
                           value={baseUrl}
                           onChange={(e) => { setBaseUrl(e.target.value); setUrlSaved(false); }}
-                          placeholder={DEFAULT_BASE_URL}
+                          placeholder={defaultBaseUrlForModel(imageModel)}
                           className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                         />
                       ) : (
@@ -699,20 +839,22 @@ export default function SettingsPage() {
                               type="text"
                               value={generationUrl}
                               onChange={(e) => { setGenerationUrl(e.target.value); setUrlSaved(false); }}
-                              placeholder={DEFAULT_GENERATION_URL}
+                              placeholder={defaultGenerationUrlForModel(imageModel)}
                               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                             />
                           </label>
-                          <label className="grid gap-1.5">
-                            <span className="text-[11px] font-medium text-muted/70">{t("settings.editUrl")}</span>
-                            <input
-                              type="text"
-                              value={editUrl}
-                              onChange={(e) => { setEditUrl(e.target.value); setUrlSaved(false); }}
-                              placeholder={DEFAULT_EDIT_URL}
-                              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
-                            />
-                          </label>
+                          {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
+                            <label className="grid gap-1.5">
+                              <span className="text-[11px] font-medium text-muted/70">{t("settings.editUrl")}</span>
+                              <input
+                                type="text"
+                                value={editUrl}
+                                onChange={(e) => { setEditUrl(e.target.value); setUrlSaved(false); }}
+                                placeholder={defaultEditUrlForModel(imageModel)}
+                                className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                              />
+                            </label>
+                          )}
                         </div>
                       )}
 

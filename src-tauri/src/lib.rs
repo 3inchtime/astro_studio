@@ -53,7 +53,26 @@ fn normalize_font_size(font_size: &str) -> &'static str {
 fn normalize_image_model(model: &str) -> &'static str {
     match model {
         ENGINE_GPT_IMAGE_2 => ENGINE_GPT_IMAGE_2,
+        ENGINE_NANO_BANANA | GEMINI_MODEL_NANO_BANANA => ENGINE_NANO_BANANA,
+        ENGINE_NANO_BANANA_2 | GEMINI_MODEL_NANO_BANANA_2 => ENGINE_NANO_BANANA_2,
+        ENGINE_NANO_BANANA_PRO | GEMINI_MODEL_NANO_BANANA_PRO => ENGINE_NANO_BANANA_PRO,
         _ => DEFAULT_IMAGE_MODEL,
+    }
+}
+
+fn is_gemini_model(model: &str) -> bool {
+    matches!(
+        normalize_image_model(model),
+        ENGINE_NANO_BANANA | ENGINE_NANO_BANANA_2 | ENGINE_NANO_BANANA_PRO
+    )
+}
+
+fn gemini_provider_model_id(model: &str) -> &'static str {
+    match normalize_image_model(model) {
+        ENGINE_NANO_BANANA => GEMINI_MODEL_NANO_BANANA,
+        ENGINE_NANO_BANANA_2 => GEMINI_MODEL_NANO_BANANA_2,
+        ENGINE_NANO_BANANA_PRO => GEMINI_MODEL_NANO_BANANA_PRO,
+        _ => GEMINI_MODEL_NANO_BANANA,
     }
 }
 
@@ -104,6 +123,22 @@ fn image_request_options(
     }
 }
 
+fn sanitize_request_options_for_model(
+    model: &str,
+    mut options: GptImageRequestOptions,
+) -> GptImageRequestOptions {
+    if is_gemini_model(model) {
+        options.quality = DEFAULT_IMAGE_QUALITY.to_string();
+        options.background = DEFAULT_IMAGE_BACKGROUND.to_string();
+        options.output_format = DEFAULT_OUTPUT_FORMAT.to_string();
+        options.output_compression = DEFAULT_OUTPUT_COMPRESSION;
+        options.moderation = DEFAULT_IMAGE_MODERATION.to_string();
+        options.input_fidelity = DEFAULT_INPUT_FIDELITY.to_string();
+    }
+
+    options
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum ImageEndpointKind {
     Generate,
@@ -132,37 +167,231 @@ fn build_image_endpoint_url(base_url: &str, kind: ImageEndpointKind) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
 }
 
+fn default_endpoint_settings_for_model(model: &str) -> EndpointSettings {
+    let model = normalize_image_model(model);
+
+    if is_gemini_model(model) {
+        let provider_model = gemini_provider_model_id(model);
+        let generation_url =
+            format!("{DEFAULT_GEMINI_MODELS_URL}/{provider_model}:generateContent");
+        return EndpointSettings {
+            mode: ENDPOINT_MODE_BASE_URL.to_string(),
+            base_url: DEFAULT_GEMINI_MODELS_URL.to_string(),
+            generation_url: generation_url.clone(),
+            edit_url: generation_url,
+        };
+    }
+
+    EndpointSettings {
+        mode: ENDPOINT_MODE_BASE_URL.to_string(),
+        base_url: DEFAULT_BASE_URL.to_string(),
+        generation_url: DEFAULT_GENERATION_URL.to_string(),
+        edit_url: DEFAULT_EDIT_URL.to_string(),
+    }
+}
+
+fn model_setting_key(model: &str, suffix: &str) -> String {
+    format!("model_config::{}::{}", normalize_image_model(model), suffix)
+}
+
+fn legacy_model_setting_ids(model: &str) -> &'static [&'static str] {
+    match normalize_image_model(model) {
+        ENGINE_NANO_BANANA => &[GEMINI_MODEL_NANO_BANANA],
+        ENGINE_NANO_BANANA_2 => &[GEMINI_MODEL_NANO_BANANA_2],
+        ENGINE_NANO_BANANA_PRO => &[GEMINI_MODEL_NANO_BANANA_PRO],
+        _ => &[],
+    }
+}
+
+fn get_model_setting(
+    db: &Database,
+    model: &str,
+    suffix: &str,
+    legacy_key: Option<&str>,
+) -> Result<Option<String>, String> {
+    let namespaced = db.get_setting(&model_setting_key(model, suffix))?;
+    if namespaced.is_some() {
+        return Ok(namespaced);
+    }
+
+    for legacy_model in legacy_model_setting_ids(model) {
+        let legacy_namespaced =
+            db.get_setting(&format!("model_config::{legacy_model}::{suffix}"))?;
+        if legacy_namespaced.is_some() {
+            return Ok(legacy_namespaced);
+        }
+    }
+
+    if normalize_image_model(model) == ENGINE_GPT_IMAGE_2 {
+        if let Some(legacy_key) = legacy_key {
+            return db.get_setting(legacy_key);
+        }
+    }
+
+    Ok(None)
+}
+
+fn set_model_setting(db: &Database, model: &str, suffix: &str, value: &str) -> Result<(), String> {
+    db.set_setting(&model_setting_key(model, suffix), value)
+}
+
+fn current_image_model(db: &Database) -> Result<&'static str, String> {
+    Ok(normalize_image_model(
+        db.get_setting(SETTING_IMAGE_MODEL)?
+            .as_deref()
+            .unwrap_or(DEFAULT_IMAGE_MODEL),
+    ))
+}
+
+fn normalize_gemini_endpoint_url(endpoint_url: &str, model: &str) -> String {
+    let endpoint = endpoint_url.trim().trim_end_matches('/');
+    let model = gemini_provider_model_id(model);
+
+    if endpoint.ends_with(":generateContent") {
+        endpoint.to_string()
+    } else if endpoint.ends_with(model) {
+        format!("{endpoint}:generateContent")
+    } else {
+        format!("{endpoint}/{model}:generateContent")
+    }
+}
+
 fn read_endpoint_settings(db: &Database) -> Result<EndpointSettings, String> {
+    let model = current_image_model(db)?;
+    read_model_endpoint_settings(db, model)
+}
+
+fn read_model_endpoint_settings(db: &Database, model: &str) -> Result<EndpointSettings, String> {
+    let defaults = default_endpoint_settings_for_model(model);
+
     Ok(EndpointSettings {
         mode: normalize_endpoint_mode(
-            db.get_setting(SETTING_ENDPOINT_MODE)?
-                .as_deref()
-                .unwrap_or(ENDPOINT_MODE_BASE_URL),
+            get_model_setting(
+                db,
+                model,
+                SETTING_ENDPOINT_MODE,
+                Some(SETTING_ENDPOINT_MODE),
+            )?
+            .as_deref()
+            .unwrap_or(ENDPOINT_MODE_BASE_URL),
         )
         .to_string(),
-        base_url: endpoint_value_or_default(db.get_setting(SETTING_BASE_URL)?, DEFAULT_BASE_URL),
-        generation_url: endpoint_value_or_default(
-            db.get_setting(SETTING_GENERATION_URL)?,
-            DEFAULT_GENERATION_URL,
+        base_url: endpoint_value_or_default(
+            get_model_setting(db, model, SETTING_BASE_URL, Some(SETTING_BASE_URL))?,
+            &defaults.base_url,
         ),
-        edit_url: endpoint_value_or_default(db.get_setting(SETTING_EDIT_URL)?, DEFAULT_EDIT_URL),
+        generation_url: endpoint_value_or_default(
+            get_model_setting(
+                db,
+                model,
+                SETTING_GENERATION_URL,
+                Some(SETTING_GENERATION_URL),
+            )?,
+            &defaults.generation_url,
+        ),
+        edit_url: endpoint_value_or_default(
+            get_model_setting(db, model, SETTING_EDIT_URL, Some(SETTING_EDIT_URL))?,
+            &defaults.edit_url,
+        ),
     })
 }
 
-fn image_endpoint_url_for_settings(settings: &EndpointSettings, kind: ImageEndpointKind) -> String {
+fn image_endpoint_url_for_model_settings(
+    model: &str,
+    settings: &EndpointSettings,
+    kind: ImageEndpointKind,
+) -> String {
+    let model = normalize_image_model(model);
+
     if settings.mode == ENDPOINT_MODE_FULL_URL {
+        if is_gemini_model(model) {
+            let endpoint = match kind {
+                ImageEndpointKind::Generate => settings.generation_url.clone(),
+                ImageEndpointKind::Edit => {
+                    if settings.edit_url.trim().is_empty() {
+                        settings.generation_url.clone()
+                    } else {
+                        settings.edit_url.clone()
+                    }
+                }
+            };
+            return normalize_gemini_endpoint_url(&endpoint, model);
+        }
+
         return match kind {
             ImageEndpointKind::Generate => settings.generation_url.clone(),
             ImageEndpointKind::Edit => settings.edit_url.clone(),
         };
     }
 
+    if is_gemini_model(model) {
+        return normalize_gemini_endpoint_url(&settings.base_url, model);
+    }
+
     build_image_endpoint_url(&settings.base_url, kind)
 }
 
-fn resolve_image_endpoint_url(db: &Database, kind: ImageEndpointKind) -> Result<String, String> {
-    let settings = read_endpoint_settings(db)?;
-    Ok(image_endpoint_url_for_settings(&settings, kind))
+fn resolve_image_endpoint_url_for_model(
+    db: &Database,
+    model: &str,
+    kind: ImageEndpointKind,
+) -> Result<String, String> {
+    let settings = read_model_endpoint_settings(db, model)?;
+    Ok(image_endpoint_url_for_model_settings(
+        model, &settings, kind,
+    ))
+}
+
+fn read_model_api_key(db: &Database, model: &str) -> Result<Option<String>, String> {
+    get_model_setting(db, model, SETTING_API_KEY, Some(SETTING_API_KEY))
+}
+
+fn save_model_api_key_value(db: &Database, model: &str, key: &str) -> Result<(), String> {
+    set_model_setting(db, model, SETTING_API_KEY, key)?;
+    if normalize_image_model(model) == ENGINE_GPT_IMAGE_2 {
+        db.set_setting(SETTING_API_KEY, key)?;
+    }
+    Ok(())
+}
+
+fn save_model_endpoint_settings_value(
+    db: &Database,
+    model: &str,
+    mode: &str,
+    base_url: &str,
+    generation_url: &str,
+    edit_url: &str,
+) -> Result<(), String> {
+    let defaults = default_endpoint_settings_for_model(model);
+    let normalized_model = normalize_image_model(model);
+    let mode = normalize_endpoint_mode(mode);
+    let base_url = endpoint_value_or_default(Some(base_url.to_string()), &defaults.base_url);
+    let generation_url =
+        endpoint_value_or_default(Some(generation_url.to_string()), &defaults.generation_url);
+    let edit_url = if is_gemini_model(normalized_model) {
+        generation_url.clone()
+    } else {
+        endpoint_value_or_default(Some(edit_url.to_string()), &defaults.edit_url)
+    };
+
+    set_model_setting(db, normalized_model, SETTING_ENDPOINT_MODE, mode)?;
+    set_model_setting(db, normalized_model, SETTING_BASE_URL, &base_url)?;
+    set_model_setting(
+        db,
+        normalized_model,
+        SETTING_GENERATION_URL,
+        &generation_url,
+    )?;
+    set_model_setting(db, normalized_model, SETTING_EDIT_URL, &edit_url)?;
+
+    if normalized_model == ENGINE_GPT_IMAGE_2 {
+        db.set_setting(SETTING_ENDPOINT_MODE, mode)?;
+        db.set_setting(SETTING_BASE_URL, &base_url)?;
+        db.set_setting(SETTING_GENERATION_URL, &generation_url)?;
+        db.set_setting(SETTING_EDIT_URL, &edit_url)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -203,13 +432,104 @@ mod tests {
         };
 
         assert_eq!(
-            image_endpoint_url_for_settings(&settings, ImageEndpointKind::Generate),
+            image_endpoint_url_for_model_settings(
+                ENGINE_GPT_IMAGE_2,
+                &settings,
+                ImageEndpointKind::Generate,
+            ),
             "https://gateway.example.test/create"
         );
         assert_eq!(
-            image_endpoint_url_for_settings(&settings, ImageEndpointKind::Edit),
+            image_endpoint_url_for_model_settings(
+                ENGINE_GPT_IMAGE_2,
+                &settings,
+                ImageEndpointKind::Edit,
+            ),
             "https://gateway.example.test/edit"
         );
+    }
+
+    #[test]
+    fn normalize_image_model_accepts_gemini_nanobanana_models() {
+        assert_eq!(
+            normalize_image_model(ENGINE_NANO_BANANA),
+            ENGINE_NANO_BANANA
+        );
+        assert_eq!(
+            normalize_image_model(GEMINI_MODEL_NANO_BANANA),
+            ENGINE_NANO_BANANA
+        );
+        assert_eq!(
+            normalize_image_model(ENGINE_NANO_BANANA_PRO),
+            ENGINE_NANO_BANANA_PRO
+        );
+        assert_eq!(
+            normalize_image_model(ENGINE_NANO_BANANA_2),
+            ENGINE_NANO_BANANA_2
+        );
+        assert_eq!(
+            normalize_image_model(GEMINI_MODEL_NANO_BANANA_2),
+            ENGINE_NANO_BANANA_2
+        );
+        assert_eq!(
+            normalize_image_model(GEMINI_MODEL_NANO_BANANA_PRO),
+            ENGINE_NANO_BANANA_PRO
+        );
+    }
+
+    #[test]
+    fn gemini_base_url_mode_builds_generate_content_endpoint() {
+        let settings = EndpointSettings {
+            mode: ENDPOINT_MODE_BASE_URL.to_string(),
+            base_url: DEFAULT_GEMINI_MODELS_URL.to_string(),
+            generation_url: String::new(),
+            edit_url: String::new(),
+        };
+
+        assert_eq!(
+            image_endpoint_url_for_model_settings(
+                ENGINE_NANO_BANANA,
+                &settings,
+                ImageEndpointKind::Generate,
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
+        );
+        assert_eq!(
+            image_endpoint_url_for_model_settings(
+                ENGINE_NANO_BANANA,
+                &settings,
+                ImageEndpointKind::Edit,
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
+        );
+    }
+
+    #[test]
+    fn gemini_models_drop_unsupported_request_controls() {
+        let options = sanitize_request_options_for_model(
+            ENGINE_NANO_BANANA,
+            GptImageRequestOptions {
+                size: "1536x1024".to_string(),
+                quality: "high".to_string(),
+                background: "transparent".to_string(),
+                output_format: "webp".to_string(),
+                output_compression: 75,
+                moderation: "low".to_string(),
+                input_fidelity: "low".to_string(),
+                stream: false,
+                partial_images: 0,
+                image_count: 3,
+            },
+        );
+
+        assert_eq!(options.size, "1536x1024");
+        assert_eq!(options.image_count, 3);
+        assert_eq!(options.quality, DEFAULT_IMAGE_QUALITY);
+        assert_eq!(options.background, DEFAULT_IMAGE_BACKGROUND);
+        assert_eq!(options.output_format, DEFAULT_OUTPUT_FORMAT);
+        assert_eq!(options.output_compression, DEFAULT_OUTPUT_COMPRESSION);
+        assert_eq!(options.moderation, DEFAULT_IMAGE_MODERATION);
+        assert_eq!(options.input_fidelity, DEFAULT_INPUT_FIDELITY);
     }
 
     #[test]
@@ -248,25 +568,34 @@ fn set_macos_development_app_icon() {
 #[tauri::command]
 fn save_api_key(db: tauri::State<'_, Database>, key: String) -> Result<(), String> {
     log::info!("Saving API key");
-    db.set_setting(SETTING_API_KEY, &key)
+    let model = current_image_model(db.inner())?;
+    save_model_api_key_value(db.inner(), model, &key)
 }
 
 #[tauri::command]
 fn get_api_key(db: tauri::State<'_, Database>) -> Result<Option<String>, String> {
-    db.get_setting(SETTING_API_KEY)
+    let model = current_image_model(db.inner())?;
+    read_model_api_key(db.inner(), model)
 }
 
 #[tauri::command]
 fn save_base_url(db: tauri::State<'_, Database>, url: String) -> Result<(), String> {
     log::info!("Saving base URL: {}", url);
-    db.set_setting(SETTING_BASE_URL, &url)
+    let model = current_image_model(db.inner())?;
+    let settings = read_model_endpoint_settings(db.inner(), model)?;
+    save_model_endpoint_settings_value(
+        db.inner(),
+        model,
+        &settings.mode,
+        &url,
+        &settings.generation_url,
+        &settings.edit_url,
+    )
 }
 
 #[tauri::command]
 fn get_base_url(db: tauri::State<'_, Database>) -> Result<String, String> {
-    Ok(db
-        .get_setting(SETTING_BASE_URL)?
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string()))
+    Ok(read_model_endpoint_settings(db.inner(), current_image_model(db.inner())?)?.base_url)
 }
 
 #[tauri::command]
@@ -282,10 +611,16 @@ fn save_endpoint_settings(
     generation_url: String,
     edit_url: String,
 ) -> Result<(), String> {
+    let model = current_image_model(db.inner())?;
+    let defaults = default_endpoint_settings_for_model(model);
     let mode = normalize_endpoint_mode(&mode);
-    let base_url = endpoint_value_or_default(Some(base_url), DEFAULT_BASE_URL);
-    let generation_url = endpoint_value_or_default(Some(generation_url), DEFAULT_GENERATION_URL);
-    let edit_url = endpoint_value_or_default(Some(edit_url), DEFAULT_EDIT_URL);
+    let base_url = endpoint_value_or_default(Some(base_url), &defaults.base_url);
+    let generation_url = endpoint_value_or_default(Some(generation_url), &defaults.generation_url);
+    let edit_url = if is_gemini_model(model) {
+        generation_url.clone()
+    } else {
+        endpoint_value_or_default(Some(edit_url), &defaults.edit_url)
+    };
 
     log::info!(
         "Saving endpoint settings: mode={}, base_url={}, generation_url={}, edit_url={}",
@@ -295,10 +630,58 @@ fn save_endpoint_settings(
         edit_url
     );
 
-    db.set_setting(SETTING_ENDPOINT_MODE, mode)?;
-    db.set_setting(SETTING_BASE_URL, &base_url)?;
-    db.set_setting(SETTING_GENERATION_URL, &generation_url)?;
-    db.set_setting(SETTING_EDIT_URL, &edit_url)
+    save_model_endpoint_settings_value(
+        db.inner(),
+        model,
+        mode,
+        &base_url,
+        &generation_url,
+        &edit_url,
+    )
+}
+
+#[tauri::command]
+fn get_model_api_key(
+    db: tauri::State<'_, Database>,
+    model: String,
+) -> Result<Option<String>, String> {
+    read_model_api_key(db.inner(), &model)
+}
+
+#[tauri::command]
+fn save_model_api_key(
+    db: tauri::State<'_, Database>,
+    model: String,
+    key: String,
+) -> Result<(), String> {
+    save_model_api_key_value(db.inner(), &model, &key)
+}
+
+#[tauri::command]
+fn get_model_endpoint_settings(
+    db: tauri::State<'_, Database>,
+    model: String,
+) -> Result<EndpointSettings, String> {
+    read_model_endpoint_settings(db.inner(), &model)
+}
+
+#[tauri::command]
+fn save_model_endpoint_settings(
+    db: tauri::State<'_, Database>,
+    model: String,
+    mode: String,
+    base_url: String,
+    generation_url: String,
+    edit_url: String,
+) -> Result<(), String> {
+    save_model_endpoint_settings_value(
+        db.inner(),
+        &model,
+        &mode,
+        &base_url,
+        &generation_url,
+        &edit_url,
+    )
 }
 
 #[tauri::command]
@@ -630,6 +1013,7 @@ async fn generate_image(
     db: tauri::State<'_, Database>,
     engine_state: tauri::State<'_, api_gateway::GptImageEngine>,
     prompt: String,
+    model: Option<String>,
     size: Option<String>,
     quality: Option<String>,
     background: Option<String>,
@@ -639,7 +1023,7 @@ async fn generate_image(
     image_count: Option<u8>,
     conversation_id: Option<String>,
 ) -> Result<GenerateResult, String> {
-    let options = image_request_options(
+    let mut options = image_request_options(
         size,
         quality,
         background,
@@ -656,10 +1040,19 @@ async fn generate_image(
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         resolve_conversation_id(&conn, conversation_id.as_deref(), &prompt)?
     };
+    let model = normalize_image_model(
+        model
+            .as_deref()
+            .or(db.get_setting(SETTING_IMAGE_MODEL)?.as_deref())
+            .unwrap_or(DEFAULT_IMAGE_MODEL),
+    )
+    .to_string();
+    options = sanitize_request_options_for_model(&model, options);
 
     log::info!(
-        "[{}] Generating image — prompt: {:?}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, image_count: {}",
+        "[{}] Generating image — model: {}, prompt: {:?}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, image_count: {}",
         generation_id,
+        model,
         prompt,
         options.size,
         options.quality,
@@ -680,6 +1073,7 @@ async fn generate_image(
         ),
         Some(&generation_id),
         Some(&serde_json::json!({
+            "model": &model,
             "prompt": prompt,
             "size": &options.size,
             "quality": &options.quality,
@@ -694,17 +1088,10 @@ async fn generate_image(
         }).to_string()),
         None,
     );
-
-    let api_key = db
-        .get_setting(SETTING_API_KEY)?
+    let api_key = read_model_api_key(db.inner(), &model)?
         .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
-    let model = normalize_image_model(
-        db.get_setting(SETTING_IMAGE_MODEL)?
-            .as_deref()
-            .unwrap_or(DEFAULT_IMAGE_MODEL),
-    )
-    .to_string();
-    let endpoint_url = resolve_image_endpoint_url(db.inner(), ImageEndpointKind::Generate)?;
+    let endpoint_url =
+        resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Generate)?;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     {
@@ -829,6 +1216,7 @@ async fn edit_image(
     db: tauri::State<'_, Database>,
     engine_state: tauri::State<'_, api_gateway::GptImageEngine>,
     prompt: String,
+    model: Option<String>,
     source_image_paths: Vec<String>,
     size: Option<String>,
     quality: Option<String>,
@@ -844,7 +1232,7 @@ async fn edit_image(
         return Err("Please select at least one source image.".to_string());
     }
 
-    let options = image_request_options(
+    let mut options = image_request_options(
         size,
         quality,
         background,
@@ -861,10 +1249,19 @@ async fn edit_image(
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         resolve_conversation_id(&conn, conversation_id.as_deref(), &prompt)?
     };
+    let model = normalize_image_model(
+        model
+            .as_deref()
+            .or(db.get_setting(SETTING_IMAGE_MODEL)?.as_deref())
+            .unwrap_or(DEFAULT_IMAGE_MODEL),
+    )
+    .to_string();
+    options = sanitize_request_options_for_model(&model, options);
 
     log::info!(
-        "[{}] Editing image — prompt: {:?}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, image_count: {}",
+        "[{}] Editing image — model: {}, prompt: {:?}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, image_count: {}",
         generation_id,
+        model,
         prompt,
         source_image_paths.len(),
         options.size,
@@ -894,6 +1291,7 @@ async fn edit_image(
         Some(&generation_id),
         Some(
             &serde_json::json!({
+                "model": &model,
                 "prompt": prompt,
                 "source_image_paths": source_image_paths.clone(),
                 "size": &options.size,
@@ -912,17 +1310,10 @@ async fn edit_image(
         ),
         None,
     );
-
-    let api_key = db
-        .get_setting(SETTING_API_KEY)?
+    let api_key = read_model_api_key(db.inner(), &model)?
         .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
-    let model = normalize_image_model(
-        db.get_setting(SETTING_IMAGE_MODEL)?
-            .as_deref()
-            .unwrap_or(DEFAULT_IMAGE_MODEL),
-    )
-    .to_string();
-    let endpoint_url = resolve_image_endpoint_url(db.inner(), ImageEndpointKind::Edit)?;
+    let endpoint_url =
+        resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Edit)?;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     {
@@ -2299,10 +2690,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             save_api_key,
             get_api_key,
+            get_model_api_key,
+            save_model_api_key,
             save_base_url,
             get_base_url,
             get_endpoint_settings,
             save_endpoint_settings,
+            get_model_endpoint_settings,
+            save_model_endpoint_settings,
             get_font_size,
             save_font_size,
             get_image_model,

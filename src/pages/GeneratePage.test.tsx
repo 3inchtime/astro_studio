@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GeneratePage from "./GeneratePage";
 
 const getConversationGenerations = vi.fn();
 const getImageModel = vi.fn();
+const saveImageModel = vi.fn();
 const generateImage = vi.fn();
 const editImage = vi.fn();
 const pickSourceImages = vi.fn();
@@ -78,6 +79,7 @@ vi.mock("../lib/api", () => ({
     getConversationGenerations(...args),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
   getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
+  saveImageModel: (...args: unknown[]) => saveImageModel(...args),
   messageImageToEditSource: (image: {
     path: string;
     imageId?: string;
@@ -112,11 +114,26 @@ vi.mock("../components/common/ConfirmDialog", () => ({
 vi.mock("../components/generate/MessageBubble", () => ({
   default: ({
     message,
+    onEditImage,
     onEditPrompt,
     onFavoritePrompt,
     isPromptFavorited,
   }: {
-    message: { id: string; role: string; content: string };
+    message: {
+      id: string;
+      role: string;
+      content: string;
+      images?: Array<{
+        path: string;
+        imageId: string;
+        generationId: string;
+      }>;
+    };
+    onEditImage?: (image: {
+      path: string;
+      imageId: string;
+      generationId: string;
+    }) => void;
     onEditPrompt?: (message: { id: string; role: string; content: string }) => void;
     onFavoritePrompt?: (message: {
       id: string;
@@ -132,6 +149,8 @@ vi.mock("../components/generate/MessageBubble", () => ({
           {isPromptFavorited ? "Remove prompt favorite" : "Favorite prompt"}
         </button>
       </div>
+    ) : message.images?.[0] ? (
+      <button onClick={() => onEditImage?.(message.images![0])}>Edit image</button>
     ) : null,
 }));
 
@@ -143,10 +162,22 @@ vi.mock("../components/favorites/FolderSelector", () => ({
   default: () => null,
 }));
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe("GeneratePage", () => {
   beforeEach(() => {
     getConversationGenerations.mockReset();
     getImageModel.mockReset();
+    saveImageModel.mockReset();
     generateImage.mockReset();
     editImage.mockReset();
     pickSourceImages.mockReset();
@@ -181,6 +212,7 @@ describe("GeneratePage", () => {
       updated_at: "2026-04-28T00:00:00Z",
     }));
     deletePromptFavorite.mockResolvedValue(undefined);
+    saveImageModel.mockResolvedValue(undefined);
     generateImage.mockResolvedValue({
       generation_id: "generation-new",
       conversation_id: "conversation-1",
@@ -192,6 +224,24 @@ describe("GeneratePage", () => {
       images: [],
     });
     pickSourceImages.mockResolvedValue([]);
+  });
+
+  it("renders every registered model from the shared catalog in the model selector", async () => {
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    const { IMAGE_MODEL_CATALOG } = await import("../lib/modelCatalog");
+    const modelSelect = await screen.findByLabelText("Model");
+    const optionNames = within(modelSelect)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+    expect(optionNames).toEqual(
+      IMAGE_MODEL_CATALOG.map((entry) => entry.label),
+    );
   });
 
   it("loads a sent prompt back into the composer when editing", async () => {
@@ -261,6 +311,280 @@ describe("GeneratePage", () => {
       );
     });
     expect(generateImage.mock.calls[0][0]).not.toHaveProperty("outputCompression");
+  });
+
+  it("uses the selected UI model for the next generate request even while model persistence is still in flight", async () => {
+    const saveModelDeferred = createDeferred<void>();
+    saveImageModel.mockReturnValue(saveModelDeferred.promise);
+
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "nano-banana" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A neon paper crane" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "nano-banana",
+          prompt: "A neon paper crane",
+        }),
+      );
+    });
+  });
+
+  it("resets parameters to selected model defaults and hides unsupported controls when switching models", async () => {
+    pickSourceImages.mockResolvedValue(["/tmp/source-edit.png"]);
+    const { getImageModelCatalogEntry } = await import("../lib/modelCatalog");
+    const geminiEntry = getImageModelCatalogEntry("nano-banana");
+
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(screen.getByLabelText("Size"), {
+      target: { value: "1536x1024" },
+    });
+    fireEvent.change(screen.getByLabelText("Quality"), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByLabelText("Background"), {
+      target: { value: "transparent" },
+    });
+    fireEvent.change(screen.getByLabelText("Format"), {
+      target: { value: "webp" },
+    });
+    fireEvent.change(screen.getByLabelText("Moderation"), {
+      target: { value: "low" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload Source" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Input fidelity"), {
+      target: { value: "low" },
+    });
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "nano-banana" },
+    });
+
+    await waitFor(() => {
+      expect(saveImageModel).toHaveBeenCalledWith("nano-banana");
+    });
+
+    expect(screen.getByLabelText("Size")).toHaveValue(
+      geminiEntry.parameterDefaults.size,
+    );
+    expect(screen.getByLabelText("Count")).toHaveValue(
+      String(geminiEntry.parameterDefaults.imageCount),
+    );
+    expect(screen.queryByLabelText("Quality")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Background")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Format")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Moderation")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Input fidelity")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Upload Source" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      { target: { value: "A polished chrome crane" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(editImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: "A polished chrome crane",
+          model: "nano-banana",
+          sourceImagePaths: ["/tmp/source-edit.png"],
+          size: geminiEntry.parameterDefaults.size,
+          imageCount: geminiEntry.parameterDefaults.imageCount,
+        }),
+      );
+    });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("quality");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("background");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("moderation");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("inputFidelity");
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("reconciles invalid draft state when late hydration switches to a narrower Gemini model", async () => {
+    const initialModelDeferred = createDeferred<"nano-banana">();
+    getImageModel.mockReturnValue(initialModelDeferred.promise);
+    pickSourceImages.mockResolvedValue(["/tmp/hydration-source.png"]);
+
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(screen.getByLabelText("Size"), {
+      target: { value: "1536x1024" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload Source" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText("Quality"), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByLabelText("Background"), {
+      target: { value: "transparent" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
+      { target: { value: "Turn it into etched silver" } },
+    );
+
+    initialModelDeferred.resolve("nano-banana");
+
+    await waitFor(() => {
+      expect(getImageModel).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Model")).toHaveValue(
+        "nano-banana",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: "Upload Source" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Turn it into etched silver")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(editImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "nano-banana",
+          prompt: "Turn it into etched silver",
+          size: "1536x1024",
+          imageCount: 1,
+          sourceImagePaths: ["/tmp/hydration-source.png"],
+        }),
+      );
+    });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("quality");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("background");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("moderation");
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("keeps picked edit sources when source picking resolves after hydration switches to Gemini", async () => {
+    const initialModelDeferred = createDeferred<"nano-banana">();
+    const pickedSourcesDeferred = createDeferred<string[]>();
+    getImageModel.mockReturnValue(initialModelDeferred.promise);
+    pickSourceImages.mockReturnValue(pickedSourcesDeferred.promise);
+
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload Source" }));
+
+    initialModelDeferred.resolve("nano-banana");
+    pickedSourcesDeferred.resolve(["/tmp/picked-after-hydration.png"]);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Model")).toHaveValue(
+        "nano-banana",
+      );
+    });
+
+    await waitFor(() => {
+      expect(pickSourceImages).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      { target: { value: "A brushed steel heron" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(editImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "nano-banana",
+          prompt: "A brushed steel heron",
+          sourceImagePaths: ["/tmp/picked-after-hydration.png"],
+        }),
+      );
+    });
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("uses image-to-edit entry points under a Gemini model", async () => {
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "nano-banana" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit image" }));
+
+    expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      { target: { value: "A paper lantern koi" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(editImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "nano-banana",
+          prompt: "A paper lantern koi",
+          sourceImagePaths: ["/tmp/source.png"],
+        }),
+      );
+    });
+    expect(generateImage).not.toHaveBeenCalled();
   });
 
   it("prevents transparent backgrounds with jpeg output", async () => {

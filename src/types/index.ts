@@ -44,6 +44,7 @@ export interface SearchResult {
 
 export interface GenerationParams {
   prompt: string;
+  model?: ImageModel;
   size?: ImageSize;
   quality?: ImageQuality;
   background?: ImageBackground;
@@ -71,6 +72,7 @@ export interface EditSourceImage {
 
 export interface RetryGenerationRequest {
   prompt: string;
+  model: ImageModel;
   size: ImageSize;
   quality: ImageQuality;
   background: ImageBackground;
@@ -157,7 +159,11 @@ export interface TrashSettings {
 }
 
 export type AppFontSize = "small" | "medium" | "large";
-export type ImageModel = "gpt-image-2";
+export type ImageModel =
+  | "gpt-image-2"
+  | "nano-banana"
+  | "nano-banana-2"
+  | "nano-banana-pro";
 export type EndpointMode = "base_url" | "full_url";
 
 export interface EndpointSettings {
@@ -165,4 +171,41 @@ export interface EndpointSettings {
   base_url: string;
   generation_url: string;
   edit_url: string;
+}
+
+export interface ModelConnectionDefaults {
+  baseUrl: string;
+  generationUrl: string;
+  editUrl: string;
+}
+
+export interface ModelParameterDefaults {
+  size: ImageSize;
+  quality: ImageQuality;
+  background: ImageBackground;
+  outputFormat: ImageOutputFormat;
+  moderation: ImageModeration;
+  inputFidelity: ImageInputFidelity;
+  imageCount: number;
+}
+
+export interface ModelParameterCapabilities {
+  sizes: ImageSize[];
+  qualities: ImageQuality[];
+  backgrounds: ImageBackground[];
+  outputFormats: ImageOutputFormat[];
+  moderationLevels: ImageModeration[];
+  inputFidelityOptions: ImageInputFidelity[];
+  imageCounts: number[];
+}
+
+export interface ImageModelCatalogEntry {
+  id: ImageModel;
+  label: string;
+  provider: string;
+  providerModelId: string;
+  supportsEdit: boolean;
+  connectionDefaults: ModelConnectionDefaults;
+  parameterDefaults: ModelParameterDefaults;
+  parameterCapabilities: ModelParameterCapabilities;
 }

@@ -95,6 +95,7 @@ describe("MessageBubble", () => {
       createdAt: "2026-04-26T00:00:00Z",
       retryRequest: {
         prompt: "retry me",
+        model: "gpt-image-2",
         size: "auto",
         quality: "auto",
         background: "auto",

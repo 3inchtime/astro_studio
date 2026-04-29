@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 pub const ENGINE_GPT_IMAGE_2: &str = "gpt-image-2";
+pub const ENGINE_NANO_BANANA: &str = "nano-banana";
+pub const ENGINE_NANO_BANANA_2: &str = "nano-banana-2";
+pub const ENGINE_NANO_BANANA_PRO: &str = "nano-banana-pro";
+pub const GEMINI_MODEL_NANO_BANANA: &str = "gemini-2.5-flash-image";
+pub const GEMINI_MODEL_NANO_BANANA_2: &str = "gemini-3.1-flash-image-preview";
+pub const GEMINI_MODEL_NANO_BANANA_PRO: &str = "gemini-3-pro-image-preview";
 pub const SETTING_IMAGE_MODEL: &str = "image_model";
 pub const SETTING_API_KEY: &str = "api_key";
 pub const SETTING_BASE_URL: &str = "base_url";
@@ -8,6 +14,8 @@ pub const SETTING_ENDPOINT_MODE: &str = "endpoint_mode";
 pub const SETTING_GENERATION_URL: &str = "generation_url";
 pub const SETTING_EDIT_URL: &str = "edit_url";
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+pub const DEFAULT_GEMINI_MODELS_URL: &str =
+    "https://generativelanguage.googleapis.com/v1beta/models";
 pub const ENDPOINT_MODE_BASE_URL: &str = "base_url";
 pub const ENDPOINT_MODE_FULL_URL: &str = "full_url";
 pub const DEFAULT_GENERATION_URL: &str = "https://api.openai.com/v1/images/generations";
