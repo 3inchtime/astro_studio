@@ -150,7 +150,10 @@ vi.mock("../components/generate/MessageBubble", () => ({
         </button>
       </div>
     ) : message.images?.[0] ? (
-      <button onClick={() => onEditImage?.(message.images![0])}>Edit image</button>
+      <div>
+        <span>{message.images[0].path}</span>
+        <button onClick={() => onEditImage?.(message.images![0])}>Edit image</button>
+      </div>
     ) : null,
 }));
 
@@ -339,6 +342,48 @@ describe("GeneratePage", () => {
           prompt: "A neon paper crane",
         }),
       );
+    });
+  });
+
+  it("keeps the returned generated image visible when conversation reload data is stale", async () => {
+    generateImage.mockResolvedValue({
+      generation_id: "generation-new",
+      conversation_id: "conversation-1",
+      images: [
+        {
+          id: "image-new",
+          generation_id: "generation-new",
+          file_path: "/tmp/generated-nano-banana.png",
+          thumbnail_path: "/tmp/generated-nano-banana-thumb.png",
+        },
+      ],
+    });
+
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "nano-banana" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A luminous banana nebula" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "nano-banana",
+          prompt: "A luminous banana nebula",
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByText("/tmp/generated-nano-banana.png")).toBeInTheDocument();
     });
   });
 

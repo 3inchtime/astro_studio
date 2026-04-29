@@ -506,7 +506,6 @@ export default function GeneratePage() {
         );
         setEditSources([]);
         setActiveConversationId(result.conversation_id);
-        await loadConversationMessages(result.conversation_id);
         refreshConversations();
       } catch (e) {
         setMessages((prev) =>
@@ -524,7 +523,7 @@ export default function GeneratePage() {
         refreshConversations();
       }
     },
-    [loadConversationMessages, refreshConversations, setActiveConversationId],
+    [refreshConversations, setActiveConversationId],
   );
 
   async function handleGenerate() {

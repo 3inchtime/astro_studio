@@ -159,14 +159,6 @@ fn gemini_aspect_ratio_for_size(size: &str) -> Option<&'static str> {
     }
 }
 
-fn gemini_output_mime_type(output_format: &str) -> &'static str {
-    match output_format {
-        "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        _ => "image/png",
-    }
-}
-
 fn build_gemini_request_body(
     prompt: &str,
     inline_images: &[GeminiInlineImage],
@@ -196,11 +188,9 @@ fn build_gemini_request_body(
     if let Some(aspect_ratio) = gemini_aspect_ratio_for_size(&options.size) {
         image_config.insert("aspectRatio".to_string(), serde_json::json!(aspect_ratio));
     }
-    image_config.insert(
-        "outputMimeType".to_string(),
-        serde_json::json!(gemini_output_mime_type(&options.output_format)),
-    );
-    generation_config.insert("imageConfig".to_string(), Value::Object(image_config));
+    if !image_config.is_empty() {
+        generation_config.insert("imageConfig".to_string(), Value::Object(image_config));
+    }
 
     serde_json::json!({
         "contents": [{ "parts": parts }],
@@ -1449,6 +1439,11 @@ mod tests {
         assert_eq!(
             body["generationConfig"]["responseModalities"],
             json!(["TEXT", "IMAGE"])
+        );
+        assert!(
+            body["generationConfig"]["imageConfig"]
+                .get("outputMimeType")
+                .is_none()
         );
     }
 
