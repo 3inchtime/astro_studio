@@ -32,6 +32,11 @@ import {
   IMAGE_MODEL_CATALOG,
   getImageModelCatalogEntry,
 } from "../lib/modelCatalog";
+import {
+  LANGUAGE_OPTIONS,
+  normalizeLanguage,
+  type SupportedLanguage,
+} from "../lib/languages";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 
 const DEFAULT_MODEL: ImageModel = "gpt-image-2";
@@ -243,7 +248,9 @@ export default function SettingsPage() {
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_MODEL);
   const [modelSaved, setModelSaved] = useState(false);
   const { t, i18n } = useTranslation();
-  const [language, setLanguage] = useState(i18n.language);
+  const [language, setLanguage] = useState<SupportedLanguage>(() =>
+    normalizeLanguage(i18n.resolvedLanguage ?? i18n.language),
+  );
   const [fontSize, setFontSize] = useState<AppFontSize>(getStoredAppFontSize());
   const [fontSizeSaved, setFontSizeSaved] = useState(false);
   const [trashSettings, setTrashSettings] = useState<TrashSettings>({ retention_days: 30 });
@@ -361,6 +368,10 @@ export default function SettingsPage() {
     getTrashSettings().then(setTrashSettings);
   }, []);
 
+  useEffect(() => {
+    setLanguage(normalizeLanguage(i18n.resolvedLanguage ?? i18n.language));
+  }, [i18n.language, i18n.resolvedLanguage]);
+
   const fetchLogs = useCallback(async () => {
     try {
       const result = await getLogs(logType || undefined, logLevel || undefined, logPage, pageSize);
@@ -420,8 +431,8 @@ export default function SettingsPage() {
     };
   }, []);
 
-  function handleLanguageChange(lang: string) {
-    i18n.changeLanguage(lang);
+  function handleLanguageChange(lang: SupportedLanguage) {
+    void i18n.changeLanguage(lang);
     setLanguage(lang);
   }
 
@@ -602,12 +613,15 @@ export default function SettingsPage() {
                         </div>
                       </div>
                       <select
-                        value={language.startsWith("zh") ? "zh-CN" : "en"}
-                        onChange={(e) => handleLanguageChange(e.target.value)}
+                        value={language}
+                        onChange={(e) => handleLanguageChange(normalizeLanguage(e.target.value))}
                         className="h-[38px] w-full appearance-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                       >
-                        <option value="en">English</option>
-                        <option value="zh-CN">简体中文</option>
+                        {LANGUAGE_OPTIONS.map((option) => (
+                          <option key={option.code} value={option.code}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </motion.div>
