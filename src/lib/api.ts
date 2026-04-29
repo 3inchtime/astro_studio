@@ -44,10 +44,42 @@ export async function getEndpointSettings(): Promise<EndpointSettings> {
   return invoke("get_endpoint_settings");
 }
 
+export async function getModelApiKey(
+  model: ImageModel,
+): Promise<string | null> {
+  return invoke("get_model_api_key", { model });
+}
+
+export async function saveModelApiKey(
+  model: ImageModel,
+  key: string,
+): Promise<void> {
+  await invoke("save_model_api_key", { model, key });
+}
+
 export async function saveEndpointSettings(
   settings: EndpointSettings,
 ): Promise<void> {
   await invoke("save_endpoint_settings", {
+    mode: settings.mode,
+    baseUrl: settings.base_url,
+    generationUrl: settings.generation_url,
+    editUrl: settings.edit_url,
+  });
+}
+
+export async function getModelEndpointSettings(
+  model: ImageModel,
+): Promise<EndpointSettings> {
+  return invoke("get_model_endpoint_settings", { model });
+}
+
+export async function saveModelEndpointSettings(
+  model: ImageModel,
+  settings: EndpointSettings,
+): Promise<void> {
+  await invoke("save_model_endpoint_settings", {
+    model,
     mode: settings.mode,
     baseUrl: settings.base_url,
     generationUrl: settings.generation_url,
@@ -68,6 +100,7 @@ export async function generateImage(
 ): Promise<GenerateResponse> {
   return invoke("generate_image", {
     prompt: params.prompt,
+    model: params.model,
     size: params.size,
     quality: params.quality,
     background: params.background,
@@ -87,6 +120,7 @@ export async function editImage(
 ): Promise<GenerateResponse> {
   return invoke("edit_image", {
     prompt: params.prompt,
+    model: params.model,
     sourceImagePaths: params.sourceImagePaths,
     size: params.size,
     quality: params.quality,
