@@ -42,7 +42,9 @@ If you do not want your workflow tied to a single platform, Astro Studio is buil
 ## Compatibility Progress
 
 - [x] `gpt-image-2`
-- [ ] `Nano Banana`
+- [ ] `nano banana` - adaptation testing in progress
+- [ ] `nano banana 2` - adaptation testing in progress
+- [ ] `nano banana pro` - adaptation testing in progress
 - [ ] More third-party image generation APIs
 
 ## Why This Product Exists
