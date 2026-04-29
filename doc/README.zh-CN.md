@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/assets/logo.png" alt="Astro Studio" width="360" />
+  <img src="../src/assets/logo.png" alt="Astro Studio" width="360" />
 </p>
 
 <h1 align="center">Astro Studio</h1>
