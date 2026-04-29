@@ -343,13 +343,29 @@ fn resolve_image_endpoint_url_for_model(
 }
 
 fn read_model_api_key(db: &Database, model: &str) -> Result<Option<String>, String> {
-    get_model_setting(db, model, SETTING_API_KEY, Some(SETTING_API_KEY))
+    Ok(
+        get_model_setting(db, model, SETTING_API_KEY, Some(SETTING_API_KEY))?
+            .map(|key| normalize_api_key_for_storage(&key)),
+    )
+}
+
+fn normalize_api_key_for_storage(key: &str) -> String {
+    let trimmed = key.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let prefix = parts.next().unwrap_or_default();
+
+    if prefix.eq_ignore_ascii_case("bearer") {
+        return parts.next().unwrap_or_default().trim().to_string();
+    }
+
+    trimmed.to_string()
 }
 
 fn save_model_api_key_value(db: &Database, model: &str, key: &str) -> Result<(), String> {
-    set_model_setting(db, model, SETTING_API_KEY, key)?;
+    let key = normalize_api_key_for_storage(key);
+    set_model_setting(db, model, SETTING_API_KEY, &key)?;
     if normalize_image_model(model) == ENGINE_GPT_IMAGE_2 {
-        db.set_setting(SETTING_API_KEY, key)?;
+        db.set_setting(SETTING_API_KEY, &key)?;
     }
     Ok(())
 }
@@ -530,6 +546,73 @@ mod tests {
         assert_eq!(options.output_compression, DEFAULT_OUTPUT_COMPRESSION);
         assert_eq!(options.moderation, DEFAULT_IMAGE_MODERATION);
         assert_eq!(options.input_fidelity, DEFAULT_INPUT_FIDELITY);
+    }
+
+    #[test]
+    fn normalize_api_key_for_storage_removes_paste_artifacts() {
+        assert_eq!(
+            normalize_api_key_for_storage("  sk-proj-valid-token\n"),
+            "sk-proj-valid-token"
+        );
+        assert_eq!(
+            normalize_api_key_for_storage("Bearer sk-proj-valid-token"),
+            "sk-proj-valid-token"
+        );
+        assert_eq!(
+            normalize_api_key_for_storage("bearer\tsk-proj-valid-token  "),
+            "sk-proj-valid-token"
+        );
+    }
+
+    #[test]
+    fn save_model_api_key_value_stores_normalized_key() {
+        let db_path = std::env::temp_dir().join(format!(
+            "astro-studio-api-key-test-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::open(&db_path).unwrap();
+        db.run_migrations().unwrap();
+
+        save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, " Bearer sk-proj-valid-token\n").unwrap();
+
+        assert_eq!(
+            read_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
+            Some("sk-proj-valid-token".to_string())
+        );
+        assert_eq!(
+            db.get_setting(SETTING_API_KEY).unwrap(),
+            Some("sk-proj-valid-token".to_string())
+        );
+
+        drop(db);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+    }
+
+    #[test]
+    fn read_model_api_key_normalizes_legacy_stored_key() {
+        let db_path = std::env::temp_dir().join(format!(
+            "astro-studio-legacy-api-key-test-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::open(&db_path).unwrap();
+        db.run_migrations().unwrap();
+        db.set_setting(
+            &model_setting_key(ENGINE_GPT_IMAGE_2, SETTING_API_KEY),
+            " Bearer sk-proj-valid-token\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
+            Some("sk-proj-valid-token".to_string())
+        );
+
+        drop(db);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
     }
 
     #[test]
