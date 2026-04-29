@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
+  ChevronDown,
   Copy,
   Folder,
   Image as ImageIcon,
@@ -15,7 +16,8 @@ import {
   getFavoriteImages,
   getPromptFavorites,
 } from "../lib/api";
-import { formatLocalDateTime } from "../lib/utils";
+import { getPromptFolderDisplayName } from "../lib/promptFolders";
+import { cn, formatLocalDateTime } from "../lib/utils";
 import { useFolders } from "../hooks/useFolders";
 import { usePromptFolders } from "../hooks/usePromptFolders";
 import type { GenerationResult, PromptFavorite } from "../types";
@@ -193,7 +195,18 @@ export default function FavoritesPage() {
             <div className="relative min-w-0 flex-1 xl:flex-none">
               <Folder
                 size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60"
+                className={cn(
+                  "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 transition-colors",
+                  activeFolderId ? "text-primary/80" : "text-muted/60",
+                )}
+                strokeWidth={2}
+              />
+              <ChevronDown
+                size={14}
+                className={cn(
+                  "pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 transition-colors",
+                  activeFolderId ? "text-primary/70" : "text-muted/55",
+                )}
                 strokeWidth={2}
               />
               <select
@@ -201,7 +214,14 @@ export default function FavoritesPage() {
                 onChange={(event) =>
                   handleFolderFilterChange(event.target.value)
                 }
-                className="h-[30px] w-full appearance-none rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-7 text-[12px] text-foreground transition-colors focus:border-border focus:bg-surface focus:outline-none xl:w-40"
+                className={cn(
+                  "h-[34px] w-full appearance-none rounded-[10px] border pl-7 pr-8 text-[12px] font-medium transition-all outline-none xl:w-44",
+                  "shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+                  activeFolderId
+                    ? "border-primary/20 bg-surface text-foreground shadow-[0_10px_24px_rgba(79,106,255,0.08)]"
+                    : "border-border-subtle bg-subtle/55 text-muted hover:border-border hover:bg-surface/92 hover:text-foreground",
+                  "focus:border-primary/30 focus:bg-surface focus:text-foreground focus:shadow-[0_0_0_4px_rgba(79,106,255,0.12)]",
+                )}
                 title={t("favorites.folderFilter")}
                 aria-label={t("favorites.folderFilter")}
               >
@@ -212,7 +232,9 @@ export default function FavoritesPage() {
                 </option>
                 {activeFolders.map((folder) => (
                   <option key={folder.id} value={folder.id}>
-                    {folder.name}
+                    {activeKind === "prompts"
+                      ? getPromptFolderDisplayName(folder)
+                      : folder.name}
                   </option>
                 ))}
               </select>

@@ -60,6 +60,13 @@ function renderSettingsPage() {
   fireEvent.click(screen.getByRole("button", { name: "log.title" }));
 }
 
+async function clickModelCard(name: string) {
+  const card = await screen.findByRole("button", { name: `Select ${name} model` });
+  await act(async () => {
+    fireEvent.click(card);
+  });
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -242,7 +249,7 @@ describe("SettingsPage logs", () => {
     });
   });
 
-  it("shows Nano Banana models in the model selector", async () => {
+  it("shows Nano Banana models as direct selection cards", async () => {
     render(
       <MemoryRouter>
         <SettingsPage />
@@ -252,14 +259,15 @@ describe("SettingsPage logs", () => {
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
     expect(
-      await screen.findByRole("option", { name: "Nano Banana" }),
+      await screen.findByRole("button", { name: "Select Nano Banana model" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "Nano Banana 2" }),
+      screen.getByRole("button", { name: "Select Nano Banana 2 model" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "Nano Banana Pro" }),
+      screen.getByRole("button", { name: "Select Nano Banana Pro model" }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "settings.model" })).not.toBeInTheDocument();
   });
 
   it("renders every registered model from the shared catalog", async () => {
@@ -314,12 +322,10 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    const modelSelect = await screen.findByDisplayValue("GPT Image 2");
-    const optionNames = within(modelSelect)
-      .getAllByRole("option")
-      .map((option) => option.textContent);
-
-    expect(optionNames).toEqual(["GPT Image 2", "Catalog Test Model"]);
+    expect(await screen.findByRole("button", { name: "Select GPT Image 2 model" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select Catalog Test Model model" }),
+    ).toBeInTheDocument();
 
     vi.doUnmock("../lib/modelCatalog");
   });
@@ -356,10 +362,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    const modelSelect = await screen.findByDisplayValue("GPT Image 2");
-    fireEvent.change(modelSelect, {
-      target: { value: "nano-banana" },
-    });
+    await clickModelCard("Nano Banana");
 
     await waitFor(() => {
       expect(getModelApiKey).toHaveBeenCalledWith("nano-banana");
@@ -416,10 +419,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    const modelSelect = await screen.findByDisplayValue("GPT Image 2");
-    fireEvent.change(modelSelect, {
-      target: { value: "nano-banana" },
-    });
+    await clickModelCard("Nano Banana");
 
     await act(async () => {
       geminiKey.resolve("gemini-key");
@@ -504,9 +504,7 @@ describe("SettingsPage logs", () => {
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
     expect(screen.getByDisplayValue("openai-key")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByDisplayValue("GPT Image 2"), {
-      target: { value: "nano-banana" },
-    });
+    await clickModelCard("Nano Banana");
 
     await waitFor(() => {
       expect(
@@ -546,10 +544,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    const modelSelect = await screen.findByDisplayValue("GPT Image 2");
-    fireEvent.change(modelSelect, {
-      target: { value: "nano-banana" },
-    });
+    await clickModelCard("Nano Banana");
 
     await waitFor(() => {
       expect(
@@ -586,10 +581,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    const modelSelect = await screen.findByDisplayValue("GPT Image 2");
-    fireEvent.change(modelSelect, {
-      target: { value: "nano-banana" },
-    });
+    await clickModelCard("Nano Banana");
 
     await waitFor(() => {
       expect(getModelApiKey).toHaveBeenCalledWith("nano-banana");
@@ -599,10 +591,10 @@ describe("SettingsPage logs", () => {
       persistedModel.resolve("nano-banana-pro");
     });
 
-    expect(screen.getByDisplayValue("Nano Banana")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select Nano Banana model" })).toHaveAttribute("aria-pressed", "true");
     expect(
-      screen.queryByDisplayValue("Nano Banana Pro"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Select Nano Banana Pro model" }),
+    ).toHaveAttribute("aria-pressed", "false");
     expect(
       screen.getByDisplayValue(
         "https://generativelanguage.googleapis.com/v1beta/models",
@@ -625,7 +617,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await screen.findByDisplayValue("GPT Image 2");
+    await screen.findByRole("button", { name: "Select GPT Image 2 model" });
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
     fireEvent.change(screen.getByDisplayValue(""), {
       target: { value: "pending-openai-key" },
@@ -643,12 +635,10 @@ describe("SettingsPage logs", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "settings.saveUrl" }));
 
-    fireEvent.change(screen.getByDisplayValue("GPT Image 2"), {
-      target: { value: "nano-banana" },
-    });
+    await clickModelCard("Nano Banana");
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Nano Banana")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Select Nano Banana model" })).toHaveAttribute("aria-pressed", "true");
       expect(
         screen.getByDisplayValue(
           "https://generativelanguage.googleapis.com/v1beta/models",

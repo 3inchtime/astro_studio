@@ -91,4 +91,26 @@ describe("Lightbox", () => {
       transform: "scale(2) translate(0px, 0px)",
     });
   });
+
+  it("falls back to the thumbnail when the full-resolution lightbox image fails", () => {
+    render(
+      <Lightbox
+        images={[
+          {
+            imageId: "image-1",
+            generationId: "generation-1",
+            path: "/tmp/image.jpeg",
+            thumbnailPath: "/tmp/thumb.png",
+          },
+        ]}
+        initialIndex={0}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const image = screen.getByAltText("Preview");
+    fireEvent.error(image);
+
+    expect(image).toHaveAttribute("src", "/tmp/thumb.png");
+  });
 });

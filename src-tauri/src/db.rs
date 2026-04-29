@@ -228,6 +228,11 @@ impl Database {
             "INSERT OR IGNORE INTO prompt_folders (id, name, created_at) VALUES ('default', 'Default', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));",
         )?;
 
+        migrate_step(
+            &conn,
+            "UPDATE prompt_folders SET name = '默认收藏夹' WHERE id = 'default' AND name <> '默认收藏夹';",
+        )?;
+
         Ok(())
     }
 

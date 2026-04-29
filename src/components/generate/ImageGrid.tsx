@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { useMemo, useState } from "react";
 import {
   toAssetUrl,
   copyImageToClipboard,
@@ -21,6 +22,40 @@ interface ImageGridProps {
   onDelete?: (generationId: string) => void;
   onEditImage?: (image: ImageItem) => void;
   onFavoriteClick?: (imageId: string) => void;
+}
+
+function ImagePreview({
+  image,
+  isMultiImage,
+}: {
+  image: ImageItem;
+  isMultiImage: boolean;
+}) {
+  const primarySrc = useMemo(() => {
+    if (isMultiImage) {
+      return image.thumbnail || image.path;
+    }
+    return image.path;
+  }, [image.path, image.thumbnail, isMultiImage]);
+  const [src, setSrc] = useState(primarySrc);
+
+  return (
+    <img
+      src={toAssetUrl(src)}
+      alt="Generated"
+      className={`block h-full transition-transform duration-500 group-hover:scale-[1.03] ${
+        isMultiImage
+          ? "w-full object-cover"
+          : "w-auto max-w-full object-cover object-center"
+      }`}
+      loading="lazy"
+      onError={() => {
+        if (!isMultiImage && image.thumbnail && src !== image.thumbnail) {
+          setSrc(image.thumbnail);
+        }
+      }}
+    />
+  );
 }
 
 export default function ImageGrid({
@@ -56,16 +91,7 @@ export default function ImageGrid({
                 : "inline-block h-72 w-fit max-w-[min(76vw,36rem)]"
             }`}
           >
-            <img
-              src={toAssetUrl(img.thumbnail || img.path)}
-              alt="Generated"
-              className={`block h-full transition-transform duration-500 group-hover:scale-[1.03] ${
-                isMultiImage
-                  ? "w-full object-cover"
-                  : "w-auto max-w-full object-cover object-center"
-              }`}
-              loading="lazy"
-            />
+            <ImagePreview image={img} isMultiImage={isMultiImage} />
           </div>
           <div className="mt-2 flex w-fit items-center justify-center gap-1 mx-auto">
             <button

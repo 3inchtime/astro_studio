@@ -9,6 +9,7 @@ import {
   getPromptFavoriteFolders,
   removePromptFavoriteFromFolders,
 } from "../../lib/api";
+import { getPromptFolderDisplayName } from "../../lib/promptFolders";
 import { cn } from "../../lib/utils";
 
 interface PromptFolderSelectorProps {
@@ -135,7 +136,7 @@ export default function PromptFolderSelector({
                     )}
                   />
                   <span className="min-w-0 truncate text-[13px] text-foreground">
-                    {folder.name}
+                    {getPromptFolderDisplayName(folder)}
                   </span>
                 </label>
               ))}

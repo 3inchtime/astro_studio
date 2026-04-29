@@ -51,7 +51,12 @@ export default function Lightbox({
 
   const currentImage = images[index];
   const currentPath = currentImage?.path;
+  const [displayPath, setDisplayPath] = useState(currentPath ?? "");
   const transitionEase: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+  useEffect(() => {
+    setDisplayPath(currentPath ?? "");
+  }, [currentPath]);
 
   if (!currentImage || !currentPath) {
     return null;
@@ -200,13 +205,18 @@ export default function Lightbox({
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={toAssetUrl(currentPath)}
+              src={toAssetUrl(displayPath)}
               alt={t("lightbox.preview")}
               className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
               style={{
                 transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
               }}
               onDoubleClick={toggleZoom}
+              onError={() => {
+                if (currentImage.thumbnailPath && displayPath !== currentImage.thumbnailPath) {
+                  setDisplayPath(currentImage.thumbnailPath);
+                }
+              }}
               draggable={false}
             />
           </motion.div>

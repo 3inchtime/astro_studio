@@ -159,6 +159,27 @@ fn gemini_aspect_ratio_for_size(size: &str) -> Option<&'static str> {
     }
 }
 
+fn gemini_request_was_closed_before_completion(error: &str) -> bool {
+    error.contains("connection closed before message completed")
+}
+
+fn augment_gemini_transport_error(model: &str, error: &str) -> String {
+    if !is_gemini_model(model) || !gemini_request_was_closed_before_completion(error) {
+        return error.to_string();
+    }
+
+    let recovery_hint = match model {
+        ENGINE_NANO_BANANA_PRO | GEMINI_MODEL_NANO_BANANA_PRO => {
+            "The provider closed the request before Gemini finished responding. Try switching to Nano Banana 2 or using 1024x1024 for this prompt."
+        }
+        _ => {
+            "The provider closed the request before Gemini finished responding. Try using 1024x1024 or a simpler prompt."
+        }
+    };
+
+    format!("{error}\n\n{recovery_hint}")
+}
+
 fn build_gemini_request_body(
     prompt: &str,
     inline_images: &[GeminiInlineImage],
@@ -177,7 +198,7 @@ fn build_gemini_request_body(
     let mut generation_config = serde_json::Map::new();
     generation_config.insert(
         "responseModalities".to_string(),
-        serde_json::json!(["TEXT", "IMAGE"]),
+        serde_json::json!(["IMAGE"]),
     );
     generation_config.insert(
         "candidateCount".to_string(),
@@ -910,7 +931,10 @@ impl GptImageEngine {
                 let response = match response {
                     Ok(response) => response,
                     Err(e) => {
-                        let error = self.format_request_error(&url, &e, self.timeout_secs);
+                        let error = augment_gemini_transport_error(
+                            model,
+                            &self.format_request_error(&url, &e, self.timeout_secs),
+                        );
                         if let Some(db) = db {
                             let _ = db.insert_log(
                                 "api_response",
@@ -1438,13 +1462,24 @@ mod tests {
         assert_eq!(body["generationConfig"]["candidateCount"], 2);
         assert_eq!(
             body["generationConfig"]["responseModalities"],
-            json!(["TEXT", "IMAGE"])
+            json!(["IMAGE"])
         );
+        assert!(body["generationConfig"]["imageConfig"]
+            .get("outputMimeType")
+            .is_none());
+    }
+
+    #[test]
+    fn gemini_transport_errors_include_manual_recovery_hint() {
+        let message = augment_gemini_transport_error(
+            ENGINE_NANO_BANANA_PRO,
+            "Request failed for https://new.suxi.ai/v1beta/models/gemini-3-pro-image-preview:generateContent [request send failure]: error sending request for url (https://new.suxi.ai/v1beta/models/gemini-3-pro-image-preview:generateContent) <- client error (SendRequest) <- connection closed before message completed",
+        );
+
         assert!(
-            body["generationConfig"]["imageConfig"]
-                .get("outputMimeType")
-                .is_none()
+            message.contains("The provider closed the request before Gemini finished responding.")
         );
+        assert!(message.contains("Try switching to Nano Banana 2"));
     }
 
     #[test]

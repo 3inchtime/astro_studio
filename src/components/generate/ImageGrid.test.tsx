@@ -23,6 +23,89 @@ vi.mock("../favorites/FavoriteButton", () => ({
 }));
 
 describe("ImageGrid", () => {
+  it("uses the original image for single-image previews so large renders stay sharp", () => {
+    render(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/full-resolution.jpeg",
+            thumbnail: "/tmp/thumbnail.png",
+            imageId: "image-sharp",
+            generationId: "generation-sharp",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByAltText("Generated")).toHaveAttribute(
+      "src",
+      "/tmp/full-resolution.jpeg",
+    );
+  });
+
+  it("falls back to the thumbnail when a single-image preview fails to load", () => {
+    render(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/full-resolution.jpeg",
+            thumbnail: "/tmp/thumbnail.png",
+            imageId: "image-fallback",
+            generationId: "generation-fallback",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    const image = screen.getByAltText("Generated");
+    fireEvent.error(image);
+
+    expect(image).toHaveAttribute("src", "/tmp/thumbnail.png");
+  });
+
+  it("resets a single-image preview when the rendered image changes", () => {
+    const { rerender } = render(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/full-resolution-a.jpeg",
+            thumbnail: "/tmp/thumbnail-a.png",
+            imageId: "image-a",
+            generationId: "generation-a",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    fireEvent.error(screen.getByAltText("Generated"));
+    expect(screen.getByAltText("Generated")).toHaveAttribute(
+      "src",
+      "/tmp/thumbnail-a.png",
+    );
+
+    rerender(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/full-resolution-b.jpeg",
+            thumbnail: "/tmp/thumbnail-b.png",
+            imageId: "image-b",
+            generationId: "generation-b",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByAltText("Generated")).toHaveAttribute(
+      "src",
+      "/tmp/full-resolution-b.jpeg",
+    );
+  });
+
   it("renders single-image cards larger so portrait images stay wider than the action row", () => {
     const { container } = render(
       <ImageGrid
@@ -72,5 +155,32 @@ describe("ImageGrid", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(onDelete).toHaveBeenCalledWith("generation-1");
+  });
+
+  it("keeps using thumbnails for multi-image grids", () => {
+    render(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/full-image-1.jpeg",
+            thumbnail: "/tmp/thumb-1.png",
+            imageId: "image-1",
+            generationId: "generation-1",
+          },
+          {
+            path: "/tmp/full-image-2.jpeg",
+            thumbnail: "/tmp/thumb-2.png",
+            imageId: "image-2",
+            generationId: "generation-2",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    const renderedImages = screen.getAllByAltText("Generated");
+
+    expect(renderedImages[0]).toHaveAttribute("src", "/tmp/thumb-1.png");
+    expect(renderedImages[1]).toHaveAttribute("src", "/tmp/thumb-2.png");
   });
 });

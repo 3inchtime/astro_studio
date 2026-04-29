@@ -942,6 +942,141 @@ fn save_generation_images(
     Ok(saved_images)
 }
 
+fn normalized_path_extension(path: &std::path::Path) -> Option<String> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            if extension.eq_ignore_ascii_case("jpg") {
+                "jpeg".to_string()
+            } else {
+                extension.to_ascii_lowercase()
+            }
+        })
+}
+
+fn repaired_image_path(path: &std::path::Path, extension: &str) -> std::path::PathBuf {
+    let candidate = path.with_extension(extension);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image");
+
+    for index in 1..1000 {
+        let candidate = parent.join(format!("{stem}_format_{index}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    parent.join(format!(
+        "{}_format_{}.{}",
+        stem,
+        uuid::Uuid::new_v4(),
+        extension
+    ))
+}
+
+fn target_repair_output_format(
+    engine: &str,
+    path: &std::path::Path,
+    detected_extension: &str,
+) -> &'static str {
+    if is_gemini_model(engine) && normalized_path_extension(path).as_deref() != Some("png") {
+        return "png";
+    }
+
+    normalized_path_extension(path)
+        .as_deref()
+        .and_then(file_manager::output_format_for_extension)
+        .or_else(|| file_manager::output_format_for_extension(detected_extension))
+        .unwrap_or("png")
+}
+
+fn repair_mismatched_image_extensions(db: &Database) -> Result<usize, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT i.id, i.file_path, g.engine
+                 FROM images i
+                 JOIN generations g ON g.id = i.generation_id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|row| row.ok())
+            .collect();
+        rows
+    };
+
+    let mut repaired = 0;
+    for (image_id, file_path, engine) in rows {
+        let path = std::path::PathBuf::from(&file_path);
+        if !path.is_file() {
+            continue;
+        }
+
+        let data = match std::fs::read(&path) {
+            Ok(data) => data,
+            Err(e) => {
+                log::warn!(
+                    "Failed to read image for extension repair: {} ({})",
+                    file_path,
+                    e
+                );
+                continue;
+            }
+        };
+        let Some(detected_extension) = file_manager::detected_image_extension(&data) else {
+            continue;
+        };
+        let output_format = target_repair_output_format(&engine, &path, detected_extension);
+        let target_extension = file_manager::extension_for_output_format(output_format);
+
+        if normalized_path_extension(&path).as_deref() == Some(target_extension)
+            && detected_extension == target_extension
+        {
+            continue;
+        }
+
+        let img =
+            image::load_from_memory(&data).map_err(|e| format!("Decode image failed: {}", e))?;
+        let next_path = if normalized_path_extension(&path).as_deref() == Some(target_extension) {
+            path.clone()
+        } else {
+            repaired_image_path(&path, target_extension)
+        };
+        let file_size =
+            file_manager::write_image_in_output_format(&img, &next_path, output_format)?;
+        if next_path != path {
+            let _ = std::fs::remove_file(&path);
+        }
+        let next_path_str = next_path.to_string_lossy().to_string();
+        if let Err(e) = conn.execute(
+            "UPDATE images SET file_path = ?1, file_size = ?2 WHERE id = ?3",
+            params![next_path_str, file_size, image_id],
+        ) {
+            if next_path != path {
+                let _ = std::fs::rename(&next_path, &path);
+            }
+            return Err(e.to_string());
+        }
+        repaired += 1;
+    }
+
+    if repaired > 0 {
+        log::info!("Repaired {} image file extension mismatch(es)", repaired);
+    }
+
+    Ok(repaired)
+}
+
 async fn recover_interrupted_generations(
     app: &tauri::AppHandle,
     db: &Database,
@@ -2837,6 +2972,11 @@ pub fn run() {
 
             {
                 let db = app.state::<Database>();
+                let _ = repair_mismatched_image_extensions(db.inner());
+            }
+
+            {
+                let db = app.state::<Database>();
                 let engine = app.state::<api_gateway::GptImageEngine>();
                 tauri::async_runtime::block_on(recover_interrupted_generations(
                     &app.handle(),
@@ -2898,4 +3038,160 @@ pub fn run() {
                 set_macos_development_app_icon();
             }
         });
+}
+
+#[cfg(test)]
+mod image_repair_tests {
+    use super::*;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
+    use std::io::Cursor;
+
+    fn test_db_path() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-studio-image-repair-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        dir.join("astro_studio.db")
+    }
+
+    fn jpeg_bytes() -> Vec<u8> {
+        let image = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(4, 4, Rgb([180, 72, 24])));
+        let mut bytes = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+            .expect("encode jpeg");
+        bytes
+    }
+
+    #[test]
+    fn repairs_mismatched_saved_image_extension_and_database_path() {
+        let db_path = test_db_path();
+        let database = Database::open(&db_path).expect("open test db");
+        database.run_migrations().expect("migrate test db");
+        let image_path = db_path
+            .parent()
+            .expect("db parent")
+            .join("bad-extension.png");
+        std::fs::write(&image_path, jpeg_bytes()).expect("write mismatched image");
+
+        {
+            let conn = database.conn.lock().expect("lock db");
+            conn.execute(
+                "INSERT INTO generations (id, prompt, engine, size, quality, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    "generation-1",
+                    "prompt",
+                    ENGINE_NANO_BANANA_PRO,
+                    "1024x1024",
+                    "auto",
+                    "completed",
+                    "2026-04-29T05:57:11Z"
+                ],
+            )
+            .expect("insert generation");
+            conn.execute(
+                "INSERT INTO images (id, generation_id, file_path, thumbnail_path, width, height, file_size, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    "image-1",
+                    "generation-1",
+                    image_path.to_string_lossy().to_string(),
+                    "",
+                    4,
+                    4,
+                    10,
+                    "2026-04-29T05:57:11Z"
+                ],
+            )
+            .expect("insert image");
+        }
+
+        repair_mismatched_image_extensions(&database).expect("repair images");
+
+        let repaired_path: String = {
+            let conn = database.conn.lock().expect("lock db");
+            conn.query_row(
+                "SELECT file_path FROM images WHERE id = ?1",
+                params!["image-1"],
+                |row| row.get(0),
+            )
+            .expect("select repaired path")
+        };
+
+        let repaired_data = std::fs::read(&repaired_path).expect("read repaired image");
+
+        assert!(repaired_path.ends_with("bad-extension.png"));
+        assert!(image_path.exists());
+        assert_eq!(
+            file_manager::detected_image_extension(&repaired_data),
+            Some("png")
+        );
+
+        std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
+    }
+
+    #[test]
+    fn repairs_legacy_gemini_jpeg_originals_to_png() {
+        let db_path = test_db_path();
+        let database = Database::open(&db_path).expect("open test db");
+        database.run_migrations().expect("migrate test db");
+        let image_path = db_path
+            .parent()
+            .expect("db parent")
+            .join("legacy-gemini.jpeg");
+        std::fs::write(&image_path, jpeg_bytes()).expect("write legacy image");
+
+        {
+            let conn = database.conn.lock().expect("lock db");
+            conn.execute(
+                "INSERT INTO generations (id, prompt, engine, size, quality, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    "generation-legacy",
+                    "prompt",
+                    ENGINE_NANO_BANANA_PRO,
+                    "1024x1024",
+                    "auto",
+                    "completed",
+                    "2026-04-29T06:18:01Z"
+                ],
+            )
+            .expect("insert generation");
+            conn.execute(
+                "INSERT INTO images (id, generation_id, file_path, thumbnail_path, width, height, file_size, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    "image-legacy",
+                    "generation-legacy",
+                    image_path.to_string_lossy().to_string(),
+                    "",
+                    4,
+                    4,
+                    10,
+                    "2026-04-29T06:18:01Z"
+                ],
+            )
+            .expect("insert image");
+        }
+
+        repair_mismatched_image_extensions(&database).expect("repair images");
+
+        let repaired_path: String = {
+            let conn = database.conn.lock().expect("lock db");
+            conn.query_row(
+                "SELECT file_path FROM images WHERE id = ?1",
+                params!["image-legacy"],
+                |row| row.get(0),
+            )
+            .expect("select repaired path")
+        };
+        let repaired_data = std::fs::read(&repaired_path).expect("read repaired image");
+
+        assert!(repaired_path.ends_with("legacy-gemini.png"));
+        assert!(!image_path.exists());
+        assert_eq!(
+            file_manager::detected_image_extension(&repaired_data),
+            Some("png")
+        );
+
+        std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
+    }
 }

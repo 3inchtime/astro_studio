@@ -73,6 +73,10 @@ function usesSharedEditEndpoint(model: ImageModel): boolean {
   return generationUrl === editUrl;
 }
 
+function formatProviderName(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
 function normalizeEndpointSettings(
   model: ImageModel,
   settings: EndpointSettings,
@@ -465,6 +469,14 @@ export default function SettingsPage() {
     setTimeout(() => setModelSaved(false), 2000);
   }
 
+  function handleSelectImageModel(model: ImageModel) {
+    didUserSelectModelRef.current = true;
+    setImageModel(model);
+    setModelSaved(false);
+    setKeySaved(false);
+    setUrlSaved(false);
+  }
+
   async function handleConfirmClearLogs() {
     setClearingLogs(true);
     try {
@@ -722,30 +734,73 @@ export default function SettingsPage() {
                         <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.modelDesc")}</p>
                       </div>
                     </div>
-                    <div className="flex min-w-0 flex-col gap-2 lg:flex-row">
-                      <select
-                        value={imageModel}
-                        onChange={(e) => {
-                          didUserSelectModelRef.current = true;
-                          setImageModel(e.target.value as ImageModel);
-                          setModelSaved(false);
-                          setKeySaved(false);
-                          setUrlSaved(false);
-                        }}
-                        className="h-[38px] w-full appearance-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
-                      >
-                        {IMAGE_MODEL_CATALOG.map(({ id, label }) => (
-                          <option key={id} value={id}>{label}</option>
-                        ))}
-                      </select>
-                      <motion.button
-                        type="button"
-                        onClick={handleSaveModel}
-                        whileTap={{ scale: 0.97 }}
-                        className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
-                      >
-                        {modelSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveModel")}
-                      </motion.button>
+                    <div className="min-w-0 space-y-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {IMAGE_MODEL_CATALOG.map((entry) => {
+                          const active = imageModel === entry.id;
+
+                          return (
+                            <button
+                              key={entry.id}
+                              type="button"
+                              aria-pressed={active}
+                              aria-label={`Select ${entry.label} model`}
+                              onClick={() => handleSelectImageModel(entry.id)}
+                              className={`group min-h-[112px] rounded-[10px] border p-3 text-left transition-all ${
+                                active
+                                  ? "border-primary/35 bg-primary/6 shadow-card"
+                                  : "border-border-subtle bg-subtle/20 hover:border-border hover:bg-subtle/35"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[13px] font-semibold text-foreground">{entry.label}</span>
+                                    <span className="rounded-[6px] border border-border-subtle bg-surface px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted/60">
+                                      {formatProviderName(entry.provider)}
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 truncate font-mono text-[10.5px] text-muted/55">
+                                    {entry.providerModelId}
+                                  </p>
+                                </div>
+                                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
+                                  active
+                                    ? "border-primary bg-primary text-white"
+                                    : "border-border-subtle text-transparent group-hover:border-border"
+                                }`}>
+                                  <Check size={12} strokeWidth={3} />
+                                </span>
+                              </div>
+                              <div className="mt-4 flex flex-wrap gap-1.5">
+                                <span className="rounded-[6px] bg-subtle px-2 py-1 text-[10.5px] font-medium text-muted/65">
+                                  {entry.supportsEdit ? t("settings.modelSupportsEdit") : t("settings.modelGenerateOnly")}
+                                </span>
+                                <span className="rounded-[6px] bg-subtle px-2 py-1 text-[10.5px] font-medium text-muted/65">
+                                  {entry.connectionDefaults.generationUrl === entry.connectionDefaults.editUrl
+                                    ? t("settings.modelSharedEndpoint")
+                                    : t("settings.modelSeparateEndpoints")}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-border-subtle bg-subtle/20 px-3 py-2.5">
+                        <p className="text-[11px] text-muted/60">
+                          {t("settings.selectedModel", {
+                            model: getImageModelCatalogEntry(imageModel).label,
+                          })}
+                        </p>
+                        <motion.button
+                          type="button"
+                          onClick={handleSaveModel}
+                          whileTap={{ scale: 0.97 }}
+                          className="flex h-[32px] shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+                        >
+                          {modelSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveModel")}
+                        </motion.button>
+                      </div>
                     </div>
                   </div>
                   <div className="border-t border-border-subtle" />
