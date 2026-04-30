@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
-  ChevronDown,
   Copy,
   Folder,
   Image as ImageIcon,
@@ -201,21 +200,13 @@ export default function FavoritesPage() {
                 )}
                 strokeWidth={2}
               />
-              <ChevronDown
-                size={14}
-                className={cn(
-                  "pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 transition-colors",
-                  activeFolderId ? "text-primary/70" : "text-muted/55",
-                )}
-                strokeWidth={2}
-              />
               <select
                 value={activeFolderId}
                 onChange={(event) =>
                   handleFolderFilterChange(event.target.value)
                 }
                 className={cn(
-                  "h-[34px] w-full appearance-none rounded-[10px] border pl-7 pr-8 text-[12px] font-medium transition-all outline-none xl:w-44",
+                  "select-control h-[34px] w-full rounded-[10px] border pl-7 pr-8 text-[12px] font-medium transition-all outline-none xl:w-44",
                   "shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
                   activeFolderId
                     ? "border-primary/20 bg-surface text-foreground shadow-[0_10px_24px_rgba(79,106,255,0.08)]"

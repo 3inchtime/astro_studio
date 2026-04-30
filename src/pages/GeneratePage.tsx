@@ -1079,7 +1079,7 @@ function SelectField({ label, value, onChange, options }: SelectFieldProps) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="min-w-0 flex-1 truncate bg-transparent text-[12px] font-medium text-foreground focus:outline-none"
+        className="select-control min-w-0 flex-1 truncate bg-transparent pr-8 text-[12px] font-medium text-foreground focus:outline-none"
       >
         {options.map((option) => (
           <option

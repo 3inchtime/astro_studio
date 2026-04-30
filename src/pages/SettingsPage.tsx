@@ -615,7 +615,7 @@ export default function SettingsPage() {
                       <select
                         value={language}
                         onChange={(e) => handleLanguageChange(normalizeLanguage(e.target.value))}
-                        className="h-[38px] w-full appearance-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                        className="select-control h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 pr-8 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                       >
                         {LANGUAGE_OPTIONS.map((option) => (
                           <option key={option.code} value={option.code}>
@@ -1033,7 +1033,7 @@ export default function SettingsPage() {
                   <select
                     value={logType}
                     onChange={(e) => { setLogType(e.target.value); setLogPage(1); }}
-                    className="h-[34px] appearance-none rounded-[8px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all focus:border-primary/25 focus:outline-none"
+                    className="select-control h-[34px] rounded-[8px] border border-border-subtle bg-subtle/30 px-3 pr-8 text-[12px] text-foreground transition-all focus:border-primary/25 focus:outline-none"
                   >
                     <option value="">{t("log.allTypes")}</option>
                     {LOG_TYPES.filter(Boolean).map((lt) => (
@@ -1044,7 +1044,7 @@ export default function SettingsPage() {
                   <select
                     value={logLevel}
                     onChange={(e) => { setLogLevel(e.target.value); setLogPage(1); }}
-                    className="h-[34px] appearance-none rounded-[8px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all focus:border-primary/25 focus:outline-none"
+                    className="select-control h-[34px] rounded-[8px] border border-border-subtle bg-subtle/30 px-3 pr-8 text-[12px] text-foreground transition-all focus:border-primary/25 focus:outline-none"
                   >
                     <option value="">{t("log.allLevels")}</option>
                     {LOG_LEVELS.filter(Boolean).map((ll) => (
@@ -1057,7 +1057,7 @@ export default function SettingsPage() {
                     <select
                       value={logSettings.retention_days}
                       onChange={(e) => handleSaveRetention(Number(e.target.value))}
-                      className="h-[30px] appearance-none rounded-[6px] border border-border-subtle bg-subtle/30 px-2 text-[11px] text-foreground focus:border-primary/25 focus:outline-none"
+                      className="select-control h-[30px] rounded-[6px] border border-border-subtle bg-subtle/30 px-2 pr-7 text-[11px] text-foreground focus:border-primary/25 focus:outline-none"
                     >
                       {[3, 7, 14, 30].map((d) => (
                         <option key={d} value={d}>{d} {t("log.days")}</option>
