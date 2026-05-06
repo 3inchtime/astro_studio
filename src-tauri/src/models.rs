@@ -163,12 +163,29 @@ pub struct OpenAiImageData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: String,
+    pub project_id: String,
+    pub project_name: Option<String>,
     pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    pub archived_at: Option<String>,
+    pub pinned_at: Option<String>,
+    pub deleted_at: Option<String>,
     pub generation_count: i32,
     pub latest_generation_at: Option<String>,
     pub latest_thumbnail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub archived_at: Option<String>,
+    pub pinned_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub conversation_count: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

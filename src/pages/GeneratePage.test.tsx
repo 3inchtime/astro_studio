@@ -101,6 +101,7 @@ vi.mock("../lib/editSources", () => ({
 
 vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({
+    activeProjectId: "project-1",
     activeConversationId: "conversation-1",
     setActiveConversationId: vi.fn(),
     refreshConversations: vi.fn(),
