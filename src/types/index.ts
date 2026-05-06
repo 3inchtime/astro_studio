@@ -2,8 +2,18 @@ export interface Generation {
   id: string;
   prompt: string;
   engine: string;
+  request_kind: string;
   size: string;
   quality: string;
+  background: ImageBackground;
+  output_format: ImageOutputFormat;
+  output_compression: number;
+  moderation: ImageModeration;
+  input_fidelity: ImageInputFidelity;
+  image_count: number;
+  source_image_count: number;
+  source_image_paths: string[];
+  request_metadata?: string | null;
   status: string;
   error_message?: string | null;
   created_at: string;
@@ -40,6 +50,21 @@ export interface SearchResult {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface GenerationSearchFilters {
+  model?: ImageModel | "";
+  request_kind?: "generate" | "edit" | "";
+  status?: "processing" | "completed" | "failed" | "";
+  size?: ImageSize | "";
+  quality?: ImageQuality | "";
+  background?: ImageBackground | "";
+  output_format?: ImageOutputFormat | "";
+  moderation?: ImageModeration | "";
+  input_fidelity?: ImageInputFidelity | "";
+  source_image_count?: "any" | "0" | "1" | "2" | "3" | "4+";
+  created_from?: string;
+  created_to?: string;
 }
 
 export interface GenerationParams {

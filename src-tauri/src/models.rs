@@ -107,8 +107,18 @@ pub struct Generation {
     pub id: String,
     pub prompt: String,
     pub engine: String,
+    pub request_kind: String,
     pub size: String,
     pub quality: String,
+    pub background: String,
+    pub output_format: String,
+    pub output_compression: i32,
+    pub moderation: String,
+    pub input_fidelity: String,
+    pub image_count: i32,
+    pub source_image_count: i32,
+    pub source_image_paths: Vec<String>,
+    pub request_metadata: Option<String>,
     pub status: String,
     pub error_message: Option<String>,
     pub created_at: String,
@@ -130,6 +140,22 @@ pub struct GeneratedImage {
 pub struct GenerationResult {
     pub generation: Generation,
     pub images: Vec<GeneratedImage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GenerationSearchFilters {
+    pub model: Option<String>,
+    pub request_kind: Option<String>,
+    pub status: Option<String>,
+    pub size: Option<String>,
+    pub quality: Option<String>,
+    pub background: Option<String>,
+    pub output_format: Option<String>,
+    pub moderation: Option<String>,
+    pub input_fidelity: Option<String>,
+    pub source_image_count: Option<String>,
+    pub created_from: Option<String>,
+    pub created_to: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

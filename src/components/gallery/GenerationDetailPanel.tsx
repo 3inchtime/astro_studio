@@ -42,6 +42,7 @@ export default function GenerationDetailPanel({
   const { t } = useTranslation();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const image = result.images[selectedIndex] ?? result.images[0];
+  const generation = result.generation;
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -113,40 +114,66 @@ export default function GenerationDetailPanel({
               {t("gallery.prompt")}
             </span>
             <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">
-              {result.generation.prompt}
+              {generation.prompt}
             </p>
           </div>
-          <div className="flex gap-5">
-            <div>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                {t("gallery.size")}
-              </span>
-              <p className="mt-0.5 text-[13px] text-foreground/80">
-                {result.generation.size}
-              </p>
-            </div>
-            <div>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                {t("gallery.quality")}
-              </span>
-              <p className="mt-0.5 text-[13px] text-foreground/80">
-                {result.generation.quality}
-              </p>
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <MetaRow label={t("gallery.model")} value={generation.engine} />
+            <MetaRow label={t("gallery.requestKind")} value={generation.request_kind} />
+            <MetaRow label={t("gallery.size")} value={generation.size} />
+            <MetaRow label={t("gallery.quality")} value={generation.quality} />
+            <MetaRow label={t("gallery.background")} value={generation.background} />
+            <MetaRow label={t("gallery.format")} value={generation.output_format} />
+            <MetaRow label={t("gallery.moderation")} value={generation.moderation} />
+            <MetaRow label={t("gallery.fidelity")} value={generation.input_fidelity} />
+            <MetaRow
+              label={t("gallery.imageCount")}
+              value={String(generation.image_count)}
+            />
+            <MetaRow
+              label={t("gallery.sourceCount")}
+              value={String(generation.source_image_count)}
+            />
+            <MetaRow
+              label={t("gallery.compression")}
+              value={String(generation.output_compression)}
+            />
+            <MetaRow
+              label={t("gallery.status")}
+              value={generation.status}
+            />
           </div>
           <div className="flex items-center gap-1.5">
             <Calendar size={11} className="text-muted/40" />
             <span className="text-[11px] text-muted/60">
-              {formatLocalDateTime(result.generation.created_at)}
+              {formatLocalDateTime(generation.created_at)}
             </span>
           </div>
-          {result.generation.deleted_at && (
+          {generation.deleted_at && (
             <div className="flex items-center gap-1.5">
               <Trash2 size={11} className="text-muted/40" />
               <span className="text-[11px] text-muted/60">
                 {deletedAtLabel || t("trash.deletedAt")}:{" "}
-                {formatLocalDateTime(result.generation.deleted_at)}
+                {formatLocalDateTime(generation.deleted_at)}
               </span>
+            </div>
+          )}
+          {generation.source_image_paths.length > 0 && (
+            <div className="rounded-[12px] border border-border-subtle bg-subtle/25 p-3">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
+                {t("gallery.sourceImages")}
+              </span>
+              <div className="mt-2 space-y-1.5">
+                {generation.source_image_paths.map((path) => (
+                  <p
+                    key={path}
+                    className="truncate text-[11px] text-foreground/70"
+                    title={path}
+                  >
+                    {path}
+                  </p>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -155,7 +182,7 @@ export default function GenerationDetailPanel({
           {image && onEditImage && (
             <button
               onClick={() =>
-                onEditImage(image.file_path, image.id, result.generation.id)
+                onEditImage(image.file_path, image.id, generation.id)
               }
               className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-primary/20 py-2.5 text-[12px] font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
             >
@@ -182,7 +209,7 @@ export default function GenerationDetailPanel({
           )}
           {onRestore && (
             <button
-              onClick={() => onRestore(result.generation.id)}
+              onClick={() => onRestore(generation.id)}
               className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
             >
               <RotateCcw size={13} />
@@ -190,7 +217,7 @@ export default function GenerationDetailPanel({
             </button>
           )}
           <button
-            onClick={() => onDelete(result.generation.id)}
+            onClick={() => onDelete(generation.id)}
             className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-error/10 py-2.5 text-[12px] font-medium text-error/60 transition-all hover:border-error/20 hover:bg-error/4 hover:text-error"
           >
             <Trash2 size={13} />
@@ -199,5 +226,16 @@ export default function GenerationDetailPanel({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function MetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[10px] border border-border-subtle bg-subtle/20 px-3 py-2">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted/45">
+        {label}
+      </span>
+      <p className="mt-0.5 truncate text-[12px] text-foreground/80">{value}</p>
+    </div>
   );
 }

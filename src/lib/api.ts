@@ -4,6 +4,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type {
   EditSourceImage,
   GenerationParams,
+  GenerationSearchFilters,
   SearchResult,
   Conversation,
   GenerationResult,
@@ -202,11 +203,13 @@ export async function searchGenerations(
   query?: string,
   page?: number,
   onlyDeleted?: boolean,
+  filters?: GenerationSearchFilters,
 ): Promise<SearchResult> {
   return invoke("search_generations", {
     query: query || null,
     page,
     onlyDeleted: onlyDeleted || null,
+    filters: filters || null,
   });
 }
 

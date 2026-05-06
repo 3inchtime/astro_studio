@@ -10,6 +10,7 @@ import {
   getPromptFavoriteFolders,
   getPromptFolders,
   getPromptFavorites,
+  searchGenerations,
   removePromptFavoriteFromFolders,
   toAssetUrl,
 } from "./api";
@@ -102,6 +103,56 @@ describe("api prompt favorite commands", () => {
     );
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(6, "delete_prompt_folder", {
       id: "folder-3",
+    });
+  });
+});
+
+describe("api gallery search commands", () => {
+  beforeEach(() => {
+    tauriApi.invoke.mockReset();
+  });
+
+  it("forwards advanced gallery filters through Tauri IPC", async () => {
+    tauriApi.invoke.mockResolvedValue({
+      generations: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
+
+    await searchGenerations("sunrise", 2, false, {
+      model: "gpt-image-2",
+      request_kind: "edit",
+      status: "completed",
+      size: "1024x1024",
+      quality: "high",
+      background: "transparent",
+      output_format: "webp",
+      moderation: "low",
+      input_fidelity: "high",
+      source_image_count: "2",
+      created_from: "2026-04-01",
+      created_to: "2026-04-30",
+    });
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("search_generations", {
+      query: "sunrise",
+      page: 2,
+      onlyDeleted: null,
+      filters: {
+        model: "gpt-image-2",
+        request_kind: "edit",
+        status: "completed",
+        size: "1024x1024",
+        quality: "high",
+        background: "transparent",
+        output_format: "webp",
+        moderation: "low",
+        input_fidelity: "high",
+        source_image_count: "2",
+        created_from: "2026-04-01",
+        created_to: "2026-04-30",
+      },
     });
   });
 });

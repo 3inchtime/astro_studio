@@ -805,28 +805,78 @@ struct PendingGenerationRecovery {
     response_file: Option<String>,
 }
 
+fn source_image_paths_json(source_image_paths: &[String]) -> Result<String, String> {
+    serde_json::to_string(source_image_paths)
+        .map_err(|e| format!("Serialize source image paths failed: {}", e))
+}
+
+fn generation_request_metadata_json(
+    request_kind: &str,
+    conversation_id: &str,
+    model: &str,
+    options: &GptImageRequestOptions,
+    source_image_paths: &[String],
+) -> Result<String, String> {
+    serde_json::to_string(&serde_json::json!({
+        "request_kind": request_kind,
+        "conversation_id": conversation_id,
+        "model": model,
+        "size": &options.size,
+        "quality": &options.quality,
+        "background": &options.background,
+        "output_format": &options.output_format,
+        "output_compression": options.output_compression,
+        "moderation": &options.moderation,
+        "input_fidelity": &options.input_fidelity,
+        "stream": options.stream,
+        "partial_images": options.partial_images,
+        "image_count": options.image_count,
+        "source_image_count": source_image_paths.len(),
+        "source_image_paths": source_image_paths,
+    }))
+    .map_err(|e| format!("Serialize generation metadata failed: {}", e))
+}
+
 fn create_processing_generation(
     conn: &Connection,
     generation_id: &str,
     prompt: &str,
     model: &str,
-    size: &str,
-    quality: &str,
+    options: &GptImageRequestOptions,
     conversation_id: &str,
     created_at: &str,
     request_kind: &str,
-    output_format: &str,
+    source_image_paths: &[String],
 ) -> Result<(), String> {
+    let source_image_paths_json = source_image_paths_json(source_image_paths)?;
+    let request_metadata =
+        generation_request_metadata_json(request_kind, conversation_id, model, options, source_image_paths)?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO generations (id, prompt, engine, size, quality, status, error_message, conversation_id, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, 'processing', NULL, ?6, ?7)",
+        "INSERT INTO generations (
+            id, prompt, engine, request_kind, size, quality, background, output_format,
+            output_compression, moderation, input_fidelity, image_count, source_image_count,
+            source_image_paths, request_metadata, status, error_message, conversation_id, created_at
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+            'processing', NULL, ?16, ?17
+         )",
         params![
             generation_id,
             prompt,
             model,
-            size,
-            quality,
+            request_kind,
+            &options.size,
+            &options.quality,
+            &options.background,
+            &options.output_format,
+            options.output_compression,
+            &options.moderation,
+            &options.input_fidelity,
+            options.image_count,
+            source_image_paths.len() as i64,
+            source_image_paths_json,
+            request_metadata,
             conversation_id,
             created_at
         ],
@@ -839,7 +889,7 @@ fn create_processing_generation(
             generation_id,
             request_kind,
             RECOVERY_STATE_REQUESTING,
-            output_format,
+            &options.output_format,
             created_at
         ],
     )
@@ -1319,12 +1369,11 @@ async fn generate_image(
             &generation_id,
             &prompt,
             &model,
-            &options.size,
-            &options.quality,
+            &options,
             &conversation_id,
             &created_at,
             RECOVERY_KIND_GENERATE,
-            &options.output_format,
+            &[],
         )?;
     }
 
@@ -1541,12 +1590,11 @@ async fn edit_image(
             &generation_id,
             &prompt,
             &model,
-            &options.size,
-            &options.quality,
+            &options,
             &conversation_id,
             &created_at,
             RECOVERY_KIND_EDIT,
-            &options.output_format,
+            &source_image_paths,
         )?;
     }
 
@@ -1646,17 +1694,173 @@ async fn edit_image(
 }
 
 fn row_to_generation(row: &rusqlite::Row) -> rusqlite::Result<Generation> {
+    let source_image_paths: String = row.get("source_image_paths")?;
+    let parsed_source_image_paths = serde_json::from_str(&source_image_paths).unwrap_or_default();
+
     Ok(Generation {
         id: row.get("id")?,
         prompt: row.get("prompt")?,
         engine: row.get("engine")?,
+        request_kind: row.get("request_kind")?,
         size: row.get("size")?,
         quality: row.get("quality")?,
+        background: row.get("background")?,
+        output_format: row.get("output_format")?,
+        output_compression: row.get("output_compression")?,
+        moderation: row.get("moderation")?,
+        input_fidelity: row.get("input_fidelity")?,
+        image_count: row.get("image_count")?,
+        source_image_count: row.get("source_image_count")?,
+        source_image_paths: parsed_source_image_paths,
+        request_metadata: row.get("request_metadata")?,
         status: row.get("status")?,
         error_message: row.get("error_message")?,
         created_at: row.get("created_at")?,
         deleted_at: row.get("deleted_at")?,
     })
+}
+
+fn generation_search_value_clause(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    column: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        clauses.push(format!("{column} = ?{}", params.len() + 1));
+        params.push(Box::new(value.to_string()));
+    }
+}
+
+fn generation_search_range_clause(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    column: &str,
+    lower_bound: Option<&str>,
+    upper_bound: Option<&str>,
+) {
+    if let Some(value) = lower_bound.map(str::trim).filter(|value| !value.is_empty()) {
+        clauses.push(format!("date({column}) >= date(?{})", params.len() + 1));
+        params.push(Box::new(value.to_string()));
+    }
+    if let Some(value) = upper_bound.map(str::trim).filter(|value| !value.is_empty()) {
+        clauses.push(format!("date({column}) <= date(?{})", params.len() + 1));
+        params.push(Box::new(value.to_string()));
+    }
+}
+
+fn generation_source_image_count_clause(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    value: Option<&str>,
+) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+
+    match value {
+        "any" => {}
+        "0" => {
+            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
+            params.push(Box::new(0_i64));
+        }
+        "1" => {
+            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
+            params.push(Box::new(1_i64));
+        }
+        "2" => {
+            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
+            params.push(Box::new(2_i64));
+        }
+        "3" => {
+            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
+            params.push(Box::new(3_i64));
+        }
+        "4+" => {
+            clauses.push(format!("g.source_image_count >= ?{}", params.len() + 1));
+            params.push(Box::new(4_i64));
+        }
+        _ => {}
+    }
+}
+
+fn generation_filters_to_sql(
+    only_deleted: bool,
+    query: Option<&str>,
+    filters: Option<&GenerationSearchFilters>,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut clauses = vec![if only_deleted {
+        deleted_generation_filter("g")
+    } else {
+        active_generation_filter("g")
+    }];
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) {
+        clauses.push(format!("g.prompt LIKE ?{}", params.len() + 1));
+        params.push(Box::new(format!("%{}%", query)));
+    }
+
+    if let Some(filters) = filters {
+        generation_search_value_clause(&mut clauses, &mut params, "g.engine", filters.model.as_deref());
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.request_kind",
+            filters.request_kind.as_deref(),
+        );
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.status",
+            filters.status.as_deref(),
+        );
+        generation_search_value_clause(&mut clauses, &mut params, "g.size", filters.size.as_deref());
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.quality",
+            filters.quality.as_deref(),
+        );
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.background",
+            filters.background.as_deref(),
+        );
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.output_format",
+            filters.output_format.as_deref(),
+        );
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.moderation",
+            filters.moderation.as_deref(),
+        );
+        generation_search_value_clause(
+            &mut clauses,
+            &mut params,
+            "g.input_fidelity",
+            filters.input_fidelity.as_deref(),
+        );
+        generation_source_image_count_clause(
+            &mut clauses,
+            &mut params,
+            filters.source_image_count.as_deref(),
+        );
+        generation_search_range_clause(
+            &mut clauses,
+            &mut params,
+            "g.created_at",
+            filters.created_from.as_deref(),
+            filters.created_to.as_deref(),
+        );
+    }
+
+    (format!("WHERE {}", clauses.join(" AND ")), params)
 }
 
 fn row_to_prompt_favorite(row: &rusqlite::Row) -> rusqlite::Result<PromptFavorite> {
@@ -1796,6 +2000,7 @@ fn search_generations(
     query: Option<String>,
     page: Option<i32>,
     only_deleted: Option<bool>,
+    filters: Option<GenerationSearchFilters>,
 ) -> Result<SearchResult, String> {
     let page = page.unwrap_or(1);
     let page_size = DEFAULT_PAGE_SIZE;
@@ -1803,45 +2008,34 @@ fn search_generations(
     let only_deleted = only_deleted.unwrap_or(false);
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let generation_filter = if only_deleted {
-        deleted_generation_filter("g")
-    } else {
-        active_generation_filter("g")
+    let (where_sql, params_boxed) =
+        generation_filters_to_sql(only_deleted, query.as_deref(), filters.as_ref());
+    let count_sql = format!("SELECT COUNT(*) FROM generations g {}", where_sql);
+    let count: i32 = {
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_boxed.iter().map(|param| param.as_ref()).collect();
+        conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))
+            .map_err(|e| e.to_string())?
     };
 
-    let (count, generations) = if let Some(q) = &query {
-        if !q.is_empty() {
-            let pattern = format!("%{}%", q);
-            let count: i32 = conn
-                .query_row(
-                    &format!(
-                        "SELECT COUNT(*) FROM generations g WHERE {} AND g.prompt LIKE ?1",
-                        generation_filter
-                    ),
-                    params![pattern],
-                    |row| row.get(0),
-                )
-                .map_err(|e| e.to_string())?;
+    let mut query_params = params_boxed;
+    query_params.push(Box::new(page_size));
+    query_params.push(Box::new(offset));
+    let query_refs: Vec<&dyn rusqlite::types::ToSql> =
+        query_params.iter().map(|param| param.as_ref()).collect();
 
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT g.* FROM generations g WHERE {} AND g.prompt LIKE ?1 ORDER BY g.created_at DESC LIMIT ?2 OFFSET ?3",
-                    generation_filter
-                ))
-                .map_err(|e| e.to_string())?;
-            let gens = stmt
-                .query_map(params![pattern, page_size, offset], row_to_generation)
-                .map_err(|e| e.to_string())?
-                .filter_map(|r| r.ok())
-                .collect::<Vec<_>>();
-
-            (count, gens)
-        } else {
-            fetch_all_generations(&conn, page_size, offset, only_deleted)?
-        }
-    } else {
-        fetch_all_generations(&conn, page_size, offset, only_deleted)?
-    };
+    let query_sql = format!(
+        "SELECT g.* FROM generations g {} ORDER BY g.created_at DESC LIMIT ?{} OFFSET ?{}",
+        where_sql,
+        query_params.len() - 1,
+        query_params.len()
+    );
+    let mut stmt = conn.prepare(&query_sql).map_err(|e| e.to_string())?;
+    let generations = stmt
+        .query_map(query_refs.as_slice(), row_to_generation)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
 
     let results = generation_results_with_images(&conn, generations)?;
 
@@ -1851,43 +2045,6 @@ fn search_generations(
         page,
         page_size,
     })
-}
-
-fn fetch_all_generations(
-    conn: &rusqlite::Connection,
-    limit: i32,
-    offset: i32,
-    only_deleted: bool,
-) -> Result<(i32, Vec<Generation>), String> {
-    let generation_filter = if only_deleted {
-        deleted_generation_filter("g")
-    } else {
-        active_generation_filter("g")
-    };
-    let count: i32 = conn
-        .query_row(
-            &format!(
-                "SELECT COUNT(*) FROM generations g WHERE {}",
-                generation_filter
-            ),
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT g.* FROM generations g WHERE {} ORDER BY g.created_at DESC LIMIT ?1 OFFSET ?2",
-            generation_filter
-        ))
-        .map_err(|e| e.to_string())?;
-    let gens = stmt
-        .query_map(params![limit, offset], row_to_generation)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok((count, gens))
 }
 
 #[tauri::command]
