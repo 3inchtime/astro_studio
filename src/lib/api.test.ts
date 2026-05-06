@@ -3,16 +3,26 @@ import tauriConfig from "../../src-tauri/tauri.conf.json";
 import {
   clearLogs,
   addPromptFavoriteToFolders,
+  archiveConversation,
+  createConversation,
+  createProject,
   createPromptFolder,
   createPromptFavorite,
+  deleteConversation,
   deletePromptFolder,
   deletePromptFavorite,
+  getConversations,
+  getProjects,
   getPromptFavoriteFolders,
   getPromptFolders,
   getPromptFavorites,
+  pinConversation,
+  renameConversation,
+  renameProject,
   searchGenerations,
   removePromptFavoriteFromFolders,
   toAssetUrl,
+  unpinConversation,
 } from "./api";
 
 const tauriApi = vi.hoisted(() => ({
@@ -153,6 +163,75 @@ describe("api gallery search commands", () => {
         created_from: "2026-04-01",
         created_to: "2026-04-30",
       },
+    });
+  });
+});
+
+describe("api project and conversation commands", () => {
+  beforeEach(() => {
+    tauriApi.invoke.mockReset();
+  });
+
+  it("passes project context through generation history commands", async () => {
+    tauriApi.invoke.mockResolvedValue([]);
+
+    await createConversation("Mood board", "project-1");
+    await getConversations("forest", "project-1", true);
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "create_conversation", {
+      title: "Mood board",
+      projectId: "project-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "get_conversations", {
+      query: "forest",
+      projectId: "project-1",
+      includeArchived: true,
+    });
+  });
+
+  it("wraps conversation management IPC commands", async () => {
+    tauriApi.invoke.mockResolvedValue(undefined);
+
+    await renameConversation("conversation-1", "New name");
+    await pinConversation("conversation-1");
+    await unpinConversation("conversation-1");
+    await archiveConversation("conversation-1");
+    await deleteConversation("conversation-1");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "rename_conversation", {
+      id: "conversation-1",
+      title: "New name",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "pin_conversation", {
+      id: "conversation-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(3, "unpin_conversation", {
+      id: "conversation-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(4, "archive_conversation", {
+      id: "conversation-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(5, "delete_conversation", {
+      id: "conversation-1",
+    });
+  });
+
+  it("wraps project IPC commands", async () => {
+    tauriApi.invoke.mockResolvedValue([]);
+
+    await getProjects(true);
+    await createProject("Launch visuals");
+    await renameProject("project-1", "Renamed project");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "get_projects", {
+      includeArchived: true,
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "create_project", {
+      name: "Launch visuals",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(3, "rename_project", {
+      id: "project-1",
+      name: "Renamed project",
     });
   });
 });

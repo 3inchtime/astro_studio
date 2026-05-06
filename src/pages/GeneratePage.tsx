@@ -102,6 +102,7 @@ function generationsToMessages(generations: GenerationResult[]): Message[] {
 export default function GeneratePage() {
   const { t } = useTranslation();
   const {
+    activeProjectId,
     activeConversationId,
     setActiveConversationId,
     refreshConversations,
@@ -416,6 +417,7 @@ export default function GeneratePage() {
         ? { imageCount: request.imageCount }
         : {}),
       conversationId: request.conversationId,
+      projectId: request.projectId,
     };
   }
 
@@ -543,6 +545,7 @@ export default function GeneratePage() {
       inputFidelity,
       imageCount,
       conversationId: activeConversationId,
+      projectId: activeProjectId,
       editSources: editSources.map((source) => ({ ...source })),
     });
   }

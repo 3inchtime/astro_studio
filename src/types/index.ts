@@ -37,12 +37,28 @@ export interface GenerationResult {
 
 export interface Conversation {
   id: string;
+  project_id: string;
+  project_name?: string | null;
   title: string;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
+  pinned_at: string | null;
+  deleted_at: string | null;
   generation_count: number;
   latest_generation_at: string | null;
   latest_thumbnail: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  pinned_at: string | null;
+  deleted_at: string | null;
+  conversation_count: number;
 }
 
 export interface SearchResult {
@@ -78,6 +94,7 @@ export interface GenerationParams {
   moderation?: ImageModeration;
   imageCount?: number;
   conversationId?: string | null;
+  projectId?: string | null;
 }
 
 export interface MessageImage {
@@ -106,6 +123,7 @@ export interface RetryGenerationRequest {
   inputFidelity: ImageInputFidelity;
   imageCount: number;
   conversationId?: string | null;
+  projectId?: string | null;
   editSources: EditSourceImage[];
 }
 

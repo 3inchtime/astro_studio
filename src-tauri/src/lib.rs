@@ -13,6 +13,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use tauri::{Emitter, Manager};
 
+const DEFAULT_PROJECT_ID: &str = "default";
+const DEFAULT_PROJECT_NAME: &str = "Default Project";
+const DEFAULT_NEW_PROJECT_NAME: &str = "New Project";
 const DEFAULT_CONVERSATION_TITLE: &str = "New Conversation";
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
 const RECOVERY_STATE_RESPONSE_READY: &str = "response_ready";
@@ -1290,6 +1293,7 @@ async fn generate_image(
     moderation: Option<String>,
     image_count: Option<u8>,
     conversation_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<GenerateResult, String> {
     let mut options = image_request_options(
         size,
@@ -1306,7 +1310,12 @@ async fn generate_image(
 
     let conversation_id = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        resolve_conversation_id(&conn, conversation_id.as_deref(), &prompt)?
+        resolve_conversation_id(
+            &conn,
+            conversation_id.as_deref(),
+            project_id.as_deref(),
+            &prompt,
+        )?
     };
     let model = normalize_image_model(
         model
@@ -1494,6 +1503,7 @@ async fn edit_image(
     moderation: Option<String>,
     image_count: Option<u8>,
     conversation_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<GenerateResult, String> {
     if source_image_paths.is_empty() {
         return Err("Please select at least one source image.".to_string());
@@ -1514,7 +1524,12 @@ async fn edit_image(
 
     let conversation_id = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        resolve_conversation_id(&conn, conversation_id.as_deref(), &prompt)?
+        resolve_conversation_id(
+            &conn,
+            conversation_id.as_deref(),
+            project_id.as_deref(),
+            &prompt,
+        )?
     };
     let model = normalize_image_model(
         model
@@ -2063,11 +2078,28 @@ fn delete_generation(db: tauri::State<'_, Database>, id: String) -> Result<(), S
 fn restore_generation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
     log::info!("Restoring generation {}", id);
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conversation_id = conn
+        .query_row(
+            "SELECT conversation_id FROM generations WHERE id = ?1",
+            params![id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten();
+
     conn.execute(
         "UPDATE generations SET deleted_at = NULL WHERE id = ?1",
         params![id],
     )
     .map_err(|e| e.to_string())?;
+
+    if let Some(conversation_id) = conversation_id {
+        conn.execute(
+            "UPDATE conversations SET deleted_at = NULL, archived_at = NULL, updated_at = ?1 WHERE id = ?2",
+            params![current_timestamp(), conversation_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -2083,11 +2115,230 @@ fn permanently_delete_generation(
 }
 
 #[tauri::command]
+fn create_project(db: tauri::State<'_, Database>, name: Option<String>) -> Result<Project, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let project_id = uuid::Uuid::new_v4().to_string();
+    let timestamp = current_timestamp();
+    let name = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_NEW_PROJECT_NAME);
+
+    conn.execute(
+        "INSERT INTO projects (id, name, created_at, updated_at, archived_at, pinned_at, deleted_at)
+         VALUES (?1, ?2, ?3, ?3, NULL, NULL, NULL)",
+        params![project_id, name, &timestamp],
+    )
+    .map_err(|e| e.to_string())?;
+
+    fetch_project(&conn, &project_id)
+}
+
+#[tauri::command]
+fn get_projects(
+    db: tauri::State<'_, Database>,
+    include_archived: Option<bool>,
+) -> Result<Vec<Project>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    ensure_default_project(&conn)?;
+
+    let include_archived = include_archived.unwrap_or(false);
+    let sql = if include_archived {
+        projects_base_sql("p.deleted_at IS NULL")
+    } else {
+        projects_base_sql("p.deleted_at IS NULL AND p.archived_at IS NULL")
+    };
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let projects = stmt
+        .query_map([], row_to_project)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(projects)
+}
+
+#[tauri::command]
+fn rename_project(db: tauri::State<'_, Database>, id: String, name: String) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Project name cannot be empty.".to_string());
+    }
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE projects SET name = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+        params![name, current_timestamp(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn archive_project(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE projects SET archived_at = COALESCE(archived_at, ?1), updated_at = ?1
+         WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET archived_at = COALESCE(archived_at, ?1), updated_at = ?1
+         WHERE project_id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn unarchive_project(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE projects SET archived_at = NULL, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET archived_at = NULL, updated_at = ?1
+         WHERE project_id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn pin_project(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE projects SET pinned_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn unpin_project(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE projects SET pinned_at = NULL, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![current_timestamp(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_project(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    if id == DEFAULT_PROJECT_ID {
+        return Err("The default project cannot be deleted.".to_string());
+    }
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE projects SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET deleted_at = ?1, updated_at = ?1 WHERE project_id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE generations SET deleted_at = COALESCE(deleted_at, ?1)
+         WHERE conversation_id IN (SELECT id FROM conversations WHERE project_id = ?2)",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn ensure_default_project(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO projects (id, name, created_at, updated_at)
+         VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+        params![DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn resolve_project_id(
+    conn: &rusqlite::Connection,
+    project_id: Option<&str>,
+) -> Result<String, String> {
+    ensure_default_project(conn)?;
+
+    if let Some(project_id) = project_id.map(str::trim).filter(|id| !id.is_empty()) {
+        let exists = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND deleted_at IS NULL)",
+                params![project_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?
+            != 0;
+
+        if exists {
+            return Ok(project_id.to_string());
+        }
+    }
+
+    Ok(DEFAULT_PROJECT_ID.to_string())
+}
+
+fn projects_base_sql(where_sql: &str) -> String {
+    format!(
+        "SELECT p.id, p.name, p.created_at, p.updated_at, p.archived_at, p.pinned_at, p.deleted_at, \
+         (SELECT COUNT(*) FROM conversations c \
+          WHERE c.project_id = p.id AND c.deleted_at IS NULL AND c.archived_at IS NULL) as conversation_count \
+         FROM projects p \
+         WHERE {} \
+         ORDER BY CASE WHEN p.pinned_at IS NULL THEN 1 ELSE 0 END, p.pinned_at DESC, p.updated_at DESC",
+        where_sql
+    )
+}
+
+fn row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+        archived_at: row.get("archived_at")?,
+        pinned_at: row.get("pinned_at")?,
+        deleted_at: row.get("deleted_at")?,
+        conversation_count: row.get("conversation_count")?,
+    })
+}
+
+fn fetch_project(conn: &rusqlite::Connection, project_id: &str) -> Result<Project, String> {
+    conn.query_row(
+        &projects_base_sql("p.id = ?1"),
+        params![project_id],
+        row_to_project,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn create_conversation(
     db: tauri::State<'_, Database>,
     title: Option<String>,
+    project_id: Option<String>,
 ) -> Result<Conversation, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let project_id = resolve_project_id(&conn, project_id.as_deref())?;
     let conv_id = uuid::Uuid::new_v4().to_string();
     let timestamp = current_timestamp();
     let title = title
@@ -2097,8 +2348,9 @@ fn create_conversation(
         .unwrap_or(DEFAULT_CONVERSATION_TITLE);
 
     conn.execute(
-        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-        params![conv_id, title, &timestamp, &timestamp],
+        "INSERT INTO conversations (id, project_id, title, created_at, updated_at, archived_at, pinned_at, deleted_at)
+         VALUES (?1, ?2, ?3, ?4, ?4, NULL, NULL, NULL)",
+        params![conv_id, project_id, title, &timestamp],
     )
     .map_err(|e| e.to_string())?;
 
@@ -2108,12 +2360,15 @@ fn create_conversation(
 fn resolve_conversation_id(
     conn: &rusqlite::Connection,
     conversation_id: Option<&str>,
+    project_id: Option<&str>,
     prompt: &str,
 ) -> Result<String, String> {
+    let project_id = resolve_project_id(conn, project_id)?;
+
     if let Some(conv_id) = conversation_id.map(str::trim).filter(|id| !id.is_empty()) {
         let exists = conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND deleted_at IS NULL)",
                 params![conv_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -2121,7 +2376,7 @@ fn resolve_conversation_id(
             != 0;
 
         if !exists {
-            return create_new_conversation(conn, prompt);
+            return create_new_conversation(conn, prompt, &project_id);
         }
 
         let generation_count = conn
@@ -2136,8 +2391,8 @@ fn resolve_conversation_id(
             if count == 0 {
                 let timestamp = current_timestamp();
                 conn.execute(
-                    "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
-                    params![conversation_title_from_prompt(prompt), timestamp, conv_id],
+                    "UPDATE conversations SET title = ?1, project_id = ?2, archived_at = NULL, updated_at = ?3 WHERE id = ?4",
+                    params![conversation_title_from_prompt(prompt), project_id, timestamp, conv_id],
                 )
                 .map_err(|e| e.to_string())?;
                 return Ok(conv_id.to_string());
@@ -2145,7 +2400,7 @@ fn resolve_conversation_id(
 
             let timestamp = current_timestamp();
             conn.execute(
-                "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+                "UPDATE conversations SET archived_at = NULL, updated_at = ?1 WHERE id = ?2",
                 params![timestamp, conv_id],
             )
             .map_err(|e| e.to_string())?;
@@ -2153,16 +2408,21 @@ fn resolve_conversation_id(
         }
     }
 
-    create_new_conversation(conn, prompt)
+    create_new_conversation(conn, prompt, &project_id)
 }
 
-fn create_new_conversation(conn: &rusqlite::Connection, prompt: &str) -> Result<String, String> {
+fn create_new_conversation(
+    conn: &rusqlite::Connection,
+    prompt: &str,
+    project_id: &str,
+) -> Result<String, String> {
     let conv_id = uuid::Uuid::new_v4().to_string();
     let title = conversation_title_from_prompt(prompt);
     let timestamp = current_timestamp();
     conn.execute(
-        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-        params![conv_id, title, &timestamp, &timestamp],
+        "INSERT INTO conversations (id, project_id, title, created_at, updated_at, archived_at, pinned_at, deleted_at)
+         VALUES (?1, ?2, ?3, ?4, ?4, NULL, NULL, NULL)",
+        params![conv_id, project_id, title, &timestamp],
     )
     .map_err(|e| e.to_string())?;
     Ok(conv_id)
@@ -2181,26 +2441,37 @@ fn conversation_title_from_prompt(prompt: &str) -> String {
     }
 }
 
-fn conversations_base_sql() -> String {
-    "SELECT c.id, c.title, c.created_at, c.updated_at, \
-     (SELECT COUNT(*) FROM generations WHERE conversation_id = c.id AND deleted_at IS NULL) as generation_count, \
-     (SELECT g.created_at FROM generations g \
-      WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_generation_at, \
-     (SELECT i.thumbnail_path FROM generations g JOIN images i ON i.generation_id = g.id \
-      WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_thumbnail \
-     FROM conversations c \
-     WHERE EXISTS (SELECT 1 FROM generations g WHERE g.conversation_id = c.id AND g.deleted_at IS NULL) \
-        OR NOT EXISTS (SELECT 1 FROM generations g WHERE g.conversation_id = c.id) \
-     ORDER BY c.updated_at DESC"
-        .to_string()
+fn conversations_list_sql(where_sql: &str) -> String {
+    format!(
+        "SELECT c.id, COALESCE(c.project_id, 'default') as project_id, p.name as project_name, c.title, c.created_at, c.updated_at, \
+         c.archived_at, c.pinned_at, c.deleted_at, \
+         (SELECT COUNT(*) FROM generations WHERE conversation_id = c.id AND deleted_at IS NULL) as generation_count, \
+         (SELECT g.created_at FROM generations g \
+          WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_generation_at, \
+         (SELECT i.thumbnail_path FROM generations g JOIN images i ON i.generation_id = g.id \
+          WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_thumbnail \
+         FROM conversations c \
+         LEFT JOIN projects p ON p.id = c.project_id \
+         WHERE {} AND ( \
+           EXISTS (SELECT 1 FROM generations g WHERE g.conversation_id = c.id AND g.deleted_at IS NULL) \
+           OR NOT EXISTS (SELECT 1 FROM generations g WHERE g.conversation_id = c.id) \
+         ) \
+         ORDER BY CASE WHEN c.pinned_at IS NULL THEN 1 ELSE 0 END, c.pinned_at DESC, c.updated_at DESC",
+        where_sql
+    )
 }
 
 fn row_to_conversation(row: &rusqlite::Row) -> rusqlite::Result<Conversation> {
     Ok(Conversation {
         id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        project_name: row.get("project_name")?,
         title: row.get("title")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        archived_at: row.get("archived_at")?,
+        pinned_at: row.get("pinned_at")?,
+        deleted_at: row.get("deleted_at")?,
         generation_count: row.get("generation_count")?,
         latest_generation_at: row.get("latest_generation_at")?,
         latest_thumbnail: row.get("latest_thumbnail")?,
@@ -2212,13 +2483,14 @@ fn fetch_conversation(
     conversation_id: &str,
 ) -> Result<Conversation, String> {
     conn.query_row(
-        "SELECT c.id, c.title, c.created_at, c.updated_at, \
+        "SELECT c.id, COALESCE(c.project_id, 'default') as project_id, p.name as project_name, c.title, c.created_at, c.updated_at, \
+         c.archived_at, c.pinned_at, c.deleted_at, \
          (SELECT COUNT(*) FROM generations WHERE conversation_id = c.id AND deleted_at IS NULL) as generation_count, \
          (SELECT g.created_at FROM generations g \
           WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_generation_at, \
          (SELECT i.thumbnail_path FROM generations g JOIN images i ON i.generation_id = g.id \
           WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_thumbnail \
-         FROM conversations c WHERE c.id = ?1",
+         FROM conversations c LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?1",
         params![conversation_id],
         row_to_conversation,
     )
@@ -2229,8 +2501,11 @@ fn fetch_conversation(
 fn get_conversations(
     db: tauri::State<'_, Database>,
     query: Option<String>,
+    project_id: Option<String>,
+    include_archived: Option<bool>,
 ) -> Result<Vec<Conversation>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    ensure_default_project(&conn)?;
 
     // Backfill: assign orphaned generations to new conversations
     let mut orphans: Vec<(String, String, String)> = Vec::new();
@@ -2260,8 +2535,9 @@ fn get_conversations(
             prompt.clone()
         };
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![conv_id, title, created_at, created_at],
+            "INSERT INTO conversations (id, project_id, title, created_at, updated_at, archived_at, pinned_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, ?4, NULL, NULL, NULL)",
+            params![conv_id, DEFAULT_PROJECT_ID, title, created_at],
         )
         .map_err(|e| e.to_string())?;
         conn.execute(
@@ -2271,33 +2547,45 @@ fn get_conversations(
         .map_err(|e| e.to_string())?;
     }
 
+    conn.execute(
+        "UPDATE conversations SET project_id = ?1 WHERE project_id IS NULL",
+        params![DEFAULT_PROJECT_ID],
+    )
+    .map_err(|e| e.to_string())?;
+
     // Now query conversations
-    let (sql, query_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(q) =
-        &query
+    let mut where_clauses = vec!["c.deleted_at IS NULL".to_string()];
+    let mut query_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let include_archived = include_archived.unwrap_or(false);
+
+    if !include_archived {
+        where_clauses.push("c.archived_at IS NULL".to_string());
+        where_clauses.push("(p.archived_at IS NULL OR p.id IS NULL)".to_string());
+    }
+    where_clauses.push("(p.deleted_at IS NULL OR p.id IS NULL)".to_string());
+
+    if let Some(project_id) = project_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
-        if !q.is_empty() {
-            let pattern = format!("%{}%", q);
-            (
-                "SELECT c.id, c.title, c.created_at, c.updated_at, \
-                 (SELECT COUNT(*) FROM generations WHERE conversation_id = c.id AND deleted_at IS NULL) as generation_count, \
-                 (SELECT g.created_at FROM generations g \
-                  WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_generation_at, \
-                 (SELECT i.thumbnail_path FROM generations g JOIN images i ON i.generation_id = g.id \
-                  WHERE g.conversation_id = c.id AND g.deleted_at IS NULL ORDER BY g.created_at DESC LIMIT 1) as latest_thumbnail \
-                 FROM conversations c \
-                 WHERE c.title LIKE ?1 AND (
-                   EXISTS (SELECT 1 FROM generations g WHERE g.conversation_id = c.id AND g.deleted_at IS NULL) \
-                   OR NOT EXISTS (SELECT 1 FROM generations g WHERE g.conversation_id = c.id)
-                 ) \
-                 ORDER BY c.updated_at DESC".to_string(),
-                vec![Box::new(pattern)],
-            )
-        } else {
-            (conversations_base_sql(), vec![])
-        }
-    } else {
-        (conversations_base_sql(), vec![])
-    };
+        query_params.push(Box::new(project_id.to_string()));
+        where_clauses.push(format!(
+            "COALESCE(c.project_id, 'default') = ?{}",
+            query_params.len()
+        ));
+    }
+
+    if let Some(q) = query
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        query_params.push(Box::new(format!("%{}%", q)));
+        where_clauses.push(format!("c.title LIKE ?{}", query_params.len()));
+    }
+
+    let sql = conversations_list_sql(&where_clauses.join(" AND "));
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -2309,6 +2597,106 @@ fn get_conversations(
         .collect();
 
     Ok(conversations)
+}
+
+#[tauri::command]
+fn rename_conversation(
+    db: tauri::State<'_, Database>,
+    id: String,
+    title: String,
+) -> Result<(), String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Conversation title cannot be empty.".to_string());
+    }
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+        params![title, current_timestamp(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn move_conversation_to_project(
+    db: tauri::State<'_, Database>,
+    id: String,
+    project_id: String,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let project_id = resolve_project_id(&conn, Some(project_id.as_str()))?;
+    conn.execute(
+        "UPDATE conversations SET project_id = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+        params![project_id, current_timestamp(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn archive_conversation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE conversations SET archived_at = COALESCE(archived_at, ?1), updated_at = ?1
+         WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn unarchive_conversation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET archived_at = NULL, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![current_timestamp(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn pin_conversation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE conversations SET pinned_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn unpin_conversation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET pinned_at = NULL, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![current_timestamp(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_conversation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let timestamp = current_timestamp();
+    conn.execute(
+        "UPDATE conversations SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE generations SET deleted_at = COALESCE(deleted_at, ?1) WHERE conversation_id = ?2",
+        params![timestamp, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3083,8 +3471,23 @@ pub fn run() {
             delete_generation,
             restore_generation,
             permanently_delete_generation,
+            create_project,
+            get_projects,
+            rename_project,
+            archive_project,
+            unarchive_project,
+            pin_project,
+            unpin_project,
+            delete_project,
             create_conversation,
             get_conversations,
+            rename_conversation,
+            move_conversation_to_project,
+            archive_conversation,
+            unarchive_conversation,
+            pin_conversation,
+            unpin_conversation,
+            delete_conversation,
             get_conversation_generations,
             copy_image_to_clipboard,
             save_image_to_file,

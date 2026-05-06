@@ -11,12 +11,16 @@ import ConversationList from "../sidebar/ConversationList";
 import { createConversation } from "../../lib/api";
 
 interface LayoutContextType {
+  activeProjectId: string | null;
+  setActiveProjectId: (id: string | null) => void;
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
   refreshConversations: () => void;
 }
 
 export const LayoutContext = createContext<LayoutContextType>({
+  activeProjectId: null,
+  setActiveProjectId: () => {},
   activeConversationId: null,
   setActiveConversationId: () => {},
   refreshConversations: () => {},
@@ -45,6 +49,7 @@ export default function AppLayout() {
   const { theme, toggleThemeWithEvent } = useTheme();
   const { t } = useTranslation();
   const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [conversationRefreshKey, setConversationRefreshKey] = useState(0);
   const refreshConversations = useCallback(() => {
@@ -54,21 +59,40 @@ export default function AppLayout() {
     setActiveConversationId(id);
     navigate("/generate");
   }, [navigate]);
+  const selectProject = useCallback((id: string | null) => {
+    setActiveProjectId(id);
+    setActiveConversationId(null);
+    navigate("/generate");
+  }, [navigate]);
+  const selectCreatedProject = useCallback((id: string) => {
+    setActiveProjectId(id);
+    setActiveConversationId(null);
+    navigate("/generate");
+  }, [navigate]);
   const selectInitialConversation = useCallback((id: string) => {
     setActiveConversationId((current) => current ?? id);
   }, []);
   const createNewConversation = useCallback(() => {
-    createConversation().then((conversation) => {
+    createConversation(undefined, activeProjectId).then((conversation) => {
+      setActiveProjectId(conversation.project_id);
       setActiveConversationId(conversation.id);
       refreshConversations();
     }).catch(() => {
       setActiveConversationId(null);
     });
     navigate("/generate");
-  }, [navigate, refreshConversations]);
+  }, [activeProjectId, navigate, refreshConversations]);
 
   return (
-    <LayoutContext.Provider value={{ activeConversationId, setActiveConversationId, refreshConversations }}>
+    <LayoutContext.Provider
+      value={{
+        activeProjectId,
+        setActiveProjectId,
+        activeConversationId,
+        setActiveConversationId,
+        refreshConversations,
+      }}
+    >
       <div className="flex h-screen overflow-hidden bg-background gradient-mesh">
         {/* Nav Rail */}
         <aside
@@ -166,8 +190,11 @@ export default function AppLayout() {
           style={{ width: widths[0] }}
         >
           <ConversationList
+            activeProjectId={activeProjectId}
             activeConversationId={activeConversationId}
             refreshKey={conversationRefreshKey}
+            onSelectProject={selectProject}
+            onProjectCreated={selectCreatedProject}
             onSelectConversation={selectConversation}
             onInitialConversation={selectInitialConversation}
             onNewConversation={createNewConversation}
