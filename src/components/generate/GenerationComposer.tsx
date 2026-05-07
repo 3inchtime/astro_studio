@@ -1,0 +1,393 @@
+import { motion } from "framer-motion";
+import { ArrowUp, ImagePlus, Wand2, X } from "lucide-react";
+import type { RefObject } from "react";
+import { useTranslation } from "react-i18next";
+import { toAssetUrl } from "../../lib/api";
+import {
+  IMAGE_MODEL_CATALOG,
+  getImageModelCatalogEntry,
+} from "../../lib/modelCatalog";
+import type {
+  EditSourceImage,
+  ImageBackground,
+  ImageInputFidelity,
+  ImageModeration,
+  ImageModel,
+  ImageOutputFormat,
+  ImageQuality,
+  ImageSize,
+} from "../../types";
+
+const sizes: { value: ImageSize; label: string; descKey: string }[] = [
+  { value: "auto", label: "Auto", descKey: "generate.auto" },
+  { value: "1024x1024", label: "1:1", descKey: "generate.square" },
+  { value: "1536x1024", label: "3:2", descKey: "generate.landscape" },
+  { value: "1024x1536", label: "2:3", descKey: "generate.portrait" },
+];
+
+const qualityOptions: ImageQuality[] = ["auto", "high", "medium", "low"];
+const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
+const backgroundOptions: ImageBackground[] = ["auto", "opaque", "transparent"];
+const moderationOptions: ImageModeration[] = ["auto", "low"];
+const inputFidelityOptions: ImageInputFidelity[] = ["high", "low"];
+const imageCountOptions = [1, 2, 3, 4];
+
+interface GenerationComposerProps {
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  prompt: string;
+  imageModel: ImageModel;
+  size: ImageSize;
+  quality: ImageQuality;
+  background: ImageBackground;
+  outputFormat: ImageOutputFormat;
+  moderation: ImageModeration;
+  inputFidelity: ImageInputFidelity;
+  imageCount: number;
+  editSources: EditSourceImage[];
+  editingPromptMessageId: string | null;
+  onPromptChange: (value: string) => void;
+  onModelChange: (model: ImageModel) => void;
+  onSizeChange: (size: ImageSize) => void;
+  onQualityChange: (quality: ImageQuality) => void;
+  onBackgroundChange: (background: ImageBackground) => void;
+  onOutputFormatChange: (outputFormat: ImageOutputFormat) => void;
+  onModerationChange: (moderation: ImageModeration) => void;
+  onInputFidelityChange: (inputFidelity: ImageInputFidelity) => void;
+  onImageCountChange: (imageCount: number) => void;
+  onAddUploadedSources: () => void;
+  onClearEditSources: () => void;
+  onRemoveEditSource: (sourceId: string) => void;
+  onCancelPromptEdit: () => void;
+  onGenerate: () => void;
+}
+
+export default function GenerationComposer({
+  textareaRef,
+  prompt,
+  imageModel,
+  size,
+  quality,
+  background,
+  outputFormat,
+  moderation,
+  inputFidelity,
+  imageCount,
+  editSources,
+  editingPromptMessageId,
+  onPromptChange,
+  onModelChange,
+  onSizeChange,
+  onQualityChange,
+  onBackgroundChange,
+  onOutputFormatChange,
+  onModerationChange,
+  onInputFidelityChange,
+  onImageCountChange,
+  onAddUploadedSources,
+  onClearEditSources,
+  onRemoveEditSource,
+  onCancelPromptEdit,
+  onGenerate,
+}: GenerationComposerProps) {
+  const { t } = useTranslation();
+  const modelCatalogEntry = getImageModelCatalogEntry(imageModel);
+  const { parameterCapabilities } = modelCatalogEntry;
+  const showSize = parameterCapabilities.sizes.length > 0;
+  const showQuality = parameterCapabilities.qualities.length > 1;
+  const showBackground = parameterCapabilities.backgrounds.length > 1;
+  const showImageCount = parameterCapabilities.imageCounts.length > 0;
+  const showOutputFormat = parameterCapabilities.outputFormats.length > 1;
+  const showModeration = parameterCapabilities.moderationLevels.length > 1;
+  const showSourceEditing = modelCatalogEntry.supportsEdit;
+  const showInputFidelity =
+    showSourceEditing &&
+    editSources.length > 0 &&
+    parameterCapabilities.inputFidelityOptions.length > 1;
+  const parameterColumnCount = [
+    true,
+    showSize,
+    showQuality,
+    showBackground,
+    showImageCount,
+    showOutputFormat,
+    showModeration,
+    showInputFidelity,
+  ].filter(Boolean).length;
+
+  return (
+    <>
+      <div className="border-t border-border-subtle bg-subtle/30 px-4 py-2.5 sm:px-6">
+        <div
+          role="toolbar"
+          aria-label={t("generate.parametersLabel")}
+          className="mx-auto w-full max-w-[900px] overflow-hidden"
+        >
+          <div
+            data-testid="generation-parameter-row"
+            className="grid w-full min-w-0 grid-rows-1 items-center gap-1.5 whitespace-nowrap"
+            style={{
+              gridTemplateColumns: `repeat(${parameterColumnCount}, minmax(0, 1fr))`,
+            }}
+          >
+            <SelectField
+              label={t("generate.modelLabel")}
+              value={imageModel}
+              onChange={(value) => onModelChange(value as ImageModel)}
+              options={IMAGE_MODEL_CATALOG.map((entry) => ({
+                value: entry.id,
+                label: entry.label,
+              }))}
+            />
+            {showSize && (
+              <SelectField
+                label={t("generate.sizeLabel")}
+                value={size}
+                onChange={(value) => onSizeChange(value as ImageSize)}
+                options={sizes
+                  .filter((item) =>
+                    parameterCapabilities.sizes.includes(item.value),
+                  )
+                  .map((item) => ({
+                    value: item.value,
+                    label: `${item.label} · ${t(item.descKey)}`,
+                  }))}
+              />
+            )}
+            {showQuality && (
+              <SelectField
+                label={t("generate.qualityLabel")}
+                value={quality}
+                onChange={(value) => onQualityChange(value as ImageQuality)}
+                options={qualityOptions
+                  .filter((value) =>
+                    parameterCapabilities.qualities.includes(value),
+                  )
+                  .map((value) => ({
+                    value,
+                    label: t(`generate.quality.${value}`),
+                  }))}
+              />
+            )}
+            {showBackground && (
+              <SelectField
+                label={t("generate.backgroundLabel")}
+                value={background}
+                onChange={(value) =>
+                  onBackgroundChange(value as ImageBackground)
+                }
+                options={backgroundOptions
+                  .filter((value) =>
+                    parameterCapabilities.backgrounds.includes(value),
+                  )
+                  .map((value) => ({
+                    value,
+                    label: t(`generate.background.${value}`),
+                    disabled: outputFormat === "jpeg" && value === "transparent",
+                  }))}
+              />
+            )}
+            {showImageCount && (
+              <SelectField
+                label={t("generate.countLabel")}
+                value={String(imageCount)}
+                onChange={(value) => onImageCountChange(Number(value))}
+                options={imageCountOptions
+                  .filter((value) =>
+                    parameterCapabilities.imageCounts.includes(value),
+                  )
+                  .map((value) => ({
+                    value: String(value),
+                    label: t("generate.countValue", { count: value }),
+                  }))}
+              />
+            )}
+            {showOutputFormat && (
+              <SelectField
+                label={t("generate.formatLabel")}
+                value={outputFormat}
+                onChange={(value) =>
+                  onOutputFormatChange(value as ImageOutputFormat)
+                }
+                options={outputFormatOptions
+                  .filter((value) =>
+                    parameterCapabilities.outputFormats.includes(value),
+                  )
+                  .map((value) => ({
+                    value,
+                    label: t(`generate.format.${value}`),
+                    disabled: background === "transparent" && value === "jpeg",
+                  }))}
+              />
+            )}
+            {showModeration && (
+              <SelectField
+                label={t("generate.moderationLabel")}
+                value={moderation}
+                onChange={(value) => onModerationChange(value as ImageModeration)}
+                options={moderationOptions
+                  .filter((value) =>
+                    parameterCapabilities.moderationLevels.includes(value),
+                  )
+                  .map((value) => ({
+                    value,
+                    label: t(`generate.moderation.${value}`),
+                  }))}
+              />
+            )}
+            {showInputFidelity && (
+              <SelectField
+                label={t("generate.inputFidelityLabel")}
+                value={inputFidelity}
+                onChange={(value) =>
+                  onInputFidelityChange(value as ImageInputFidelity)
+                }
+                options={inputFidelityOptions
+                  .filter((value) =>
+                    parameterCapabilities.inputFidelityOptions.includes(value),
+                  )
+                  .map((value) => ({
+                    value,
+                    label: t(`generate.inputFidelity.${value}`),
+                  }))}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-surface px-6 pt-4 pb-5">
+        <div className="mx-auto max-w-[900px]">
+          <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
+            {editingPromptMessageId && (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
+                <div className="text-[12px] font-medium text-foreground/80">
+                  {t("generate.editingPrompt")}
+                </div>
+                <button
+                  onClick={onCancelPromptEdit}
+                  className="text-[12px] font-medium text-primary transition-colors hover:text-primary/80"
+                >
+                  {t("generate.cancelEditPrompt")}
+                </button>
+              </div>
+            )}
+
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                {showSourceEditing && (
+                  <button
+                    onClick={onAddUploadedSources}
+                    className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:border-border hover:text-foreground"
+                  >
+                    <ImagePlus size={14} />
+                    {t("generate.uploadSource")}
+                  </button>
+                )}
+              </div>
+
+              {editSources.length > 0 && (
+                <button
+                  onClick={onClearEditSources}
+                  className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+                >
+                  {t("generate.clearSources")}
+                </button>
+              )}
+            </div>
+
+            {editSources.length > 0 && (
+              <div className="mb-3">
+                <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground/80">
+                  <Wand2 size={14} className="text-primary" />
+                  {t("generate.editingSources", { count: editSources.length })}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {editSources.map((source) => (
+                    <div
+                      key={source.id}
+                      className="relative overflow-hidden rounded-[12px] border border-border-subtle bg-surface"
+                    >
+                      <img
+                        src={toAssetUrl(source.path)}
+                        alt={source.label}
+                        className="h-20 w-20 object-cover"
+                      />
+                      <button
+                        onClick={() => onRemoveEditSource(source.id)}
+                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                        title={t("generate.removeSource")}
+                      >
+                        <X size={12} />
+                      </button>
+                      <div className="max-w-20 truncate px-2 py-1 text-[10px] text-muted">
+                        {source.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <textarea
+              ref={textareaRef}
+              value={prompt}
+              onChange={(e) => onPromptChange(e.target.value)}
+              placeholder={
+                editSources.length > 0
+                  ? t("generate.editPlaceholder")
+                  : t("generate.placeholder")
+              }
+              rows={2}
+              className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[110px]"
+            />
+            <motion.button
+              onClick={onGenerate}
+              disabled={!prompt.trim()}
+              aria-label={t("generate.submit")}
+              whileHover={{ scale: 1.02, y: -1 }}
+              whileTap={{ scale: 0.97 }}
+              className="absolute right-3 bottom-3 flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
+            >
+              <ArrowUp size={15} strokeWidth={2.5} />
+            </motion.button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+interface SelectFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string; disabled?: boolean }>;
+}
+
+function SelectField({ label, value, onChange, options }: SelectFieldProps) {
+  return (
+    <label className="flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] border border-border-subtle bg-surface px-2 text-[12px] text-foreground transition-colors focus-within:border-border">
+      <span
+        className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
+        title={label}
+      >
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="select-control min-w-0 flex-1 truncate bg-transparent pr-8 text-[12px] font-medium text-foreground focus:outline-none"
+      >
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}

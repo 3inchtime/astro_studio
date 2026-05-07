@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   createPromptFavorite,
   deletePromptFavorite,
@@ -12,18 +12,28 @@ import {
   deleteGeneration,
   messageImageToEditSource,
   pickSourceImages,
-  toAssetUrl,
 } from "../lib/api";
 import { consumePendingEditSources } from "../lib/editSources";
+import { generationsToMessages } from "../lib/generationMessages";
+import {
+  buildEditParams,
+  buildGenerationParams,
+  modelSupportsEdit,
+} from "../lib/generationRequests";
+import {
+  createUploadedEditSource,
+  editSourcesToMessageImages,
+  mergeEditSources,
+  normalizePromptFavorite,
+  upsertPromptFavorite,
+} from "../lib/generatePageHelpers";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import ConfirmDialog from "../components/common/ConfirmDialog";
-import MessageBubble from "../components/generate/MessageBubble";
+import GenerationComposer from "../components/generate/GenerationComposer";
+import GenerationFeed from "../components/generate/GenerationFeed";
 import Lightbox from "../components/lightbox/Lightbox";
 import FolderSelector from "../components/favorites/FolderSelector";
-import {
-  IMAGE_MODEL_CATALOG,
-  getImageModelCatalogEntry,
-} from "../lib/modelCatalog";
+import { getImageModelCatalogEntry } from "../lib/modelCatalog";
 import type {
   EditSourceImage,
   ImageBackground,
@@ -35,69 +45,12 @@ import type {
   ImageSize,
   Message,
   MessageImage,
-  GenerationResult,
   PromptFavorite,
-  GenerationParams,
   RetryGenerationRequest,
 } from "../types";
 import { useTranslation } from "react-i18next";
-import { Image as ImageIcon, ArrowUp, ImagePlus, X, Wand2 } from "lucide-react";
-
-const sizes: { value: ImageSize; label: string; descKey: string }[] = [
-  { value: "auto", label: "Auto", descKey: "generate.auto" },
-  { value: "1024x1024", label: "1:1", descKey: "generate.square" },
-  { value: "1536x1024", label: "3:2", descKey: "generate.landscape" },
-  { value: "1024x1536", label: "2:3", descKey: "generate.portrait" },
-];
-
-const qualityOptions: ImageQuality[] = ["auto", "high", "medium", "low"];
-const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
-const backgroundOptions: ImageBackground[] = ["auto", "opaque", "transparent"];
-const moderationOptions: ImageModeration[] = ["auto", "low"];
-const inputFidelityOptions: ImageInputFidelity[] = ["high", "low"];
-const imageCountOptions = [1, 2, 3, 4];
 const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2";
 const DEFAULT_IMAGE_MODEL_ENTRY = getImageModelCatalogEntry(DEFAULT_IMAGE_MODEL);
-
-function modelSupportsEdit(model: ImageModel): boolean {
-  return getImageModelCatalogEntry(model).supportsEdit;
-}
-
-function generationsToMessages(generations: GenerationResult[]): Message[] {
-  const messages: Message[] = [];
-  for (const gr of generations) {
-    const images: MessageImage[] = gr.images.map((img) => ({
-      imageId: img.id,
-      generationId: img.generation_id,
-      path: img.file_path,
-      thumbnailPath: img.thumbnail_path,
-    }));
-    messages.push({
-      id: `user-${gr.generation.id}`,
-      role: "user",
-      content: gr.generation.prompt,
-      sourceImages: [],
-      status: "complete",
-      createdAt: gr.generation.created_at,
-    });
-    messages.push({
-      id: `assistant-${gr.generation.id}`,
-      role: "assistant",
-      content: "",
-      generationId: gr.generation.id,
-      images,
-      error: gr.generation.error_message ?? undefined,
-      status:
-        gr.generation.status === "completed"
-          ? "complete"
-          : gr.generation.status === "failed"
-            ? "failed"
-            : "processing",
-      createdAt: gr.generation.created_at,
-    });
-  }
-  return messages;
-}
 
 export default function GeneratePage() {
   const { t } = useTranslation();
@@ -398,44 +351,6 @@ export default function GeneratePage() {
     saveImageModel(model).catch(() => {});
   }, [applyModelDefaults, markComposerDraftStarted, setActiveImageModel]);
 
-  function buildGenerationParams(request: RetryGenerationRequest): GenerationParams {
-    const capabilities = getImageModelCatalogEntry(request.model).parameterCapabilities;
-
-    return {
-      prompt: request.prompt,
-      model: request.model,
-      ...(capabilities.sizes.length > 0 ? { size: request.size } : {}),
-      ...(capabilities.qualities.length > 1 ? { quality: request.quality } : {}),
-      ...(capabilities.backgrounds.length > 1 ? { background: request.background } : {}),
-      ...(capabilities.outputFormats.length > 1
-        ? { outputFormat: request.outputFormat }
-        : {}),
-      ...(capabilities.moderationLevels.length > 1
-        ? { moderation: request.moderation }
-        : {}),
-      ...(capabilities.imageCounts.length > 0
-        ? { imageCount: request.imageCount }
-        : {}),
-      conversationId: request.conversationId,
-      projectId: request.projectId,
-    };
-  }
-
-  function buildEditParams(request: RetryGenerationRequest): GenerationParams & {
-    sourceImagePaths: string[];
-    inputFidelity?: ImageInputFidelity;
-  } {
-    const capabilities = getImageModelCatalogEntry(request.model).parameterCapabilities;
-
-    return {
-      ...buildGenerationParams(request),
-      sourceImagePaths: request.editSources.map((source) => source.path),
-      ...(capabilities.inputFidelityOptions.length > 1
-        ? { inputFidelity: request.inputFidelity }
-        : {}),
-    };
-  }
-
   const handleRemoveEditSource = useCallback((sourceId: string) => {
     markComposerDraftStarted();
     setEditSources((current) =>
@@ -657,30 +572,6 @@ export default function GeneratePage() {
     [promptFavoriteActionKey, promptFavoriteByPrompt],
   );
 
-  const modelCatalogEntry = getImageModelCatalogEntry(imageModel);
-  const { parameterCapabilities } = modelCatalogEntry;
-  const showSize = parameterCapabilities.sizes.length > 0;
-  const showQuality = parameterCapabilities.qualities.length > 1;
-  const showBackground = parameterCapabilities.backgrounds.length > 1;
-  const showImageCount = parameterCapabilities.imageCounts.length > 0;
-  const showOutputFormat = parameterCapabilities.outputFormats.length > 1;
-  const showModeration = parameterCapabilities.moderationLevels.length > 1;
-  const showSourceEditing = modelCatalogEntry.supportsEdit;
-  const showInputFidelity =
-    showSourceEditing &&
-    editSources.length > 0 &&
-    parameterCapabilities.inputFidelityOptions.length > 1;
-  const parameterColumnCount = [
-    true,
-    showSize,
-    showQuality,
-    showBackground,
-    showImageCount,
-    showOutputFormat,
-    showModeration,
-    showInputFidelity,
-  ].filter(Boolean).length;
-
   return (
     <div className="flex h-full flex-col">
       <div
@@ -688,290 +579,72 @@ export default function GeneratePage() {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto"
       >
-        {messages.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="mx-auto max-w-[900px] space-y-7 px-6 py-6">
-            <AnimatePresence initial={false}>
-              {messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  onImageClick={handleImageClick}
-                  onDelete={handleRequestDeleteGeneration}
-                  onEditImage={handleUseImageAsSource}
-                  onEditPrompt={handleEditPrompt}
-                  onFavoritePrompt={(message) =>
-                    void handleTogglePromptFavorite(message.content)
-                  }
-                  isPromptFavorited={
-                    msg.role === "user" &&
-                    promptFavoriteByPrompt.has(
-                      normalizePromptFavorite(msg.content),
-                    )
-                  }
-                  onFavoriteClick={setFolderSelectorImageId}
-                  onRetry={(message) => void handleRetryMessage(message)}
-                  chatViewportHeight={chatViewportHeight}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
+        <GenerationFeed
+          messages={messages}
+          chatViewportHeight={chatViewportHeight}
+          isPromptFavorited={(message) =>
+            message.role === "user" &&
+            promptFavoriteByPrompt.has(normalizePromptFavorite(message.content))
+          }
+          onImageClick={handleImageClick}
+          onDelete={handleRequestDeleteGeneration}
+          onEditImage={handleUseImageAsSource}
+          onEditPrompt={handleEditPrompt}
+          onFavoritePrompt={(value) => void handleTogglePromptFavorite(value)}
+          onFavoriteClick={setFolderSelectorImageId}
+          onRetry={(message) => void handleRetryMessage(message)}
+        />
       </div>
 
-      {/* Settings bar */}
-      <div className="border-t border-border-subtle bg-subtle/30 px-4 py-2.5 sm:px-6">
-        <div
-          role="toolbar"
-          aria-label={t("generate.parametersLabel")}
-          className="mx-auto w-full max-w-[900px] overflow-hidden"
-        >
-          <div
-            data-testid="generation-parameter-row"
-            className="grid w-full min-w-0 grid-rows-1 items-center gap-1.5 whitespace-nowrap"
-            style={{
-              gridTemplateColumns: `repeat(${parameterColumnCount}, minmax(0, 1fr))`,
-            }}
-          >
-            <SelectField
-              label={t("generate.modelLabel")}
-              value={imageModel}
-              onChange={(value) => handleModelChange(value as ImageModel)}
-              options={IMAGE_MODEL_CATALOG.map((entry) => ({
-                value: entry.id,
-                label: entry.label,
-              }))}
-            />
-            {showSize && (
-              <SelectField
-                label={t("generate.sizeLabel")}
-                value={size}
-                onChange={(value) => {
-                  markComposerDraftStarted();
-                  setSize(value as ImageSize);
-                }}
-                options={sizes
-                  .filter((item) => parameterCapabilities.sizes.includes(item.value))
-                  .map((item) => ({
-                    value: item.value,
-                    label: `${item.label} · ${t(item.descKey)}`,
-                  }))}
-              />
-            )}
-            {showQuality && (
-              <SelectField
-                label={t("generate.qualityLabel")}
-                value={quality}
-                onChange={(value) => {
-                  markComposerDraftStarted();
-                  setQuality(value as ImageQuality);
-                }}
-                options={qualityOptions
-                  .filter((value) => parameterCapabilities.qualities.includes(value))
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.quality.${value}`),
-                  }))}
-              />
-            )}
-            {showBackground && (
-              <SelectField
-                label={t("generate.backgroundLabel")}
-                value={background}
-                onChange={(value) =>
-                  handleBackgroundChange(value as ImageBackground)
-                }
-                options={backgroundOptions
-                  .filter((value) =>
-                    parameterCapabilities.backgrounds.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.background.${value}`),
-                    disabled: outputFormat === "jpeg" && value === "transparent",
-                  }))}
-              />
-            )}
-            {showImageCount && (
-              <SelectField
-                label={t("generate.countLabel")}
-                value={String(imageCount)}
-                onChange={(value) => {
-                  markComposerDraftStarted();
-                  setImageCount(Number(value));
-                }}
-                options={imageCountOptions
-                  .filter((value) => parameterCapabilities.imageCounts.includes(value))
-                  .map((value) => ({
-                    value: String(value),
-                    label: t("generate.countValue", { count: value }),
-                  }))}
-              />
-            )}
-            {showOutputFormat && (
-              <SelectField
-                label={t("generate.formatLabel")}
-                value={outputFormat}
-                onChange={(value) =>
-                  handleOutputFormatChange(value as ImageOutputFormat)
-                }
-                options={outputFormatOptions
-                  .filter((value) =>
-                    parameterCapabilities.outputFormats.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.format.${value}`),
-                    disabled: background === "transparent" && value === "jpeg",
-                  }))}
-              />
-            )}
-            {showModeration && (
-              <SelectField
-                label={t("generate.moderationLabel")}
-                value={moderation}
-                onChange={(value) => {
-                  markComposerDraftStarted();
-                  setModeration(value as ImageModeration);
-                }}
-                options={moderationOptions
-                  .filter((value) =>
-                    parameterCapabilities.moderationLevels.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.moderation.${value}`),
-                  }))}
-              />
-            )}
-            {showInputFidelity && (
-              <SelectField
-                label={t("generate.inputFidelityLabel")}
-                value={inputFidelity}
-                onChange={(value) => {
-                  markComposerDraftStarted();
-                  setInputFidelity(value as ImageInputFidelity);
-                }}
-                options={inputFidelityOptions
-                  .filter((value) =>
-                    parameterCapabilities.inputFidelityOptions.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.inputFidelity.${value}`),
-                  }))}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Input area */}
-      <div className="bg-surface px-6 pt-4 pb-5">
-        <div className="mx-auto max-w-[900px]">
-          <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
-            {editingPromptMessageId && (
-              <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
-                <div className="text-[12px] font-medium text-foreground/80">
-                  {t("generate.editingPrompt")}
-                </div>
-                <button
-                  onClick={handleCancelPromptEdit}
-                  className="text-[12px] font-medium text-primary transition-colors hover:text-primary/80"
-                >
-                  {t("generate.cancelEditPrompt")}
-                </button>
-              </div>
-            )}
-
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                {showSourceEditing && (
-                  <button
-                    onClick={() => void handleAddUploadedSources()}
-                    className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:border-border hover:text-foreground"
-                  >
-                    <ImagePlus size={14} />
-                    {t("generate.uploadSource")}
-                  </button>
-                )}
-              </div>
-
-              {editSources.length > 0 && (
-                <button
-                  onClick={() => {
-                    markComposerDraftStarted();
-                    setEditSources([]);
-                  }}
-                  className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
-                >
-                  {t("generate.clearSources")}
-                </button>
-              )}
-            </div>
-
-            {editSources.length > 0 && (
-              <div className="mb-3">
-                <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground/80">
-                  <Wand2 size={14} className="text-primary" />
-                  {t("generate.editingSources", { count: editSources.length })}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {editSources.map((source) => (
-                    <div
-                      key={source.id}
-                      className="relative overflow-hidden rounded-[12px] border border-border-subtle bg-surface"
-                    >
-                      <img
-                        src={toAssetUrl(source.path)}
-                        alt={source.label}
-                        className="h-20 w-20 object-cover"
-                      />
-                      <button
-                        onClick={() => handleRemoveEditSource(source.id)}
-                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
-                        title={t("generate.removeSource")}
-                      >
-                        <X size={12} />
-                      </button>
-                      <div className="max-w-20 truncate px-2 py-1 text-[10px] text-muted">
-                        {source.label}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <textarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={(e) => {
-                markComposerDraftStarted();
-                setPrompt(e.target.value);
-              }}
-              placeholder={
-                editSources.length > 0
-                  ? t("generate.editPlaceholder")
-                  : t("generate.placeholder")
-              }
-              rows={2}
-              className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[110px]"
-            />
-            <motion.button
-              onClick={handleGenerate}
-              disabled={!prompt.trim()}
-              aria-label={t("generate.submit")}
-              whileHover={{ scale: 1.02, y: -1 }}
-              whileTap={{ scale: 0.97 }}
-              className="absolute right-3 bottom-3 flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
-            >
-              <ArrowUp size={15} strokeWidth={2.5} />
-            </motion.button>
-          </div>
-        </div>
-      </div>
+      <GenerationComposer
+        textareaRef={textareaRef}
+        prompt={prompt}
+        imageModel={imageModel}
+        size={size}
+        quality={quality}
+        background={background}
+        outputFormat={outputFormat}
+        moderation={moderation}
+        inputFidelity={inputFidelity}
+        imageCount={imageCount}
+        editSources={editSources}
+        editingPromptMessageId={editingPromptMessageId}
+        onPromptChange={(value) => {
+          markComposerDraftStarted();
+          setPrompt(value);
+        }}
+        onModelChange={handleModelChange}
+        onSizeChange={(value) => {
+          markComposerDraftStarted();
+          setSize(value);
+        }}
+        onQualityChange={(value) => {
+          markComposerDraftStarted();
+          setQuality(value);
+        }}
+        onBackgroundChange={handleBackgroundChange}
+        onOutputFormatChange={handleOutputFormatChange}
+        onModerationChange={(value) => {
+          markComposerDraftStarted();
+          setModeration(value);
+        }}
+        onInputFidelityChange={(value) => {
+          markComposerDraftStarted();
+          setInputFidelity(value);
+        }}
+        onImageCountChange={(value) => {
+          markComposerDraftStarted();
+          setImageCount(value);
+        }}
+        onAddUploadedSources={() => void handleAddUploadedSources()}
+        onClearEditSources={() => {
+          markComposerDraftStarted();
+          setEditSources([]);
+        }}
+        onRemoveEditSource={handleRemoveEditSource}
+        onCancelPromptEdit={handleCancelPromptEdit}
+        onGenerate={() => void handleGenerate()}
+      />
 
       <AnimatePresence>
         {lightboxState && (
@@ -1004,123 +677,6 @@ export default function GeneratePage() {
         onCancel={handleCancelDeleteGeneration}
         loading={isDeletingGeneration}
       />
-    </div>
-  );
-}
-
-function mergeEditSources(
-  current: EditSourceImage[],
-  incoming: EditSourceImage[],
-): EditSourceImage[] {
-  const byPath = new Map(current.map((source) => [source.path, source]));
-
-  for (const source of incoming) {
-    byPath.set(source.path, source);
-  }
-
-  return Array.from(byPath.values());
-}
-
-function createUploadedEditSource(path: string): EditSourceImage {
-  const normalizedPath = path.replace(/\\/g, "/");
-  const fileName = normalizedPath.split("/").pop() || "source-image";
-
-  return {
-    id: `${crypto.randomUUID()}:${normalizedPath}`,
-    path,
-    label: fileName,
-  };
-}
-
-function editSourcesToMessageImages(
-  sources: EditSourceImage[],
-  generationId: string,
-): MessageImage[] {
-  return sources.map((source, index) => ({
-    imageId: source.imageId ?? `${generationId}-source-${index}`,
-    generationId: source.generationId ?? generationId,
-    path: source.path,
-    thumbnailPath: source.path,
-  }));
-}
-
-function normalizePromptFavorite(prompt: string): string {
-  return prompt.trim().toLocaleLowerCase();
-}
-
-function upsertPromptFavorite(
-  current: PromptFavorite[],
-  favorite: PromptFavorite,
-): PromptFavorite[] {
-  const normalized = normalizePromptFavorite(favorite.prompt);
-  return [
-    favorite,
-    ...current.filter(
-      (item) =>
-        item.id !== favorite.id &&
-        normalizePromptFavorite(item.prompt) !== normalized,
-    ),
-  ];
-}
-
-interface SelectFieldProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string; disabled?: boolean }>;
-}
-
-function SelectField({ label, value, onChange, options }: SelectFieldProps) {
-  return (
-    <label className="flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] border border-border-subtle bg-surface px-2 text-[12px] text-foreground transition-colors focus-within:border-border">
-      <span
-        className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
-        title={label}
-      >
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="select-control min-w-0 flex-1 truncate bg-transparent pr-8 text-[12px] font-medium text-foreground focus:outline-none"
-      >
-        {options.map((option) => (
-          <option
-            key={option.value}
-            value={option.value}
-            disabled={option.disabled}
-          >
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function EmptyState() {
-  const { t } = useTranslation();
-  return (
-    <div className="flex h-full flex-col items-center justify-center px-6">
-      <motion.div
-        initial={{ opacity: 0, y: 16, filter: "blur(8px)" }}
-        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="flex flex-col items-center text-center"
-      >
-        <div className="relative mb-6">
-          <div className="h-20 w-20 rounded-[20px] bg-gradient-to-br from-primary/8 via-lavender-light to-accent/6 flex items-center justify-center border border-border-subtle">
-            <ImageIcon size={32} className="text-lavender" strokeWidth={1.4} />
-          </div>
-          <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary/30 animate-pulse" />
-        </div>
-        <p className="text-[15px] font-semibold text-foreground tracking-tight">
-          {t("generate.emptyTitle")}
-        </p>
-        <p className="mt-2 max-w-[260px] text-[13px] leading-relaxed text-muted">
-          {t("generate.emptySubtitle")}
-        </p>
-      </motion.div>
     </div>
   );
 }

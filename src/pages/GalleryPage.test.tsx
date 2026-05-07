@@ -92,4 +92,100 @@ describe("GalleryPage", () => {
       });
     });
   });
+
+  it("searches with the current query and filters when pressing Enter", async () => {
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+    });
+
+    fireEvent.change(screen.getByLabelText("gallery.filterQuality"), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("gallery.search"), {
+      target: { value: "nebula" },
+    });
+    fireEvent.keyDown(screen.getByPlaceholderText("gallery.search"), {
+      key: "Enter",
+    });
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith("nebula", 1, false, {
+        quality: "high",
+      });
+    });
+  });
+
+  it("compacts date filters through the gallery search action", async () => {
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+    });
+
+    fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
+      target: { value: "2026-05-01" },
+    });
+    fireEvent.change(screen.getByLabelText("gallery.filterCreatedTo"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "gallery.applyFilters" }));
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {
+        created_from: "2026-05-01",
+      });
+    });
+  });
+
+  it("enables reset when filters are active and searches with cleared filters", async () => {
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+    });
+
+    const resetButton = screen.getByRole("button", {
+      name: "gallery.resetFilters",
+    });
+    expect(resetButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("gallery.filterStatus"), {
+      target: { value: "completed" },
+    });
+    expect(resetButton).toBeEnabled();
+
+    fireEvent.click(resetButton);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {});
+    });
+    expect(screen.getByLabelText("gallery.filterStatus")).toHaveValue("");
+  });
+
+  it("reset clears an active text query", async () => {
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+    });
+
+    const searchInput = screen.getByPlaceholderText("gallery.search");
+    const resetButton = screen.getByRole("button", {
+      name: "gallery.resetFilters",
+    });
+
+    fireEvent.change(searchInput, {
+      target: { value: "portrait" },
+    });
+    expect(resetButton).toBeEnabled();
+
+    fireEvent.click(resetButton);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {});
+    });
+    expect(searchInput).toHaveValue("");
+  });
 });
