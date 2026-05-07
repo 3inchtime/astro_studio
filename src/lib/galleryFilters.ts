@@ -4,11 +4,7 @@ export function compactFilters(
   filters: GenerationSearchFilters,
 ): GenerationSearchFilters {
   return Object.fromEntries(
-    Object.entries(filters).filter(([, value]) => {
-      if (value === "" || value === undefined) return false;
-      if (value === "any") return false;
-      return true;
-    }),
+    Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined),
   ) as GenerationSearchFilters;
 }
 

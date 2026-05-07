@@ -67,18 +67,18 @@ describe("GalleryPage", () => {
     });
   });
 
-  it("applies advanced search filters through the gallery search action", async () => {
+  it("searches with prompt, model, and date only", async () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
     fireEvent.change(screen.getByLabelText("gallery.filterModel"), {
       target: { value: "gpt-image-2" },
     });
-    fireEvent.change(screen.getByLabelText("gallery.filterSources"), {
-      target: { value: "2" },
+    fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
+      target: { value: "2026-05-01" },
     });
     fireEvent.change(screen.getByPlaceholderText("gallery.search"), {
       target: { value: "sunrise" },
@@ -88,20 +88,24 @@ describe("GalleryPage", () => {
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenLastCalledWith("sunrise", 1, false, {
         model: "gpt-image-2",
-        source_image_count: "2",
-      });
+        created_from: "2026-05-01",
+      }, undefined);
     });
+
+    expect(screen.queryByLabelText("gallery.filterStatus")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("gallery.filterQuality")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("gallery.filterSources")).not.toBeInTheDocument();
   });
 
   it("searches with the current query and filters when pressing Enter", async () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
-    fireEvent.change(screen.getByLabelText("gallery.filterQuality"), {
-      target: { value: "high" },
+    fireEvent.change(screen.getByLabelText("gallery.filterCreatedTo"), {
+      target: { value: "2026-05-31" },
     });
     fireEvent.change(screen.getByPlaceholderText("gallery.search"), {
       target: { value: "nebula" },
@@ -112,8 +116,8 @@ describe("GalleryPage", () => {
 
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenLastCalledWith("nebula", 1, false, {
-        quality: "high",
-      });
+        created_to: "2026-05-31",
+      }, undefined);
     });
   });
 
@@ -121,7 +125,7 @@ describe("GalleryPage", () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
     fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
@@ -135,7 +139,7 @@ describe("GalleryPage", () => {
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {
         created_from: "2026-05-01",
-      });
+      }, undefined);
     });
   });
 
@@ -143,7 +147,7 @@ describe("GalleryPage", () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
     const resetButton = screen.getByRole("button", {
@@ -151,24 +155,24 @@ describe("GalleryPage", () => {
     });
     expect(resetButton).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText("gallery.filterStatus"), {
-      target: { value: "completed" },
+    fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
+      target: { value: "2026-05-01" },
     });
     expect(resetButton).toBeEnabled();
 
     fireEvent.click(resetButton);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
     });
-    expect(screen.getByLabelText("gallery.filterStatus")).toHaveValue("");
+    expect(screen.getByLabelText("gallery.filterCreatedFrom")).toHaveValue("");
   });
 
   it("reset clears an active text query", async () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
     const searchInput = screen.getByPlaceholderText("gallery.search");
@@ -184,7 +188,7 @@ describe("GalleryPage", () => {
     fireEvent.click(resetButton);
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {});
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
     });
     expect(searchInput).toHaveValue("");
   });

@@ -65,6 +65,7 @@ export default function GalleryPage() {
         pageToLoad,
         false,
         compactFilters(nextFilters),
+        undefined,
       );
       setResults(result.generations);
       setTotal(result.total);

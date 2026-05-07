@@ -11,8 +11,6 @@ describe("galleryFilters", () => {
   it("removes empty dropdown values and the any source sentinel", () => {
     const filters: GenerationSearchFilters = {
       model: "gpt-image-2",
-      size: "",
-      source_image_count: "any",
       created_from: "2026-05-01",
       created_to: undefined,
     };
@@ -25,59 +23,38 @@ describe("galleryFilters", () => {
 
   it("treats a trimmed query or compact filter value as active", () => {
     expect(isFilterActive({}, "   ")).toBe(false);
-    expect(isFilterActive({ source_image_count: "any" }, "")).toBe(false);
     expect(isFilterActive({}, "sunrise")).toBe(true);
-    expect(isFilterActive({ status: "completed" }, "")).toBe(true);
+    expect(isFilterActive({ model: "gpt-image-2" }, "")).toBe(true);
   });
 
   it("returns a new filters object with the updated value", () => {
     const filters: GenerationSearchFilters = {
       model: "gpt-image-2",
-      status: "completed",
+      created_to: "2026-05-12",
     };
 
-    const updated = updateFilterValue(filters, "status", "failed");
+    const updated = updateFilterValue(filters, "created_to", "2026-05-31");
 
     expect(updated).toEqual({
       model: "gpt-image-2",
-      status: "failed",
+      created_to: "2026-05-31",
     });
     expect(updated).not.toBe(filters);
-    expect(filters.status).toBe("completed");
+    expect(filters.created_to).toBe("2026-05-12");
   });
 
-  it("builds gallery search config with current filter values", () => {
+  it("builds gallery search config with only model and date fields", () => {
     const filters: GenerationSearchFilters = {
       model: "gpt-image-2",
-      source_image_count: "2",
       created_from: "2026-05-01",
-      created_to: "",
+      created_to: "2026-05-31",
     };
-    const config = createGallerySearchConfig(
-      (key) => key,
-      filters,
-      () => undefined,
-    );
+    const config = createGallerySearchConfig((key) => key, filters, () => undefined);
 
-    expect(config.fields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          key: "model",
-          value: "gpt-image-2",
-        }),
-        expect.objectContaining({
-          key: "source_image_count",
-          value: "2",
-        }),
-        expect.objectContaining({
-          key: "created_from",
-          value: "2026-05-01",
-        }),
-        expect.objectContaining({
-          key: "created_to",
-          value: "",
-        }),
-      ]),
-    );
+    expect(config.fields.map((field) => field.key)).toEqual([
+      "model",
+      "created_from",
+      "created_to",
+    ]);
   });
 });

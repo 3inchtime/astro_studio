@@ -207,6 +207,7 @@ export async function searchGenerations(
   page?: number,
   onlyDeleted?: boolean,
   filters?: GenerationSearchFilters,
+  _projectId?: string,
 ): Promise<SearchResult> {
   return invoke("search_generations", {
     query: query || null,

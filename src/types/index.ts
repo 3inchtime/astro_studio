@@ -59,6 +59,7 @@ export interface Project {
   pinned_at: string | null;
   deleted_at: string | null;
   conversation_count: number;
+  image_count: number;
 }
 
 export interface SearchResult {
@@ -70,15 +71,6 @@ export interface SearchResult {
 
 export interface GenerationSearchFilters {
   model?: ImageModel | "";
-  request_kind?: "generate" | "edit" | "";
-  status?: "processing" | "completed" | "failed" | "";
-  size?: ImageSize | "";
-  quality?: ImageQuality | "";
-  background?: ImageBackground | "";
-  output_format?: ImageOutputFormat | "";
-  moderation?: ImageModeration | "";
-  input_fidelity?: ImageInputFidelity | "";
-  source_image_count?: "any" | "0" | "1" | "2" | "3" | "4+";
   created_from?: string;
   created_to?: string;
 }
