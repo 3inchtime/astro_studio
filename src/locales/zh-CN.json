@@ -35,6 +35,14 @@
 
   "projects.directory": "项目",
   "projects.title": "项目",
+  "projects.recentConversations": "最近会话",
+  "projects.newConversation": "新建对话",
+  "projects.manage": "管理项目",
+  "projects.imagesTitle": "项目图片",
+  "projects.imagesEmptyTitle": "项目内还没有图片",
+  "projects.imagesEmptyHint": "这个项目生成的图片会显示在这里。",
+  "projects.emptyConversations": "从这个项目开始第一条会话。",
+  "projects.notFound": "未找到这个项目。",
 
   "generate.placeholder": "描述你想要生成的图像...",
   "generate.emptyTitle": "你想创作什么？",

@@ -35,6 +35,14 @@
 
   "projects.directory": "Projects",
   "projects.title": "Projects",
+  "projects.recentConversations": "Recent Conversations",
+  "projects.newConversation": "New Conversation",
+  "projects.manage": "Manage",
+  "projects.imagesTitle": "Project Images",
+  "projects.imagesEmptyTitle": "No project images yet",
+  "projects.imagesEmptyHint": "Generated images from this project will appear here.",
+  "projects.emptyConversations": "Start the first conversation in this project.",
+  "projects.notFound": "This project could not be found.",
 
   "generate.placeholder": "Describe the image you want to generate...",
   "generate.emptyTitle": "What will you create?",
