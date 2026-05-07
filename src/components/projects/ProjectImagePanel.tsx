@@ -9,14 +9,12 @@ import { createGallerySearchConfig } from "../../lib/galleryFilterConfig";
 import { compactFilters, isFilterActive, updateFilterValue } from "../../lib/galleryFilters";
 
 export default function ProjectImagePanel({
-  projectId,
   results,
   total,
   page,
   pageSize,
   onSearch,
 }: {
-  projectId: string;
   results: GenerationResult[];
   total: number;
   page: number;

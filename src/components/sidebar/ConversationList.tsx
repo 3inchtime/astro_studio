@@ -52,7 +52,6 @@ export default function ConversationList({
   activeConversationId,
   refreshKey,
   onSelectProject,
-  onProjectCreated,
   onSelectConversation,
   onInitialConversation,
   onNewConversation,

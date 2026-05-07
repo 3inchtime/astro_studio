@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { archiveProject, getConversations, getProjects, renameProject, searchGenerations } from "../lib/api";
 import { useLayoutContext } from "../components/layout/AppLayout";
-import type { Conversation, GenerationResult, GenerationSearchFilters, Project } from "../types";
+import type { Conversation, GenerationResult, Project } from "../types";
 import ProjectSummaryCards from "../components/projects/ProjectSummaryCards";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
 
@@ -138,7 +138,6 @@ export default function ProjectHomePage() {
 
       <section className="mt-8">
         <ProjectImagePanel
-          projectId={project.id}
           results={results}
           total={total}
           page={page}
