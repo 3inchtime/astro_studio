@@ -30,9 +30,13 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => navigate,
 }));
 
-vi.mock("../lib/editSources", () => ({
-  savePendingEditSources: (...args: unknown[]) => savePendingEditSources(...args),
-}));
+vi.mock("../lib/editSources", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/editSources")>();
+  return {
+    ...actual,
+    savePendingEditSources: (...args: unknown[]) => savePendingEditSources(...args),
+  };
+});
 
 vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({

@@ -2,6 +2,23 @@ import type { EditSourceImage } from "../types";
 
 const PENDING_EDIT_SOURCES_KEY = "astro-studio.pending-edit-sources";
 
+export function buildEditSource(
+  imagePath: string,
+  imageId: string,
+  generationId: string,
+): EditSourceImage {
+  const normalizedPath = imagePath.replace(/\\/g, "/");
+  const fileName = normalizedPath.split("/").pop() || "source-image";
+
+  return {
+    id: `${imageId}:${normalizedPath}`,
+    path: imagePath,
+    label: fileName,
+    imageId,
+    generationId,
+  };
+}
+
 export function savePendingEditSources(sources: EditSourceImage[]): void {
   if (typeof window === "undefined") return;
 

@@ -14,12 +14,18 @@ export default function ProjectImagePanel({
   page,
   pageSize,
   onSearch,
+  onSelect,
+  onPreview,
+  onManageFolders,
 }: {
   results: GenerationResult[];
   total: number;
   page: number;
   pageSize: number;
   onSearch: (query: string, filters: GenerationSearchFilters, page: number) => Promise<void>;
+  onSelect: (result: GenerationResult) => void;
+  onPreview?: (result: GenerationResult, index: number) => void;
+  onManageFolders: (imageId: string) => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -57,7 +63,7 @@ export default function ProjectImagePanel({
             subtitle={t("projects.imagesEmptyHint")}
           />
         ) : (
-          <GenerationGrid results={results} favoriteMode="manage" onSelect={() => {}} onManageFolders={() => {}} />
+          <GenerationGrid results={results} favoriteMode="manage" onSelect={onSelect} onPreview={onPreview} onManageFolders={onManageFolders} />
         )}
         <PaginationControls
           page={page}

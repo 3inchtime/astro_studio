@@ -72,7 +72,7 @@ export default function ConversationList({
     async (q?: string) => {
       const items = await getConversations(
         q,
-        activeProjectId,
+        activeProjectId || "default",
         false,
       );
       setConversations(items);

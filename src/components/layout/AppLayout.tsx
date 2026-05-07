@@ -77,9 +77,15 @@ export default function AppLayout() {
     if (!location.pathname.startsWith("/projects/")) {
       return null;
     }
-
-    return decodeURIComponent(location.pathname.slice("/projects/".length)) || null;
+    const rest = location.pathname.slice("/projects/".length);
+    const firstSegment = rest.split("/")[0];
+    return decodeURIComponent(firstSegment) || null;
   }, [location.pathname]);
+
+  const isProjectChatRoute = useMemo(
+    () => /^\/projects\/[^/]+\/chat/.test(location.pathname),
+    [location.pathname],
+  );
 
   useEffect(() => {
     if (location.pathname === "/projects") {
@@ -88,11 +94,26 @@ export default function AppLayout() {
       return;
     }
 
+    // Project chat route — set project but let ProjectChatPage control the conversation
+    if (isProjectChatRoute && routeProjectId) {
+      setActiveProjectId(routeProjectId);
+      return;
+    }
+
     if (routeProjectId) {
       setActiveProjectId(routeProjectId);
       setActiveConversationId(null);
+      return;
     }
-  }, [location.pathname, routeProjectId]);
+
+    // /generate always uses the default project — no cross-contamination
+    if (location.pathname === "/generate") {
+      setActiveProjectId(null);
+      return;
+    }
+
+    setActiveProjectId(null);
+  }, [location.pathname, routeProjectId, isProjectChatRoute]);
 
   const refreshConversations = useCallback(() => {
     setConversationRefreshKey((key) => key + 1);

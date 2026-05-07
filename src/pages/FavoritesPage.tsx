@@ -16,9 +16,10 @@ import {
   getFavoriteImages,
   getPromptFavorites,
 } from "../lib/api";
-import { savePendingEditSources } from "../lib/editSources";
+import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { getPromptFolderDisplayName } from "../lib/promptFolders";
 import { cn, formatLocalDateTime } from "../lib/utils";
+import { useUIStore } from "../lib/store";
 import { useFolders } from "../hooks/useFolders";
 import { usePromptFolders } from "../hooks/usePromptFolders";
 import { useLayoutContext } from "../components/layout/AppLayout";
@@ -53,13 +54,14 @@ export default function FavoritesPage() {
   const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
     null,
   );
-  const [folderSelectorImageId, setFolderSelectorImageId] = useState<
-    string | null
-  >(null);
-  const [lightboxState, setLightboxState] = useState<{
-    images: MessageImage[];
-    index: number;
-  } | null>(null);
+  const {
+    lightbox,
+    openLightbox,
+    closeLightbox,
+    folderSelectorImageId,
+    openFolderSelector,
+    closeFolderSelector,
+  } = useUIStore();
 
   const [promptFavorites, setPromptFavorites] = useState<PromptFavorite[]>([]);
   const [promptQuery, setPromptQuery] = useState("");
@@ -76,23 +78,26 @@ export default function FavoritesPage() {
       mode: "replace" | "append" = "replace",
     ) => {
       setIsLoadingImages(true);
-      const result = await getFavoriteImages(
-        folderId || selectedImageFolderId || undefined,
-        query?.trim() || imageQuery.trim() || undefined,
-        page,
-      );
-      setImageResults((current) =>
-        mode === "append"
-          ? [...current, ...result.generations]
-          : result.generations,
-      );
-      setImageTotal(result.total);
-      setImagePage(result.page);
-      setImagePageSize(result.page_size);
-      if (mode === "replace") {
-        setSelectedImage(null);
+      try {
+        const result = await getFavoriteImages(
+          folderId || selectedImageFolderId || undefined,
+          query?.trim() || imageQuery.trim() || undefined,
+          page,
+        );
+        setImageResults((current) =>
+          mode === "append"
+            ? [...current, ...result.generations]
+            : result.generations,
+        );
+        setImageTotal(result.total);
+        setImagePage(result.page);
+        setImagePageSize(result.page_size);
+        if (mode === "replace") {
+          setSelectedImage(null);
+        }
+      } finally {
+        setIsLoadingImages(false);
       }
-      setIsLoadingImages(false);
     },
     [imageQuery, selectedImageFolderId],
   );
@@ -137,41 +142,26 @@ export default function FavoritesPage() {
     await deleteGeneration(id);
     await loadImageFavorites(imagePage, imageQuery, selectedImageFolderId);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
-    setLightboxState((current) => {
-      if (!current) return null;
-      return current.images.some((image) => image.generationId === id)
-        ? null
-        : current;
-    });
+    if (lightbox?.images.some((image) => image.generationId === id)) {
+      closeLightbox();
+    }
   }
 
-  function handleEditImage(
-    imagePath: string,
-    imageId: string,
-    generationId: string,
-  ) {
-    const normalizedPath = imagePath.replace(/\\/g, "/");
-    const fileName = normalizedPath.split("/").pop() || "source-image";
-
-    savePendingEditSources([
-      {
-        id: `${imageId}:${normalizedPath}`,
-        path: imagePath,
-        label: fileName,
-        imageId,
-        generationId,
-      },
-    ]);
-    setActiveConversationId(null);
-    navigate("/generate");
-  }
+  const handleEditImage = useCallback(
+    (imagePath: string, imageId: string, generationId: string) => {
+      savePendingEditSources([buildEditSource(imagePath, imageId, generationId)]);
+      setActiveConversationId(null);
+      navigate("/generate");
+    },
+    [navigate, setActiveConversationId],
+  );
 
   const handleEditLightboxImage = useCallback(
     (image: MessageImage) => {
       handleEditImage(image.path, image.imageId, image.generationId);
-      setLightboxState(null);
+      closeLightbox();
     },
-    [],
+    [handleEditImage, closeLightbox],
   );
 
   async function handleDeletePromptFavorite(id: string) {
@@ -192,7 +182,7 @@ export default function FavoritesPage() {
   }
 
   function handleImageFolderSelectorClose() {
-    setFolderSelectorImageId(null);
+    closeFolderSelector();
     reloadFolders();
     loadImageFavorites(imagePage, imageQuery, selectedImageFolderId).catch(
       () => {},
@@ -205,14 +195,11 @@ export default function FavoritesPage() {
     loadPromptFavorites(promptQuery, selectedPromptFolderId).catch(() => {});
   }
 
-  const openLightbox = useCallback(
+  const openResultLightbox = useCallback(
     (result: GenerationResult, index: number) => {
-      setLightboxState({
-        images: generationResultToLightboxImages(result),
-        index,
-      });
+      openLightbox(generationResultToLightboxImages(result), index);
     },
-    [],
+    [openLightbox],
   );
 
   const activeTotal =
@@ -355,7 +342,7 @@ export default function FavoritesPage() {
                 <GenerationGrid
                   results={imageResults}
                   onSelect={setSelectedImage}
-                  onPreview={openLightbox}
+                  onPreview={openResultLightbox}
                 />
               )}
               <div ref={loadMoreImagesRef} aria-hidden="true" className="h-1" />
@@ -380,18 +367,18 @@ export default function FavoritesPage() {
             onClose={() => setSelectedImage(null)}
             onDelete={(id) => void handleDeleteImage(id)}
             onEditImage={handleEditImage}
-            onPreview={(imageIndex) => openLightbox(selectedImage, imageIndex)}
-            onManageFolders={setFolderSelectorImageId}
+            onPreview={(imageIndex) => openResultLightbox(selectedImage, imageIndex)}
+            onManageFolders={openFolderSelector}
           />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {lightboxState && (
+        {lightbox && (
           <Lightbox
-            images={lightboxState.images}
-            initialIndex={lightboxState.index}
-            onClose={() => setLightboxState(null)}
+            images={lightbox.images}
+            initialIndex={lightbox.index}
+            onClose={closeLightbox}
             onEditImage={handleEditLightboxImage}
             onDelete={(id) => void handleDeleteImage(id)}
           />

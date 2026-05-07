@@ -23,9 +23,13 @@ vi.mock("../lib/api", () => ({
   searchGenerations: (...args: unknown[]) => searchGenerations(...args),
 }));
 
-vi.mock("../lib/editSources", () => ({
-  savePendingEditSources: vi.fn(),
-}));
+vi.mock("../lib/editSources", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/editSources")>();
+  return {
+    ...actual,
+    savePendingEditSources: vi.fn(),
+  };
+});
 
 vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({

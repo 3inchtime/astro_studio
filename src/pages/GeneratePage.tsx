@@ -1,13 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
-  createPromptFavorite,
-  deletePromptFavorite,
   editImage,
   generateImage,
   getConversationGenerations,
   getImageModel,
-  getPromptFavorites,
   saveImageModel,
   deleteGeneration,
   messageImageToEditSource,
@@ -25,8 +22,9 @@ import {
   editSourcesToMessageImages,
   mergeEditSources,
   normalizePromptFavorite,
-  upsertPromptFavorite,
 } from "../lib/generatePageHelpers";
+import { usePromptFavoritesQuery, useCreatePromptFavoriteMutation, useDeletePromptFavoriteMutation } from "../lib/queries/favorites";
+import { useUIStore } from "../lib/store";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import GenerationComposer from "../components/generate/GenerationComposer";
@@ -45,7 +43,6 @@ import type {
   ImageSize,
   Message,
   MessageImage,
-  PromptFavorite,
   RetryGenerationRequest,
 } from "../types";
 import { useTranslation } from "react-i18next";
@@ -89,22 +86,25 @@ export default function GeneratePage() {
   const [editingPromptMessageId, setEditingPromptMessageId] = useState<
     string | null
   >(null);
-  const [lightboxState, setLightboxState] = useState<{
-    images: MessageImage[];
-    index: number;
-  } | null>(null);
-  const [folderSelectorImageId, setFolderSelectorImageId] = useState<
-    string | null
-  >(null);
+  const {
+    lightbox,
+    openLightbox,
+    closeLightbox,
+    folderSelectorImageId,
+    openFolderSelector,
+    closeFolderSelector,
+  } = useUIStore();
   const [pendingDeleteGenerationId, setPendingDeleteGenerationId] = useState<
     string | null
   >(null);
   const [isDeletingGeneration, setIsDeletingGeneration] = useState(false);
   const [chatViewportHeight, setChatViewportHeight] = useState(0);
-  const [promptFavorites, setPromptFavorites] = useState<PromptFavorite[]>([]);
+  const { data: promptFavorites = [] } = usePromptFavoritesQuery();
   const [promptFavoriteActionKey, setPromptFavoriteActionKey] = useState<
     string | null
   >(null);
+  const promptFavoriteCreate = useCreatePromptFavoriteMutation();
+  const promptFavoriteDelete = useDeletePromptFavoriteMutation();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -189,11 +189,6 @@ export default function GeneratePage() {
   const loadConversationMessages = useCallback(async (conversationId: string) => {
     const generations = await getConversationGenerations(conversationId);
     setMessages(generationsToMessages(generations));
-  }, []);
-
-  const loadPromptFavorites = useCallback(async () => {
-    const favorites = await getPromptFavorites();
-    setPromptFavorites(favorites);
   }, []);
 
   const promptFavoriteByPrompt = useMemo(() => {
@@ -286,10 +281,6 @@ export default function GeneratePage() {
       cancelled = true;
     };
   }, [applyModelDefaults, reconcileDraftStateForModel, setActiveImageModel]);
-
-  useEffect(() => {
-    loadPromptFavorites().catch(() => {});
-  }, [loadPromptFavorites]);
 
   const handleAddUploadedSources = useCallback(async () => {
     markComposerDraftStarted();
@@ -467,9 +458,9 @@ export default function GeneratePage() {
 
   const handleImageClick = useCallback(
     (images: MessageImage[], index: number) => {
-      setLightboxState({ images, index });
+      openLightbox(images, index);
     },
-    [],
+    [openLightbox],
   );
 
   const handleDeleteFromBubble = useCallback(
@@ -484,14 +475,14 @@ export default function GeneratePage() {
               m.id !== `user-${generationId}`,
           ),
         );
-        setLightboxState((current) => {
-          if (!current) return null;
-          return current.images.some(
+        if (
+          lightbox &&
+          lightbox.images.some(
             (image) => image.generationId === generationId,
           )
-            ? null
-            : current;
-        });
+        ) {
+          closeLightbox();
+        }
         refreshConversations();
       } finally {
         setIsDeletingGeneration(false);
@@ -556,20 +547,15 @@ export default function GeneratePage() {
       setPromptFavoriteActionKey(normalizedPrompt);
       try {
         if (existing) {
-          await deletePromptFavorite(existing.id);
-          setPromptFavorites((current) =>
-            current.filter((favorite) => favorite.id !== existing.id),
-          );
-          return;
+          await promptFavoriteDelete.mutateAsync(existing.id);
+        } else {
+          await promptFavoriteCreate.mutateAsync(promptText);
         }
-
-        const favorite = await createPromptFavorite(promptText);
-        setPromptFavorites((current) => upsertPromptFavorite(current, favorite));
       } finally {
         setPromptFavoriteActionKey(null);
       }
     },
-    [promptFavoriteActionKey, promptFavoriteByPrompt],
+    [promptFavoriteActionKey, promptFavoriteByPrompt, promptFavoriteCreate, promptFavoriteDelete],
   );
 
   return (
@@ -591,7 +577,7 @@ export default function GeneratePage() {
           onEditImage={handleUseImageAsSource}
           onEditPrompt={handleEditPrompt}
           onFavoritePrompt={(value) => void handleTogglePromptFavorite(value)}
-          onFavoriteClick={setFolderSelectorImageId}
+          onFavoriteClick={openFolderSelector}
           onRetry={(message) => void handleRetryMessage(message)}
         />
       </div>
@@ -647,14 +633,14 @@ export default function GeneratePage() {
       />
 
       <AnimatePresence>
-        {lightboxState && (
+        {lightbox && (
           <Lightbox
-            images={lightboxState.images}
-            initialIndex={lightboxState.index}
-            onClose={() => setLightboxState(null)}
+            images={lightbox.images}
+            initialIndex={lightbox.index}
+            onClose={closeLightbox}
             onEditImage={(image) => {
               handleUseImageAsSource(image);
-              setLightboxState(null);
+              closeLightbox();
             }}
             onDelete={handleRequestDeleteGeneration}
           />
@@ -664,7 +650,7 @@ export default function GeneratePage() {
       {folderSelectorImageId && (
         <FolderSelector
           imageId={folderSelectorImageId}
-          onClose={() => setFolderSelectorImageId(null)}
+          onClose={closeFolderSelector}
         />
       )}
 

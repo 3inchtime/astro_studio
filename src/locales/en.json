@@ -55,6 +55,12 @@
   "projects.pin": "Pin",
   "projects.unpin": "Unpin",
   "projects.notFound": "This project could not be found.",
+  "projects.conversations": "Conversations",
+  "projects.conversationCount": "Conversations",
+  "projects.imageCount": "Images",
+  "projects.conversationImageCount": "{{count}} images",
+  "projects.renameConversationError": "Unable to rename conversation.",
+  "projects.deleteConversationError": "Unable to delete conversation.",
 
   "projectDialog.createTitle": "Create project",
   "projectDialog.renameTitle": "Rename project",

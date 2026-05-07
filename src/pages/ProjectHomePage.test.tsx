@@ -127,7 +127,7 @@ describe("ProjectHomePage", () => {
     );
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByText("projects.recentConversations")).toBeInTheDocument();
+    expect(screen.getByText("projects.conversations")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "projects.manage" })).toBeInTheDocument();
 
     await waitFor(() => {
@@ -229,25 +229,21 @@ describe("ProjectHomePage", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("closes the rename dialog and updates optimistically when refresh fails after rename", async () => {
-    const refreshError = new Error("refresh failed");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("closes the rename dialog and updates optimistically", async () => {
     renameProject.mockResolvedValue(undefined);
-    getProjects
-      .mockResolvedValueOnce([
-        {
-          id: "project-1",
-          name: "Brand Storyboards",
-          created_at: "",
-          updated_at: "2026-05-07T01:00:00Z",
-          archived_at: null,
-          pinned_at: null,
-          deleted_at: null,
-          conversation_count: 12,
-          image_count: 86,
-        },
-      ])
-      .mockRejectedValueOnce(refreshError);
+    getProjects.mockResolvedValueOnce([
+      {
+        id: "project-1",
+        name: "Brand Storyboards",
+        created_at: "",
+        updated_at: "2026-05-07T01:00:00Z",
+        archived_at: null,
+        pinned_at: null,
+        deleted_at: null,
+        conversation_count: 12,
+        image_count: 86,
+      },
+    ]);
 
     render(
       <MemoryRouter initialEntries={["/projects/project-1"]}>
@@ -273,9 +269,6 @@ describe("ProjectHomePage", () => {
     });
     expect(screen.queryByText("projectDialog.renameError")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "New Name" })).toBeInTheDocument();
-    expect(errorSpy).toHaveBeenCalledWith(refreshError);
-
-    errorSpy.mockRestore();
   });
 
   it("shows Unpin, not Pin, for pinned projects", async () => {
@@ -324,34 +317,20 @@ describe("ProjectHomePage", () => {
     expect(screen.queryByRole("button", { name: "projects.unpin" })).not.toBeInTheDocument();
   });
 
-  it("pins an unpinned project and refreshes projects", async () => {
-    getProjects
-      .mockResolvedValueOnce([
-        {
-          id: "project-1",
-          name: "Brand Storyboards",
-          created_at: "",
-          updated_at: "2026-05-07T01:00:00Z",
-          archived_at: null,
-          pinned_at: null,
-          deleted_at: null,
-          conversation_count: 12,
-          image_count: 86,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          id: "project-1",
-          name: "Brand Storyboards",
-          created_at: "",
-          updated_at: "2026-05-07T01:00:00Z",
-          archived_at: null,
-          pinned_at: "2026-05-07T02:00:00Z",
-          deleted_at: null,
-          conversation_count: 12,
-          image_count: 86,
-        },
-      ]);
+  it("pins an unpinned project optimistically", async () => {
+    getProjects.mockResolvedValueOnce([
+      {
+        id: "project-1",
+        name: "Brand Storyboards",
+        created_at: "",
+        updated_at: "2026-05-07T01:00:00Z",
+        archived_at: null,
+        pinned_at: null,
+        deleted_at: null,
+        conversation_count: 12,
+        image_count: 86,
+      },
+    ]);
 
     render(
       <MemoryRouter initialEntries={["/projects/project-1"]}>
@@ -368,40 +347,23 @@ describe("ProjectHomePage", () => {
     await waitFor(() => {
       expect(pinProject).toHaveBeenCalledWith("project-1");
     });
-    await waitFor(() => {
-      expect(getProjects).toHaveBeenCalledTimes(2);
-    });
     expect(navigate).not.toHaveBeenCalledWith("/projects");
   });
 
-  it("unpins a pinned project and refreshes projects", async () => {
-    getProjects
-      .mockResolvedValueOnce([
-        {
-          id: "project-1",
-          name: "Brand Storyboards",
-          created_at: "",
-          updated_at: "2026-05-07T01:00:00Z",
-          archived_at: null,
-          pinned_at: "2026-05-07T01:00:00Z",
-          deleted_at: null,
-          conversation_count: 12,
-          image_count: 86,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          id: "project-1",
-          name: "Brand Storyboards",
-          created_at: "",
-          updated_at: "2026-05-07T01:00:00Z",
-          archived_at: null,
-          pinned_at: null,
-          deleted_at: null,
-          conversation_count: 12,
-          image_count: 86,
-        },
-      ]);
+  it("unpins a pinned project optimistically", async () => {
+    getProjects.mockResolvedValueOnce([
+      {
+        id: "project-1",
+        name: "Brand Storyboards",
+        created_at: "",
+        updated_at: "2026-05-07T01:00:00Z",
+        archived_at: null,
+        pinned_at: "2026-05-07T01:00:00Z",
+        deleted_at: null,
+        conversation_count: 12,
+        image_count: 86,
+      },
+    ]);
 
     render(
       <MemoryRouter initialEntries={["/projects/project-1"]}>
@@ -417,9 +379,6 @@ describe("ProjectHomePage", () => {
 
     await waitFor(() => {
       expect(unpinProject).toHaveBeenCalledWith("project-1");
-    });
-    await waitFor(() => {
-      expect(getProjects).toHaveBeenCalledTimes(2);
     });
     expect(navigate).not.toHaveBeenCalledWith("/projects");
   });

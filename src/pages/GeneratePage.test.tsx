@@ -1,6 +1,19 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import GeneratePage from "./GeneratePage";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+});
+
+function TestWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  );
+}
 
 const getConversationGenerations = vi.fn();
 const getImageModel = vi.fn();
@@ -186,6 +199,12 @@ describe("GeneratePage", () => {
     editImage.mockReset();
     pickSourceImages.mockReset();
     createPromptFavorite.mockReset();
+    createPromptFavorite.mockImplementation(async (prompt: string) => ({
+      id: `fav-${crypto.randomUUID()}`,
+      prompt,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
     getPromptFavorites.mockReset();
     deletePromptFavorite.mockReset();
 
@@ -231,7 +250,7 @@ describe("GeneratePage", () => {
   });
 
   it("renders every registered model from the shared catalog in the model selector", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -249,7 +268,7 @@ describe("GeneratePage", () => {
   });
 
   it("loads a sent prompt back into the composer when editing", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -263,7 +282,7 @@ describe("GeneratePage", () => {
   });
 
   it("saves a sent prompt as a prompt favorite from the message actions", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -282,7 +301,7 @@ describe("GeneratePage", () => {
   });
 
   it("submits selected generation parameters from the settings bar", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -321,7 +340,7 @@ describe("GeneratePage", () => {
     const saveModelDeferred = createDeferred<void>();
     saveImageModel.mockReturnValue(saveModelDeferred.promise);
 
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -360,7 +379,7 @@ describe("GeneratePage", () => {
       ],
     });
 
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -393,7 +412,7 @@ describe("GeneratePage", () => {
     const { getImageModelCatalogEntry } = await import("../lib/modelCatalog");
     const geminiEntry = getImageModelCatalogEntry("nano-banana");
 
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -480,7 +499,7 @@ describe("GeneratePage", () => {
     getImageModel.mockReturnValue(initialModelDeferred.promise);
     pickSourceImages.mockResolvedValue(["/tmp/hydration-source.png"]);
 
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -554,7 +573,7 @@ describe("GeneratePage", () => {
     getImageModel.mockReturnValue(initialModelDeferred.promise);
     pickSourceImages.mockReturnValue(pickedSourcesDeferred.promise);
 
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -599,7 +618,7 @@ describe("GeneratePage", () => {
   });
 
   it("uses image-to-edit entry points under a Gemini model", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -634,7 +653,7 @@ describe("GeneratePage", () => {
   });
 
   it("prevents transparent backgrounds with jpeg output", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -655,7 +674,7 @@ describe("GeneratePage", () => {
   });
 
   it("keeps generation parameters in a single row inside the page boundary", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -678,7 +697,7 @@ describe("GeneratePage", () => {
   });
 
   it("lets the generate surface stretch across the available main panel", async () => {
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
@@ -705,7 +724,7 @@ describe("GeneratePage", () => {
   it("submits edit-only input fidelity with selected source images", async () => {
     pickSourceImages.mockResolvedValue(["/tmp/source-edit.png"]);
 
-    render(<GeneratePage />);
+    render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");

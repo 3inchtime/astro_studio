@@ -55,6 +55,12 @@
   "projects.pin": "置顶",
   "projects.unpin": "取消置顶",
   "projects.notFound": "未找到这个项目。",
+  "projects.conversations": "会话列表",
+  "projects.conversationCount": "会话数",
+  "projects.imageCount": "图片数",
+  "projects.conversationImageCount": "{{count}} 张图片",
+  "projects.renameConversationError": "无法重命名会话。",
+  "projects.deleteConversationError": "无法删除会话。",
 
   "projectDialog.createTitle": "创建项目",
   "projectDialog.renameTitle": "重命名项目",
