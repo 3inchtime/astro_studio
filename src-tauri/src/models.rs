@@ -145,15 +145,6 @@ pub struct GenerationResult {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GenerationSearchFilters {
     pub model: Option<String>,
-    pub request_kind: Option<String>,
-    pub status: Option<String>,
-    pub size: Option<String>,
-    pub quality: Option<String>,
-    pub background: Option<String>,
-    pub output_format: Option<String>,
-    pub moderation: Option<String>,
-    pub input_fidelity: Option<String>,
-    pub source_image_count: Option<String>,
     pub created_from: Option<String>,
     pub created_to: Option<String>,
 }

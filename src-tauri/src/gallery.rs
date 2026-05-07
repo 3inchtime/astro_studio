@@ -111,6 +111,7 @@ fn generation_filters_to_sql(
     only_deleted: bool,
     query: Option<&str>,
     filters: Option<&GenerationSearchFilters>,
+    project_id: Option<&str>,
 ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let mut clauses = vec![if only_deleted {
         deleted_generation_filter("g")
@@ -124,65 +125,20 @@ fn generation_filters_to_sql(
         params.push(Box::new(format!("%{}%", query)));
     }
 
+    if let Some(project_id) = project_id.map(str::trim).filter(|value| !value.is_empty()) {
+        clauses.push(format!(
+            "EXISTS (SELECT 1 FROM conversations c WHERE c.id = g.conversation_id AND COALESCE(c.project_id, 'default') = ?{})",
+            params.len() + 1
+        ));
+        params.push(Box::new(project_id.to_string()));
+    }
+
     if let Some(filters) = filters {
         generation_search_value_clause(
             &mut clauses,
             &mut params,
             "g.engine",
             filters.model.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.request_kind",
-            filters.request_kind.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.status",
-            filters.status.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.size",
-            filters.size.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.quality",
-            filters.quality.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.background",
-            filters.background.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.output_format",
-            filters.output_format.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.moderation",
-            filters.moderation.as_deref(),
-        );
-        generation_search_value_clause(
-            &mut clauses,
-            &mut params,
-            "g.input_fidelity",
-            filters.input_fidelity.as_deref(),
-        );
-        generation_source_image_count_clause(
-            &mut clauses,
-            &mut params,
-            filters.source_image_count.as_deref(),
         );
         generation_search_range_clause(
             &mut clauses,
@@ -325,6 +281,7 @@ pub(crate) fn search_generations(
     page: Option<i32>,
     only_deleted: Option<bool>,
     filters: Option<GenerationSearchFilters>,
+    project_id: Option<String>,
 ) -> Result<SearchResult, String> {
     let page = page.unwrap_or(1);
     let page_size = DEFAULT_PAGE_SIZE;
@@ -333,7 +290,12 @@ pub(crate) fn search_generations(
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let (where_sql, params_boxed) =
-        generation_filters_to_sql(only_deleted, query.as_deref(), filters.as_ref());
+        generation_filters_to_sql(
+            only_deleted,
+            query.as_deref(),
+            filters.as_ref(),
+            project_id.as_deref(),
+        );
     let count_sql = format!("SELECT COUNT(*) FROM generations g {}", where_sql);
     let count: i32 = {
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -369,6 +331,29 @@ pub(crate) fn search_generations(
         page,
         page_size,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generation_filters_to_sql_adds_project_scope_clause() {
+        let (sql, params) = generation_filters_to_sql(
+            false,
+            Some("sunrise"),
+            Some(&GenerationSearchFilters {
+                model: Some("gpt-image-2".into()),
+                created_from: Some("2026-05-01".into()),
+                created_to: None,
+            }),
+            Some("project-1"),
+        );
+
+        assert!(sql.contains("EXISTS (SELECT 1 FROM conversations c"));
+        assert!(sql.contains("COALESCE(c.project_id, 'default')"));
+        assert_eq!(params.len(), 4);
+    }
 }
 
 #[tauri::command]

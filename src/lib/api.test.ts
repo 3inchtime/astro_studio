@@ -122,7 +122,7 @@ describe("api gallery search commands", () => {
     tauriApi.invoke.mockReset();
   });
 
-  it("forwards the simplified gallery filters through Tauri IPC", async () => {
+  it("forwards simplified gallery filters and optional project scope through Tauri IPC", async () => {
     tauriApi.invoke.mockResolvedValue({
       generations: [],
       total: 0,
@@ -130,11 +130,17 @@ describe("api gallery search commands", () => {
       page_size: 20,
     });
 
-    await searchGenerations("sunrise", 2, false, {
-      model: "gpt-image-2",
-      created_from: "2026-04-01",
-      created_to: "2026-04-30",
-    });
+    await searchGenerations(
+      "sunrise",
+      2,
+      false,
+      {
+        model: "gpt-image-2",
+        created_from: "2026-05-01",
+        created_to: "2026-05-31",
+      },
+      "project-1",
+    );
 
     expect(tauriApi.invoke).toHaveBeenCalledWith("search_generations", {
       query: "sunrise",
@@ -142,29 +148,10 @@ describe("api gallery search commands", () => {
       onlyDeleted: null,
       filters: {
         model: "gpt-image-2",
-        created_from: "2026-04-01",
-        created_to: "2026-04-30",
+        created_from: "2026-05-01",
+        created_to: "2026-05-31",
       },
-    });
-  });
-
-  it("accepts the future project argument without forwarding it yet", async () => {
-    tauriApi.invoke.mockResolvedValue({
-      generations: [],
-      total: 0,
-      page: 1,
-      page_size: 20,
-    });
-
-    await searchGenerations("sunrise", 1, false, { model: "gpt-image-2" }, "project-1");
-
-    expect(tauriApi.invoke).toHaveBeenCalledWith("search_generations", {
-      query: "sunrise",
-      page: 1,
-      onlyDeleted: null,
-      filters: {
-        model: "gpt-image-2",
-      },
+      projectId: "project-1",
     });
   });
 });
