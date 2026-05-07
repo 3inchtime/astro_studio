@@ -15,25 +15,19 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   archiveConversation,
-  archiveProject,
-  createProject,
   deleteConversation,
-  deleteProject,
   getConversations,
   getProjects,
   moveConversationToProject,
   pinConversation,
-  pinProject,
   renameConversation,
-  renameProject,
   toAssetUrl,
   unarchiveConversation,
-  unarchiveProject,
   unpinConversation,
-  unpinProject,
 } from "../../lib/api";
 import { formatConversationTime } from "../../lib/utils";
 import type { Conversation, Project } from "../../types";
@@ -51,44 +45,7 @@ interface ConversationListProps {
 
 type ActionMenu =
   | { type: "conversation"; id: string }
-  | { type: "project"; id: string }
   | null;
-
-function groupByProject(conversations: Conversation[], projects: Project[]) {
-  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
-  const orderedIds = new Set(projects.map((project) => project.id));
-  const groups = projects.map((project) => ({
-    project,
-    items: conversations.filter((conv) => conv.project_id === project.id),
-  }));
-  const remaining = conversations.filter((conv) => !orderedIds.has(conv.project_id));
-
-  for (const conv of remaining) {
-    const groupIndex = groups.findIndex((item) => item.project.id === conv.project_id);
-
-    if (groupIndex === -1) {
-      groups.push({
-        project: {
-          id: conv.project_id,
-          name: conv.project_name ?? projectNames.get(conv.project_id) ?? "Project",
-          created_at: conv.created_at,
-          updated_at: conv.updated_at,
-          archived_at: null,
-          pinned_at: null,
-          deleted_at: null,
-          conversation_count: 0,
-          image_count: 0,
-        } satisfies Project,
-        items: [],
-      });
-    }
-
-    const targetGroup = groups[groupIndex === -1 ? groups.length - 1 : groupIndex];
-    targetGroup.items.push(conv);
-  }
-
-  return groups.filter((group) => group.items.length > 0 || group.project.id === "default");
-}
 
 export default function ConversationList({
   activeProjectId,
@@ -100,31 +57,31 @@ export default function ConversationList({
   onInitialConversation,
   onNewConversation,
 }: ConversationListProps) {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState("");
-  const [includeArchived, setIncludeArchived] = useState(false);
   const [openMenu, setOpenMenu] = useState<ActionMenu>(null);
   const { t } = useTranslation();
 
   const loadProjects = useCallback(async () => {
-    const items = await getProjects(includeArchived);
+    const items = await getProjects(false);
     setProjects(items);
-  }, [includeArchived]);
+  }, []);
 
   const loadConversations = useCallback(
     async (q?: string) => {
       const items = await getConversations(
         q,
         activeProjectId,
-        includeArchived,
+        false,
       );
       setConversations(items);
       if (!q && !activeConversationId && items.length > 0) {
         onInitialConversation(items[0].id);
       }
     },
-    [activeConversationId, activeProjectId, includeArchived, onInitialConversation],
+    [activeConversationId, activeProjectId, onInitialConversation],
   );
 
   const loadAll = useCallback(
@@ -149,7 +106,6 @@ export default function ConversationList({
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects],
   );
-  const visibleGroups = groupByProject(conversations, projects);
 
   const runConversationAction = useCallback(
     async (conversation: Conversation, action: string) => {
@@ -193,44 +149,6 @@ export default function ConversationList({
     ],
   );
 
-  const runProjectAction = useCallback(
-    async (project: Project, action: string) => {
-      setOpenMenu(null);
-      if (action === "rename") {
-        const name = window.prompt(t("sidebar.renameProject"), project.name);
-        if (!name || name.trim() === project.name) return;
-        await renameProject(project.id, name.trim());
-      } else if (action === "pin") {
-        await pinProject(project.id);
-      } else if (action === "unpin") {
-        await unpinProject(project.id);
-      } else if (action === "archive") {
-        await archiveProject(project.id);
-        if (activeProjectId === project.id) {
-          onSelectProject(null);
-        }
-      } else if (action === "unarchive") {
-        await unarchiveProject(project.id);
-      } else if (action === "delete") {
-        if (!window.confirm(t("sidebar.deleteProjectConfirm"))) return;
-        await deleteProject(project.id);
-        if (activeProjectId === project.id) {
-          onSelectProject(null);
-        }
-      }
-      await loadAll(query);
-    },
-    [activeProjectId, loadAll, onSelectProject, query, t],
-  );
-
-  const handleCreateProject = useCallback(async () => {
-    const name = window.prompt(t("sidebar.newProject"));
-    if (!name?.trim()) return;
-    const project = await createProject(name.trim());
-    onProjectCreated(project.id);
-    await loadAll(query);
-  }, [loadAll, onProjectCreated, query, t]);
-
   return (
     <div className="flex h-full flex-col">
       <div className="px-4 pt-5 pb-3">
@@ -238,17 +156,19 @@ export default function ConversationList({
           <div className="flex items-center gap-2">
             <MessageSquare size={13} className="text-muted" strokeWidth={1.8} />
             <span className="text-[13px] font-semibold text-foreground tracking-tight">
-              {t("sidebar.conversations")}
+              {activeProjectId && selectedProject
+                ? selectedProject.name
+                : t("sidebar.conversations")}
             </span>
           </div>
-          <button
-            onClick={handleCreateProject}
-            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
-            title={t("sidebar.newProject")}
-            aria-label={t("sidebar.newProject")}
-          >
-            <FolderKanban size={14} />
-          </button>
+          {activeProjectId && selectedProject ? (
+            <button
+              onClick={() => navigate(`/projects/${activeProjectId}`)}
+              className="text-[11px] font-medium text-primary"
+            >
+              {t("nav.projects")}
+            </button>
+          ) : null}
         </div>
         <div className="relative">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" strokeWidth={2} />
@@ -258,49 +178,6 @@ export default function ConversationList({
             placeholder={t("sidebar.search")}
             className="h-[28px] w-full rounded-[8px] border border-border-subtle bg-subtle/50 pl-7 pr-2 text-[12px] text-foreground placeholder:text-muted/60 focus:outline-none focus:border-border focus:bg-surface transition-colors"
           />
-        </div>
-      </div>
-
-      <div className="border-y border-border-subtle bg-subtle/25 px-3 py-2">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted/60">
-            {t("sidebar.projects")}
-          </span>
-          <button
-            onClick={() => setIncludeArchived((value) => !value)}
-            className={`text-[10px] font-medium transition-colors ${
-              includeArchived ? "text-primary" : "text-muted/70 hover:text-foreground"
-            }`}
-          >
-            {t("sidebar.archived")}
-          </button>
-        </div>
-        <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-          <button
-            onClick={() => onSelectProject(null)}
-            className={`max-w-[150px] shrink-0 rounded-[8px] border px-2 py-1 text-left text-[11px] font-medium transition-colors ${
-              activeProjectId === null
-                ? "border-primary/20 bg-primary/8 text-primary"
-                : "border-border-subtle bg-surface text-foreground/70 hover:text-foreground"
-            }`}
-            title={t("sidebar.allProjects")}
-          >
-            <span className="block truncate">{t("sidebar.allProjects")}</span>
-          </button>
-          {projects.map((project) => (
-            <button
-              key={project.id}
-              onClick={() => onSelectProject(project.id)}
-              className={`max-w-[150px] shrink-0 rounded-[8px] border px-2 py-1 text-left text-[11px] font-medium transition-colors ${
-                activeProjectId === project.id
-                  ? "border-primary/20 bg-primary/8 text-primary"
-                  : "border-border-subtle bg-surface text-foreground/70 hover:text-foreground"
-              }`}
-              title={project.name}
-            >
-              <span className="block truncate">{project.name}</span>
-            </button>
-          ))}
         </div>
       </div>
 
@@ -318,7 +195,7 @@ export default function ConversationList({
             </p>
             <div className="mt-0.5 flex items-center gap-1.5">
               <span className="truncate text-[10px] text-muted/60">
-                {selectedProject?.name ?? t("sidebar.projects")}
+                {activeProjectId ? t("sidebar.conversations") : selectedProject?.name ?? t("sidebar.conversations")}
               </span>
             </div>
           </div>
@@ -331,108 +208,29 @@ export default function ConversationList({
             </p>
           </div>
         ) : (
-          visibleGroups.map((group) => (
-            <div key={group.project.id} className="mb-4">
-              <div className="mb-1 flex items-center justify-between gap-2 px-2">
-                <button
-                  onClick={() => onSelectProject(group.project.id)}
-                  className="min-w-0 text-left"
-                >
-                  <p className="truncate text-[10px] font-medium uppercase tracking-wider text-muted/50">
-                    {group.project.name}
-                  </p>
-                </button>
-                <div className="relative">
-                  <button
-                    onClick={() =>
-                      setOpenMenu((current) =>
-                        current?.type === "project" && current.id === group.project.id
-                          ? null
-                          : { type: "project", id: group.project.id },
-                      )
-                    }
-                    className="flex h-6 w-6 items-center justify-center rounded-[7px] text-muted/60 transition-colors hover:bg-subtle hover:text-foreground"
-                    aria-label={t("sidebar.projectActions")}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                  {openMenu?.type === "project" && openMenu.id === group.project.id && (
-                    <ActionPopover>
-                      <ActionButton
-                        icon={<Pencil size={13} />}
-                        label={t("sidebar.rename")}
-                        onClick={() => void runProjectAction(group.project, "rename")}
-                      />
-                      <ActionButton
-                        icon={group.project.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
-                        label={
-                          group.project.pinned_at
-                            ? t("sidebar.unpin")
-                            : t("sidebar.pin")
-                        }
-                        onClick={() =>
-                          void runProjectAction(
-                            group.project,
-                            group.project.pinned_at ? "unpin" : "pin",
-                          )
-                        }
-                      />
-                      <ActionButton
-                        icon={
-                          group.project.archived_at
-                            ? <ArchiveRestore size={13} />
-                            : <Archive size={13} />
-                        }
-                        label={
-                          group.project.archived_at
-                            ? t("sidebar.unarchive")
-                            : t("sidebar.archive")
-                        }
-                        onClick={() =>
-                          void runProjectAction(
-                            group.project,
-                            group.project.archived_at ? "unarchive" : "archive",
-                          )
-                        }
-                      />
-                      {group.project.id !== "default" && (
-                        <ActionButton
-                          danger
-                          icon={<Trash2 size={13} />}
-                          label={t("sidebar.delete")}
-                          onClick={() => void runProjectAction(group.project, "delete")}
-                        />
-                      )}
-                    </ActionPopover>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                {group.items.map((conv, i) => (
-                  <ConversationRow
-                    key={conv.id}
-                    conversation={conv}
-                    active={activeConversationId === conv.id}
-                    index={i}
-                    menuOpen={
-                      openMenu?.type === "conversation" && openMenu.id === conv.id
-                    }
-                    onSelect={() => onSelectConversation(conv.id)}
-                    onToggleMenu={() =>
-                      setOpenMenu((current) =>
-                        current?.type === "conversation" && current.id === conv.id
-                          ? null
-                          : { type: "conversation", id: conv.id },
-                      )
-                    }
-                    onAction={(action) => void runConversationAction(conv, action)}
-                    projects={projects}
-                  />
-                ))}
-              </div>
-            </div>
-          ))
+          <div className="flex flex-col gap-0.5">
+            {conversations.map((conv, i) => (
+              <ConversationRow
+                key={conv.id}
+                conversation={conv}
+                active={activeConversationId === conv.id}
+                index={i}
+                menuOpen={
+                  openMenu?.type === "conversation" && openMenu.id === conv.id
+                }
+                onSelect={() => onSelectConversation(conv.id)}
+                onToggleMenu={() =>
+                  setOpenMenu((current) =>
+                    current?.type === "conversation" && current.id === conv.id
+                      ? null
+                      : { type: "conversation", id: conv.id },
+                  )
+                }
+                onAction={(action) => void runConversationAction(conv, action)}
+                projects={projects}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>
