@@ -29,6 +29,7 @@ import {
   toAssetUrl,
   unpinConversation,
 } from "./api";
+import type { ModelProviderProfilesState } from "./api";
 
 const tauriApi = vi.hoisted(() => ({
   convertFileSrc: vi.fn((path: string) => path),
@@ -58,7 +59,7 @@ describe("api model provider profile commands", () => {
   });
 
   it("wraps model provider profile IPC commands", async () => {
-    const state = {
+    const state: ModelProviderProfilesState = {
       active_provider_id: "provider-1",
       profiles: [
         {
