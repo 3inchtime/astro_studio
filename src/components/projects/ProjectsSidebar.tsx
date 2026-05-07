@@ -3,6 +3,7 @@ import { FolderKanban, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { createProject, getProjects } from "../../lib/api";
 import type { Project } from "../../types";
+import ProjectNameDialog from "./ProjectNameDialog";
 
 interface ProjectsSidebarProps {
   activeProjectId: string | null;
@@ -17,6 +18,9 @@ export default function ProjectsSidebar({
 }: ProjectsSidebarProps) {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const loadProjects = useCallback(async () => {
     const items = await getProjects(false);
@@ -27,12 +31,21 @@ export default function ProjectsSidebar({
     loadProjects().catch(() => {});
   }, [loadProjects]);
 
-  const handleCreateProject = useCallback(async () => {
-    const name = window.prompt(t("sidebar.newProject"));
-    if (!name?.trim()) return;
-    const project = await createProject(name.trim());
-    onProjectCreated(project.id);
-    await loadProjects();
+  const handleCreateProject = useCallback(async (name: string) => {
+    setCreateLoading(true);
+    setCreateError(null);
+    try {
+      const project = await createProject(name);
+      onProjectCreated(project.id);
+      setCreateDialogOpen(false);
+      loadProjects().catch((error) => {
+        console.error(error);
+      });
+    } catch {
+      setCreateError(t("projectDialog.createError"));
+    } finally {
+      setCreateLoading(false);
+    }
   }, [loadProjects, onProjectCreated, t]);
 
   return (
@@ -45,7 +58,10 @@ export default function ProjectsSidebar({
           </div>
           <button
             type="button"
-            onClick={handleCreateProject}
+            onClick={() => {
+              setCreateError(null);
+              setCreateDialogOpen(true);
+            }}
             className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
             aria-label={t("sidebar.newProject")}
             title={t("sidebar.newProject")}
@@ -86,6 +102,23 @@ export default function ProjectsSidebar({
           ))}
         </div>
       </div>
+      <ProjectNameDialog
+        open={createDialogOpen}
+        title={t("projectDialog.createTitle")}
+        label={t("projectDialog.nameLabel")}
+        submitLabel={t("projectDialog.createSubmit")}
+        cancelLabel={t("projectDialog.cancel")}
+        requiredMessage={t("projectDialog.nameRequired")}
+        error={createError}
+        loading={createLoading}
+        onSubmit={(name) => void handleCreateProject(name)}
+        onCancel={() => {
+          if (!createLoading) {
+            setCreateDialogOpen(false);
+            setCreateError(null);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -1,11 +1,11 @@
-import { MemoryRouter } from "react-router-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ProjectsPage from "./ProjectsPage";
+import ProjectsSidebar from "./ProjectsSidebar";
 
 const getProjects = vi.fn();
 const createProject = vi.fn();
-const navigate = vi.fn();
+const onSelectProject = vi.fn();
+const onProjectCreated = vi.fn();
 
 vi.mock("react-i18next", () => {
   return {
@@ -13,28 +13,21 @@ vi.mock("react-i18next", () => {
   };
 });
 
-vi.mock("../lib/api", () => {
+vi.mock("../../lib/api", () => {
   return {
     getProjects: (...args: unknown[]) => getProjects(...args),
     createProject: (...args: unknown[]) => createProject(...args),
   };
 });
 
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
-  return {
-    ...actual,
-    useNavigate: () => navigate,
-  };
-});
-
-describe("ProjectsPage", () => {
+describe("ProjectsSidebar", () => {
   let promptSpy: { mockRestore: () => void };
 
   beforeEach(() => {
     getProjects.mockReset();
     createProject.mockReset();
-    navigate.mockReset();
+    onSelectProject.mockReset();
+    onProjectCreated.mockReset();
     promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Native Prompt Name");
     getProjects.mockResolvedValue([
       {
@@ -66,11 +59,13 @@ describe("ProjectsPage", () => {
     promptSpy.mockRestore();
   });
 
-  it("shows user-facing projects and hides the default project", async () => {
+  it("renders non-default projects returned by getProjects(false)", async () => {
     render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
+      <ProjectsSidebar
+        activeProjectId={null}
+        onSelectProject={onSelectProject}
+        onProjectCreated={onProjectCreated}
+      />,
     );
 
     await waitFor(() => {
@@ -78,51 +73,33 @@ describe("ProjectsPage", () => {
     });
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByText("86 images")).toBeInTheDocument();
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
   });
 
-  it("opens the project dialog from the new project button", async () => {
+  it("opens the project dialog from the plus button", async () => {
     render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
+      <ProjectsSidebar
+        activeProjectId={null}
+        onSelectProject={onSelectProject}
+        onProjectCreated={onProjectCreated}
+      />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("projectDialog.createTitle")).toBeInTheDocument();
     expect(promptSpy).not.toHaveBeenCalled();
   });
 
-  it("submits a trimmed project name to createProject", async () => {
+  it("creates the project and calls onProjectCreated", async () => {
     createProject.mockResolvedValue({ id: "project-created" });
 
     render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
-    fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
-      target: { value: "  Launch Visuals  " },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
-
-    await waitFor(() => {
-      expect(createProject).toHaveBeenCalledWith("Launch Visuals");
-    });
-  });
-
-  it("navigates to the created project after successful creation", async () => {
-    createProject.mockResolvedValue({ id: "project-created" });
-
-    render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
+      <ProjectsSidebar
+        activeProjectId={null}
+        onSelectProject={onSelectProject}
+        onProjectCreated={onProjectCreated}
+      />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
@@ -132,17 +109,21 @@ describe("ProjectsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
 
     await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith("/projects/project-created");
+      expect(createProject).toHaveBeenCalledWith("Launch Visuals");
+      expect(onProjectCreated).toHaveBeenCalledWith("project-created");
     });
+    expect(getProjects).toHaveBeenCalledTimes(2);
   });
 
-  it("displays a create error when project creation fails", async () => {
+  it("renders the error message when creation fails", async () => {
     createProject.mockRejectedValue(new Error("failed"));
 
     render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
+      <ProjectsSidebar
+        activeProjectId={null}
+        onSelectProject={onSelectProject}
+        onProjectCreated={onProjectCreated}
+      />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
@@ -155,8 +136,10 @@ describe("ProjectsPage", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("renders an empty state when there are no user-facing projects", async () => {
-    getProjects.mockResolvedValue([
+  it("keeps project creation successful when the refresh fails afterward", async () => {
+    const loadError = new Error("refresh failed");
+    createProject.mockResolvedValue({ id: "project-created" });
+    getProjects.mockResolvedValueOnce([
       {
         id: "default",
         name: "Default Project",
@@ -168,53 +151,43 @@ describe("ProjectsPage", () => {
         conversation_count: 2,
         image_count: 5,
       },
-    ]);
-
-    render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText("projects.emptyTitle")).toBeInTheDocument();
-    expect(screen.getByText("projects.emptyHint")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "sidebar.newProject" }).length).toBeGreaterThan(0);
-  });
-
-  it("renders a load error when projects fail to load", async () => {
-    getProjects.mockRejectedValue(new Error("failed"));
-
-    render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText("projects.loadError")).toBeInTheDocument();
-  });
-
-  it("renders a pinned marker for pinned projects", async () => {
-    getProjects.mockResolvedValue([
       {
         id: "project-1",
         name: "Brand Storyboards",
         created_at: "",
         updated_at: "2026-05-07T01:00:00Z",
         archived_at: null,
-        pinned_at: "2026-05-07T01:00:00Z",
+        pinned_at: null,
         deleted_at: null,
         conversation_count: 12,
         image_count: 86,
       },
     ]);
+    getProjects.mockRejectedValueOnce(loadError);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     render(
-      <MemoryRouter>
-        <ProjectsPage />
-      </MemoryRouter>,
+      <ProjectsSidebar
+        activeProjectId={null}
+        onSelectProject={onSelectProject}
+        onProjectCreated={onProjectCreated}
+      />,
     );
 
-    expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByText("projects.pinned")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
+    fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
+      target: { value: "Launch Visuals" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith("Launch Visuals");
+      expect(onProjectCreated).toHaveBeenCalledWith("project-created");
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("projectDialog.createError")).not.toBeInTheDocument();
+    expect(errorSpy).toHaveBeenCalledWith(loadError);
+
+    errorSpy.mockRestore();
   });
 });

@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { archiveProject, getConversations, getProjects, renameProject, searchGenerations } from "../lib/api";
+import {
+  archiveProject,
+  deleteProject,
+  getConversations,
+  getProjects,
+  pinProject,
+  renameProject,
+  searchGenerations,
+  unpinProject,
+} from "../lib/api";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import type { Conversation, GenerationResult, Project } from "../types";
 import ProjectSummaryCards from "../components/projects/ProjectSummaryCards";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
+import ProjectNameDialog from "../components/projects/ProjectNameDialog";
+import ProjectActionsMenu from "../components/projects/ProjectActionsMenu";
+import ConfirmDialog from "../components/common/ConfirmDialog";
 
 export default function ProjectHomePage() {
   const { t } = useTranslation();
@@ -19,6 +31,15 @@ export default function ProjectHomePage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [showActions, setShowActions] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [projectActionPending, setProjectActionPending] = useState(false);
+  const projectActionPendingRef = useRef(false);
+  const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveProjectId(projectId);
@@ -50,22 +71,130 @@ export default function ProjectHomePage() {
     [results],
   );
 
-  async function handleProjectAction(action: "rename" | "archive") {
-    if (!project) return;
+  function refreshProject(currentProject: Project) {
+    getProjects(false)
+      .then((items) => {
+        setProject(items.find((item) => item.id === currentProject.id && item.id !== "default") ?? currentProject);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+  }
 
-    if (action === "rename") {
-      const name = window.prompt(t("sidebar.renameProject"), project.name);
-      if (!name?.trim() || name.trim() === project.name) return;
-      await renameProject(project.id, name.trim());
-      const items = await getProjects(false);
-      setProject(items.find((item) => item.id === project.id) ?? project);
+  function handleRenameAction() {
+    if (!project || projectActionPendingRef.current) return;
+
+    setRenameError(null);
+    setProjectActionError(null);
+    setRenameDialogOpen(true);
+    setShowActions(false);
+  }
+
+  async function handlePinProject() {
+    if (!project || projectActionPendingRef.current) return;
+
+    const currentProject = project;
+    projectActionPendingRef.current = true;
+    setProjectActionPending(true);
+    setProjectActionError(null);
+    try {
+      await pinProject(currentProject.id);
+      setProject({ ...currentProject, pinned_at: currentProject.pinned_at ?? new Date().toISOString() });
       setShowActions(false);
+      refreshProject(currentProject);
+    } catch {
+      setProjectActionError(t("projects.actionError"));
+    } finally {
+      projectActionPendingRef.current = false;
+      setProjectActionPending(false);
+    }
+  }
+
+  async function handleUnpinProject() {
+    if (!project || projectActionPendingRef.current) return;
+
+    const currentProject = project;
+    projectActionPendingRef.current = true;
+    setProjectActionPending(true);
+    setProjectActionError(null);
+    try {
+      await unpinProject(currentProject.id);
+      setProject({ ...currentProject, pinned_at: null });
+      setShowActions(false);
+      refreshProject(currentProject);
+    } catch {
+      setProjectActionError(t("projects.actionError"));
+    } finally {
+      projectActionPendingRef.current = false;
+      setProjectActionPending(false);
+    }
+  }
+
+  async function handleArchiveProject() {
+    if (!project || projectActionPendingRef.current) return;
+
+    projectActionPendingRef.current = true;
+    setProjectActionPending(true);
+    setProjectActionError(null);
+    try {
+      await archiveProject(project.id);
+      setShowActions(false);
+      navigate("/projects");
+    } catch {
+      setProjectActionError(t("projects.actionError"));
+    } finally {
+      projectActionPendingRef.current = false;
+      setProjectActionPending(false);
+    }
+  }
+
+  function handleDeleteAction() {
+    if (!project || projectActionPendingRef.current) return;
+
+    setShowActions(false);
+    setProjectActionError(null);
+    setDeleteError(null);
+    setDeleteDialogOpen(true);
+  }
+
+  async function handleDeleteProject() {
+    if (!project || projectActionPendingRef.current) return;
+
+    projectActionPendingRef.current = true;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await deleteProject(project.id);
+      setDeleteDialogOpen(false);
+      navigate("/projects");
+    } catch {
+      setDeleteError(t("projects.deleteError"));
+    } finally {
+      projectActionPendingRef.current = false;
+      setDeleteLoading(false);
+    }
+  }
+
+  async function handleRenameProject(name: string) {
+    if (!project) return;
+    if (name === project.name) {
+      setRenameDialogOpen(false);
+      setRenameError(null);
       return;
     }
 
-    await archiveProject(project.id);
-    setShowActions(false);
-    navigate("/projects");
+    setRenameLoading(true);
+    setRenameError(null);
+    try {
+      await renameProject(project.id, name);
+      setRenameDialogOpen(false);
+      setProject((current) => (current ? { ...current, name } : current));
+      refreshProject({ ...project, name });
+    } catch {
+      setRenameError(t("projectDialog.renameError"));
+    } finally {
+      setRenameLoading(false);
+    }
   }
 
   if (!project) {
@@ -87,16 +216,16 @@ export default function ProjectHomePage() {
           >
             {t("projects.manage")}
           </button>
-          {showActions ? (
-            <div className="absolute right-0 top-[44px] z-10 w-40 overflow-hidden rounded-[10px] border border-border-subtle bg-surface py-1 shadow-card">
-              <button className="w-full px-3 py-2 text-left text-[12px]" onClick={() => void handleProjectAction("rename")}>
-                {t("sidebar.rename")}
-              </button>
-              <button className="w-full px-3 py-2 text-left text-[12px]" onClick={() => void handleProjectAction("archive")}>
-                {t("sidebar.archive")}
-              </button>
-            </div>
-          ) : null}
+          <ProjectActionsMenu
+            open={showActions}
+            pinned={project.pinned_at !== null}
+            disabled={projectActionPending}
+            onRename={handleRenameAction}
+            onPin={() => void handlePinProject()}
+            onUnpin={() => void handleUnpinProject()}
+            onArchive={() => void handleArchiveProject()}
+            onDelete={handleDeleteAction}
+          />
           <button
             onClick={() => navigate("/generate")}
             className="rounded-[12px] bg-primary px-4 py-2 text-[12px] font-medium text-white"
@@ -105,6 +234,14 @@ export default function ProjectHomePage() {
           </button>
         </div>
       </div>
+      {projectActionError ? (
+        <div
+          role="alert"
+          className="mt-4 rounded-[12px] border border-error/15 bg-error/8 px-4 py-3 text-[13px] text-error"
+        >
+          {projectActionError}
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <ProjectSummaryCards project={project} recentModels={recentModels} />
@@ -151,6 +288,38 @@ export default function ProjectHomePage() {
           }}
         />
       </section>
+      <ProjectNameDialog
+        open={renameDialogOpen}
+        title={t("projectDialog.renameTitle")}
+        label={t("projectDialog.nameLabel")}
+        initialName={project.name}
+        submitLabel={t("projectDialog.renameSubmit")}
+        cancelLabel={t("projectDialog.cancel")}
+        requiredMessage={t("projectDialog.nameRequired")}
+        error={renameError}
+        loading={renameLoading}
+        onSubmit={(name) => void handleRenameProject(name)}
+        onCancel={() => {
+          if (!renameLoading) {
+            setRenameDialogOpen(false);
+            setRenameError(null);
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title={t("projects.deleteConfirm")}
+        confirmLabel={t("projects.deleteConfirmAction")}
+        cancelLabel={t("projects.deleteCancel")}
+        loading={deleteLoading}
+        error={deleteError}
+        onConfirm={() => void handleDeleteProject()}
+        onCancel={() => {
+          if (!deleteLoading) {
+            setDeleteDialogOpen(false);
+          }
+        }}
+      />
     </div>
   );
 }

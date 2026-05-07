@@ -9,6 +9,7 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
+  error?: string | null;
 }
 
 export default function ConfirmDialog({
@@ -19,6 +20,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
   loading = false,
+  error = null,
 }: ConfirmDialogProps) {
   return (
     <AnimatePresence>
@@ -57,6 +59,15 @@ export default function ConfirmDialog({
                 <X size={16} />
               </button>
             </div>
+
+            {error ? (
+              <div
+                role="alert"
+                className="mt-4 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-[12px] text-error"
+              >
+                {error}
+              </div>
+            ) : null}
 
             <div className="mt-5 flex justify-end gap-2">
               <button
