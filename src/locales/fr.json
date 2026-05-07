@@ -105,6 +105,7 @@
   "gallery.delete": "Déplacer vers la corbeille",
 
   "settings.title": "Paramètres",
+  "settings.sections": "Sections des paramètres",
   "settings.general": "Paramètres généraux",
   "settings.generalDesc": "Préférences d'interface pour Astro Studio",
   "settings.modelConfig": "Configuration du modèle",
@@ -141,6 +142,8 @@
   "settings.modelGenerateOnly": "Génération seule",
   "settings.modelSharedEndpoint": "Endpoint partagé",
   "settings.modelSeparateEndpoints": "Endpoints séparés",
+  "settings.currentModel": "Modèle actuel",
+  "settings.providerWorkspace": "Espace fournisseurs",
   "settings.saveModel": "Enregistrer le modèle",
   "settings.saveUrl": "Enregistrer l'URL",
   "settings.language": "Langue",

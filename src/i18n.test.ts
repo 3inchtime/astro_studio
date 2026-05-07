@@ -22,6 +22,9 @@ const localeResources = {
 const providerSettingsKeys = [
   "settings.noApiKey",
   "settings.useProvider",
+  "settings.sections",
+  "settings.currentModel",
+  "settings.providerWorkspace",
 ] as const;
 
 describe("i18n resources", () => {

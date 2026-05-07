@@ -105,6 +105,7 @@
   "gallery.delete": "휴지통으로 이동",
 
   "settings.title": "설정",
+  "settings.sections": "설정 섹션",
   "settings.general": "일반 설정",
   "settings.generalDesc": "Astro Studio 인터페이스 환경설정",
   "settings.modelConfig": "모델 구성",
@@ -141,6 +142,8 @@
   "settings.modelGenerateOnly": "생성 전용",
   "settings.modelSharedEndpoint": "공유 엔드포인트",
   "settings.modelSeparateEndpoints": "별도 엔드포인트",
+  "settings.currentModel": "현재 모델",
+  "settings.providerWorkspace": "공급자 작업 공간",
   "settings.saveModel": "모델 저장",
   "settings.saveUrl": "URL 저장",
   "settings.language": "언어",
