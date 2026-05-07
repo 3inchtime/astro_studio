@@ -72,41 +72,6 @@ fn generation_search_range_clause(
     }
 }
 
-fn generation_source_image_count_clause(
-    clauses: &mut Vec<String>,
-    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
-    value: Option<&str>,
-) {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return;
-    };
-
-    match value {
-        "any" => {}
-        "0" => {
-            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
-            params.push(Box::new(0_i64));
-        }
-        "1" => {
-            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
-            params.push(Box::new(1_i64));
-        }
-        "2" => {
-            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
-            params.push(Box::new(2_i64));
-        }
-        "3" => {
-            clauses.push(format!("g.source_image_count = ?{}", params.len() + 1));
-            params.push(Box::new(3_i64));
-        }
-        "4+" => {
-            clauses.push(format!("g.source_image_count >= ?{}", params.len() + 1));
-            params.push(Box::new(4_i64));
-        }
-        _ => {}
-    }
-}
-
 fn generation_filters_to_sql(
     only_deleted: bool,
     query: Option<&str>,
