@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -66,6 +66,26 @@ export default function AppLayout() {
     () => location.pathname === "/projects" || location.pathname.startsWith("/projects/"),
     [location.pathname],
   );
+  const routeProjectId = useMemo(() => {
+    if (!location.pathname.startsWith("/projects/")) {
+      return null;
+    }
+
+    return decodeURIComponent(location.pathname.slice("/projects/".length)) || null;
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname === "/projects") {
+      setActiveProjectId(null);
+      setActiveConversationId(null);
+      return;
+    }
+
+    if (routeProjectId) {
+      setActiveProjectId(routeProjectId);
+      setActiveConversationId(null);
+    }
+  }, [location.pathname, routeProjectId]);
 
   const refreshConversations = useCallback(() => {
     setConversationRefreshKey((key) => key + 1);
