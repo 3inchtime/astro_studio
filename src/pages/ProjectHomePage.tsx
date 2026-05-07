@@ -6,6 +6,7 @@ import { useLayoutContext } from "../components/layout/AppLayout";
 import type { Conversation, GenerationResult, Project } from "../types";
 import ProjectSummaryCards from "../components/projects/ProjectSummaryCards";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
+import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 
 export default function ProjectHomePage() {
   const { t } = useTranslation();
@@ -19,6 +20,9 @@ export default function ProjectHomePage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [showActions, setShowActions] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveProjectId(projectId);
@@ -54,11 +58,8 @@ export default function ProjectHomePage() {
     if (!project) return;
 
     if (action === "rename") {
-      const name = window.prompt(t("sidebar.renameProject"), project.name);
-      if (!name?.trim() || name.trim() === project.name) return;
-      await renameProject(project.id, name.trim());
-      const items = await getProjects(false);
-      setProject(items.find((item) => item.id === project.id) ?? project);
+      setRenameError(null);
+      setRenameDialogOpen(true);
       setShowActions(false);
       return;
     }
@@ -66,6 +67,34 @@ export default function ProjectHomePage() {
     await archiveProject(project.id);
     setShowActions(false);
     navigate("/projects");
+  }
+
+  async function handleRenameProject(name: string) {
+    if (!project) return;
+    if (name === project.name) {
+      setRenameDialogOpen(false);
+      setRenameError(null);
+      return;
+    }
+
+    setRenameLoading(true);
+    setRenameError(null);
+    try {
+      await renameProject(project.id, name);
+      setRenameDialogOpen(false);
+      setProject((current) => (current ? { ...current, name } : current));
+      getProjects(false)
+        .then((items) => {
+          setProject(items.find((item) => item.id === project.id) ?? project);
+        })
+        .catch((error) => {
+          console.error(error);
+        });
+    } catch {
+      setRenameError(t("projectDialog.renameError"));
+    } finally {
+      setRenameLoading(false);
+    }
   }
 
   if (!project) {
@@ -151,6 +180,24 @@ export default function ProjectHomePage() {
           }}
         />
       </section>
+      <ProjectNameDialog
+        open={renameDialogOpen}
+        title={t("projectDialog.renameTitle")}
+        label={t("projectDialog.nameLabel")}
+        initialName={project.name}
+        submitLabel={t("projectDialog.renameSubmit")}
+        cancelLabel={t("projectDialog.cancel")}
+        requiredMessage={t("projectDialog.nameRequired")}
+        error={renameError}
+        loading={renameLoading}
+        onSubmit={(name) => void handleRenameProject(name)}
+        onCancel={() => {
+          if (!renameLoading) {
+            setRenameDialogOpen(false);
+            setRenameError(null);
+          }
+        }}
+      />
     </div>
   );
 }

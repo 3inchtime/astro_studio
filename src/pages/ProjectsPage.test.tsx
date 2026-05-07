@@ -1,21 +1,41 @@
 import { MemoryRouter } from "react-router-dom";
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "./ProjectsPage";
 
 const getProjects = vi.fn();
+const createProject = vi.fn();
+const navigate = vi.fn();
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
+vi.mock("react-i18next", () => {
+  return {
+    useTranslation: () => ({ t: (key: string) => key }),
+  };
+});
 
-vi.mock("../lib/api", () => ({
-  getProjects: (...args: unknown[]) => getProjects(...args),
-}));
+vi.mock("../lib/api", () => {
+  return {
+    getProjects: (...args: unknown[]) => getProjects(...args),
+    createProject: (...args: unknown[]) => createProject(...args),
+  };
+});
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
 
 describe("ProjectsPage", () => {
+  let promptSpy: { mockRestore: () => void };
+
   beforeEach(() => {
     getProjects.mockReset();
+    createProject.mockReset();
+    navigate.mockReset();
+    promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Native Prompt Name");
     getProjects.mockResolvedValue([
       {
         id: "default",
@@ -42,6 +62,10 @@ describe("ProjectsPage", () => {
     ]);
   });
 
+  afterEach(() => {
+    promptSpy.mockRestore();
+  });
+
   it("shows user-facing projects and hides the default project", async () => {
     render(
       <MemoryRouter>
@@ -56,5 +80,78 @@ describe("ProjectsPage", () => {
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     expect(screen.getByText("86 images")).toBeInTheDocument();
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
+  });
+
+  it("opens the project dialog from the new project button", async () => {
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("projectDialog.createTitle")).toBeInTheDocument();
+    expect(promptSpy).not.toHaveBeenCalled();
+  });
+
+  it("submits a trimmed project name to createProject", async () => {
+    createProject.mockResolvedValue({ id: "project-created" });
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
+    fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
+      target: { value: "  Launch Visuals  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith("Launch Visuals");
+    });
+  });
+
+  it("navigates to the created project after successful creation", async () => {
+    createProject.mockResolvedValue({ id: "project-created" });
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
+    fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
+      target: { value: "Launch Visuals" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+
+    await waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith("/projects/project-created");
+    });
+  });
+
+  it("displays a create error when project creation fails", async () => {
+    createProject.mockRejectedValue(new Error("failed"));
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.newProject" }));
+    fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
+      target: { value: "Launch Visuals" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("projectDialog.createError");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

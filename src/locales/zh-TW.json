@@ -32,6 +32,16 @@
   "sidebar.conversationActions": "Conversation actions",
   "sidebar.projectActions": "Project actions",
 
+  "projectDialog.createTitle": "Create project",
+  "projectDialog.renameTitle": "Rename project",
+  "projectDialog.nameLabel": "Project name",
+  "projectDialog.createSubmit": "Create",
+  "projectDialog.renameSubmit": "Save",
+  "projectDialog.cancel": "Cancel",
+  "projectDialog.nameRequired": "Enter a project name.",
+  "projectDialog.createError": "Unable to create project.",
+  "projectDialog.renameError": "Unable to rename project.",
+
   "generate.placeholder": "描述你想生成的圖片...",
   "generate.emptyTitle": "你想創作什麼？",
   "generate.emptySubtitle": "在下方描述想要的圖片，按 Enter 讓想像成形。",

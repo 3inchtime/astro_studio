@@ -44,6 +44,16 @@
   "projects.emptyConversations": "从这个项目开始第一条会话。",
   "projects.notFound": "未找到这个项目。",
 
+  "projectDialog.createTitle": "创建项目",
+  "projectDialog.renameTitle": "重命名项目",
+  "projectDialog.nameLabel": "项目名称",
+  "projectDialog.createSubmit": "创建",
+  "projectDialog.renameSubmit": "保存",
+  "projectDialog.cancel": "取消",
+  "projectDialog.nameRequired": "请输入项目名称。",
+  "projectDialog.createError": "无法创建项目。",
+  "projectDialog.renameError": "无法重命名项目。",
+
   "generate.placeholder": "描述你想要生成的图像...",
   "generate.emptyTitle": "你想创作什么？",
   "generate.emptySubtitle": "在下方描述你想要的图像，按 Enter 键让想象变为现实。",

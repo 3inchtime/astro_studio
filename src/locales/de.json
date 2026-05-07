@@ -32,6 +32,16 @@
   "sidebar.conversationActions": "Conversation actions",
   "sidebar.projectActions": "Project actions",
 
+  "projectDialog.createTitle": "Create project",
+  "projectDialog.renameTitle": "Rename project",
+  "projectDialog.nameLabel": "Project name",
+  "projectDialog.createSubmit": "Create",
+  "projectDialog.renameSubmit": "Save",
+  "projectDialog.cancel": "Cancel",
+  "projectDialog.nameRequired": "Enter a project name.",
+  "projectDialog.createError": "Unable to create project.",
+  "projectDialog.renameError": "Unable to rename project.",
+
   "generate.placeholder": "Beschreibe das Bild, das du generieren möchtest...",
   "generate.emptyTitle": "Was möchtest du erschaffen?",
   "generate.emptySubtitle": "Beschreibe unten ein Bild und drücke Enter, um deine Vorstellung zum Leben zu erwecken.",

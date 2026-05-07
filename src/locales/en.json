@@ -44,6 +44,16 @@
   "projects.emptyConversations": "Start the first conversation in this project.",
   "projects.notFound": "This project could not be found.",
 
+  "projectDialog.createTitle": "Create project",
+  "projectDialog.renameTitle": "Rename project",
+  "projectDialog.nameLabel": "Project name",
+  "projectDialog.createSubmit": "Create",
+  "projectDialog.renameSubmit": "Save",
+  "projectDialog.cancel": "Cancel",
+  "projectDialog.nameRequired": "Enter a project name.",
+  "projectDialog.createError": "Unable to create project.",
+  "projectDialog.renameError": "Unable to rename project.",
+
   "generate.placeholder": "Describe the image you want to generate...",
   "generate.emptyTitle": "What will you create?",
   "generate.emptySubtitle": "Describe an image below and press Enter to bring your imagination to life.",
