@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GalleryPage from "./GalleryPage";
 import type { GenerationResult } from "../types";
@@ -110,11 +110,38 @@ vi.mock("../components/favorites/FolderSelector", () => ({
   default: () => null,
 }));
 
-function buildResult(): GenerationResult {
+let intersectionCallback: IntersectionObserverCallback | null = null;
+
+function triggerIntersection(isIntersecting = true) {
+  if (!intersectionCallback) {
+    throw new Error("IntersectionObserver was not initialized");
+  }
+
+  intersectionCallback(
+    [
+      {
+        isIntersecting,
+        target: document.createElement("div"),
+        intersectionRatio: isIntersecting ? 1 : 0,
+        time: 0,
+        boundingClientRect: {} as DOMRectReadOnly,
+        intersectionRect: {} as DOMRectReadOnly,
+        rootBounds: null,
+      } as IntersectionObserverEntry,
+    ],
+    {} as IntersectionObserver,
+  );
+}
+
+function buildResult(id = "1"): GenerationResult {
+  const imageIdPrefix = id === "1" ? "image" : `image-${id}`;
+  const fullPrefix = id === "1" ? "/tmp/full" : `/tmp/full-${id}`;
+  const thumbPrefix = id === "1" ? "/tmp/thumb" : `/tmp/thumb-${id}`;
+
   return {
     generation: {
-      id: "generation-1",
-      prompt: "Moonlit observatory",
+      id: `generation-${id}`,
+      prompt: `Moonlit observatory ${id}`,
       engine: "gpt-image-2",
       request_kind: "generate",
       size: "1024x1024",
@@ -133,19 +160,19 @@ function buildResult(): GenerationResult {
     },
     images: [
       {
-        id: "image-1",
-        generation_id: "generation-1",
-        file_path: "/tmp/full-1.png",
-        thumbnail_path: "/tmp/thumb-1.png",
+        id: `${imageIdPrefix}-1`,
+        generation_id: `generation-${id}`,
+        file_path: `${fullPrefix}-1.png`,
+        thumbnail_path: `${thumbPrefix}-1.png`,
         width: 1024,
         height: 1024,
         file_size: 1024,
       },
       {
-        id: "image-2",
-        generation_id: "generation-1",
-        file_path: "/tmp/full-2.png",
-        thumbnail_path: "/tmp/thumb-2.png",
+        id: `${imageIdPrefix}-2`,
+        generation_id: `generation-${id}`,
+        file_path: `${fullPrefix}-2.png`,
+        thumbnail_path: `${thumbPrefix}-2.png`,
         width: 1536,
         height: 1024,
         file_size: 2048,
@@ -160,6 +187,23 @@ describe("GalleryPage", () => {
     deleteGeneration.mockReset();
     setActiveConversationId.mockReset();
     navigate.mockReset();
+    intersectionCallback = null;
+
+    vi.stubGlobal(
+      "IntersectionObserver",
+      vi.fn((callback: IntersectionObserverCallback) => {
+        intersectionCallback = callback;
+        return {
+          observe: vi.fn(),
+          unobserve: vi.fn(),
+          disconnect: vi.fn(),
+          root: null,
+          rootMargin: "",
+          thresholds: [],
+          takeRecords: vi.fn(),
+        };
+      }),
+    );
 
     searchGenerations.mockResolvedValue({
       generations: [],
@@ -346,5 +390,38 @@ describe("GalleryPage", () => {
 
     expect(screen.getByTestId("lightbox-index")).toHaveTextContent("0");
     expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
+  });
+
+  it("loads the next gallery page when the waterfall sentinel becomes visible", async () => {
+    searchGenerations
+      .mockResolvedValueOnce({
+        generations: [buildResult("1")],
+        total: 2,
+        page: 1,
+        page_size: 1,
+      })
+      .mockResolvedValueOnce({
+        generations: [buildResult("2")],
+        total: 2,
+        page: 2,
+        page_size: 1,
+      });
+
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Open preview generation-1" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      triggerIntersection();
+    });
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 2, false, {}, undefined);
+    });
+
+    expect(screen.getByRole("button", { name: "Open preview generation-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open preview generation-2" })).toBeInTheDocument();
   });
 });

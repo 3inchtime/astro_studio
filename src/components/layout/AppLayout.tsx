@@ -66,8 +66,11 @@ export default function AppLayout() {
     () => location.pathname === "/projects" || location.pathname.startsWith("/projects/"),
     [location.pathname],
   );
-  const isSettingsRoute = useMemo(
-    () => location.pathname === "/settings",
+  const shouldHideSidebar = useMemo(
+    () =>
+      location.pathname === "/settings" ||
+      location.pathname === "/gallery" ||
+      location.pathname === "/favorites",
     [location.pathname],
   );
   const routeProjectId = useMemo(() => {
@@ -234,7 +237,7 @@ export default function AppLayout() {
           </div>
         </aside>
 
-        {!isSettingsRoute && (
+        {!shouldHideSidebar && (
           <>
             <aside className="flex shrink-0 flex-col border-r border-border-subtle" style={{ width: widths[0] }}>
               {isProjectRoute ? (

@@ -29,8 +29,8 @@ import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import Lightbox from "../components/lightbox/Lightbox";
-import PaginationControls from "../components/gallery/PaginationControls";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
 type FavoriteKind = "images" | "prompts";
 
@@ -48,7 +48,8 @@ export default function FavoritesPage() {
   const [selectedImageFolderId, setSelectedImageFolderId] = useState("");
   const [imageTotal, setImageTotal] = useState(0);
   const [imagePage, setImagePage] = useState(1);
-  const [imagePageSize] = useState(20);
+  const [imagePageSize, setImagePageSize] = useState(20);
+  const [isLoadingImages, setIsLoadingImages] = useState(false);
   const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
     null,
   );
@@ -68,15 +69,30 @@ export default function FavoritesPage() {
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
 
   const loadImageFavorites = useCallback(
-    async (page: number, query?: string, folderId?: string) => {
+    async (
+      page: number,
+      query?: string,
+      folderId?: string,
+      mode: "replace" | "append" = "replace",
+    ) => {
+      setIsLoadingImages(true);
       const result = await getFavoriteImages(
         folderId || selectedImageFolderId || undefined,
         query?.trim() || imageQuery.trim() || undefined,
         page,
       );
-      setImageResults(result.generations);
+      setImageResults((current) =>
+        mode === "append"
+          ? [...current, ...result.generations]
+          : result.generations,
+      );
       setImageTotal(result.total);
       setImagePage(result.page);
+      setImagePageSize(result.page_size);
+      if (mode === "replace") {
+        setSelectedImage(null);
+      }
+      setIsLoadingImages(false);
     },
     [imageQuery, selectedImageFolderId],
   );
@@ -205,7 +221,20 @@ export default function FavoritesPage() {
     activeKind === "images" ? selectedImageFolderId : selectedPromptFolderId;
   const activeFolders = activeKind === "images" ? folders : promptFolders;
   const activeQuery = activeKind === "images" ? imageQuery : promptQuery;
-  const imageTotalPages = Math.ceil(imageTotal / imagePageSize);
+  const hasMoreImages = imagePage * imagePageSize < imageTotal;
+  const loadMoreImagesRef = useInfiniteScroll({
+    enabled: activeKind === "images" && imageResults.length > 0,
+    hasMore: hasMoreImages,
+    isLoading: isLoadingImages,
+    onLoadMore: () => {
+      void loadImageFavorites(
+        imagePage + 1,
+        imageQuery,
+        selectedImageFolderId,
+        "append",
+      );
+    },
+  });
 
   return (
     <div className="flex h-full">
@@ -329,18 +358,7 @@ export default function FavoritesPage() {
                   onPreview={openLightbox}
                 />
               )}
-
-              <PaginationControls
-                page={imagePage}
-                totalPages={imageTotalPages}
-                onPageChange={(page) =>
-                  loadImageFavorites(
-                    page,
-                    imageQuery,
-                    selectedImageFolderId,
-                  )
-                }
-              />
+              <div ref={loadMoreImagesRef} aria-hidden="true" className="h-1" />
             </>
           ) : (
             <PromptFavoritesList

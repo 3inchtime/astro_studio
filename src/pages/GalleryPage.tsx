@@ -12,9 +12,9 @@ import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import GallerySearchBar from "../components/gallery/GallerySearchBar";
 import Lightbox from "../components/lightbox/Lightbox";
-import PaginationControls from "../components/gallery/PaginationControls";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import { createGallerySearchConfig } from "../lib/galleryFilterConfig";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import {
   compactFilters,
   isFilterActive,
@@ -31,6 +31,7 @@ export default function GalleryPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [isLoading, setIsLoading] = useState(false);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
   const [folderSelectorImageId, setFolderSelectorImageId] = useState<
     string | null
@@ -65,7 +66,9 @@ export default function GalleryPage() {
       pageToLoad: number,
       nextQuery: string,
       nextFilters: GenerationSearchFilters,
+      mode: "replace" | "append" = "replace",
     ) => {
+      setIsLoading(true);
       const result = await searchGenerations(
         nextQuery.trim() || undefined,
         pageToLoad,
@@ -73,11 +76,18 @@ export default function GalleryPage() {
         compactFilters(nextFilters),
         undefined,
       );
-      setResults(result.generations);
+      setResults((current) =>
+        mode === "append"
+          ? [...current, ...result.generations]
+          : result.generations,
+      );
       setTotal(result.total);
       setPage(result.page);
       setPageSize(result.page_size);
-      setSelected(null);
+      if (mode === "replace") {
+        setSelected(null);
+      }
+      setIsLoading(false);
     },
     [],
   );
@@ -147,7 +157,15 @@ export default function GalleryPage() {
     [],
   );
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const hasMore = page * pageSize < total;
+  const loadMoreRef = useInfiniteScroll({
+    enabled: results.length > 0,
+    hasMore,
+    isLoading,
+    onLoadMore: () => {
+      void performSearch(page + 1, query, filters, "append");
+    },
+  });
 
   return (
     <div className="flex h-full">
@@ -177,14 +195,7 @@ export default function GalleryPage() {
               onManageFolders={setFolderSelectorImageId}
             />
           )}
-
-          <PaginationControls
-            page={page}
-            totalPages={totalPages}
-            onPageChange={(nextPage) => {
-              void performSearch(nextPage, query, filters);
-            }}
-          />
+          <div ref={loadMoreRef} aria-hidden="true" className="h-1" />
         </div>
       </div>
 

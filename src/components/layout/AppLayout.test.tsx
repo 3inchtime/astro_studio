@@ -56,4 +56,34 @@ describe("AppLayout", () => {
     expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
     expect(screen.getByText("settings")).toBeInTheDocument();
   });
+
+  it("collapses the conversation sidebar on gallery and favorites routes", () => {
+    const { rerender } = render(
+      <MemoryRouter key="gallery" initialEntries={["/gallery"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/gallery" element={<div>gallery</div>} />
+            <Route path="/favorites" element={<div>favorites</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByText("gallery")).toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter key="favorites" initialEntries={["/favorites"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/gallery" element={<div>gallery</div>} />
+            <Route path="/favorites" element={<div>favorites</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByText("favorites")).toBeInTheDocument();
+  });
 });
