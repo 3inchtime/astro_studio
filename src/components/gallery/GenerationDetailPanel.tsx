@@ -18,6 +18,7 @@ interface GenerationDetailPanelProps {
     imageId: string,
     generationId: string,
   ) => void;
+  onPreview?: (imageIndex: number) => void;
   onManageFolders?: (imageId: string) => void;
   onRestore?: (generationId: string) => void;
   deleteLabel?: string;
@@ -33,6 +34,7 @@ export default function GenerationDetailPanel({
   onClose,
   onDelete,
   onEditImage,
+  onPreview,
   onManageFolders,
   onRestore,
   deleteLabel,
@@ -77,11 +79,26 @@ export default function GenerationDetailPanel({
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               className="mb-3 overflow-hidden rounded-[12px] border border-border-subtle"
             >
-              <img
-                src={toAssetUrl(image.file_path)}
-                alt={result.generation.prompt}
-                className="w-full"
-              />
+              {onPreview ? (
+                <button
+                  type="button"
+                  onClick={() => onPreview(selectedIndex)}
+                  aria-label={`Preview ${result.generation.prompt}`}
+                  className="block w-full cursor-zoom-in text-left"
+                >
+                  <img
+                    src={toAssetUrl(image.file_path)}
+                    alt={result.generation.prompt}
+                    className="w-full"
+                  />
+                </button>
+              ) : (
+                <img
+                  src={toAssetUrl(image.file_path)}
+                  alt={result.generation.prompt}
+                  className="w-full"
+                />
+              )}
             </motion.div>
 
             {result.images.length > 1 && (
@@ -90,6 +107,7 @@ export default function GenerationDetailPanel({
                   <button
                     key={item.id}
                     onClick={() => setSelectedIndex(index)}
+                    aria-label={`${t("lightbox.preview")} ${index + 1}`}
                     className={`overflow-hidden rounded-[10px] border transition-all ${
                       index === selectedIndex
                         ? "border-primary shadow-card"

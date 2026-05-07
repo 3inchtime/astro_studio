@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   Copy,
   Folder,
@@ -15,22 +16,28 @@ import {
   getFavoriteImages,
   getPromptFavorites,
 } from "../lib/api";
+import { savePendingEditSources } from "../lib/editSources";
 import { getPromptFolderDisplayName } from "../lib/promptFolders";
 import { cn, formatLocalDateTime } from "../lib/utils";
 import { useFolders } from "../hooks/useFolders";
 import { usePromptFolders } from "../hooks/usePromptFolders";
-import type { GenerationResult, PromptFavorite } from "../types";
+import { useLayoutContext } from "../components/layout/AppLayout";
+import type { GenerationResult, MessageImage, PromptFavorite } from "../types";
 import FolderSelector from "../components/favorites/FolderSelector";
 import PromptFolderSelector from "../components/favorites/PromptFolderSelector";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
+import Lightbox from "../components/lightbox/Lightbox";
 import PaginationControls from "../components/gallery/PaginationControls";
+import { generationResultToLightboxImages } from "../lib/lightboxImages";
 
 type FavoriteKind = "images" | "prompts";
 
 export default function FavoritesPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { setActiveConversationId } = useLayoutContext();
   const { folders, reload: reloadFolders } = useFolders();
   const { folders: promptFolders, reload: reloadPromptFolders } =
     usePromptFolders();
@@ -48,6 +55,10 @@ export default function FavoritesPage() {
   const [folderSelectorImageId, setFolderSelectorImageId] = useState<
     string | null
   >(null);
+  const [lightboxState, setLightboxState] = useState<{
+    images: MessageImage[];
+    index: number;
+  } | null>(null);
 
   const [promptFavorites, setPromptFavorites] = useState<PromptFavorite[]>([]);
   const [promptQuery, setPromptQuery] = useState("");
@@ -110,7 +121,42 @@ export default function FavoritesPage() {
     await deleteGeneration(id);
     await loadImageFavorites(imagePage, imageQuery, selectedImageFolderId);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
+    setLightboxState((current) => {
+      if (!current) return null;
+      return current.images.some((image) => image.generationId === id)
+        ? null
+        : current;
+    });
   }
+
+  function handleEditImage(
+    imagePath: string,
+    imageId: string,
+    generationId: string,
+  ) {
+    const normalizedPath = imagePath.replace(/\\/g, "/");
+    const fileName = normalizedPath.split("/").pop() || "source-image";
+
+    savePendingEditSources([
+      {
+        id: `${imageId}:${normalizedPath}`,
+        path: imagePath,
+        label: fileName,
+        imageId,
+        generationId,
+      },
+    ]);
+    setActiveConversationId(null);
+    navigate("/generate");
+  }
+
+  const handleEditLightboxImage = useCallback(
+    (image: MessageImage) => {
+      handleEditImage(image.path, image.imageId, image.generationId);
+      setLightboxState(null);
+    },
+    [],
+  );
 
   async function handleDeletePromptFavorite(id: string) {
     await deletePromptFavorite(id);
@@ -142,6 +188,16 @@ export default function FavoritesPage() {
     reloadPromptFolders();
     loadPromptFavorites(promptQuery, selectedPromptFolderId).catch(() => {});
   }
+
+  const openLightbox = useCallback(
+    (result: GenerationResult, index: number) => {
+      setLightboxState({
+        images: generationResultToLightboxImages(result),
+        index,
+      });
+    },
+    [],
+  );
 
   const activeTotal =
     activeKind === "images" ? imageTotal : promptFavorites.length;
@@ -270,6 +326,7 @@ export default function FavoritesPage() {
                 <GenerationGrid
                   results={imageResults}
                   onSelect={setSelectedImage}
+                  onPreview={openLightbox}
                 />
               )}
 
@@ -304,7 +361,21 @@ export default function FavoritesPage() {
             title={t("favorites.detail")}
             onClose={() => setSelectedImage(null)}
             onDelete={(id) => void handleDeleteImage(id)}
+            onEditImage={handleEditImage}
+            onPreview={(imageIndex) => openLightbox(selectedImage, imageIndex)}
             onManageFolders={setFolderSelectorImageId}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {lightboxState && (
+          <Lightbox
+            images={lightboxState.images}
+            initialIndex={lightboxState.index}
+            onClose={() => setLightboxState(null)}
+            onEditImage={handleEditLightboxImage}
+            onDelete={(id) => void handleDeleteImage(id)}
           />
         )}
       </AnimatePresence>

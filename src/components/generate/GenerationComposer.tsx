@@ -120,7 +120,7 @@ export default function GenerationComposer({
         <div
           role="toolbar"
           aria-label={t("generate.parametersLabel")}
-          className="mx-auto w-full max-w-[900px] overflow-hidden"
+          className="w-full overflow-hidden"
         >
           <div
             data-testid="generation-parameter-row"
@@ -256,7 +256,7 @@ export default function GenerationComposer({
       </div>
 
       <div className="bg-surface px-6 pt-4 pb-5">
-        <div className="mx-auto max-w-[900px]">
+        <div className="w-full">
           <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
             {editingPromptMessageId && (
               <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">

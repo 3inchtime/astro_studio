@@ -677,6 +677,31 @@ describe("GeneratePage", () => {
     );
   });
 
+  it("lets the generate surface stretch across the available main panel", async () => {
+    render(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    const toolbar = screen.getByRole("toolbar", {
+      name: "Generation parameters",
+    });
+    const feedSurface = screen
+      .getByRole("button", { name: "Edit prompt" })
+      .closest(".space-y-7");
+    const composerSurface = screen
+      .getByPlaceholderText("Describe the image you want to generate...")
+      .parentElement?.parentElement;
+
+    expect(toolbar).toHaveClass("w-full");
+    expect(toolbar.className).not.toContain("max-w-[900px]");
+    expect(feedSurface).toHaveClass("w-full");
+    expect(feedSurface?.className).not.toContain("max-w-[900px]");
+    expect(composerSurface).toHaveClass("w-full");
+    expect(composerSurface?.className).not.toContain("max-w-[900px]");
+  });
+
   it("submits edit-only input fidelity with selected source images", async () => {
     pickSourceImages.mockResolvedValue(["/tmp/source-edit.png"]);
 

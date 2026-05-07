@@ -51,6 +51,7 @@ describe("galleryFilters", () => {
     };
     const config = createGallerySearchConfig((key) => key, filters, () => undefined);
 
+    expect(config.searchLabel).toBe("gallery.prompt");
     expect(config.fields.map((field) => field.key)).toEqual([
       "model",
       "created_from",

@@ -1,4 +1,4 @@
-import { Filter, RotateCcw, Search } from "lucide-react";
+import { CalendarDays, Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
 
 interface GallerySearchBarProps {
@@ -22,8 +22,8 @@ export default function GallerySearchBar({
 }: GallerySearchBarProps) {
   return (
     <div className="border-b border-border-subtle px-6 py-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div className="flex shrink-0 items-center gap-3 pb-0.5">
           <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
             {config.title}
           </h2>
@@ -34,11 +34,18 @@ export default function GallerySearchBar({
           )}
         </div>
 
-        <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center xl:w-auto">
-          <label className="relative min-w-0 flex-1 xl:w-80 xl:flex-none">
+        <div
+          role="search"
+          aria-label={`${config.title} filters`}
+          className="flex w-full min-w-0 flex-wrap items-end gap-2 xl:flex-1 xl:justify-end"
+        >
+          <label className="relative min-w-[220px] flex-[1_1_260px]">
+            <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
+              {config.searchLabel}
+            </span>
             <Search
               size={13}
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60"
+              className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/60"
               strokeWidth={2}
             />
             <input
@@ -53,7 +60,61 @@ export default function GallerySearchBar({
               className="h-[34px] w-full rounded-[10px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground placeholder:text-muted/50 transition-colors focus:border-border focus:bg-surface focus:outline-none"
             />
           </label>
-          <div className="flex items-center gap-2">
+
+          {config.fields.map((field) => {
+            if (field.type === "date") {
+              return (
+                <label
+                  key={field.key}
+                  className="relative min-w-[140px] flex-[1_1_150px] xl:max-w-[170px]"
+                >
+                  <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
+                    {field.label}
+                  </span>
+                  <CalendarDays
+                    size={13}
+                    className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/55"
+                    strokeWidth={2}
+                  />
+                  <input
+                    type="date"
+                    value={field.value}
+                    onChange={(event) => field.onChange(event.target.value)}
+                    className="h-[34px] w-full rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-3 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
+                  />
+                </label>
+              );
+            }
+
+            return (
+              <label
+                key={field.key}
+                className="relative min-w-[170px] flex-[1_1_180px] xl:max-w-[220px]"
+              >
+                <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
+                  {field.label}
+                </span>
+                <SlidersHorizontal
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/55"
+                  strokeWidth={2}
+                />
+                <select
+                  value={field.value}
+                  onChange={(event) => field.onChange(event.target.value)}
+                  className="select-control mt-1 h-[34px] w-full min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-8 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
+                >
+                  {field.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+
+          <div className="flex flex-[0_0_auto] items-end gap-2">
             <button
               type="button"
               onClick={onSearch}
@@ -73,48 +134,6 @@ export default function GallerySearchBar({
             </button>
           </div>
         </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {config.fields.map((field) => {
-          if (field.type === "date") {
-            return (
-              <label key={field.key} className="flex min-w-0 flex-col gap-1">
-                <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
-                  {field.label}
-                </span>
-                <input
-                  type="date"
-                  value={field.value}
-                  onChange={(event) => field.onChange(event.target.value)}
-                  className="h-[34px] rounded-[10px] border border-border-subtle bg-subtle/35 px-3 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
-                />
-                </label>
-            );
-          }
-
-          return (
-            <label
-              key={field.key}
-              className="flex min-w-0 flex-col gap-1"
-            >
-              <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
-                {field.label}
-              </span>
-              <select
-                value={field.value}
-                onChange={(event) => field.onChange(event.target.value)}
-                className="select-control h-[34px] min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 px-3 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
-              >
-                {field.options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          );
-        })}
       </div>
     </div>
   );

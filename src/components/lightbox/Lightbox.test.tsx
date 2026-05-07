@@ -113,4 +113,29 @@ describe("Lightbox", () => {
 
     expect(image).toHaveAttribute("src", "/tmp/thumb.png");
   });
+
+  it("closes when clicking the empty preview area but not the image itself", () => {
+    const onClose = vi.fn();
+
+    render(
+      <Lightbox
+        images={[
+          {
+            imageId: "image-1",
+            generationId: "generation-1",
+            path: "/tmp/image.png",
+            thumbnailPath: "/tmp/thumb.png",
+          },
+        ]}
+        initialIndex={0}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByAltText("Preview"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("image-preview-viewport"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GalleryPage from "./GalleryPage";
+import type { GenerationResult } from "../types";
 
 const searchGenerations = vi.fn();
 const deleteGeneration = vi.fn();
@@ -37,11 +38,68 @@ vi.mock("../components/gallery/EmptyCollectionState", () => ({
 }));
 
 vi.mock("../components/gallery/GenerationGrid", () => ({
-  default: () => <div data-testid="grid" />,
+  default: ({
+    results,
+    onPreview,
+    onSelect,
+  }: {
+    results: GenerationResult[];
+    onPreview?: (result: GenerationResult, imageIndex: number) => void;
+    onSelect: (result: GenerationResult) => void;
+  }) => (
+    <div data-testid="grid">
+      {results.map((result) => (
+        <div key={result.generation.id}>
+          <button onClick={() => onPreview?.(result, 1)}>
+            Open preview {result.generation.id}
+          </button>
+          <button onClick={() => onSelect(result)}>
+            Open detail {result.generation.id}
+          </button>
+        </div>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("../components/gallery/GenerationDetailPanel", () => ({
-  default: () => null,
+  default: ({
+    result,
+    onPreview,
+  }: {
+    result: GenerationResult;
+    onPreview?: (imageIndex: number) => void;
+  }) => (
+    <div data-testid="detail-panel">
+      <button onClick={() => onPreview?.(0)}>
+        Preview detail {result.generation.id}
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("../components/lightbox/Lightbox", () => ({
+  default: ({
+    images,
+    initialIndex,
+  }: {
+    images: Array<{
+      imageId: string;
+      generationId: string;
+      path: string;
+      thumbnailPath?: string;
+    }>;
+    initialIndex: number;
+  }) => (
+    <div data-testid="lightbox">
+      <span data-testid="lightbox-index">{initialIndex}</span>
+      {images.map((image) => (
+        <span key={image.imageId} data-testid="lightbox-image">
+          {image.imageId}:{image.generationId}:{image.path}:{image.thumbnailPath}
+        </span>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("../components/gallery/PaginationControls", () => ({
@@ -51,6 +109,50 @@ vi.mock("../components/gallery/PaginationControls", () => ({
 vi.mock("../components/favorites/FolderSelector", () => ({
   default: () => null,
 }));
+
+function buildResult(): GenerationResult {
+  return {
+    generation: {
+      id: "generation-1",
+      prompt: "Moonlit observatory",
+      engine: "gpt-image-2",
+      request_kind: "generate",
+      size: "1024x1024",
+      quality: "auto",
+      background: "auto",
+      output_format: "png",
+      output_compression: 100,
+      moderation: "auto",
+      input_fidelity: "high",
+      image_count: 2,
+      source_image_count: 0,
+      source_image_paths: [],
+      status: "completed",
+      created_at: "2026-05-07T00:00:00Z",
+      deleted_at: null,
+    },
+    images: [
+      {
+        id: "image-1",
+        generation_id: "generation-1",
+        file_path: "/tmp/full-1.png",
+        thumbnail_path: "/tmp/thumb-1.png",
+        width: 1024,
+        height: 1024,
+        file_size: 1024,
+      },
+      {
+        id: "image-2",
+        generation_id: "generation-1",
+        file_path: "/tmp/full-2.png",
+        thumbnail_path: "/tmp/thumb-2.png",
+        width: 1536,
+        height: 1024,
+        file_size: 2048,
+      },
+    ],
+  };
+}
 
 describe("GalleryPage", () => {
   beforeEach(() => {
@@ -191,5 +293,58 @@ describe("GalleryPage", () => {
       expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
     });
     expect(searchInput).toHaveValue("");
+  });
+
+  it("opens the shared lightbox from a gallery image with all result images", async () => {
+    searchGenerations.mockResolvedValueOnce({
+      generations: [buildResult()],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("grid")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Open preview generation-1",
+    }));
+
+    expect(screen.getByTestId("lightbox-index")).toHaveTextContent("1");
+    expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
+    expect(screen.getAllByTestId("lightbox-image")[0]).toHaveTextContent(
+      "image-1:generation-1:/tmp/full-1.png:/tmp/thumb-1.png",
+    );
+    expect(screen.getAllByTestId("lightbox-image")[1]).toHaveTextContent(
+      "image-2:generation-1:/tmp/full-2.png:/tmp/thumb-2.png",
+    );
+  });
+
+  it("opens the shared lightbox from the detail panel image", async () => {
+    searchGenerations.mockResolvedValueOnce({
+      generations: [buildResult()],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("grid")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Open detail generation-1",
+    }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Preview detail generation-1",
+    }));
+
+    expect(screen.getByTestId("lightbox-index")).toHaveTextContent("0");
+    expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
   });
 });

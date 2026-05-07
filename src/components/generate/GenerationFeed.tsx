@@ -34,7 +34,7 @@ export default function GenerationFeed({
   }
 
   return (
-    <div className="mx-auto max-w-[900px] space-y-7 px-6 py-6">
+    <div className="w-full space-y-7 px-6 py-6">
       <AnimatePresence initial={false}>
         {messages.map((msg) => (
           <MessageBubble

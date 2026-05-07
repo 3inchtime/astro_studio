@@ -4,14 +4,16 @@ import { useNavigate } from "react-router-dom";
 import { deleteGeneration, searchGenerations } from "../lib/api";
 import { savePendingEditSources } from "../lib/editSources";
 import { useLayoutContext } from "../components/layout/AppLayout";
-import type { GenerationResult, GenerationSearchFilters } from "../types";
+import type { GenerationResult, GenerationSearchFilters, MessageImage } from "../types";
 import { useTranslation } from "react-i18next";
 import FolderSelector from "../components/favorites/FolderSelector";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import GallerySearchBar from "../components/gallery/GallerySearchBar";
+import Lightbox from "../components/lightbox/Lightbox";
 import PaginationControls from "../components/gallery/PaginationControls";
+import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import { createGallerySearchConfig } from "../lib/galleryFilterConfig";
 import {
   compactFilters,
@@ -33,6 +35,10 @@ export default function GalleryPage() {
   const [folderSelectorImageId, setFolderSelectorImageId] = useState<
     string | null
   >(null);
+  const [lightboxState, setLightboxState] = useState<{
+    images: MessageImage[];
+    index: number;
+  } | null>(null);
 
   const hasActiveFilters = useMemo(
     () => isFilterActive(filters, query),
@@ -88,6 +94,12 @@ export default function GalleryPage() {
     await deleteGeneration(id);
     await performSearch(page, query, filters);
     if (selected?.generation.id === id) setSelected(null);
+    setLightboxState((current) => {
+      if (!current) return null;
+      return current.images.some((image) => image.generationId === id)
+        ? null
+        : current;
+    });
   }
 
   function handleEditImage(
@@ -117,6 +129,24 @@ export default function GalleryPage() {
     void performSearch(1, "", {});
   }
 
+  const openLightbox = useCallback(
+    (result: GenerationResult, index: number) => {
+      setLightboxState({
+        images: generationResultToLightboxImages(result),
+        index,
+      });
+    },
+    [],
+  );
+
+  const handleEditLightboxImage = useCallback(
+    (image: MessageImage) => {
+      handleEditImage(image.path, image.imageId, image.generationId);
+      setLightboxState(null);
+    },
+    [],
+  );
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
@@ -143,6 +173,7 @@ export default function GalleryPage() {
               results={results}
               favoriteMode="manage"
               onSelect={setSelected}
+              onPreview={openLightbox}
               onManageFolders={setFolderSelectorImageId}
             />
           )}
@@ -166,7 +197,20 @@ export default function GalleryPage() {
             onClose={() => setSelected(null)}
             onDelete={(id) => void handleDelete(id)}
             onEditImage={handleEditImage}
+            onPreview={(imageIndex) => openLightbox(selected, imageIndex)}
             onManageFolders={setFolderSelectorImageId}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {lightboxState && (
+          <Lightbox
+            images={lightboxState.images}
+            initialIndex={lightboxState.index}
+            onClose={() => setLightboxState(null)}
+            onEditImage={handleEditLightboxImage}
+            onDelete={(id) => void handleDelete(id)}
           />
         )}
       </AnimatePresence>

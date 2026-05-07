@@ -39,6 +39,7 @@ export type GalleryFilterFieldConfig =
 
 export interface GallerySearchConfig {
   title: string;
+  searchLabel: string;
   searchPlaceholder: string;
   applyFilters: string;
   resetFilters: string;
@@ -89,6 +90,7 @@ export function createGallerySearchConfig(
 ): GallerySearchConfig {
   return {
     title: t("gallery.title"),
+    searchLabel: t("gallery.prompt"),
     searchPlaceholder: t("gallery.search"),
     applyFilters: t("gallery.applyFilters"),
     resetFilters: t("gallery.resetFilters"),

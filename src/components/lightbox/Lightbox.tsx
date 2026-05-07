@@ -190,6 +190,7 @@ export default function Lightbox({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onClick={onClose}
         style={{
           cursor: zoom > 1 ? (isPanning ? "grabbing" : "grab") : "default",
         }}
@@ -202,7 +203,6 @@ export default function Lightbox({
             exit={{ opacity: 0, y: -18, scale: 1.03, filter: "blur(10px)" }}
             transition={{ duration: 0.42, ease: transitionEase }}
             className="relative flex h-full w-full items-center justify-center"
-            onClick={(e) => e.stopPropagation()}
           >
             <img
               src={toAssetUrl(displayPath)}
@@ -212,6 +212,7 @@ export default function Lightbox({
                 transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
               }}
               onDoubleClick={toggleZoom}
+              onClick={(e) => e.stopPropagation()}
               onError={() => {
                 if (currentImage.thumbnailPath && displayPath !== currentImage.thumbnailPath) {
                   setDisplayPath(currentImage.thumbnailPath);
