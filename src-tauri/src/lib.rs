@@ -1616,7 +1616,11 @@ fn projects_base_sql(where_sql: &str) -> String {
     format!(
         "SELECT p.id, p.name, p.created_at, p.updated_at, p.archived_at, p.pinned_at, p.deleted_at, \
          (SELECT COUNT(*) FROM conversations c \
-          WHERE c.project_id = p.id AND c.deleted_at IS NULL AND c.archived_at IS NULL) as conversation_count \
+          WHERE c.project_id = p.id AND c.deleted_at IS NULL AND c.archived_at IS NULL) as conversation_count, \
+         (SELECT COUNT(i.id) FROM conversations c \
+          JOIN generations g ON g.conversation_id = c.id \
+          JOIN images i ON i.generation_id = g.id \
+          WHERE c.project_id = p.id AND c.deleted_at IS NULL AND c.archived_at IS NULL AND g.deleted_at IS NULL) as image_count \
          FROM projects p \
          WHERE {} \
          ORDER BY CASE WHEN p.pinned_at IS NULL THEN 1 ELSE 0 END, p.pinned_at DESC, p.updated_at DESC",
@@ -1634,6 +1638,7 @@ fn row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {
         pinned_at: row.get("pinned_at")?,
         deleted_at: row.get("deleted_at")?,
         conversation_count: row.get("conversation_count")?,
+        image_count: row.get("image_count")?,
     })
 }
 

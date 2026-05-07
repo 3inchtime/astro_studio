@@ -34,6 +34,7 @@
   "sidebar.projectActions": "Project actions",
 
   "projects.directory": "Projects",
+  "projects.title": "Projects",
 
   "generate.placeholder": "Describe the image you want to generate...",
   "generate.emptyTitle": "What will you create?",

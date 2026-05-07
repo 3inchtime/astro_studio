@@ -34,6 +34,7 @@
   "sidebar.projectActions": "项目操作",
 
   "projects.directory": "项目",
+  "projects.title": "项目",
 
   "generate.placeholder": "描述你想要生成的图像...",
   "generate.emptyTitle": "你想创作什么？",

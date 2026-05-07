@@ -203,6 +203,7 @@ pub struct Project {
     pub pinned_at: Option<String>,
     pub deleted_at: Option<String>,
     pub conversation_count: i32,
+    pub image_count: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
