@@ -64,9 +64,10 @@ function groupByProject(conversations: Conversation[], projects: Project[]) {
   const remaining = conversations.filter((conv) => !orderedIds.has(conv.project_id));
 
   for (const conv of remaining) {
-    let group = groups.find((item) => item.project.id === conv.project_id);
-    if (!group) {
-      group = {
+    const groupIndex = groups.findIndex((item) => item.project.id === conv.project_id);
+
+    if (groupIndex === -1) {
+      groups.push({
         project: {
           id: conv.project_id,
           name: conv.project_name ?? projectNames.get(conv.project_id) ?? "Project",
@@ -76,12 +77,14 @@ function groupByProject(conversations: Conversation[], projects: Project[]) {
           pinned_at: null,
           deleted_at: null,
           conversation_count: 0,
-        },
+          image_count: 0,
+        } satisfies Project,
         items: [],
-      };
-      groups.push(group);
+      });
     }
-    group.items.push(conv);
+
+    const targetGroup = groups[groupIndex === -1 ? groups.length - 1 : groupIndex];
+    targetGroup.items.push(conv);
   }
 
   return groups.filter((group) => group.items.length > 0 || group.project.id === "default");

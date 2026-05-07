@@ -8,7 +8,7 @@ import { createGallerySearchConfig } from "./galleryFilterConfig";
 import type { GenerationSearchFilters } from "../types";
 
 describe("galleryFilters", () => {
-  it("removes empty dropdown values and the any source sentinel", () => {
+  it("removes empty and undefined filter values", () => {
     const filters: GenerationSearchFilters = {
       model: "gpt-image-2",
       created_from: "2026-05-01",

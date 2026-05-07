@@ -122,7 +122,7 @@ describe("api gallery search commands", () => {
     tauriApi.invoke.mockReset();
   });
 
-  it("forwards advanced gallery filters through Tauri IPC", async () => {
+  it("forwards the simplified gallery filters through Tauri IPC", async () => {
     tauriApi.invoke.mockResolvedValue({
       generations: [],
       total: 0,
@@ -132,15 +132,6 @@ describe("api gallery search commands", () => {
 
     await searchGenerations("sunrise", 2, false, {
       model: "gpt-image-2",
-      request_kind: "edit",
-      status: "completed",
-      size: "1024x1024",
-      quality: "high",
-      background: "transparent",
-      output_format: "webp",
-      moderation: "low",
-      input_fidelity: "high",
-      source_image_count: "2",
       created_from: "2026-04-01",
       created_to: "2026-04-30",
     });
@@ -151,17 +142,28 @@ describe("api gallery search commands", () => {
       onlyDeleted: null,
       filters: {
         model: "gpt-image-2",
-        request_kind: "edit",
-        status: "completed",
-        size: "1024x1024",
-        quality: "high",
-        background: "transparent",
-        output_format: "webp",
-        moderation: "low",
-        input_fidelity: "high",
-        source_image_count: "2",
         created_from: "2026-04-01",
         created_to: "2026-04-30",
+      },
+    });
+  });
+
+  it("accepts the future project argument without forwarding it yet", async () => {
+    tauriApi.invoke.mockResolvedValue({
+      generations: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
+
+    await searchGenerations("sunrise", 1, false, { model: "gpt-image-2" }, "project-1");
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("search_generations", {
+      query: "sunrise",
+      page: 1,
+      onlyDeleted: null,
+      filters: {
+        model: "gpt-image-2",
       },
     });
   });

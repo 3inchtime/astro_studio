@@ -207,6 +207,7 @@ export async function searchGenerations(
   page?: number,
   onlyDeleted?: boolean,
   filters?: GenerationSearchFilters,
+  // Accepted now so Gallery can move to the future call shape; forwarding starts in Task 2.
   _projectId?: string,
 ): Promise<SearchResult> {
   return invoke("search_generations", {
