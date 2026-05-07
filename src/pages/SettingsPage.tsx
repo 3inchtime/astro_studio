@@ -273,6 +273,7 @@ export default function SettingsPage() {
 
   async function handleCreateProvider() {
     const modelAtCreateStart = imageModel;
+    const stateAtCreateStart = providerState;
     const nextState = await createModelProviderProfile(
       modelAtCreateStart,
       NEW_PROVIDER_NAME,
@@ -282,7 +283,18 @@ export default function SettingsPage() {
     }
 
     setProviderState(nextState);
-    setSelectedProviderId(nextState.active_provider_id);
+    const existingProviderIds = new Set(
+      stateAtCreateStart.profiles.map((profile) => profile.id),
+    );
+    const createdProvider = nextState.profiles
+      .filter((profile) => !existingProviderIds.has(profile.id))
+      .slice(-1)[0];
+    setSelectedProviderId(
+      createdProvider?.id ??
+        (providerForState(nextState, selectedProviderId)
+          ? selectedProviderId
+          : nextState.active_provider_id),
+    );
     setShowKey(false);
     setProviderSaved(false);
   }

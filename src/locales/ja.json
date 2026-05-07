@@ -132,6 +132,8 @@
   "settings.newProvider": "新規プロバイダー",
   "settings.activateProvider": "プロバイダーを使用",
   "settings.activeProvider": "有効",
+  "settings.noApiKey": "API キーなし",
+  "settings.useProvider": "プロバイダーを使用",
   "settings.deleteProvider": "プロバイダーを削除",
   "settings.saveProvider": "プロバイダーを保存",
   "settings.selectedModel": "選択中: {{model}}",

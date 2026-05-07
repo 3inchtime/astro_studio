@@ -151,7 +151,7 @@ describe("SettingsPage logs", () => {
     );
     saveModelProviderProfiles.mockImplementation(async (_model: string, state: unknown) => state);
     createModelProviderProfile.mockResolvedValue({
-      active_provider_id: "new-provider",
+      active_provider_id: "openai-official",
       profiles: [
         ...openAiProviderState.profiles,
         {
@@ -538,7 +538,7 @@ describe("SettingsPage logs", () => {
     });
   });
 
-  it("creates, activates, and deletes provider profiles through the profile API", async () => {
+  it("creates a provider for editing without activating it, then activates and deletes providers", async () => {
     render(
       <MemoryRouter>
         <SettingsPage />
@@ -553,6 +553,14 @@ describe("SettingsPage logs", () => {
       expect(createModelProviderProfile).toHaveBeenCalledWith("gpt-image-2", "New Provider");
       expect(screen.getByDisplayValue("New Provider")).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Select OpenAI Official provider" })).toHaveTextContent(
+      "settings.activeProvider",
+    );
+    expect(screen.getByRole("button", { name: "Select New Provider provider" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Use New Provider provider" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Select Company Gateway provider" }));
     fireEvent.click(screen.getByRole("button", { name: "Use Company Gateway provider" }));

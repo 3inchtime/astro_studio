@@ -132,6 +132,8 @@
   "settings.newProvider": "Nuevo proveedor",
   "settings.activateProvider": "Usar proveedor",
   "settings.activeProvider": "Activo",
+  "settings.noApiKey": "Sin clave API",
+  "settings.useProvider": "Usar proveedor",
   "settings.deleteProvider": "Eliminar proveedor",
   "settings.saveProvider": "Guardar proveedor",
   "settings.selectedModel": "Seleccionado: {{model}}",

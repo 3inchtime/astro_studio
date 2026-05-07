@@ -470,6 +470,18 @@ fn save_model_endpoint_settings_value(
 mod tests {
     use super::*;
 
+    fn invoke_request(cmd: &str, body: serde_json::Value) -> tauri::webview::InvokeRequest {
+        tauri::webview::InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "http://tauri.localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(body),
+            headers: tauri::http::HeaderMap::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        }
+    }
+
     fn temp_test_db(prefix: &str) -> (Database, std::path::PathBuf) {
         let db_path =
             std::env::temp_dir().join(format!("{prefix}-{}.sqlite", uuid::Uuid::new_v4()));
@@ -740,6 +752,53 @@ mod tests {
         drop(db);
         remove_temp_test_db(db_path);
     }
+
+    #[test]
+    fn create_provider_profile_keeps_existing_active_provider() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-create-active-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-a".to_string(),
+            profiles: vec![ModelProviderProfile {
+                id: "provider-a".to_string(),
+                name: "Provider A".to_string(),
+                api_key: "sk-a".to_string(),
+                endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+            }],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        let app = tauri::test::mock_builder()
+            .manage(db)
+            .invoke_handler(tauri::generate_handler![create_model_provider_profile])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let response = tauri::test::get_ipc_response(
+            &webview,
+            invoke_request(
+                "create_model_provider_profile",
+                serde_json::json!({
+                    "model": ENGINE_GPT_IMAGE_2,
+                    "name": "  New Provider  "
+                }),
+            ),
+        )
+        .unwrap();
+        let saved = response.deserialize::<ModelProviderProfilesState>().unwrap();
+
+        assert_eq!(saved.active_provider_id, "provider-a");
+        assert_eq!(saved.profiles.len(), 2);
+        assert!(saved
+            .profiles
+            .iter()
+            .any(|profile| profile.name == "New Provider"));
+
+        drop(webview);
+        drop(app);
+        remove_temp_test_db(db_path);
+    }
 }
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -917,7 +976,6 @@ fn create_model_provider_profile(
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
     let provider_id = uuid::Uuid::new_v4().to_string();
-    state.active_provider_id = provider_id.clone();
     state.profiles.push(ModelProviderProfile {
         id: provider_id,
         name: normalize_provider_name(&name),

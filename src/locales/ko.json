@@ -132,6 +132,8 @@
   "settings.newProvider": "새 공급자",
   "settings.activateProvider": "공급자 사용",
   "settings.activeProvider": "활성",
+  "settings.noApiKey": "API 키 없음",
+  "settings.useProvider": "공급자 사용",
   "settings.deleteProvider": "공급자 삭제",
   "settings.saveProvider": "공급자 저장",
   "settings.selectedModel": "선택됨: {{model}}",

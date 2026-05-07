@@ -169,6 +169,8 @@
   "settings.newProvider": "New Provider",
   "settings.activateProvider": "Use Provider",
   "settings.activeProvider": "Active",
+  "settings.noApiKey": "No API key",
+  "settings.useProvider": "Use Provider",
   "settings.deleteProvider": "Delete Provider",
   "settings.saveProvider": "Save Provider",
   "settings.selectedModel": "Selected: {{model}}",

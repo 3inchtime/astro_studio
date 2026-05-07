@@ -132,6 +132,8 @@
   "settings.newProvider": "新增服務商",
   "settings.activateProvider": "啟用服務商",
   "settings.activeProvider": "目前啟用",
+  "settings.noApiKey": "未填寫 API 金鑰",
+  "settings.useProvider": "啟用服務商",
   "settings.deleteProvider": "刪除服務商",
   "settings.saveProvider": "儲存服務商",
   "settings.selectedModel": "目前選擇：{{model}}",
