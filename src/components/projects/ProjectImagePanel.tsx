@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Image as ImageIcon } from "lucide-react";
 import type { GenerationResult, GenerationSearchFilters } from "../../types";
 import GallerySearchBar from "../gallery/GallerySearchBar";
 import GenerationGrid from "../gallery/GenerationGrid";
@@ -41,35 +42,66 @@ export default function ProjectImagePanel({
     [filters, t],
   );
 
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
   return (
-    <div className="rounded-[18px] border border-border-subtle bg-surface">
-      <GallerySearchBar
-        config={config}
-        total={total}
-        query={query}
-        hasActiveFilters={isFilterActive(filters, query)}
-        onQueryChange={setQuery}
-        onSearch={() => void onSearch(query, compactFilters(filters), 1)}
-        onReset={() => {
-          setQuery("");
-          setFilters({});
-          void onSearch("", {}, 1);
-        }}
-      />
-      <div className="p-5">
+    <div className="flex h-full flex-col">
+      {/* Gallery Header */}
+      <div className="shrink-0 px-6 pt-5 pb-3">
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <div className="flex items-center gap-2">
+            <ImageIcon size={15} className="text-muted" strokeWidth={1.8} />
+            <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
+              {t("projects.imagesTitle")}
+            </h2>
+            {total > 0 && (
+              <span className="text-[11px] text-muted tabular-nums">
+                {total}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <GallerySearchBar
+          config={config}
+          total={total}
+          query={query}
+          hasActiveFilters={isFilterActive(filters, query)}
+          onQueryChange={setQuery}
+          onSearch={() => void onSearch(query, compactFilters(filters), 1)}
+          onReset={() => {
+            setQuery("");
+            setFilters({});
+            void onSearch("", {}, 1);
+          }}
+        />
+      </div>
+
+      {/* Gallery Grid */}
+      <div className="flex-1 overflow-y-auto px-6 pb-6">
         {results.length === 0 ? (
           <EmptyCollectionState
             title={t("projects.imagesEmptyTitle")}
             subtitle={t("projects.imagesEmptyHint")}
           />
         ) : (
-          <GenerationGrid results={results} favoriteMode="manage" onSelect={onSelect} onPreview={onPreview} onManageFolders={onManageFolders} />
+          <>
+            <GenerationGrid
+              results={results}
+              favoriteMode="manage"
+              onSelect={onSelect}
+              onPreview={onPreview}
+              onManageFolders={onManageFolders}
+            />
+            <div className="mt-5">
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                onPageChange={(nextPage) => void onSearch(query, compactFilters(filters), nextPage)}
+              />
+            </div>
+          </>
         )}
-        <PaginationControls
-          page={page}
-          totalPages={Math.max(1, Math.ceil(total / pageSize))}
-          onPageChange={(nextPage) => void onSearch(query, compactFilters(filters), nextPage)}
-        />
       </div>
     </div>
   );

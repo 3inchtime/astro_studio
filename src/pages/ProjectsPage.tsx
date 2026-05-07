@@ -101,10 +101,10 @@ export default function ProjectsPage() {
                 ) : null}
               </div>
               <div className="mt-2 text-[12px] text-muted">
-                {project.conversation_count} conversations
+                {t("projects.conversationCountValue", { count: project.conversation_count })}
               </div>
               <div className="mt-1 text-[12px] text-muted">
-                {project.image_count} images
+                {t("projects.imageCountValue", { count: project.image_count })}
               </div>
             </button>
           ))}

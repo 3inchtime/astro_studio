@@ -78,7 +78,7 @@ describe("ProjectsPage", () => {
     });
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByText("86 images")).toBeInTheDocument();
+    expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
   });
 

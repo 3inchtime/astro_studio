@@ -57,6 +57,8 @@
   "projects.conversations": "Conversations",
   "projects.conversationCount": "Conversations",
   "projects.imageCount": "Images",
+  "projects.conversationCountValue": "{{count}} conversations",
+  "projects.imageCountValue": "{{count}} images",
   "projects.conversationImageCount": "{{count}} images",
   "projects.renameConversationError": "Unable to rename conversation.",
   "projects.deleteConversationError": "Unable to delete conversation.",

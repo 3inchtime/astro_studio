@@ -62,8 +62,12 @@ export default function AppLayout() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [conversationRefreshKey, setConversationRefreshKey] = useState(0);
 
-  const isProjectRoute = useMemo(
-    () => location.pathname === "/projects" || location.pathname.startsWith("/projects/"),
+  const isProjectListRoute = useMemo(
+    () => location.pathname === "/projects",
+    [location.pathname],
+  );
+  const isProjectDetailRoute = useMemo(
+    () => /^\/projects\/[^/]+$/.test(location.pathname),
     [location.pathname],
   );
   const shouldHideSidebar = useMemo(
@@ -86,6 +90,15 @@ export default function AppLayout() {
     () => /^\/projects\/[^/]+\/chat/.test(location.pathname),
     [location.pathname],
   );
+
+  // Synchronously derived from route — prevents stale project ID during navigation
+  // (e.g. navigating from a project page to /generate would briefly show project
+  // conversations before the useEffect clears activeProjectId)
+  const sidebarConversationProjectId = useMemo(() => {
+    if (location.pathname === "/generate") return null;
+    if (isProjectDetailRoute || isProjectChatRoute) return routeProjectId;
+    return activeProjectId;
+  }, [location.pathname, activeProjectId, isProjectDetailRoute, isProjectChatRoute, routeProjectId]);
 
   useEffect(() => {
     if (location.pathname === "/projects") {
@@ -122,9 +135,13 @@ export default function AppLayout() {
   const selectConversation = useCallback(
     (id: string) => {
       setActiveConversationId(id);
-      navigate("/generate");
+      if (activeProjectId && activeProjectId !== "default") {
+        navigate(`/projects/${activeProjectId}/chat/${id}`);
+      } else {
+        navigate("/generate");
+      }
     },
-    [navigate],
+    [navigate, activeProjectId],
   );
 
   const selectProject = useCallback(
@@ -155,11 +172,20 @@ export default function AppLayout() {
         setActiveProjectId(conversation.project_id);
         setActiveConversationId(conversation.id);
         refreshConversations();
+        if (conversation.project_id && conversation.project_id !== "default") {
+          navigate(`/projects/${conversation.project_id}/chat/${conversation.id}`);
+        } else {
+          navigate("/generate");
+        }
       })
       .catch(() => {
         setActiveConversationId(null);
+        if (activeProjectId && activeProjectId !== "default") {
+          navigate(`/projects/${activeProjectId}/chat`);
+        } else {
+          navigate("/generate");
+        }
       });
-    navigate("/generate");
   }, [activeProjectId, navigate, refreshConversations]);
 
   return (
@@ -261,7 +287,7 @@ export default function AppLayout() {
         {!shouldHideSidebar && (
           <>
             <aside className="flex shrink-0 flex-col border-r border-border-subtle" style={{ width: widths[0] }}>
-              {isProjectRoute ? (
+              {isProjectListRoute ? (
                 <ProjectsSidebar
                   activeProjectId={activeProjectId}
                   onSelectProject={selectProject}
@@ -269,7 +295,7 @@ export default function AppLayout() {
                 />
               ) : (
                 <ConversationList
-                  activeProjectId={activeProjectId}
+                  activeProjectId={sidebarConversationProjectId}
                   activeConversationId={activeConversationId}
                   refreshKey={conversationRefreshKey}
                   onSelectProject={selectProject}

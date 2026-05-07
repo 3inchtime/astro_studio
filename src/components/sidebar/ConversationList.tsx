@@ -162,7 +162,7 @@ export default function ConversationList({
           </div>
           {activeProjectId && selectedProject ? (
             <button
-              onClick={() => navigate(`/projects/${activeProjectId}`)}
+              onClick={() => navigate("/projects")}
               className="text-[11px] font-medium text-primary"
             >
               {t("nav.projects")}

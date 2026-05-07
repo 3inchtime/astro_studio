@@ -127,14 +127,13 @@ describe("ProjectHomePage", () => {
     );
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByText("projects.conversations")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "projects.manage" })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, "project-1");
     });
 
-    expect(screen.getByText("86")).toBeInTheDocument();
+    expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
   });
 
   it("opens the rename dialog with the current project name", async () => {

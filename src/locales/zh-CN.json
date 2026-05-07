@@ -58,6 +58,8 @@
   "projects.conversations": "会话列表",
   "projects.conversationCount": "会话数",
   "projects.imageCount": "图片数",
+  "projects.conversationCountValue": "{{count}} 个会话",
+  "projects.imageCountValue": "{{count}} 张图片",
   "projects.conversationImageCount": "{{count}} 张图片",
   "projects.renameConversationError": "无法重命名会话。",
   "projects.deleteConversationError": "无法删除会话。",

@@ -1,34 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
-import { Image as ImageIcon, Pin, PinOff, Trash2 } from "lucide-react";
+import { Archive, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   archiveProject,
-  createConversation,
-  deleteConversation,
   deleteGeneration,
   deleteProject,
-  getConversations,
   getProjects,
-  pinConversation,
   pinProject,
-  renameConversation,
   renameProject,
   searchGenerations,
-  unpinConversation,
-  toAssetUrl,
   unpinProject,
 } from "../lib/api";
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { useUIStore } from "../lib/store";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import { useLayoutContext } from "../components/layout/AppLayout";
-import type { Conversation, GenerationResult, MessageImage, Project } from "../types";
-import ProjectSummaryCards from "../components/projects/ProjectSummaryCards";
+import type { GenerationResult, MessageImage, Project } from "../types";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
-import ProjectActionsMenu from "../components/projects/ProjectActionsMenu";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import Lightbox from "../components/lightbox/Lightbox";
@@ -38,32 +29,26 @@ export default function ProjectHomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { projectId = "" } = useParams();
-  const { setActiveConversationId, setActiveProjectId } = useLayoutContext();
+  const { setActiveProjectId, setActiveConversationId } = useLayoutContext();
   const [project, setProject] = useState<Project | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [showActions, setShowActions] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(null);
+
+  // Project action dialogs
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameLoading, setRenameLoading] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [projectActionPending, setProjectActionPending] = useState(false);
   const projectActionPendingRef = useRef(false);
   const [projectActionError, setProjectActionError] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(null);
-  const [conversationRenameTarget, setConversationRenameTarget] =
-    useState<Conversation | null>(null);
-  const [renameConversationLoading, setRenameConversationLoading] = useState(false);
-  const [renameConversationError, setRenameConversationError] = useState<string | null>(null);
-  const [conversationDeleteTarget, setConversationDeleteTarget] =
-    useState<Conversation | null>(null);
-  const [deleteConversationLoading, setDeleteConversationLoading] = useState(false);
-  const [deleteConversationError, setDeleteConversationError] = useState<string | null>(null);
+  const [showActions, setShowActions] = useState(false);
+
   const {
     lightbox,
     openLightbox,
@@ -83,7 +68,6 @@ export default function ProjectHomePage() {
       getProjects(false).then((items) => {
         setProject(items.find((item) => item.id === projectId && item.id !== "default") ?? null);
       }),
-      getConversations(undefined, projectId, false).then(setConversations),
       searchGenerations(undefined, 1, false, {}, projectId).then((result) => {
         setResults(result.generations);
         setTotal(result.total);
@@ -92,24 +76,33 @@ export default function ProjectHomePage() {
       }),
     ]).catch(() => {
       setProject(null);
-      setConversations([]);
       setResults([]);
       setTotal(0);
     });
   }, [projectId]);
 
-  function handleRenameAction() {
-    if (!project || projectActionPendingRef.current) return;
-
+  async function handleRenameProject(name: string) {
+    if (!project) return;
+    if (name === project.name) {
+      setRenameDialogOpen(false);
+      setRenameError(null);
+      return;
+    }
+    setRenameLoading(true);
     setRenameError(null);
-    setProjectActionError(null);
-    setRenameDialogOpen(true);
-    setShowActions(false);
+    try {
+      await renameProject(project.id, name);
+      setRenameDialogOpen(false);
+      setProject((current) => (current ? { ...current, name } : current));
+    } catch {
+      setRenameError(t("projectDialog.renameError"));
+    } finally {
+      setRenameLoading(false);
+    }
   }
 
   async function handlePinProject() {
     if (!project || projectActionPendingRef.current) return;
-
     const currentProject = project;
     projectActionPendingRef.current = true;
     setProjectActionPending(true);
@@ -128,7 +121,6 @@ export default function ProjectHomePage() {
 
   async function handleUnpinProject() {
     if (!project || projectActionPendingRef.current) return;
-
     const currentProject = project;
     projectActionPendingRef.current = true;
     setProjectActionPending(true);
@@ -147,7 +139,6 @@ export default function ProjectHomePage() {
 
   async function handleArchiveProject() {
     if (!project || projectActionPendingRef.current) return;
-
     projectActionPendingRef.current = true;
     setProjectActionPending(true);
     setProjectActionError(null);
@@ -163,18 +154,8 @@ export default function ProjectHomePage() {
     }
   }
 
-  function handleDeleteAction() {
-    if (!project || projectActionPendingRef.current) return;
-
-    setShowActions(false);
-    setProjectActionError(null);
-    setDeleteError(null);
-    setDeleteDialogOpen(true);
-  }
-
   async function handleDeleteProject() {
     if (!project || projectActionPendingRef.current) return;
-
     projectActionPendingRef.current = true;
     setDeleteLoading(true);
     setDeleteError(null);
@@ -187,91 +168,6 @@ export default function ProjectHomePage() {
     } finally {
       projectActionPendingRef.current = false;
       setDeleteLoading(false);
-    }
-  }
-
-  async function handleRenameProject(name: string) {
-    if (!project) return;
-    if (name === project.name) {
-      setRenameDialogOpen(false);
-      setRenameError(null);
-      return;
-    }
-
-    setRenameLoading(true);
-    setRenameError(null);
-    try {
-      await renameProject(project.id, name);
-      setRenameDialogOpen(false);
-      setProject((current) => (current ? { ...current, name } : current));
-    } catch {
-      setRenameError(t("projectDialog.renameError"));
-    } finally {
-      setRenameLoading(false);
-    }
-  }
-
-  function handleConversationClick(conversation: Conversation) {
-    navigate(`/projects/${project!.id}/chat/${conversation.id}`);
-  }
-
-  async function handleRenameConversation(name: string) {
-    if (!conversationRenameTarget) return;
-    if (name === conversationRenameTarget.title) {
-      setConversationRenameTarget(null);
-      setRenameConversationError(null);
-      return;
-    }
-
-    setRenameConversationLoading(true);
-    setRenameConversationError(null);
-    try {
-      await renameConversation(conversationRenameTarget.id, name);
-      setConversationRenameTarget(null);
-      setConversations((current) =>
-        current.map((c) => (c.id === conversationRenameTarget.id ? { ...c, title: name } : c)),
-      );
-    } catch {
-      setRenameConversationError(t("projects.renameConversationError"));
-    } finally {
-      setRenameConversationLoading(false);
-    }
-  }
-
-  async function handlePinConversationAction(conversation: Conversation) {
-    try {
-      if (conversation.pinned_at) {
-        await unpinConversation(conversation.id);
-      } else {
-        await pinConversation(conversation.id);
-      }
-      setConversations((current) =>
-        current.map((c) =>
-          c.id === conversation.id
-            ? { ...c, pinned_at: conversation.pinned_at ? null : new Date().toISOString() }
-            : c,
-        ),
-      );
-    } catch {
-      // silently fail for pin toggle
-    }
-  }
-
-  async function handleDeleteConversationAction() {
-    if (!conversationDeleteTarget) return;
-
-    setDeleteConversationLoading(true);
-    setDeleteConversationError(null);
-    try {
-      await deleteConversation(conversationDeleteTarget.id);
-      setConversationDeleteTarget(null);
-      setConversations((current) =>
-        current.filter((c) => c.id !== conversationDeleteTarget.id),
-      );
-    } catch {
-      setDeleteConversationError(t("projects.deleteConversationError"));
-    } finally {
-      setDeleteConversationLoading(false);
     }
   }
 
@@ -311,145 +207,130 @@ export default function ProjectHomePage() {
 
   function handleFolderSelectorClose() {
     closeFolderSelector();
-    searchGenerations(undefined, page, false, {}, project!.id).then((result) => {
-      setResults(result.generations);
-      setTotal(result.total);
-    }).catch(() => {});
+    searchGenerations(undefined, page, false, {}, project!.id)
+      .then((result) => {
+        setResults(result.generations);
+        setTotal(result.total);
+      })
+      .catch(() => {});
   }
 
   if (!project) {
-    return <div className="p-8 text-[14px] text-muted">{t("projects.notFound")}</div>;
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-[14px] text-muted">{t("projects.notFound")}</p>
+      </div>
+    );
   }
 
   return (
-    <div className="flex h-full">
-      <div className="flex-1 overflow-y-auto px-8 py-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.08em] text-muted">{t("projects.directory")}</div>
-          <h1 className="mt-2 text-[30px] font-semibold text-foreground">{project.name}</h1>
-        </div>
-        <div className="relative flex items-center gap-2">
-          <button
-            onClick={() => setShowActions((current) => !current)}
-            aria-label={t("projects.manage")}
-            className="rounded-[12px] border border-border-subtle px-4 py-2 text-[12px] font-medium text-foreground"
-          >
-            {t("projects.manage")}
-          </button>
-          <ProjectActionsMenu
-            open={showActions}
-            pinned={project.pinned_at !== null}
-            disabled={projectActionPending}
-            onRename={handleRenameAction}
-            onPin={() => void handlePinProject()}
-            onUnpin={() => void handleUnpinProject()}
-            onArchive={() => void handleArchiveProject()}
-            onDelete={handleDeleteAction}
-          />
-          <button
-            onClick={() => {
-              createConversation(undefined, project.id)
-                .then((conversation) => {
-                  setConversations((current) => [conversation, ...current]);
-                  navigate(`/projects/${project.id}/chat/${conversation.id}`);
-                })
-                .catch(() => {
-                  navigate(`/projects/${project.id}/chat`);
-                });
-            }}
-            className="rounded-[12px] bg-primary px-4 py-2 text-[12px] font-medium text-white"
-          >
-            {t("projects.newConversation")}
-          </button>
-        </div>
-      </div>
-      {projectActionError ? (
-        <div
-          role="alert"
-          className="mt-4 rounded-[12px] border border-error/15 bg-error/8 px-4 py-3 text-[13px] text-error"
-        >
-          {projectActionError}
-        </div>
-      ) : null}
-
-      <div className="mt-6">
-        <ProjectSummaryCards project={project} />
-      </div>
-
-      <section className="mt-8">
-        <h2 className="text-[18px] font-semibold text-foreground">{t("projects.conversations")}</h2>
-        <div className="mt-4 grid gap-2">
-          {conversations.length === 0 ? (
-            <div className="rounded-[14px] border border-border-subtle bg-surface p-4 text-[13px] text-muted">
-              {t("projects.emptyConversations")}
+    <div className="flex h-full flex-col">
+      {/* Project Header */}
+      <div className="shrink-0 border-b border-border-subtle bg-surface/40 px-6 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] uppercase tracking-[0.1em] text-muted/60 font-medium">
+                {t("projects.directory")}
+              </span>
+              {project.pinned_at && (
+                <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[10px] font-medium text-primary">
+                  <Pin size={9} />
+                  {t("projects.pinned")}
+                </span>
+              )}
             </div>
-          ) : (
-            conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                className="group flex items-center gap-3 rounded-[12px] border border-border-subtle bg-surface p-3 transition-shadow hover:border-border hover:shadow-sm"
-              >
-                <button
-                  onClick={() => handleConversationClick(conversation)}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-subtle border border-border-subtle">
-                    {conversation.latest_thumbnail ? (
-                      <img
-                        src={toAssetUrl(conversation.latest_thumbnail)}
-                        alt=""
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <ImageIcon size={14} className="text-muted/30" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      {conversation.pinned_at && (
-                        <Pin size={10} className="shrink-0 text-primary" />
-                      )}
-                      <p className="truncate text-[13px] font-medium text-foreground">
-                        {conversation.title}
-                      </p>
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-muted">
-                      {t("projects.conversationImageCount", { count: conversation.generation_count })}
-                    </p>
-                  </div>
-                </button>
-                <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  <button
-                    onClick={() => setConversationRenameTarget(conversation)}
-                    className="flex h-8 items-center gap-1 rounded-[8px] px-2 text-[11px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
-                    aria-label={t("sidebar.renameConversation")}
-                  >
-                    {t("sidebar.rename")}
-                  </button>
-                  <button
-                    onClick={() => void handlePinConversationAction(conversation)}
-                    className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
-                    aria-label={conversation.pinned_at ? t("sidebar.unpin") : t("sidebar.pin")}
-                  >
-                    {conversation.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
-                  </button>
-                  <button
-                    onClick={() => setConversationDeleteTarget(conversation)}
-                    className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-error/6 hover:text-error"
-                    aria-label={t("sidebar.deleteConversationConfirm")}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+            <h1 className="text-[18px] font-semibold text-foreground tracking-tight truncate">
+              {project.name}
+            </h1>
+            <p className="mt-1 text-[11px] text-muted">
+              {t("projects.imageCountValue", { count: project.image_count })}
+            </p>
+          </div>
 
-      <section className="mt-8">
+          <div className="relative">
+            <button
+              onClick={() => setShowActions((c) => !c)}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] text-muted transition-all hover:bg-subtle hover:text-foreground"
+              aria-label={t("projects.manage")}
+            >
+              <svg width="15" height="3" viewBox="0 0 15 3" fill="currentColor">
+                <circle cx="1.5" cy="1.5" r="1.5" />
+                <circle cx="7.5" cy="1.5" r="1.5" />
+                <circle cx="13.5" cy="1.5" r="1.5" />
+              </svg>
+            </button>
+
+            {showActions && (
+              <div className="absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[10px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
+                <button
+                  onClick={() => {
+                    setShowActions(false);
+                    setRenameError(null);
+                    setRenameDialogOpen(true);
+                  }}
+                  disabled={projectActionPending}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <Pencil size={13} />
+                  <span>{t("sidebar.rename")}</span>
+                </button>
+                {project.pinned_at ? (
+                  <button
+                    onClick={() => void handleUnpinProject()}
+                    disabled={projectActionPending}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    <PinOff size={13} />
+                    <span>{t("projects.unpin")}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => void handlePinProject()}
+                    disabled={projectActionPending}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    <Pin size={13} />
+                    <span>{t("projects.pin")}</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => void handleArchiveProject()}
+                  disabled={projectActionPending}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <Archive size={13} />
+                  <span>{t("sidebar.archive")}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowActions(false);
+                    setDeleteError(null);
+                    setDeleteDialogOpen(true);
+                  }}
+                  disabled={projectActionPending}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error hover:bg-error/8 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 size={13} />
+                  <span>{t("sidebar.delete")}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {projectActionError ? (
+          <div
+            role="alert"
+            className="mt-3 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-[11px] text-error"
+          >
+            {projectActionError}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Image Gallery */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <ProjectImagePanel
           results={results}
           total={total}
@@ -466,9 +347,9 @@ export default function ProjectHomePage() {
           onPreview={openResultLightbox}
           onManageFolders={openFolderSelector}
         />
-      </section>
       </div>
 
+      {/* Slide-in Detail Panel */}
       <AnimatePresence>
         {selectedImage && (
           <GenerationDetailPanel
@@ -483,6 +364,7 @@ export default function ProjectHomePage() {
         )}
       </AnimatePresence>
 
+      {/* Lightbox */}
       <AnimatePresence>
         {lightbox && (
           <Lightbox
@@ -495,12 +377,15 @@ export default function ProjectHomePage() {
         )}
       </AnimatePresence>
 
+      {/* Folder Selector */}
       {folderSelectorImageId && (
         <FolderSelector
           imageId={folderSelectorImageId}
           onClose={handleFolderSelectorClose}
         />
       )}
+
+      {/* Dialogs */}
       <ProjectNameDialog
         open={renameDialogOpen}
         title={t("projectDialog.renameTitle")}
@@ -530,38 +415,6 @@ export default function ProjectHomePage() {
         onCancel={() => {
           if (!deleteLoading) {
             setDeleteDialogOpen(false);
-          }
-        }}
-      />
-      <ProjectNameDialog
-        open={conversationRenameTarget !== null}
-        title={t("sidebar.renameConversation")}
-        label={t("projectDialog.nameLabel")}
-        initialName={conversationRenameTarget?.title ?? ""}
-        submitLabel={t("projectDialog.renameSubmit")}
-        cancelLabel={t("projectDialog.cancel")}
-        requiredMessage={t("projectDialog.nameRequired")}
-        error={renameConversationError}
-        loading={renameConversationLoading}
-        onSubmit={(name) => void handleRenameConversation(name)}
-        onCancel={() => {
-          if (!renameConversationLoading) {
-            setConversationRenameTarget(null);
-            setRenameConversationError(null);
-          }
-        }}
-      />
-      <ConfirmDialog
-        open={conversationDeleteTarget !== null}
-        title={t("sidebar.deleteConversationConfirm")}
-        confirmLabel={t("projects.deleteConfirmAction")}
-        cancelLabel={t("projects.deleteCancel")}
-        loading={deleteConversationLoading}
-        error={deleteConversationError}
-        onConfirm={() => void handleDeleteConversationAction()}
-        onCancel={() => {
-          if (!deleteConversationLoading) {
-            setConversationDeleteTarget(null);
           }
         }}
       />
