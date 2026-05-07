@@ -66,6 +66,10 @@ export default function AppLayout() {
     () => location.pathname === "/projects" || location.pathname.startsWith("/projects/"),
     [location.pathname],
   );
+  const isSettingsRoute = useMemo(
+    () => location.pathname === "/settings",
+    [location.pathname],
+  );
   const routeProjectId = useMemo(() => {
     if (!location.pathname.startsWith("/projects/")) {
       return null;
@@ -230,28 +234,32 @@ export default function AppLayout() {
           </div>
         </aside>
 
-        <aside className="flex shrink-0 flex-col border-r border-border-subtle" style={{ width: widths[0] }}>
-          {isProjectRoute ? (
-            <ProjectsSidebar
-              activeProjectId={activeProjectId}
-              onSelectProject={selectProject}
-              onProjectCreated={selectCreatedProject}
-            />
-          ) : (
-            <ConversationList
-              activeProjectId={activeProjectId}
-              activeConversationId={activeConversationId}
-              refreshKey={conversationRefreshKey}
-              onSelectProject={selectProject}
-              onProjectCreated={selectCreatedProject}
-              onSelectConversation={selectConversation}
-              onInitialConversation={selectInitialConversation}
-              onNewConversation={createNewConversation}
-            />
-          )}
-        </aside>
+        {!isSettingsRoute && (
+          <>
+            <aside className="flex shrink-0 flex-col border-r border-border-subtle" style={{ width: widths[0] }}>
+              {isProjectRoute ? (
+                <ProjectsSidebar
+                  activeProjectId={activeProjectId}
+                  onSelectProject={selectProject}
+                  onProjectCreated={selectCreatedProject}
+                />
+              ) : (
+                <ConversationList
+                  activeProjectId={activeProjectId}
+                  activeConversationId={activeConversationId}
+                  refreshKey={conversationRefreshKey}
+                  onSelectProject={selectProject}
+                  onProjectCreated={selectCreatedProject}
+                  onSelectConversation={selectConversation}
+                  onInitialConversation={selectInitialConversation}
+                  onNewConversation={createNewConversation}
+                />
+              )}
+            </aside>
 
-        <ResizeHandle onMouseDown={onHandleDown(0)} />
+            <ResizeHandle onMouseDown={onHandleDown(0)} />
+          </>
+        )}
 
         <main className="relative flex-1 overflow-hidden" style={{ minWidth: widths[1] }}>
           <AnimatePresence mode="wait">

@@ -142,6 +142,7 @@
   "gallery.delete": "Move to Trash",
 
   "settings.title": "Settings",
+  "settings.sections": "Settings sections",
   "settings.general": "General Settings",
   "settings.generalDesc": "Interface preferences for Astro Studio",
   "settings.modelConfig": "Model Configuration",
@@ -162,8 +163,10 @@
   "settings.editUrl": "Edit image URL",
   "settings.model": "Model",
   "settings.modelDesc": "Choose which image generation model Astro Studio should use.",
+  "settings.currentModel": "Current model",
   "settings.providers": "Providers",
   "settings.providersDesc": "Custom service providers for the selected model",
+  "settings.providerWorkspace": "Provider workspace",
   "settings.providerName": "Provider name",
   "settings.providerNamePlaceholder": "Provider name",
   "settings.newProvider": "New Provider",

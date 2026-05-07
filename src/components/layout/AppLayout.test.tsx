@@ -41,4 +41,19 @@ describe("AppLayout", () => {
 
     expect(screen.getByTestId("conversation-sidebar")).toBeInTheDocument();
   });
+
+  it("collapses the conversation sidebar on settings routes", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/settings" element={<div>settings</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByText("settings")).toBeInTheDocument();
+  });
 });

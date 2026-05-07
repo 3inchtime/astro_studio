@@ -142,6 +142,7 @@
   "gallery.delete": "移入回收站",
 
   "settings.title": "设置",
+  "settings.sections": "设置分区",
   "settings.general": "通用设置",
   "settings.generalDesc": "Astro Studio 的界面偏好",
   "settings.modelConfig": "模型配置",
@@ -162,8 +163,10 @@
   "settings.editUrl": "编辑图片 URL",
   "settings.model": "模型",
   "settings.modelDesc": "选择 Astro Studio 使用的图像生成模型。",
+  "settings.currentModel": "当前模型",
   "settings.providers": "服务商配置",
   "settings.providersDesc": "当前模型的自定义服务商",
+  "settings.providerWorkspace": "服务商工作区",
   "settings.providerName": "服务商名称",
   "settings.providerNamePlaceholder": "服务商名称",
   "settings.newProvider": "新增服务商",

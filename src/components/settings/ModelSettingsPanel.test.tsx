@@ -68,17 +68,36 @@ describe("ModelSettingsPanel provider profiles", () => {
     renderPanel();
 
     expect(screen.getByText("settings.providers")).toBeInTheDocument();
+    expect(screen.getAllByText("settings.selectedModel", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("settings.providerName").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Select OpenAI Official provider" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Select Company Gateway provider" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Use Company Gateway provider" })).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("OpenAI Official")).toBeInTheDocument();
     expect(screen.getByDisplayValue("https://api.openai.com/v1")).toBeInTheDocument();
+  });
+
+  it("shows a separate provider workspace with a summary rail and editor pane", () => {
+    renderPanel();
+
+    expect(screen.getByText("settings.currentModel")).toBeInTheDocument();
+    expect(screen.getByText("settings.providerWorkspace")).toBeInTheDocument();
+    expect(screen.getByText("settings.newProvider")).toBeInTheDocument();
+    expect(screen.getByText("settings.endpointDesc")).toBeInTheDocument();
+    expect(screen.getByText("2 settings.providers")).toBeInTheDocument();
+    expect(screen.getByText("settings.activeProvider: OpenAI Official")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("OpenAI Official")).toBeInTheDocument();
+    expect(screen.getAllByText("settings.apiKey").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("settings.endpoint").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Delete OpenAI Official provider" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "settings.saveProvider" })).toBeInTheDocument();
   });
 
   it("routes provider actions through callbacks", () => {
     const props = renderPanel({ selectedProviderId: "provider-b" });
 
     fireEvent.click(screen.getByRole("button", { name: "settings.newProvider" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use Company Gateway provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.activateProvider" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete Company Gateway provider" }));
     fireEvent.change(screen.getByDisplayValue("Company Gateway"), {
       target: { value: "Renamed Gateway" },

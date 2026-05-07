@@ -103,8 +103,6 @@ function renderSettingsPage() {
       <SettingsPage />
     </MemoryRouter>,
   );
-
-  fireEvent.click(screen.getByRole("button", { name: "log.title" }));
 }
 
 async function clickModelCard(name: string) {
@@ -206,6 +204,8 @@ describe("SettingsPage logs", () => {
   it("shows the newest runtime logs at the top", async () => {
     renderSettingsPage();
 
+    fireEvent.click(screen.getByRole("button", { name: "log.title" }));
+
     const freshLog = await screen.findByText("fresh log");
     const olderLog = screen.getByText("older log");
 
@@ -214,8 +214,30 @@ describe("SettingsPage logs", () => {
     ).toBeTruthy();
   });
 
+  it("renders a top settings navigation and switches sections from it", async () => {
+    renderSettingsPage();
+
+    const settingsNav = screen.getByRole("navigation", { name: "settings.sections" });
+
+    expect(
+      within(settingsNav).getByRole("button", { name: "settings.general" }),
+    ).toHaveAttribute("aria-current", "page");
+
+    await act(async () => {
+      fireEvent.click(
+        within(settingsNav).getByRole("button", { name: "settings.modelConfig" }),
+      );
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "settings.modelConfig" }),
+    ).toBeInTheDocument();
+  });
+
   it("copies the visible runtime logs", async () => {
     renderSettingsPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "log.title" }));
 
     await screen.findByText("fresh log");
     fireEvent.click(screen.getByRole("button", { name: "log.copyRuntimeLogs" }));
@@ -253,6 +275,8 @@ describe("SettingsPage logs", () => {
     });
 
     renderSettingsPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "log.title" }));
 
     fireEvent.click(await screen.findByText("persisted failure"));
     fireEvent.click(screen.getByRole("button", { name: "log.copyLog" }));
@@ -296,6 +320,8 @@ describe("SettingsPage logs", () => {
     });
 
     renderSettingsPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "log.title" }));
 
     await screen.findByText("persisted failure");
     fireEvent.click(screen.getByRole("button", { name: "log.clearLogs" }));
@@ -421,8 +447,12 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    expect(await screen.findByText("OpenAI Official")).toBeInTheDocument();
-    expect(screen.getByText("Company Gateway")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Select OpenAI Official provider" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select Company Gateway provider" }),
+    ).toBeInTheDocument();
     expect(getModelProviderProfiles).toHaveBeenCalledWith("gpt-image-2");
   });
 
@@ -518,7 +548,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await screen.findByText("OpenAI Official");
+    await screen.findByRole("button", { name: "Select OpenAI Official provider" });
     fireEvent.click(screen.getByRole("button", { name: "Select Company Gateway provider" }));
     fireEvent.change(screen.getByDisplayValue("Company Gateway"), {
       target: { value: "Renamed Gateway" },
@@ -547,7 +577,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await screen.findByText("OpenAI Official");
+    await screen.findByRole("button", { name: "Select OpenAI Official provider" });
     fireEvent.click(screen.getByRole("button", { name: "settings.newProvider" }));
     await waitFor(() => {
       expect(createModelProviderProfile).toHaveBeenCalledWith("gpt-image-2", "New Provider");
@@ -560,10 +590,10 @@ describe("SettingsPage logs", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("button", { name: "Use New Provider provider" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "settings.activateProvider" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Select Company Gateway provider" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use Company Gateway provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.activateProvider" }));
     await waitFor(() =>
       expect(setActiveModelProvider).toHaveBeenCalledWith("gpt-image-2", "company-gateway"),
     );
@@ -621,7 +651,7 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await screen.findByText("OpenAI Official");
+    await screen.findByRole("button", { name: "Select OpenAI Official provider" });
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
     fireEvent.change(screen.getByDisplayValue("openai-key"), {
       target: { value: "pending-openai-key" },

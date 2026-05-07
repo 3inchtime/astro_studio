@@ -105,6 +105,7 @@
   "gallery.delete": "ゴミ箱へ移動",
 
   "settings.title": "設定",
+  "settings.sections": "設定セクション",
   "settings.general": "一般設定",
   "settings.generalDesc": "Astro Studio のインターフェース設定",
   "settings.modelConfig": "モデル設定",
@@ -141,6 +142,8 @@
   "settings.modelGenerateOnly": "生成のみ",
   "settings.modelSharedEndpoint": "共有エンドポイント",
   "settings.modelSeparateEndpoints": "個別エンドポイント",
+  "settings.currentModel": "現在のモデル",
+  "settings.providerWorkspace": "プロバイダーワークスペース",
   "settings.saveModel": "モデルを保存",
   "settings.saveUrl": "URL を保存",
   "settings.language": "言語",

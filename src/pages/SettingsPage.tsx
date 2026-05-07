@@ -53,9 +53,24 @@ const FONT_SIZE_LABEL_KEYS: Record<AppFontSize, string> = {
 };
 
 const SETTINGS_TABS = [
-  { id: "general", icon: SlidersHorizontal, labelKey: "settings.general" },
-  { id: "model", icon: Cpu, labelKey: "settings.modelConfig" },
-  { id: "logs", icon: FileText, labelKey: "log.title" },
+  {
+    id: "general",
+    icon: SlidersHorizontal,
+    labelKey: "settings.general",
+    descriptionKey: "settings.generalDesc",
+  },
+  {
+    id: "model",
+    icon: Cpu,
+    labelKey: "settings.modelConfig",
+    descriptionKey: "settings.modelConfigDesc",
+  },
+  {
+    id: "logs",
+    icon: FileText,
+    labelKey: "log.title",
+    descriptionKey: "log.liveDesc",
+  },
 ] as const;
 
 export default function SettingsPage() {
@@ -408,37 +423,68 @@ export default function SettingsPage() {
   }
 
   const totalPages = Math.ceil(totalLogs / pageSize);
+  const activeSection = SETTINGS_TABS.find((section) => section.id === activeTab) ?? SETTINGS_TABS[0];
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl p-6 md:p-8">
-        <motion.h2
+      <div className="mx-auto w-full max-w-[1320px] p-6 md:p-8">
+        <motion.header
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-7 text-[16px] font-semibold tracking-tight text-foreground"
+          className="mb-6 rounded-[14px] border border-border-subtle bg-surface px-5 py-5 shadow-card"
         >
-          {t("settings.title")}
-        </motion.h2>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-[18px] font-semibold tracking-tight text-foreground">
+                {t("settings.title")}
+              </h2>
+              <p className="mt-1.5 max-w-3xl text-[12px] leading-relaxed text-muted/65">
+                {t(activeSection.descriptionKey)}
+              </p>
+            </div>
+            <div className="rounded-full border border-border-subtle bg-subtle/30 px-3 py-1.5 text-[11px] font-medium text-muted/75">
+              {t(activeSection.labelKey)}
+            </div>
+          </div>
+        </motion.header>
 
-        {/* Tab header */}
-        <div className="mb-6 flex gap-1 rounded-[12px] border border-border-subtle bg-subtle/20 p-1">
-          {SETTINGS_TABS.map(({ id, icon: Icon, labelKey }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`relative flex-1 rounded-[10px] px-4 py-2 text-[12px] font-medium transition-all ${
-                activeTab === id
-                  ? "bg-surface text-foreground shadow-card"
-                  : "text-muted/60 hover:text-foreground"
-              }`}
-            >
-              <span className="flex items-center justify-center gap-1.5">
-                <Icon size={13} />
-                {t(labelKey)}
-              </span>
-            </button>
-          ))}
-        </div>
+        <nav
+          aria-label={t("settings.sections", { defaultValue: "Settings sections" })}
+          className="mb-6 grid gap-3 lg:grid-cols-3"
+        >
+          {SETTINGS_TABS.map(({ id, icon: Icon, labelKey, descriptionKey }) => {
+            const active = activeTab === id;
+
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-label={t(labelKey)}
+                aria-current={active ? "page" : undefined}
+                onClick={() => setActiveTab(id)}
+                className={`flex min-h-[88px] items-start gap-3 rounded-[14px] border px-4 py-4 text-left transition-all ${
+                  active
+                    ? "border-border bg-surface shadow-card"
+                    : "border-border-subtle bg-surface/70 hover:border-border hover:bg-surface"
+                }`}
+              >
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border ${
+                  active
+                    ? "border-primary/15 bg-primary/7 text-primary"
+                    : "border-border-subtle bg-subtle/35 text-muted"
+                }`}>
+                  <Icon size={16} strokeWidth={2} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-foreground">{t(labelKey)}</div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-muted/65">
+                    {t(descriptionKey)}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </nav>
 
         <AnimatePresence mode="wait">
           {activeTab === "general" ? (

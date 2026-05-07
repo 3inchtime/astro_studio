@@ -105,6 +105,7 @@
   "gallery.delete": "移至回收站",
 
   "settings.title": "設定",
+  "settings.sections": "設定分區",
   "settings.general": "一般設定",
   "settings.generalDesc": "Astro Studio 的介面偏好",
   "settings.modelConfig": "模型設定",
@@ -141,6 +142,8 @@
   "settings.modelGenerateOnly": "僅生成",
   "settings.modelSharedEndpoint": "共用端點",
   "settings.modelSeparateEndpoints": "獨立端點",
+  "settings.currentModel": "目前模型",
+  "settings.providerWorkspace": "服務商工作區",
   "settings.saveModel": "儲存模型",
   "settings.saveUrl": "儲存 URL",
   "settings.language": "語言",
