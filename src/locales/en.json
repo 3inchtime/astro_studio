@@ -1,5 +1,6 @@
 {
   "nav.generate": "Generate",
+  "nav.projects": "Projects",
   "nav.gallery": "Gallery",
   "nav.favorites": "Favorites",
   "nav.trash": "Trash",
@@ -31,6 +32,8 @@
   "sidebar.deleteProjectConfirm": "Delete this project and move its conversations to Trash?",
   "sidebar.conversationActions": "Conversation actions",
   "sidebar.projectActions": "Project actions",
+
+  "projects.directory": "Projects",
 
   "generate.placeholder": "Describe the image you want to generate...",
   "generate.emptyTitle": "What will you create?",

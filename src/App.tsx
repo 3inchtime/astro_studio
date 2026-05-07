@@ -28,6 +28,8 @@ function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/generate" element={<GeneratePage />} />
+          <Route path="/projects" element={<GeneratePage />} />
+          <Route path="/projects/:projectId" element={<GeneratePage />} />
           <Route path="/gallery" element={<GalleryPage />} />
           <Route path="/trash" element={<TrashPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
