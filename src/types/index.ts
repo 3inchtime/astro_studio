@@ -208,6 +208,18 @@ export interface EndpointSettings {
   edit_url: string;
 }
 
+export interface ModelProviderProfile {
+  id: string;
+  name: string;
+  api_key: string;
+  endpoint_settings: EndpointSettings;
+}
+
+export interface ModelProviderProfilesState {
+  active_provider_id: string;
+  profiles: ModelProviderProfile[];
+}
+
 export interface ModelConnectionDefaults {
   baseUrl: string;
   generationUrl: string;
