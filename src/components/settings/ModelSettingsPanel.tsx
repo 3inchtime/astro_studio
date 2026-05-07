@@ -1,7 +1,11 @@
 import { motion } from "framer-motion";
-import { Check, Cpu, Eye, EyeOff, Globe, Key } from "lucide-react";
+import { Check, Cpu, Eye, EyeOff, Globe, Plus, Trash2 } from "lucide-react";
 import type { TFunction } from "i18next";
-import type { EndpointMode, ImageModel } from "../../types";
+import type {
+  EndpointMode,
+  ImageModel,
+  ModelProviderProfilesState,
+} from "../../types";
 import {
   IMAGE_MODEL_CATALOG,
   getImageModelCatalogEntry,
@@ -19,55 +23,66 @@ interface ModelSettingsPanelProps {
   t: TFunction;
   imageModel: ImageModel;
   modelSaved: boolean;
-  apiKey: string;
-  displayKey: string;
   showKey: boolean;
-  keySaved: boolean;
-  endpointMode: EndpointMode;
-  baseUrl: string;
-  generationUrl: string;
-  editUrl: string;
-  urlSaved: boolean;
+  providerState: ModelProviderProfilesState;
+  selectedProviderId: string;
+  providerSaved: boolean;
   onSelectImageModel: (model: ImageModel) => void;
   onSaveModel: () => void;
-  onApiKeyChange: (apiKey: string) => void;
+  onSelectProvider: (providerId: string) => void;
+  onProviderNameChange: (name: string) => void;
+  onProviderApiKeyChange: (apiKey: string) => void;
   onShowKeyChange: (showKey: boolean) => void;
-  onSaveKey: () => void;
-  onEndpointModeChange: (mode: EndpointMode) => void;
-  onBaseUrlChange: (url: string) => void;
-  onGenerationUrlChange: (url: string) => void;
-  onEditUrlChange: (url: string) => void;
-  onSaveUrl: () => void;
+  onProviderEndpointModeChange: (mode: EndpointMode) => void;
+  onProviderBaseUrlChange: (url: string) => void;
+  onProviderGenerationUrlChange: (url: string) => void;
+  onProviderEditUrlChange: (url: string) => void;
+  onCreateProvider: () => void;
+  onDeleteProvider: (providerId: string) => void;
+  onSetActiveProvider: (providerId: string) => void;
+  onSaveProvider: () => void;
 }
 
 function formatProviderName(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
+function maskKey(key: string): string {
+  if (key.length <= 8) return "sk-****";
+  return key.slice(0, 3) + "..." + key.slice(-4);
+}
+
 export function ModelSettingsPanel({
   t,
   imageModel,
   modelSaved,
-  apiKey,
-  displayKey,
   showKey,
-  keySaved,
-  endpointMode,
-  baseUrl,
-  generationUrl,
-  editUrl,
-  urlSaved,
+  providerState,
+  selectedProviderId,
+  providerSaved,
   onSelectImageModel,
   onSaveModel,
-  onApiKeyChange,
+  onSelectProvider,
+  onProviderNameChange,
+  onProviderApiKeyChange,
   onShowKeyChange,
-  onSaveKey,
-  onEndpointModeChange,
-  onBaseUrlChange,
-  onGenerationUrlChange,
-  onEditUrlChange,
-  onSaveUrl,
+  onProviderEndpointModeChange,
+  onProviderBaseUrlChange,
+  onProviderGenerationUrlChange,
+  onProviderEditUrlChange,
+  onCreateProvider,
+  onDeleteProvider,
+  onSetActiveProvider,
+  onSaveProvider,
 }: ModelSettingsPanelProps) {
+  const selectedProvider =
+    providerState.profiles.find((provider) => provider.id === selectedProviderId) ??
+    providerState.profiles[0];
+  const endpointSettings = selectedProvider.endpoint_settings;
+  const apiKey = selectedProvider.api_key;
+  const displayKey = showKey ? apiKey : (apiKey ? maskKey(apiKey) : "");
+  const canDeleteProvider = providerState.profiles.length > 1;
+
   return (
     <motion.div
       key="model"
@@ -167,124 +182,213 @@ export function ModelSettingsPanel({
             </div>
           </div>
           <div className="border-t border-border-subtle" />
-          <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
+          <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start lg:gap-6">
             <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
-                <Key size={14} className="text-primary" strokeWidth={2} />
-              </div>
-              <div>
-                <h4 className="text-[13px] font-semibold text-foreground">{t("settings.apiKey")}</h4>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.apiKeyDesc")}</p>
-              </div>
-            </div>
-            <div className="flex min-w-0 flex-col gap-2 lg:flex-row">
-              <div className="relative min-w-0 flex-1">
-                <input
-                  type={showKey ? "text" : "password"}
-                  value={displayKey}
-                  onChange={(e) => onApiKeyChange(e.target.value)}
-                  onFocus={() => { if (!showKey) onShowKeyChange(true); }}
-                  placeholder={t("settings.apiKeyPlaceholder")}
-                  className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => onShowKeyChange(!showKey)}
-                  title={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                  aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                  className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
-                >
-                  {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
-                </button>
-              </div>
-              <motion.button
-                type="button"
-                onClick={onSaveKey}
-                disabled={!apiKey.trim()}
-                whileTap={{ scale: 0.97 }}
-                className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground disabled:opacity-30 lg:min-w-[104px]"
-              >
-                {keySaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveKey")}
-              </motion.button>
-            </div>
-          </div>
-          <div className="border-t border-border-subtle" />
-          <div className="grid grid-cols-[128px_minmax(0,1fr)] items-start gap-4 p-5 sm:grid-cols-[220px_minmax(0,1fr)] sm:gap-6">
-            <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
                 <Globe size={14} className="text-primary" strokeWidth={2} />
               </div>
               <div>
-                <h4 className="text-[13px] font-semibold text-foreground">{t("settings.endpoint")}</h4>
+                <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providers")}</h4>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.providersDesc")}</p>
               </div>
             </div>
-            <div className="min-w-0 space-y-3">
-              <div className="grid gap-2 rounded-[10px] border border-border-subtle bg-subtle/20 p-1 sm:grid-cols-2">
-                {(["base_url", "full_url"] as EndpointMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onEndpointModeChange(mode)}
-                    className={`h-[34px] rounded-[8px] px-3 text-[12px] font-medium transition-all ${
-                      endpointMode === mode
-                        ? "bg-surface text-foreground shadow-card"
-                        : "text-muted/60 hover:text-foreground"
-                    }`}
-                  >
-                    {t(mode === "base_url" ? "settings.endpointBaseUrlMode" : "settings.endpointFullUrlMode")}
-                  </button>
-                ))}
+            <div className="grid min-w-0 gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+              <div className="min-w-0 space-y-2">
+                <button
+                  type="button"
+                  onClick={onCreateProvider}
+                  aria-label={t("settings.newProvider")}
+                  className="flex h-[36px] w-full items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+                >
+                  <Plus size={13} />
+                  {t("settings.newProvider")}
+                </button>
+                <div className="space-y-2">
+                  {providerState.profiles.map((provider) => {
+                    const selected = provider.id === selectedProvider.id;
+                    const active = provider.id === providerState.active_provider_id;
+
+                    return (
+                      <div
+                        key={provider.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Select ${provider.name} provider`}
+                        aria-pressed={selected}
+                        onClick={() => onSelectProvider(provider.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onSelectProvider(provider.id);
+                          }
+                        }}
+                        className={`rounded-[10px] border p-3 text-left transition-all ${
+                          selected
+                            ? "border-primary/35 bg-primary/6 shadow-card"
+                            : "border-border-subtle bg-subtle/20 hover:border-border hover:bg-subtle/35"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-[12px] font-semibold text-foreground">{provider.name}</p>
+                            <p className="mt-1 truncate font-mono text-[10.5px] text-muted/55">
+                              {provider.api_key ? maskKey(provider.api_key) : t("settings.noApiKey")}
+                            </p>
+                          </div>
+                          {active && (
+                            <span className="shrink-0 rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                              {t("settings.activeProvider")}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          {!active && (
+                            <button
+                              type="button"
+                              aria-label={`Use ${provider.name} provider`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onSetActiveProvider(provider.id);
+                              }}
+                              className="flex h-[28px] items-center justify-center gap-1 rounded-[7px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+                            >
+                              <Check size={12} />
+                              {t("settings.useProvider")}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Delete ${provider.name} provider`}
+                            disabled={!canDeleteProvider}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDeleteProvider(provider.id);
+                            }}
+                            className="flex h-[28px] w-[28px] items-center justify-center rounded-[7px] border border-border-subtle bg-surface text-muted/55 transition-all hover:border-border hover:text-foreground disabled:opacity-30"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <p className="text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
-                <p className="text-[11px] leading-relaxed text-muted/55">{t("settings.endpointModeHint")}</p>
-              </div>
-
-              {endpointMode === "base_url" ? (
-                <input
-                  type="text"
-                  value={baseUrl}
-                  onChange={(e) => onBaseUrlChange(e.target.value)}
-                  placeholder={defaultBaseUrlForModel(imageModel)}
-                  className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
-                />
-              ) : (
-                <div className="grid gap-2">
+              <div className="min-w-0 space-y-3 rounded-[10px] border border-border-subtle bg-subtle/20 p-3">
+                <div className="grid gap-2 sm:grid-cols-2">
                   <label className="grid gap-1.5">
-                    <span className="text-[11px] font-medium text-muted/70">{t("settings.generationUrl")}</span>
+                    <span className="text-[11px] font-medium text-muted/70">{t("settings.providerName")}</span>
                     <input
                       type="text"
-                      value={generationUrl}
-                      onChange={(e) => onGenerationUrlChange(e.target.value)}
-                      placeholder={defaultGenerationUrlForModel(imageModel)}
-                      className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                      value={selectedProvider.name}
+                      onChange={(e) => onProviderNameChange(e.target.value)}
+                      placeholder={t("settings.providerNamePlaceholder")}
+                      className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                     />
                   </label>
-                  {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
+                  <label className="grid gap-1.5">
+                    <span className="text-[11px] font-medium text-muted/70">{t("settings.apiKey")}</span>
+                    <div className="relative min-w-0">
+                      <input
+                        type={showKey ? "text" : "password"}
+                        value={displayKey}
+                        onChange={(e) => onProviderApiKeyChange(e.target.value)}
+                        onFocus={() => { if (!showKey) onShowKeyChange(true); }}
+                        placeholder={t("settings.apiKeyPlaceholder")}
+                        className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => onShowKeyChange(!showKey)}
+                        title={showKey ? t("settings.hideKey") : t("settings.showKey")}
+                        aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
+                        className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
+                      >
+                        {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="grid gap-2 rounded-[10px] border border-border-subtle bg-surface p-1 sm:grid-cols-2">
+                  {(["base_url", "full_url"] as EndpointMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => onProviderEndpointModeChange(mode)}
+                      className={`h-[34px] rounded-[8px] px-3 text-[12px] font-medium transition-all ${
+                        endpointSettings.mode === mode
+                          ? "bg-subtle text-foreground shadow-card"
+                          : "text-muted/60 hover:text-foreground"
+                      }`}
+                    >
+                      {t(mode === "base_url" ? "settings.endpointBaseUrlMode" : "settings.endpointFullUrlMode")}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
+                  <p className="text-[11px] leading-relaxed text-muted/55">{t("settings.endpointModeHint")}</p>
+                </div>
+
+                {endpointSettings.mode === "base_url" ? (
+                  <input
+                    type="text"
+                    value={endpointSettings.base_url}
+                    onChange={(e) => onProviderBaseUrlChange(e.target.value)}
+                    placeholder={defaultBaseUrlForModel(imageModel)}
+                    className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                  />
+                ) : (
+                  <div className="grid gap-2">
                     <label className="grid gap-1.5">
-                      <span className="text-[11px] font-medium text-muted/70">{t("settings.editUrl")}</span>
+                      <span className="text-[11px] font-medium text-muted/70">{t("settings.generationUrl")}</span>
                       <input
                         type="text"
-                        value={editUrl}
-                        onChange={(e) => onEditUrlChange(e.target.value)}
-                        placeholder={defaultEditUrlForModel(imageModel)}
-                        className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                        value={endpointSettings.generation_url}
+                        onChange={(e) => onProviderGenerationUrlChange(e.target.value)}
+                        placeholder={defaultGenerationUrlForModel(imageModel)}
+                        className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
                       />
                     </label>
-                  )}
-                </div>
-              )}
+                    {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
+                      <label className="grid gap-1.5">
+                        <span className="text-[11px] font-medium text-muted/70">{t("settings.editUrl")}</span>
+                        <input
+                          type="text"
+                          value={endpointSettings.edit_url}
+                          onChange={(e) => onProviderEditUrlChange(e.target.value)}
+                          placeholder={defaultEditUrlForModel(imageModel)}
+                          className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                        />
+                      </label>
+                    )}
+                  </div>
+                )}
 
-              <div className="flex justify-end">
-                <motion.button
-                  type="button"
-                  onClick={onSaveUrl}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
-                >
-                  {urlSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveUrl")}
-                </motion.button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {selectedProvider.id !== providerState.active_provider_id && (
+                    <motion.button
+                      type="button"
+                      onClick={() => onSetActiveProvider(selectedProvider.id)}
+                      whileTap={{ scale: 0.97 }}
+                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+                    >
+                      <Check size={13} />
+                      {t("settings.activateProvider")}
+                    </motion.button>
+                  )}
+                  <motion.button
+                    type="button"
+                    onClick={onSaveProvider}
+                    whileTap={{ scale: 0.97 }}
+                    className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
+                  >
+                    {providerSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveProvider")}
+                  </motion.button>
+                </div>
               </div>
             </div>
           </div>
