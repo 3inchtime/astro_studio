@@ -137,7 +137,7 @@ fn current_image_model(db: &Database) -> Result<&'static str, String> {
 
 fn read_endpoint_settings(db: &Database) -> Result<EndpointSettings, String> {
     let model = current_image_model(db)?;
-    read_legacy_model_endpoint_settings(db, model)
+    read_model_endpoint_settings(db, model)
 }
 
 fn read_legacy_model_endpoint_settings(
@@ -183,10 +183,19 @@ fn resolve_image_endpoint_url_for_model(
     model: &str,
     kind: ImageEndpointKind,
 ) -> Result<String, String> {
-    let settings = read_legacy_model_endpoint_settings(db, model)?;
+    let settings = read_model_endpoint_settings(db, model)?;
     Ok(image_endpoint_url_for_model_settings(
         model, &settings, kind,
     ))
+}
+
+fn read_model_api_key(db: &Database, model: &str) -> Result<Option<String>, String> {
+    let profile = active_provider_profile_for_model(db, model)?;
+    Ok(Some(profile.api_key).filter(|key| !key.trim().is_empty()))
+}
+
+fn read_model_endpoint_settings(db: &Database, model: &str) -> Result<EndpointSettings, String> {
+    Ok(active_provider_profile_for_model(db, model)?.endpoint_settings)
 }
 
 fn read_legacy_model_api_key(db: &Database, model: &str) -> Result<Option<String>, String> {
@@ -367,7 +376,6 @@ fn save_model_provider_profiles_state(
     Ok(state)
 }
 
-#[allow(dead_code)]
 fn active_provider_profile_for_model(
     db: &Database,
     model: &str,
@@ -381,10 +389,19 @@ fn active_provider_profile_for_model(
 }
 
 fn save_model_api_key_value(db: &Database, model: &str, key: &str) -> Result<(), String> {
+    let normalized_model = normalize_image_model(model);
     let key = normalize_api_key_for_storage(key);
-    set_model_setting(db, model, SETTING_API_KEY, &key)?;
-    if normalize_image_model(model) == ENGINE_GPT_IMAGE_2 {
+    let mut state = read_model_provider_profiles_state(db, normalized_model)?;
+    for profile in &mut state.profiles {
+        if profile.id == state.active_provider_id {
+            profile.api_key = key.clone();
+        }
+    }
+    save_model_provider_profiles_state(db, normalized_model, state)?;
+
+    if normalized_model == ENGINE_GPT_IMAGE_2 {
         db.set_setting(SETTING_API_KEY, &key)?;
+        set_model_setting(db, normalized_model, SETTING_API_KEY, &key)?;
     }
     Ok(())
 }
@@ -397,33 +414,53 @@ fn save_model_endpoint_settings_value(
     generation_url: &str,
     edit_url: &str,
 ) -> Result<(), String> {
-    let defaults = default_endpoint_settings_for_model(model);
     let normalized_model = normalize_image_model(model);
-    let mode = normalize_endpoint_mode(mode);
-    let base_url = endpoint_value_or_default(Some(base_url.to_string()), &defaults.base_url);
-    let generation_url =
-        endpoint_value_or_default(Some(generation_url.to_string()), &defaults.generation_url);
-    let edit_url = if is_gemini_model(normalized_model) {
-        generation_url.clone()
-    } else {
-        endpoint_value_or_default(Some(edit_url.to_string()), &defaults.edit_url)
-    };
-
-    set_model_setting(db, normalized_model, SETTING_ENDPOINT_MODE, mode)?;
-    set_model_setting(db, normalized_model, SETTING_BASE_URL, &base_url)?;
-    set_model_setting(
-        db,
+    let endpoint_settings = normalize_provider_endpoint_settings(
         normalized_model,
-        SETTING_GENERATION_URL,
-        &generation_url,
-    )?;
-    set_model_setting(db, normalized_model, SETTING_EDIT_URL, &edit_url)?;
+        &EndpointSettings {
+            mode: mode.to_string(),
+            base_url: base_url.to_string(),
+            generation_url: generation_url.to_string(),
+            edit_url: edit_url.to_string(),
+        },
+    );
+    let mut state = read_model_provider_profiles_state(db, normalized_model)?;
+    for profile in &mut state.profiles {
+        if profile.id == state.active_provider_id {
+            profile.endpoint_settings = endpoint_settings.clone();
+        }
+    }
+    save_model_provider_profiles_state(db, normalized_model, state)?;
 
     if normalized_model == ENGINE_GPT_IMAGE_2 {
-        db.set_setting(SETTING_ENDPOINT_MODE, mode)?;
-        db.set_setting(SETTING_BASE_URL, &base_url)?;
-        db.set_setting(SETTING_GENERATION_URL, &generation_url)?;
-        db.set_setting(SETTING_EDIT_URL, &edit_url)?;
+        db.set_setting(SETTING_ENDPOINT_MODE, &endpoint_settings.mode)?;
+        db.set_setting(SETTING_BASE_URL, &endpoint_settings.base_url)?;
+        db.set_setting(SETTING_GENERATION_URL, &endpoint_settings.generation_url)?;
+        db.set_setting(SETTING_EDIT_URL, &endpoint_settings.edit_url)?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_ENDPOINT_MODE,
+            &endpoint_settings.mode,
+        )?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_BASE_URL,
+            &endpoint_settings.base_url,
+        )?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_GENERATION_URL,
+            &endpoint_settings.generation_url,
+        )?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_EDIT_URL,
+            &endpoint_settings.edit_url,
+        )?;
     }
 
     Ok(())
@@ -626,6 +663,83 @@ mod tests {
         drop(db);
         remove_temp_test_db(db_path);
     }
+
+    #[test]
+    fn legacy_api_key_helpers_update_active_provider_profile() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-key-compat-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-b".to_string(),
+            profiles: vec![
+                ModelProviderProfile {
+                    id: "provider-a".to_string(),
+                    name: "Provider A".to_string(),
+                    api_key: "sk-a".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+                },
+                ModelProviderProfile {
+                    id: "provider-b".to_string(),
+                    name: "Provider B".to_string(),
+                    api_key: "sk-b".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+                },
+            ],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, "Bearer sk-active").unwrap();
+
+        let saved = read_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2).unwrap();
+        assert_eq!(
+            read_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
+            Some("sk-active".to_string())
+        );
+        assert_eq!(saved.profiles[0].api_key, "sk-a");
+        assert_eq!(saved.profiles[1].api_key, "sk-active");
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn endpoint_resolution_uses_active_provider_profile() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-endpoint-compat-test");
+        let mut provider_a_settings = default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2);
+        provider_a_settings.base_url = "https://provider-a.example/v1".to_string();
+        let mut provider_b_settings = default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2);
+        provider_b_settings.base_url = "https://provider-b.example/v1".to_string();
+
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-b".to_string(),
+            profiles: vec![
+                ModelProviderProfile {
+                    id: "provider-a".to_string(),
+                    name: "Provider A".to_string(),
+                    api_key: "sk-a".to_string(),
+                    endpoint_settings: provider_a_settings,
+                },
+                ModelProviderProfile {
+                    id: "provider-b".to_string(),
+                    name: "Provider B".to_string(),
+                    api_key: "sk-b".to_string(),
+                    endpoint_settings: provider_b_settings,
+                },
+            ],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        assert_eq!(
+            resolve_image_endpoint_url_for_model(
+                &db,
+                ENGINE_GPT_IMAGE_2,
+                ImageEndpointKind::Generate,
+            )
+            .unwrap(),
+            "https://provider-b.example/v1/images/generations"
+        );
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
 }
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -660,14 +774,14 @@ fn save_api_key(db: tauri::State<'_, Database>, key: String) -> Result<(), Strin
 #[tauri::command]
 fn get_api_key(db: tauri::State<'_, Database>) -> Result<Option<String>, String> {
     let model = current_image_model(db.inner())?;
-    read_legacy_model_api_key(db.inner(), model)
+    read_model_api_key(db.inner(), model)
 }
 
 #[tauri::command]
 fn save_base_url(db: tauri::State<'_, Database>, url: String) -> Result<(), String> {
     log::info!("Saving base URL: {}", url);
     let model = current_image_model(db.inner())?;
-    let settings = read_legacy_model_endpoint_settings(db.inner(), model)?;
+    let settings = read_model_endpoint_settings(db.inner(), model)?;
     save_model_endpoint_settings_value(
         db.inner(),
         model,
@@ -680,7 +794,7 @@ fn save_base_url(db: tauri::State<'_, Database>, url: String) -> Result<(), Stri
 
 #[tauri::command]
 fn get_base_url(db: tauri::State<'_, Database>) -> Result<String, String> {
-    Ok(read_legacy_model_endpoint_settings(db.inner(), current_image_model(db.inner())?)?.base_url)
+    Ok(read_model_endpoint_settings(db.inner(), current_image_model(db.inner())?)?.base_url)
 }
 
 #[tauri::command]
@@ -730,7 +844,7 @@ fn get_model_api_key(
     db: tauri::State<'_, Database>,
     model: String,
 ) -> Result<Option<String>, String> {
-    read_legacy_model_api_key(db.inner(), &model)
+    read_model_api_key(db.inner(), &model)
 }
 
 #[tauri::command]
@@ -747,7 +861,7 @@ fn get_model_endpoint_settings(
     db: tauri::State<'_, Database>,
     model: String,
 ) -> Result<EndpointSettings, String> {
-    read_legacy_model_endpoint_settings(db.inner(), &model)
+    read_model_endpoint_settings(db.inner(), &model)
 }
 
 #[tauri::command]
@@ -767,6 +881,87 @@ fn save_model_endpoint_settings(
         &generation_url,
         &edit_url,
     )
+}
+
+#[tauri::command]
+fn get_model_provider_profiles(
+    db: tauri::State<'_, Database>,
+    model: String,
+) -> Result<ModelProviderProfilesState, String> {
+    read_model_provider_profiles_state(db.inner(), &model)
+}
+
+#[tauri::command]
+fn save_model_provider_profiles(
+    db: tauri::State<'_, Database>,
+    model: String,
+    active_provider_id: String,
+    profiles: Vec<ModelProviderProfile>,
+) -> Result<ModelProviderProfilesState, String> {
+    save_model_provider_profiles_state(
+        db.inner(),
+        &model,
+        ModelProviderProfilesState {
+            active_provider_id,
+            profiles,
+        },
+    )
+}
+
+#[tauri::command]
+fn create_model_provider_profile(
+    db: tauri::State<'_, Database>,
+    model: String,
+    name: String,
+) -> Result<ModelProviderProfilesState, String> {
+    let normalized_model = normalize_image_model(&model);
+    let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    state.active_provider_id = provider_id.clone();
+    state.profiles.push(ModelProviderProfile {
+        id: provider_id,
+        name: normalize_provider_name(&name),
+        api_key: String::new(),
+        endpoint_settings: default_endpoint_settings_for_model(normalized_model),
+    });
+    save_model_provider_profiles_state(db.inner(), normalized_model, state)
+}
+
+#[tauri::command]
+fn delete_model_provider_profile(
+    db: tauri::State<'_, Database>,
+    model: String,
+    provider_id: String,
+) -> Result<ModelProviderProfilesState, String> {
+    let normalized_model = normalize_image_model(&model);
+    let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
+    if state.profiles.len() <= 1 {
+        return Err("At least one provider profile is required.".to_string());
+    }
+    state.profiles.retain(|profile| profile.id != provider_id);
+    if !state
+        .profiles
+        .iter()
+        .any(|profile| profile.id == state.active_provider_id)
+    {
+        state.active_provider_id = state.profiles[0].id.clone();
+    }
+    save_model_provider_profiles_state(db.inner(), normalized_model, state)
+}
+
+#[tauri::command]
+fn set_active_model_provider(
+    db: tauri::State<'_, Database>,
+    model: String,
+    provider_id: String,
+) -> Result<ModelProviderProfilesState, String> {
+    let normalized_model = normalize_image_model(&model);
+    let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
+    if !state.profiles.iter().any(|profile| profile.id == provider_id) {
+        return Err("Provider profile not found.".to_string());
+    }
+    state.active_provider_id = provider_id;
+    save_model_provider_profiles_state(db.inner(), normalized_model, state)
 }
 
 #[tauri::command]
@@ -1369,8 +1564,9 @@ async fn generate_image(
         }).to_string()),
         None,
     );
-    let api_key = read_legacy_model_api_key(db.inner(), &model)?
-        .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
+    let api_key = read_model_api_key(db.inner(), &model)?.ok_or_else(|| {
+        "API key not set for the active provider. Please set it in Settings.".to_string()
+    })?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Generate)?;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -1596,8 +1792,9 @@ async fn edit_image(
         ),
         None,
     );
-    let api_key = read_legacy_model_api_key(db.inner(), &model)?
-        .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
+    let api_key = read_model_api_key(db.inner(), &model)?.ok_or_else(|| {
+        "API key not set for the active provider. Please set it in Settings.".to_string()
+    })?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Edit)?;
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -2802,6 +2999,11 @@ pub fn run() {
             save_endpoint_settings,
             get_model_endpoint_settings,
             save_model_endpoint_settings,
+            get_model_provider_profiles,
+            save_model_provider_profiles,
+            create_model_provider_profile,
+            delete_model_provider_profile,
+            set_active_model_provider,
             get_font_size,
             save_font_size,
             get_image_model,
