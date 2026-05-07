@@ -154,4 +154,67 @@ describe("ProjectsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("projectDialog.createError");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("renders an empty state when there are no user-facing projects", async () => {
+    getProjects.mockResolvedValue([
+      {
+        id: "default",
+        name: "Default Project",
+        created_at: "",
+        updated_at: "",
+        archived_at: null,
+        pinned_at: null,
+        deleted_at: null,
+        conversation_count: 2,
+        image_count: 5,
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("projects.emptyTitle")).toBeInTheDocument();
+    expect(screen.getByText("projects.emptyHint")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "sidebar.newProject" }).length).toBeGreaterThan(0);
+  });
+
+  it("renders a load error when projects fail to load", async () => {
+    getProjects.mockRejectedValue(new Error("failed"));
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("projects.loadError")).toBeInTheDocument();
+  });
+
+  it("renders a pinned marker for pinned projects", async () => {
+    getProjects.mockResolvedValue([
+      {
+        id: "project-1",
+        name: "Brand Storyboards",
+        created_at: "",
+        updated_at: "2026-05-07T01:00:00Z",
+        archived_at: null,
+        pinned_at: "2026-05-07T01:00:00Z",
+        deleted_at: null,
+        conversation_count: 12,
+        image_count: 86,
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
+    expect(screen.getByText("projects.pinned")).toBeInTheDocument();
+  });
 });
