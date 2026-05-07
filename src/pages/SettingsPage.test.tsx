@@ -7,14 +7,15 @@ const getFontSize = vi.fn();
 const getImageModel = vi.fn();
 const getLogSettings = vi.fn();
 const getLogs = vi.fn();
-const getModelApiKey = vi.fn();
-const getModelEndpointSettings = vi.fn();
+const getModelProviderProfiles = vi.fn();
 const getRuntimeLogs = vi.fn();
 const getTrashSettings = vi.fn();
 const onRuntimeLog = vi.fn();
 const clearLogs = vi.fn();
-const saveModelApiKey = vi.fn();
-const saveModelEndpointSettings = vi.fn();
+const saveModelProviderProfiles = vi.fn();
+const createModelProviderProfile = vi.fn();
+const deleteModelProviderProfile = vi.fn();
+const setActiveModelProvider = vi.fn();
 const saveImageModel = vi.fn();
 
 vi.mock("react-i18next", () => ({
@@ -34,21 +35,67 @@ vi.mock("../lib/api", () => ({
   getImageModel: (...args: unknown[]) => getImageModel(...args),
   getLogs: (...args: unknown[]) => getLogs(...args),
   getLogSettings: (...args: unknown[]) => getLogSettings(...args),
-  getModelApiKey: (...args: unknown[]) => getModelApiKey(...args),
-  getModelEndpointSettings: (...args: unknown[]) =>
-    getModelEndpointSettings(...args),
+  getModelProviderProfiles: (...args: unknown[]) => getModelProviderProfiles(...args),
   getRuntimeLogs: (...args: unknown[]) => getRuntimeLogs(...args),
   getTrashSettings: (...args: unknown[]) => getTrashSettings(...args),
   onRuntimeLog: (...args: unknown[]) => onRuntimeLog(...args),
   readLogResponseFile: vi.fn(),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
   saveFontSize: vi.fn(),
-  saveModelApiKey: (...args: unknown[]) => saveModelApiKey(...args),
-  saveModelEndpointSettings: (...args: unknown[]) =>
-    saveModelEndpointSettings(...args),
+  saveModelProviderProfiles: (...args: unknown[]) => saveModelProviderProfiles(...args),
+  createModelProviderProfile: (...args: unknown[]) => createModelProviderProfile(...args),
+  deleteModelProviderProfile: (...args: unknown[]) => deleteModelProviderProfile(...args),
+  setActiveModelProvider: (...args: unknown[]) => setActiveModelProvider(...args),
   saveLogSettings: vi.fn(),
   saveTrashSettings: vi.fn(),
 }));
+
+const openAiProviderState = {
+  active_provider_id: "openai-official",
+  profiles: [
+    {
+      id: "openai-official",
+      name: "OpenAI Official",
+      api_key: "openai-key",
+      endpoint_settings: {
+        mode: "base_url",
+        base_url: "https://api.openai.com/v1",
+        generation_url: "https://api.openai.com/v1/images/generations",
+        edit_url: "https://api.openai.com/v1/images/edits",
+      },
+    },
+    {
+      id: "company-gateway",
+      name: "Company Gateway",
+      api_key: "gateway-key",
+      endpoint_settings: {
+        mode: "full_url",
+        base_url: "https://gateway.example/v1",
+        generation_url: "https://gateway.example/generate",
+        edit_url: "https://gateway.example/edit",
+      },
+    },
+  ],
+} as const;
+
+const geminiProviderState = {
+  active_provider_id: "gemini-official",
+  profiles: [
+    {
+      id: "gemini-official",
+      name: "Gemini Official",
+      api_key: "gemini-key",
+      endpoint_settings: {
+        mode: "base_url",
+        base_url: "https://generativelanguage.googleapis.com/v1beta/models",
+        generation_url:
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
+        edit_url:
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
+      },
+    },
+  ],
+} as const;
 
 function renderSettingsPage() {
   render(
@@ -87,35 +134,47 @@ describe("SettingsPage logs", () => {
     getImageModel.mockReset();
     getLogSettings.mockReset();
     getLogs.mockReset();
-    getModelApiKey.mockReset();
-    getModelEndpointSettings.mockReset();
+    getModelProviderProfiles.mockReset();
     getRuntimeLogs.mockReset();
     getTrashSettings.mockReset();
     onRuntimeLog.mockReset();
     saveImageModel.mockReset();
-    saveModelApiKey.mockReset();
-    saveModelEndpointSettings.mockReset();
+    saveModelProviderProfiles.mockReset();
+    createModelProviderProfile.mockReset();
+    deleteModelProviderProfile.mockReset();
+    setActiveModelProvider.mockReset();
     writeText.mockReset();
 
     clearLogs.mockResolvedValue(1);
-    getModelApiKey.mockImplementation(async (model: string) =>
-      model === "nano-banana" ? "gemini-key" : "",
+    getModelProviderProfiles.mockImplementation(async (model: string) =>
+      model === "nano-banana" ? geminiProviderState : openAiProviderState,
     );
-    getModelEndpointSettings.mockImplementation(async (model: string) => ({
-      mode: "base_url",
-      base_url:
-        model === "nano-banana"
-          ? "https://generativelanguage.googleapis.com/v1beta/models"
-          : "https://api.openai.com/v1",
-      generation_url:
-        model === "nano-banana"
-          ? "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
-          : "https://api.openai.com/v1/images/generations",
-      edit_url:
-        model === "nano-banana"
-          ? "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
-          : "https://api.openai.com/v1/images/edits",
-    }));
+    saveModelProviderProfiles.mockImplementation(async (_model: string, state: unknown) => state);
+    createModelProviderProfile.mockResolvedValue({
+      active_provider_id: "new-provider",
+      profiles: [
+        ...openAiProviderState.profiles,
+        {
+          id: "new-provider",
+          name: "New Provider",
+          api_key: "",
+          endpoint_settings: {
+            mode: "base_url",
+            base_url: "https://api.openai.com/v1",
+            generation_url: "https://api.openai.com/v1/images/generations",
+            edit_url: "https://api.openai.com/v1/images/edits",
+          },
+        },
+      ],
+    });
+    deleteModelProviderProfile.mockResolvedValue({
+      active_provider_id: "openai-official",
+      profiles: [openAiProviderState.profiles[0]],
+    });
+    setActiveModelProvider.mockResolvedValue({
+      ...openAiProviderState,
+      active_provider_id: "company-gateway",
+    });
     getFontSize.mockResolvedValue("medium");
     getImageModel.mockResolvedValue("gpt-image-2");
     getLogSettings.mockResolvedValue({ enabled: true, retention_days: 7 });
@@ -353,7 +412,7 @@ describe("SettingsPage logs", () => {
     consoleError.mockRestore();
   });
 
-  it("loads model-specific credentials when switching models", async () => {
+  it("loads provider profiles for the selected model", async () => {
     render(
       <MemoryRouter>
         <SettingsPage />
@@ -362,54 +421,18 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await clickModelCard("Nano Banana");
-
-    await waitFor(() => {
-      expect(getModelApiKey).toHaveBeenCalledWith("nano-banana");
-      expect(getModelEndpointSettings).toHaveBeenCalledWith(
-        "nano-banana",
-      );
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
-    expect(screen.getByDisplayValue("gemini-key")).toBeInTheDocument();
-    expect(
-      screen.getByDisplayValue(
-        "https://generativelanguage.googleapis.com/v1beta/models",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("OpenAI Official")).toBeInTheDocument();
+    expect(screen.getByText("Company Gateway")).toBeInTheDocument();
+    expect(getModelProviderProfiles).toHaveBeenCalledWith("gpt-image-2");
   });
 
-  it("ignores stale async model settings from a previous model selection", async () => {
-    const gptKey = createDeferred<string | null>();
-    const geminiKey = createDeferred<string | null>();
-    const gptEndpointSettings = createDeferred<{
-      mode: "base_url";
-      base_url: string;
-      generation_url: string;
-      edit_url: string;
-    }>();
-    const geminiEndpointSettings = createDeferred<{
-      mode: "base_url";
-      base_url: string;
-      generation_url: string;
-      edit_url: string;
-    }>();
+  it("ignores stale async provider profiles from a previous model selection", async () => {
+    const gptProfiles = createDeferred<typeof openAiProviderState>();
+    const geminiProfiles = createDeferred<typeof geminiProviderState>();
 
-    getModelApiKey.mockImplementation((model: string) => {
-      if (model === "gpt-image-2") {
-        return gptKey.promise;
-      }
-
-      return geminiKey.promise;
-    });
-    getModelEndpointSettings.mockImplementation((model: string) => {
-      if (model === "gpt-image-2") {
-        return gptEndpointSettings.promise;
-      }
-
-      return geminiEndpointSettings.promise;
-    });
+    getModelProviderProfiles.mockImplementation((model: string) =>
+      model === "gpt-image-2" ? gptProfiles.promise : geminiProfiles.promise,
+    );
 
     render(
       <MemoryRouter>
@@ -422,15 +445,7 @@ describe("SettingsPage logs", () => {
     await clickModelCard("Nano Banana");
 
     await act(async () => {
-      geminiKey.resolve("gemini-key");
-      geminiEndpointSettings.resolve({
-        mode: "base_url",
-        base_url: "https://generativelanguage.googleapis.com/v1beta/models",
-        generation_url:
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
-        edit_url:
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
-      });
+      geminiProfiles.resolve(geminiProviderState);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
@@ -445,17 +460,11 @@ describe("SettingsPage logs", () => {
     });
 
     await act(async () => {
-      gptKey.resolve("stale-openai-key");
-      gptEndpointSettings.resolve({
-        mode: "base_url",
-        base_url: "https://api.openai.com/v1",
-        generation_url: "https://api.openai.com/v1/images/generations",
-        edit_url: "https://api.openai.com/v1/images/edits",
-      });
+      gptProfiles.resolve(openAiProviderState);
     });
 
     expect(screen.getByDisplayValue("gemini-key")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("stale-openai-key")).not.toBeInTheDocument();
+    expect(screen.queryByText("OpenAI Official")).not.toBeInTheDocument();
     expect(
       screen.getByDisplayValue(
         "https://generativelanguage.googleapis.com/v1beta/models",
@@ -463,34 +472,12 @@ describe("SettingsPage logs", () => {
     ).toBeInTheDocument();
   });
 
-  it("resets connection fields to the selected model before saving", async () => {
-    const geminiKey = createDeferred<string | null>();
-    const geminiEndpointSettings = createDeferred<{
-      mode: "base_url";
-      base_url: string;
-      generation_url: string;
-      edit_url: string;
-    }>();
+  it("resets provider fields to the selected model defaults while loading", async () => {
+    const geminiProfiles = createDeferred<typeof geminiProviderState>();
 
-    getModelApiKey.mockImplementation((model: string) => {
-      if (model === "nano-banana") {
-        return geminiKey.promise;
-      }
-
-      return Promise.resolve("openai-key");
-    });
-    getModelEndpointSettings.mockImplementation((model: string) => {
-      if (model === "nano-banana") {
-        return geminiEndpointSettings.promise;
-      }
-
-      return Promise.resolve({
-        mode: "full_url",
-        base_url: "https://api.openai.com/v1",
-        generation_url: "https://api.openai.com/v1/images/generations",
-        edit_url: "https://api.openai.com/v1/images/edits",
-      });
-    });
+    getModelProviderProfiles.mockImplementation((model: string) =>
+      model === "nano-banana" ? geminiProfiles.promise : Promise.resolve(openAiProviderState),
+    );
 
     render(
       <MemoryRouter>
@@ -500,42 +487,29 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await screen.findByDisplayValue("https://api.openai.com/v1/images/generations");
+    await screen.findByDisplayValue("https://api.openai.com/v1");
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
     expect(screen.getByDisplayValue("openai-key")).toBeInTheDocument();
 
     await clickModelCard("Nano Banana");
 
-    await waitFor(() => {
-      expect(
-        screen.getByDisplayValue(
-          "https://generativelanguage.googleapis.com/v1beta/models",
-        ),
-      ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Default")).toBeInTheDocument();
+    expect(
+      screen.getByDisplayValue(
+        "https://generativelanguage.googleapis.com/v1beta/models",
+      ),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      geminiProfiles.resolve(geminiProviderState);
     });
 
-    expect(screen.getByRole("button", { name: "settings.saveKey" })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "settings.saveUrl" }));
-
-    await waitFor(() => {
-      expect(saveModelEndpointSettings).toHaveBeenCalledWith(
-        "nano-banana",
-        {
-          mode: "base_url",
-          base_url: "https://generativelanguage.googleapis.com/v1beta/models",
-          generation_url:
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
-          edit_url:
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
-        },
-      );
-    });
-
-    expect(saveModelApiKey).not.toHaveBeenCalled();
+    expect(await screen.findByDisplayValue("Gemini Official")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
+    expect(screen.getByDisplayValue("gemini-key")).toBeInTheDocument();
   });
 
-  it("saves the API key for the currently selected model", async () => {
+  it("saves edits to the selected provider profile", async () => {
     render(
       <MemoryRouter>
         <SettingsPage />
@@ -544,28 +518,52 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await clickModelCard("Nano Banana");
+    await screen.findByText("OpenAI Official");
+    fireEvent.click(screen.getByRole("button", { name: "Select Company Gateway provider" }));
+    fireEvent.change(screen.getByDisplayValue("Company Gateway"), {
+      target: { value: "Renamed Gateway" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByDisplayValue(
-          "https://generativelanguage.googleapis.com/v1beta/models",
-        ),
-      ).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
-    fireEvent.change(screen.getByDisplayValue("gemini-key"), {
-      target: { value: "fresh-gemini-key" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "settings.saveKey" }));
-
-    await waitFor(() => {
-      expect(saveModelApiKey).toHaveBeenCalledWith(
-        "nano-banana",
-        "fresh-gemini-key",
+      expect(saveModelProviderProfiles).toHaveBeenCalledWith(
+        "gpt-image-2",
+        expect.objectContaining({
+          active_provider_id: "openai-official",
+          profiles: expect.arrayContaining([
+            expect.objectContaining({ id: "company-gateway", name: "Renamed Gateway" }),
+          ]),
+        }),
       );
     });
+  });
+
+  it("creates, activates, and deletes provider profiles through the profile API", async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
+
+    await screen.findByText("OpenAI Official");
+    fireEvent.click(screen.getByRole("button", { name: "settings.newProvider" }));
+    await waitFor(() => {
+      expect(createModelProviderProfile).toHaveBeenCalledWith("gpt-image-2", "New Provider");
+      expect(screen.getByDisplayValue("New Provider")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Company Gateway provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Company Gateway provider" }));
+    await waitFor(() =>
+      expect(setActiveModelProvider).toHaveBeenCalledWith("gpt-image-2", "company-gateway"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Company Gateway provider" }));
+    await waitFor(() =>
+      expect(deleteModelProviderProfile).toHaveBeenCalledWith("gpt-image-2", "company-gateway"),
+    );
   });
 
   it("does not let a late persisted model overwrite a manual selection", async () => {
@@ -584,7 +582,7 @@ describe("SettingsPage logs", () => {
     await clickModelCard("Nano Banana");
 
     await waitFor(() => {
-      expect(getModelApiKey).toHaveBeenCalledWith("nano-banana");
+      expect(getModelProviderProfiles).toHaveBeenCalledWith("nano-banana");
     });
 
     await act(async () => {
@@ -602,12 +600,10 @@ describe("SettingsPage logs", () => {
     ).toBeInTheDocument();
   });
 
-  it("ignores late save completions after switching to another model", async () => {
-    const keySave = createDeferred<void>();
-    const endpointSave = createDeferred<void>();
+  it("ignores late provider save completions after switching to another model", async () => {
+    const providerSave = createDeferred<typeof openAiProviderState>();
 
-    saveModelApiKey.mockReturnValue(keySave.promise);
-    saveModelEndpointSettings.mockReturnValue(endpointSave.promise);
+    saveModelProviderProfiles.mockReturnValue(providerSave.promise);
 
     render(
       <MemoryRouter>
@@ -617,23 +613,12 @@ describe("SettingsPage logs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
-    await screen.findByRole("button", { name: "Select GPT Image 2 model" });
+    await screen.findByText("OpenAI Official");
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
-    fireEvent.change(screen.getByDisplayValue(""), {
+    fireEvent.change(screen.getByDisplayValue("openai-key"), {
       target: { value: "pending-openai-key" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "settings.saveKey" }));
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "settings.endpointFullUrlMode" }),
-    );
-    fireEvent.change(
-      screen.getByDisplayValue("https://api.openai.com/v1/images/generations"),
-      {
-        target: { value: "https://example.com/custom-generation" },
-      },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "settings.saveUrl" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
 
     await clickModelCard("Nano Banana");
 
@@ -647,8 +632,7 @@ describe("SettingsPage logs", () => {
     });
 
     await act(async () => {
-      keySave.resolve();
-      endpointSave.resolve();
+      providerSave.resolve(openAiProviderState);
     });
 
     expect(screen.queryAllByText("settings.saved")).toHaveLength(0);
@@ -657,9 +641,6 @@ describe("SettingsPage logs", () => {
         "https://generativelanguage.googleapis.com/v1beta/models",
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByDisplayValue("https://example.com/custom-generation"),
-    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
     expect(screen.getByDisplayValue("gemini-key")).toBeInTheDocument();
     expect(
