@@ -13,6 +13,12 @@ pub const SETTING_BASE_URL: &str = "base_url";
 pub const SETTING_ENDPOINT_MODE: &str = "endpoint_mode";
 pub const SETTING_GENERATION_URL: &str = "generation_url";
 pub const SETTING_EDIT_URL: &str = "edit_url";
+pub const SETTING_MODEL_PROVIDER_PROFILES_PREFIX: &str = "model_provider_profiles";
+pub const SETTING_MODEL_ACTIVE_PROVIDER_PREFIX: &str = "model_active_provider";
+pub const DEFAULT_PROVIDER_ID: &str = "default";
+pub const DEFAULT_PROVIDER_NAME: &str = "Default";
+#[allow(dead_code)]
+pub const NEW_PROVIDER_NAME: &str = "New Provider";
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_GEMINI_MODELS_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models";
@@ -80,12 +86,26 @@ pub struct TrashSettings {
     pub retention_days: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EndpointSettings {
     pub mode: String,
     pub base_url: String,
     pub generation_url: String,
     pub edit_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelProviderProfile {
+    pub id: String,
+    pub name: String,
+    pub api_key: String,
+    pub endpoint_settings: EndpointSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelProviderProfilesState {
+    pub active_provider_id: String,
+    pub profiles: Vec<ModelProviderProfile>,
 }
 
 #[derive(Debug, Clone)]

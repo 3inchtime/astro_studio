@@ -4,14 +4,17 @@ import {
   clearLogs,
   addPromptFavoriteToFolders,
   archiveConversation,
+  createModelProviderProfile,
   createConversation,
   createProject,
   createPromptFolder,
   createPromptFavorite,
   deleteConversation,
+  deleteModelProviderProfile,
   deletePromptFolder,
   deletePromptFavorite,
   getConversations,
+  getModelProviderProfiles,
   getProjects,
   getPromptFavoriteFolders,
   getPromptFolders,
@@ -21,9 +24,12 @@ import {
   renameProject,
   searchGenerations,
   removePromptFavoriteFromFolders,
+  saveModelProviderProfiles,
+  setActiveModelProvider,
   toAssetUrl,
   unpinConversation,
 } from "./api";
+import type { ModelProviderProfilesState } from "./api";
 
 const tauriApi = vi.hoisted(() => ({
   convertFileSrc: vi.fn((path: string) => path),
@@ -44,6 +50,69 @@ describe("api log commands", () => {
     await clearLogs(0);
 
     expect(tauriApi.invoke).toHaveBeenCalledWith("clear_logs", { beforeDays: 0 });
+  });
+});
+
+describe("api model provider profile commands", () => {
+  beforeEach(() => {
+    tauriApi.invoke.mockReset();
+  });
+
+  it("wraps model provider profile IPC commands", async () => {
+    const state: ModelProviderProfilesState = {
+      active_provider_id: "provider-1",
+      profiles: [
+        {
+          id: "provider-1",
+          name: "OpenAI Official",
+          api_key: "sk-provider-1",
+          endpoint_settings: {
+            mode: "base_url",
+            base_url: "https://api.openai.com/v1",
+            generation_url: "https://api.openai.com/v1/images/generations",
+            edit_url: "https://api.openai.com/v1/images/edits",
+          },
+        },
+      ],
+    };
+
+    tauriApi.invoke.mockResolvedValue(state);
+
+    await getModelProviderProfiles("gpt-image-2");
+    await saveModelProviderProfiles("gpt-image-2", state);
+    await createModelProviderProfile("gpt-image-2", "Company Gateway");
+    await deleteModelProviderProfile("gpt-image-2", "provider-1");
+    await setActiveModelProvider("gpt-image-2", "provider-1");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      1,
+      "get_model_provider_profiles",
+      { model: "gpt-image-2" },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      2,
+      "save_model_provider_profiles",
+      {
+        model: "gpt-image-2",
+        activeProviderId: "provider-1",
+        profiles: state.profiles,
+      },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      3,
+      "create_model_provider_profile",
+      { model: "gpt-image-2", name: "Company Gateway" },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      4,
+      "delete_model_provider_profile",
+      { model: "gpt-image-2", providerId: "provider-1" },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      5,
+      "set_active_model_provider",
+      { model: "gpt-image-2", providerId: "provider-1" },
+    );
   });
 });
 

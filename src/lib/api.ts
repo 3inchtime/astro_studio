@@ -20,6 +20,8 @@ import type {
   ImageModel,
   ImageInputFidelity,
   EndpointSettings,
+  ModelProviderProfile,
+  ModelProviderProfilesState,
   PromptFavorite,
 } from "../types";
 
@@ -89,6 +91,46 @@ export async function saveModelEndpointSettings(
     editUrl: settings.edit_url,
   });
 }
+
+export async function getModelProviderProfiles(
+  model: ImageModel,
+): Promise<ModelProviderProfilesState> {
+  return invoke("get_model_provider_profiles", { model });
+}
+
+export async function saveModelProviderProfiles(
+  model: ImageModel,
+  state: ModelProviderProfilesState,
+): Promise<ModelProviderProfilesState> {
+  return invoke("save_model_provider_profiles", {
+    model,
+    activeProviderId: state.active_provider_id,
+    profiles: state.profiles,
+  });
+}
+
+export async function createModelProviderProfile(
+  model: ImageModel,
+  name: string,
+): Promise<ModelProviderProfilesState> {
+  return invoke("create_model_provider_profile", { model, name });
+}
+
+export async function deleteModelProviderProfile(
+  model: ImageModel,
+  providerId: string,
+): Promise<ModelProviderProfilesState> {
+  return invoke("delete_model_provider_profile", { model, providerId });
+}
+
+export async function setActiveModelProvider(
+  model: ImageModel,
+  providerId: string,
+): Promise<ModelProviderProfilesState> {
+  return invoke("set_active_model_provider", { model, providerId });
+}
+
+export type { ModelProviderProfile, ModelProviderProfilesState };
 
 export async function getImageModel(): Promise<ImageModel> {
   return invoke("get_image_model");

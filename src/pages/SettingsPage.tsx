@@ -5,8 +5,9 @@ import {
   getLogs, clearLogs, getLogSettings, saveLogSettings,
   readLogResponseFile, getTrashSettings, saveTrashSettings,
   getFontSize, getImageModel, saveFontSize, saveImageModel,
-  getRuntimeLogs, onRuntimeLog, getModelApiKey, getModelEndpointSettings,
-  saveModelApiKey, saveModelEndpointSettings,
+  getRuntimeLogs, onRuntimeLog, getModelProviderProfiles,
+  saveModelProviderProfiles, createModelProviderProfile,
+  deleteModelProviderProfile, setActiveModelProvider,
 } from "../lib/api";
 import {
   Cpu, FileText, SlidersHorizontal,
@@ -14,10 +15,11 @@ import {
 import { useTranslation } from "react-i18next";
 import type {
   AppFontSize,
-  EndpointMode,
   ImageModel,
   LogEntry,
   LogSettings,
+  ModelProviderProfile,
+  ModelProviderProfilesState,
   RuntimeLogEntry,
   TrashSettings,
 } from "../types";
@@ -25,7 +27,6 @@ import {
   applyAppFontSize,
   getStoredAppFontSize,
 } from "../lib/fontSize";
-import { getImageModelCatalogEntry } from "../lib/modelCatalog";
 import { normalizeLanguage, type SupportedLanguage } from "../lib/languages";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import { GeneralSettingsPanel } from "../components/settings/GeneralSettingsPanel";
@@ -36,27 +37,20 @@ import {
   mergeRuntimeLogs,
 } from "../lib/settingsLogs";
 import {
-  defaultBaseUrlForModel,
-  defaultEditUrlForModel,
-  defaultEndpointSettingsForModel,
-  defaultGenerationUrlForModel,
-  modelSupportsEdit,
-  normalizeEndpointSettings,
-  usesSharedEditEndpoint,
-} from "../lib/settingsEndpoints";
+  DEFAULT_PROVIDER_ID,
+  NEW_PROVIDER_NAME,
+  defaultProviderProfilesStateForModel,
+  providerForState,
+  removeProviderFromState,
+  updateProviderInState,
+} from "../lib/modelProviderProfiles";
 
 const DEFAULT_MODEL: ImageModel = "gpt-image-2";
-const DEFAULT_MODEL_ENTRY = getImageModelCatalogEntry(DEFAULT_MODEL);
 const FONT_SIZE_LABEL_KEYS: Record<AppFontSize, string> = {
   small: "settings.fontSizeSmall",
   medium: "settings.fontSizeMedium",
   large: "settings.fontSizeLarge",
 };
-
-function maskKey(key: string): string {
-  if (key.length <= 8) return "sk-****";
-  return key.slice(0, 3) + "..." + key.slice(-4);
-}
 
 const SETTINGS_TABS = [
   { id: "general", icon: SlidersHorizontal, labelKey: "settings.general" },
@@ -69,16 +63,12 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">("general");
 
   // General settings state
-  const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [keySaved, setKeySaved] = useState(false);
-  const [endpointMode, setEndpointMode] = useState<EndpointMode>("base_url");
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_MODEL_ENTRY.connectionDefaults.baseUrl);
-  const [generationUrl, setGenerationUrl] = useState(
-    DEFAULT_MODEL_ENTRY.connectionDefaults.generationUrl,
+  const [providerState, setProviderState] = useState<ModelProviderProfilesState>(() =>
+    defaultProviderProfilesStateForModel(DEFAULT_MODEL),
   );
-  const [editUrl, setEditUrl] = useState(DEFAULT_MODEL_ENTRY.connectionDefaults.editUrl);
-  const [urlSaved, setUrlSaved] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState(DEFAULT_PROVIDER_ID);
+  const [providerSaved, setProviderSaved] = useState(false);
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_MODEL);
   const [modelSaved, setModelSaved] = useState(false);
   const { t, i18n } = useTranslation();
@@ -144,52 +134,28 @@ export default function SettingsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const modelAtLoadStart = imageModel;
+    const defaultState = defaultProviderProfilesStateForModel(modelAtLoadStart);
 
-    setApiKey("");
     setShowKey(false);
-    setEndpointMode("base_url");
-    setBaseUrl(defaultBaseUrlForModel(imageModel));
-    setGenerationUrl(defaultGenerationUrlForModel(imageModel));
-    setEditUrl(defaultEditUrlForModel(imageModel));
+    setProviderSaved(false);
+    setProviderState(defaultState);
+    setSelectedProviderId(defaultState.active_provider_id);
 
-    getModelApiKey(imageModel).then((key) => {
-      if (cancelled) {
+    getModelProviderProfiles(modelAtLoadStart).then((state) => {
+      if (cancelled || imageModelRef.current !== modelAtLoadStart) {
         return;
       }
 
-      setApiKey(key ?? "");
-      setShowKey(false);
+      setProviderState(state);
+      setSelectedProviderId(state.active_provider_id);
     }).catch(() => {
-      if (cancelled) {
+      if (cancelled || imageModelRef.current !== modelAtLoadStart) {
         return;
       }
 
-      setApiKey("");
-      setShowKey(false);
-    });
-
-    getModelEndpointSettings(imageModel).then((settings) => {
-      if (cancelled) {
-        return;
-      }
-
-      const normalizedSettings = normalizeEndpointSettings(imageModel, settings);
-
-      setEndpointMode(normalizedSettings.mode);
-      setBaseUrl(normalizedSettings.base_url);
-      setGenerationUrl(normalizedSettings.generation_url);
-      setEditUrl(normalizedSettings.edit_url);
-    }).catch(() => {
-      if (cancelled) {
-        return;
-      }
-
-      const defaultSettings = defaultEndpointSettingsForModel(imageModel);
-
-      setEndpointMode(defaultSettings.mode);
-      setBaseUrl(defaultSettings.base_url);
-      setGenerationUrl(defaultSettings.generation_url);
-      setEditUrl(defaultSettings.edit_url);
+      setProviderState(defaultState);
+      setSelectedProviderId(defaultState.active_provider_id);
     });
 
     return () => {
@@ -270,42 +236,104 @@ export default function SettingsPage() {
     setLanguage(lang);
   }
 
-  async function handleSaveKey() {
-    const modelAtSaveStart = imageModel;
+  function updateSelectedProvider(
+    update: (profile: ModelProviderProfile) => ModelProviderProfile,
+  ) {
+    setProviderState((currentState) => {
+      if (!providerForState(currentState, selectedProviderId)) {
+        return currentState;
+      }
 
-    await saveModelApiKey(modelAtSaveStart, apiKey);
-    if (imageModelRef.current !== modelAtSaveStart) {
-      return;
-    }
-
-    setShowKey(false);
-    setKeySaved(true);
-    setTimeout(() => setKeySaved(false), 2000);
+      return updateProviderInState(currentState, selectedProviderId, update);
+    });
+    setProviderSaved(false);
   }
 
-  async function handleSaveUrl() {
+  async function handleSaveProvider() {
     const modelAtSaveStart = imageModel;
-    const nextBaseUrl = baseUrl.trim() || defaultBaseUrlForModel(imageModel);
-    const nextGenerationUrl =
-      generationUrl.trim() || defaultGenerationUrlForModel(imageModel);
-    const nextEditUrl = !modelSupportsEdit(imageModel) || usesSharedEditEndpoint(imageModel)
-      ? nextGenerationUrl
-      : editUrl.trim() || defaultEditUrlForModel(imageModel);
-    await saveModelEndpointSettings(modelAtSaveStart, {
-      mode: endpointMode,
-      base_url: nextBaseUrl,
-      generation_url: nextGenerationUrl,
-      edit_url: nextEditUrl,
-    });
+    const stateAtSaveStart = providerState;
+    const nextState = await saveModelProviderProfiles(
+      modelAtSaveStart,
+      stateAtSaveStart,
+    );
     if (imageModelRef.current !== modelAtSaveStart) {
       return;
     }
 
-    setBaseUrl(nextBaseUrl);
-    setGenerationUrl(nextGenerationUrl);
-    setEditUrl(nextEditUrl);
-    setUrlSaved(true);
-    setTimeout(() => setUrlSaved(false), 2000);
+    setProviderState(nextState);
+    setSelectedProviderId(
+      providerForState(nextState, selectedProviderId)
+        ? selectedProviderId
+        : nextState.active_provider_id,
+    );
+    setShowKey(false);
+    setProviderSaved(true);
+    setTimeout(() => setProviderSaved(false), 2000);
+  }
+
+  async function handleCreateProvider() {
+    const modelAtCreateStart = imageModel;
+    const stateAtCreateStart = providerState;
+    const nextState = await createModelProviderProfile(
+      modelAtCreateStart,
+      NEW_PROVIDER_NAME,
+    );
+    if (imageModelRef.current !== modelAtCreateStart) {
+      return;
+    }
+
+    setProviderState(nextState);
+    const existingProviderIds = new Set(
+      stateAtCreateStart.profiles.map((profile) => profile.id),
+    );
+    const createdProvider = nextState.profiles
+      .filter((profile) => !existingProviderIds.has(profile.id))
+      .slice(-1)[0];
+    setSelectedProviderId(
+      createdProvider?.id ??
+        (providerForState(nextState, selectedProviderId)
+          ? selectedProviderId
+          : nextState.active_provider_id),
+    );
+    setShowKey(false);
+    setProviderSaved(false);
+  }
+
+  async function handleDeleteProvider(providerId: string) {
+    const modelAtDeleteStart = imageModel;
+    setProviderState((currentState) => {
+      const nextState = removeProviderFromState(currentState, providerId);
+      if (!providerForState(nextState, selectedProviderId)) {
+        setSelectedProviderId(nextState.active_provider_id);
+      }
+
+      return nextState;
+    });
+    setProviderSaved(false);
+
+    const nextState = await deleteModelProviderProfile(modelAtDeleteStart, providerId);
+    if (imageModelRef.current !== modelAtDeleteStart) {
+      return;
+    }
+
+    setProviderState(nextState);
+    setSelectedProviderId(
+      providerForState(nextState, selectedProviderId)
+        ? selectedProviderId
+        : nextState.active_provider_id,
+    );
+  }
+
+  async function handleSetActiveProvider(providerId: string) {
+    const modelAtActivateStart = imageModel;
+    const nextState = await setActiveModelProvider(modelAtActivateStart, providerId);
+    if (imageModelRef.current !== modelAtActivateStart) {
+      return;
+    }
+
+    setProviderState(nextState);
+    setSelectedProviderId(providerId);
+    setProviderSaved(false);
   }
 
   async function handleSaveModel() {
@@ -318,8 +346,7 @@ export default function SettingsPage() {
     didUserSelectModelRef.current = true;
     setImageModel(model);
     setModelSaved(false);
-    setKeySaved(false);
-    setUrlSaved(false);
+    setProviderSaved(false);
   }
 
   async function handleConfirmClearLogs() {
@@ -381,7 +408,6 @@ export default function SettingsPage() {
   }
 
   const totalPages = Math.ceil(totalLogs / pageSize);
-  const displayKey = showKey ? apiKey : (apiKey ? maskKey(apiKey) : "");
 
   return (
     <div className="h-full overflow-y-auto">
@@ -435,40 +461,64 @@ export default function SettingsPage() {
               t={t}
               imageModel={imageModel}
               modelSaved={modelSaved}
-              apiKey={apiKey}
-              displayKey={displayKey}
               showKey={showKey}
-              keySaved={keySaved}
-              endpointMode={endpointMode}
-              baseUrl={baseUrl}
-              generationUrl={generationUrl}
-              editUrl={editUrl}
-              urlSaved={urlSaved}
+              providerState={providerState}
+              selectedProviderId={selectedProviderId}
+              providerSaved={providerSaved}
               onSelectImageModel={handleSelectImageModel}
               onSaveModel={() => void handleSaveModel()}
-              onApiKeyChange={(nextKey) => {
-                setApiKey(nextKey);
-                setKeySaved(false);
+              onSelectProvider={(providerId) => {
+                setSelectedProviderId(providerId);
+                setShowKey(false);
+                setProviderSaved(false);
               }}
+              onProviderNameChange={(name) =>
+                updateSelectedProvider((provider) => ({ ...provider, name }))
+              }
+              onProviderApiKeyChange={(apiKey) =>
+                updateSelectedProvider((provider) => ({ ...provider, api_key: apiKey }))
+              }
               onShowKeyChange={setShowKey}
-              onSaveKey={() => void handleSaveKey()}
-              onEndpointModeChange={(mode) => {
-                setEndpointMode(mode);
-                setUrlSaved(false);
-              }}
-              onBaseUrlChange={(url) => {
-                setBaseUrl(url);
-                setUrlSaved(false);
-              }}
-              onGenerationUrlChange={(url) => {
-                setGenerationUrl(url);
-                setUrlSaved(false);
-              }}
-              onEditUrlChange={(url) => {
-                setEditUrl(url);
-                setUrlSaved(false);
-              }}
-              onSaveUrl={() => void handleSaveUrl()}
+              onProviderEndpointModeChange={(mode) =>
+                updateSelectedProvider((provider) => ({
+                  ...provider,
+                  endpoint_settings: {
+                    ...provider.endpoint_settings,
+                    mode,
+                  },
+                }))
+              }
+              onProviderBaseUrlChange={(url) =>
+                updateSelectedProvider((provider) => ({
+                  ...provider,
+                  endpoint_settings: {
+                    ...provider.endpoint_settings,
+                    base_url: url,
+                  },
+                }))
+              }
+              onProviderGenerationUrlChange={(url) =>
+                updateSelectedProvider((provider) => ({
+                  ...provider,
+                  endpoint_settings: {
+                    ...provider.endpoint_settings,
+                    generation_url: url,
+                  },
+                }))
+              }
+              onProviderEditUrlChange={(url) =>
+                updateSelectedProvider((provider) => ({
+                  ...provider,
+                  endpoint_settings: {
+                    ...provider.endpoint_settings,
+                    edit_url: url,
+                  },
+                }))
+              }
+              onCreateProvider={() => void handleCreateProvider()}
+              onDeleteProvider={(providerId) => void handleDeleteProvider(providerId)}
+              onSetActiveProvider={(providerId) => void handleSetActiveProvider(providerId)}
+              onSaveProvider={() => void handleSaveProvider()}
             />
           ) : (
             <LogsPanel
