@@ -137,10 +137,13 @@ fn current_image_model(db: &Database) -> Result<&'static str, String> {
 
 fn read_endpoint_settings(db: &Database) -> Result<EndpointSettings, String> {
     let model = current_image_model(db)?;
-    read_model_endpoint_settings(db, model)
+    read_legacy_model_endpoint_settings(db, model)
 }
 
-fn read_model_endpoint_settings(db: &Database, model: &str) -> Result<EndpointSettings, String> {
+fn read_legacy_model_endpoint_settings(
+    db: &Database,
+    model: &str,
+) -> Result<EndpointSettings, String> {
     let defaults = default_endpoint_settings_for_model(model);
 
     Ok(EndpointSettings {
@@ -180,13 +183,13 @@ fn resolve_image_endpoint_url_for_model(
     model: &str,
     kind: ImageEndpointKind,
 ) -> Result<String, String> {
-    let settings = read_model_endpoint_settings(db, model)?;
+    let settings = read_legacy_model_endpoint_settings(db, model)?;
     Ok(image_endpoint_url_for_model_settings(
         model, &settings, kind,
     ))
 }
 
-fn read_model_api_key(db: &Database, model: &str) -> Result<Option<String>, String> {
+fn read_legacy_model_api_key(db: &Database, model: &str) -> Result<Option<String>, String> {
     Ok(
         get_model_setting(db, model, SETTING_API_KEY, Some(SETTING_API_KEY))?
             .map(|key| normalize_api_key_for_storage(&key)),
@@ -203,6 +206,178 @@ fn normalize_api_key_for_storage(key: &str) -> String {
     }
 
     trimmed.to_string()
+}
+
+fn model_provider_profiles_key(model: &str) -> String {
+    format!(
+        "{}::{}",
+        SETTING_MODEL_PROVIDER_PROFILES_PREFIX,
+        normalize_image_model(model)
+    )
+}
+
+fn model_active_provider_key(model: &str) -> String {
+    format!(
+        "{}::{}",
+        SETTING_MODEL_ACTIVE_PROVIDER_PREFIX,
+        normalize_image_model(model)
+    )
+}
+
+fn normalize_provider_name(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        "Provider".to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn normalize_provider_endpoint_settings(
+    model: &str,
+    settings: &EndpointSettings,
+) -> EndpointSettings {
+    let defaults = default_endpoint_settings_for_model(model);
+    let mode = normalize_endpoint_mode(&settings.mode).to_string();
+    let base_url = endpoint_value_or_default(Some(settings.base_url.clone()), &defaults.base_url);
+    let generation_url = endpoint_value_or_default(
+        Some(settings.generation_url.clone()),
+        &defaults.generation_url,
+    );
+    let edit_url = if is_gemini_model(model) {
+        generation_url.clone()
+    } else {
+        endpoint_value_or_default(Some(settings.edit_url.clone()), &defaults.edit_url)
+    };
+
+    EndpointSettings {
+        mode,
+        base_url,
+        generation_url,
+        edit_url,
+    }
+}
+
+fn default_provider_profile_for_model(
+    db: &Database,
+    model: &str,
+) -> Result<ModelProviderProfile, String> {
+    let normalized_model = normalize_image_model(model);
+    Ok(ModelProviderProfile {
+        id: DEFAULT_PROVIDER_ID.to_string(),
+        name: DEFAULT_PROVIDER_NAME.to_string(),
+        api_key: read_legacy_model_api_key(db, normalized_model)?.unwrap_or_default(),
+        endpoint_settings: read_legacy_model_endpoint_settings(db, normalized_model)?,
+    })
+}
+
+fn normalize_provider_profiles_state(
+    model: &str,
+    state: ModelProviderProfilesState,
+) -> Result<ModelProviderProfilesState, String> {
+    let normalized_model = normalize_image_model(model);
+    let mut seen = std::collections::HashSet::new();
+    let mut profiles = Vec::with_capacity(state.profiles.len());
+
+    for profile in state.profiles {
+        let id = profile.id.trim().to_string();
+        if id.is_empty() {
+            return Err("Provider id cannot be empty.".to_string());
+        }
+        if !seen.insert(id.clone()) {
+            return Err(format!("Duplicate provider id: {id}"));
+        }
+
+        profiles.push(ModelProviderProfile {
+            id,
+            name: normalize_provider_name(&profile.name),
+            api_key: normalize_api_key_for_storage(&profile.api_key),
+            endpoint_settings: normalize_provider_endpoint_settings(
+                normalized_model,
+                &profile.endpoint_settings,
+            ),
+        });
+    }
+
+    if profiles.is_empty() {
+        return Err("At least one provider profile is required.".to_string());
+    }
+
+    let active_provider_id = if profiles
+        .iter()
+        .any(|profile| profile.id == state.active_provider_id)
+    {
+        state.active_provider_id
+    } else {
+        profiles[0].id.clone()
+    };
+
+    Ok(ModelProviderProfilesState {
+        active_provider_id,
+        profiles,
+    })
+}
+
+fn read_model_provider_profiles_state(
+    db: &Database,
+    model: &str,
+) -> Result<ModelProviderProfilesState, String> {
+    let normalized_model = normalize_image_model(model);
+    let stored_profiles = db.get_setting(&model_provider_profiles_key(normalized_model))?;
+    let profiles = match stored_profiles
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<Vec<ModelProviderProfile>>(value).ok())
+        .filter(|profiles| !profiles.is_empty())
+    {
+        Some(profiles) => profiles,
+        None => vec![default_provider_profile_for_model(db, normalized_model)?],
+    };
+    let active_provider_id = db
+        .get_setting(&model_active_provider_key(normalized_model))?
+        .unwrap_or_else(|| DEFAULT_PROVIDER_ID.to_string());
+
+    normalize_provider_profiles_state(
+        normalized_model,
+        ModelProviderProfilesState {
+            active_provider_id,
+            profiles,
+        },
+    )
+}
+
+fn save_model_provider_profiles_state(
+    db: &Database,
+    model: &str,
+    state: ModelProviderProfilesState,
+) -> Result<ModelProviderProfilesState, String> {
+    let normalized_model = normalize_image_model(model);
+    let state = normalize_provider_profiles_state(normalized_model, state)?;
+    let profiles_json = serde_json::to_string(&state.profiles)
+        .map_err(|e| format!("Serialize provider profiles failed: {}", e))?;
+
+    db.set_setting(
+        &model_provider_profiles_key(normalized_model),
+        &profiles_json,
+    )?;
+    db.set_setting(
+        &model_active_provider_key(normalized_model),
+        &state.active_provider_id,
+    )?;
+
+    Ok(state)
+}
+
+#[allow(dead_code)]
+fn active_provider_profile_for_model(
+    db: &Database,
+    model: &str,
+) -> Result<ModelProviderProfile, String> {
+    let state = read_model_provider_profiles_state(db, model)?;
+    state
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == state.active_provider_id)
+        .ok_or_else(|| "Active provider profile not found.".to_string())
 }
 
 fn save_model_api_key_value(db: &Database, model: &str, key: &str) -> Result<(), String> {
@@ -258,6 +433,20 @@ fn save_model_endpoint_settings_value(
 mod tests {
     use super::*;
 
+    fn temp_test_db(prefix: &str) -> (Database, std::path::PathBuf) {
+        let db_path =
+            std::env::temp_dir().join(format!("{prefix}-{}.sqlite", uuid::Uuid::new_v4()));
+        let db = Database::open(&db_path).unwrap();
+        db.run_migrations().unwrap();
+        (db, db_path)
+    }
+
+    fn remove_temp_test_db(db_path: std::path::PathBuf) {
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+    }
+
     #[test]
     fn normalize_api_key_for_storage_removes_paste_artifacts() {
         assert_eq!(
@@ -286,7 +475,7 @@ mod tests {
         save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, " Bearer sk-proj-valid-token\n").unwrap();
 
         assert_eq!(
-            read_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
+            read_legacy_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
             Some("sk-proj-valid-token".to_string())
         );
         assert_eq!(
@@ -315,7 +504,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            read_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
+            read_legacy_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
             Some("sk-proj-valid-token".to_string())
         );
 
@@ -333,6 +522,109 @@ mod tests {
 
         assert_eq!(format_log_clear_cutoff(now, 0), "2026-04-28T12:30:45Z");
         assert_eq!(format_log_clear_cutoff(now, 7), "2026-04-21T12:30:45Z");
+    }
+
+    #[test]
+    fn provider_profiles_default_to_legacy_model_settings() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-default-test");
+        db.set_setting(
+            &model_setting_key(ENGINE_GPT_IMAGE_2, SETTING_API_KEY),
+            "Bearer sk-legacy",
+        )
+        .unwrap();
+        db.set_setting(
+            &model_setting_key(ENGINE_GPT_IMAGE_2, SETTING_BASE_URL),
+            "https://proxy.example/v1",
+        )
+        .unwrap();
+
+        let state = read_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2).unwrap();
+
+        assert_eq!(state.active_provider_id, DEFAULT_PROVIDER_ID);
+        assert_eq!(state.profiles.len(), 1);
+        assert_eq!(state.profiles[0].id, DEFAULT_PROVIDER_ID);
+        assert_eq!(state.profiles[0].name, DEFAULT_PROVIDER_NAME);
+        assert_eq!(state.profiles[0].api_key, "sk-legacy");
+        assert_eq!(
+            state.profiles[0].endpoint_settings.base_url,
+            "https://proxy.example/v1"
+        );
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn provider_profiles_fall_back_to_first_profile_when_active_is_missing() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-active-test");
+        let profiles = vec![
+            ModelProviderProfile {
+                id: "provider-a".to_string(),
+                name: "Provider A".to_string(),
+                api_key: "sk-a".to_string(),
+                endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+            },
+            ModelProviderProfile {
+                id: "provider-b".to_string(),
+                name: "Provider B".to_string(),
+                api_key: "sk-b".to_string(),
+                endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+            },
+        ];
+        db.set_setting(
+            &model_provider_profiles_key(ENGINE_GPT_IMAGE_2),
+            &serde_json::to_string(&profiles).unwrap(),
+        )
+        .unwrap();
+        db.set_setting(
+            &model_active_provider_key(ENGINE_GPT_IMAGE_2),
+            "missing-provider",
+        )
+        .unwrap();
+
+        let state = read_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2).unwrap();
+
+        assert_eq!(state.active_provider_id, "provider-a");
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn saving_provider_profiles_normalizes_keys_and_gemini_edit_url() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-save-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "gemini-provider".to_string(),
+            profiles: vec![ModelProviderProfile {
+                id: "gemini-provider".to_string(),
+                name: "  Gemini Gateway  ".to_string(),
+                api_key: " Bearer gemini-key\n".to_string(),
+                endpoint_settings: EndpointSettings {
+                    mode: ENDPOINT_MODE_FULL_URL.to_string(),
+                    base_url: " ".to_string(),
+                    generation_url: " https://gateway.example/generate ".to_string(),
+                    edit_url: " https://gateway.example/ignored-edit ".to_string(),
+                },
+            }],
+        };
+
+        save_model_provider_profiles_state(&db, ENGINE_NANO_BANANA, state).unwrap();
+        let saved = read_model_provider_profiles_state(&db, ENGINE_NANO_BANANA).unwrap();
+
+        assert_eq!(saved.active_provider_id, "gemini-provider");
+        assert_eq!(saved.profiles[0].name, "Gemini Gateway");
+        assert_eq!(saved.profiles[0].api_key, "gemini-key");
+        assert_eq!(
+            saved.profiles[0].endpoint_settings.base_url,
+            DEFAULT_GEMINI_MODELS_URL
+        );
+        assert_eq!(
+            saved.profiles[0].endpoint_settings.edit_url,
+            "https://gateway.example/generate"
+        );
+
+        drop(db);
+        remove_temp_test_db(db_path);
     }
 }
 
@@ -368,14 +660,14 @@ fn save_api_key(db: tauri::State<'_, Database>, key: String) -> Result<(), Strin
 #[tauri::command]
 fn get_api_key(db: tauri::State<'_, Database>) -> Result<Option<String>, String> {
     let model = current_image_model(db.inner())?;
-    read_model_api_key(db.inner(), model)
+    read_legacy_model_api_key(db.inner(), model)
 }
 
 #[tauri::command]
 fn save_base_url(db: tauri::State<'_, Database>, url: String) -> Result<(), String> {
     log::info!("Saving base URL: {}", url);
     let model = current_image_model(db.inner())?;
-    let settings = read_model_endpoint_settings(db.inner(), model)?;
+    let settings = read_legacy_model_endpoint_settings(db.inner(), model)?;
     save_model_endpoint_settings_value(
         db.inner(),
         model,
@@ -388,7 +680,7 @@ fn save_base_url(db: tauri::State<'_, Database>, url: String) -> Result<(), Stri
 
 #[tauri::command]
 fn get_base_url(db: tauri::State<'_, Database>) -> Result<String, String> {
-    Ok(read_model_endpoint_settings(db.inner(), current_image_model(db.inner())?)?.base_url)
+    Ok(read_legacy_model_endpoint_settings(db.inner(), current_image_model(db.inner())?)?.base_url)
 }
 
 #[tauri::command]
@@ -438,7 +730,7 @@ fn get_model_api_key(
     db: tauri::State<'_, Database>,
     model: String,
 ) -> Result<Option<String>, String> {
-    read_model_api_key(db.inner(), &model)
+    read_legacy_model_api_key(db.inner(), &model)
 }
 
 #[tauri::command]
@@ -455,7 +747,7 @@ fn get_model_endpoint_settings(
     db: tauri::State<'_, Database>,
     model: String,
 ) -> Result<EndpointSettings, String> {
-    read_model_endpoint_settings(db.inner(), &model)
+    read_legacy_model_endpoint_settings(db.inner(), &model)
 }
 
 #[tauri::command]
@@ -1077,7 +1369,7 @@ async fn generate_image(
         }).to_string()),
         None,
     );
-    let api_key = read_model_api_key(db.inner(), &model)?
+    let api_key = read_legacy_model_api_key(db.inner(), &model)?
         .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Generate)?;
@@ -1304,7 +1596,7 @@ async fn edit_image(
         ),
         None,
     );
-    let api_key = read_model_api_key(db.inner(), &model)?
+    let api_key = read_legacy_model_api_key(db.inner(), &model)?
         .ok_or_else(|| "API key not set. Please set it in Settings.".to_string())?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Edit)?;
