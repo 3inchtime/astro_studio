@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppLayout from "./components/layout/AppLayout";
 import GeneratePage from "./pages/GeneratePage";
+import ProjectsPage from "./pages/ProjectsPage";
+import ProjectHomePage from "./pages/ProjectHomePage";
 import GalleryPage from "./pages/GalleryPage";
 import FavoritesPage from "./pages/FavoritesPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -28,8 +30,8 @@ function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/generate" element={<GeneratePage />} />
-          <Route path="/projects" element={<GeneratePage />} />
-          <Route path="/projects/:projectId" element={<GeneratePage />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
           <Route path="/gallery" element={<GalleryPage />} />
           <Route path="/trash" element={<TrashPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
