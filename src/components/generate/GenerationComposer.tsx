@@ -135,7 +135,7 @@ export default function GenerationComposer({
               onChange={(value) => onModelChange(value as ImageModel)}
               options={IMAGE_MODEL_CATALOG.map((entry) => ({
                 value: entry.id,
-                label: entry.label,
+                label: t(entry.i18nKey),
               }))}
             />
             {showSize && (

@@ -1,5 +1,6 @@
-import { CalendarDays, Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
+import { Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
+import DateFilterField from "./DateFilterField";
 
 interface GallerySearchBarProps {
   config: GallerySearchConfig;
@@ -61,58 +62,83 @@ export default function GallerySearchBar({
             />
           </label>
 
-          {config.fields.map((field) => {
-            if (field.type === "date") {
-              return (
+          {(() => {
+            const elements: React.ReactNode[] = [];
+            let i = 0;
+
+            while (i < config.fields.length) {
+              const field = config.fields[i];
+
+              if (field.type === "date" && config.fields[i + 1]?.type === "date") {
+                const nextField = config.fields[i + 1] as typeof field & { type: "date" };
+                elements.push(
+                  <div
+                    key={`${field.key}-${nextField.key}`}
+                    className="flex items-end gap-1.5"
+                  >
+                    <DateFilterField
+                      label={field.label}
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                    <span className="mb-[11px] text-[11px] text-muted/35 select-none">
+                      —
+                    </span>
+                    <DateFilterField
+                      label={nextField.label}
+                      value={nextField.value}
+                      onChange={nextField.onChange}
+                    />
+                  </div>,
+                );
+                i += 2;
+                continue;
+              }
+
+              if (field.type === "date") {
+                elements.push(
+                  <DateFilterField
+                    key={field.key}
+                    label={field.label}
+                    value={field.value}
+                    onChange={field.onChange}
+                  />,
+                );
+                i += 1;
+                continue;
+              }
+
+              elements.push(
                 <label
                   key={field.key}
-                  className="relative min-w-[140px] flex-[1_1_150px] xl:max-w-[170px]"
+                  className="relative min-w-[170px] flex-[1_1_180px] xl:max-w-[220px]"
                 >
-                  <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
+                  <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
                     {field.label}
                   </span>
-                  <CalendarDays
+                  <SlidersHorizontal
                     size={13}
                     className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/55"
                     strokeWidth={2}
                   />
-                  <input
-                    type="date"
+                  <select
                     value={field.value}
                     onChange={(event) => field.onChange(event.target.value)}
-                    className="h-[34px] w-full rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-3 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
-                  />
-                </label>
+                    className="select-control mt-1 h-[34px] w-full min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-8 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
+                  >
+                    {field.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>,
               );
+              i += 1;
             }
 
-            return (
-              <label
-                key={field.key}
-                className="relative min-w-[170px] flex-[1_1_180px] xl:max-w-[220px]"
-              >
-                <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
-                  {field.label}
-                </span>
-                <SlidersHorizontal
-                  size={13}
-                  className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/55"
-                  strokeWidth={2}
-                />
-                <select
-                  value={field.value}
-                  onChange={(event) => field.onChange(event.target.value)}
-                  className="select-control mt-1 h-[34px] w-full min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-8 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
-                >
-                  {field.options.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            );
-          })}
+            return elements;
+          })()}
 
           <div className="flex flex-[0_0_auto] items-end gap-2">
             <button

@@ -144,6 +144,12 @@
   "gallery.editImage": "編輯圖片",
   "gallery.saveImage": "儲存圖片",
   "gallery.delete": "移至回收站",
+  "gallery.allModels": "所有模型",
+
+  "models.gptImage2": "GPT Image 2",
+  "models.nanoBanana": "Nano Banana",
+  "models.nanoBanana2": "Nano Banana 2",
+  "models.nanoBananaPro": "Nano Banana Pro",
 
   "settings.title": "設定",
   "settings.sections": "設定分區",

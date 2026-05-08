@@ -144,6 +144,12 @@
   "gallery.editImage": "Modifier l'image",
   "gallery.saveImage": "Enregistrer l'image",
   "gallery.delete": "Déplacer vers la corbeille",
+  "gallery.allModels": "Tous les modèles",
+
+  "models.gptImage2": "GPT Image 2",
+  "models.nanoBanana": "Nano Banana",
+  "models.nanoBanana2": "Nano Banana 2",
+  "models.nanoBananaPro": "Nano Banana Pro",
 
   "settings.title": "Paramètres",
   "settings.sections": "Sections des paramètres",

@@ -17,7 +17,12 @@ export function generationsToMessages(
       id: `user-${gr.generation.id}`,
       role: "user",
       content: gr.generation.prompt,
-      sourceImages: [],
+      sourceImages: gr.generation.source_image_paths.map((path, index) => ({
+        imageId: `${gr.generation.id}-source-${index}`,
+        generationId: gr.generation.id,
+        path,
+        thumbnailPath: path,
+      })),
       status: "complete",
       createdAt: gr.generation.created_at,
     });

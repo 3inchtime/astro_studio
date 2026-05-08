@@ -144,6 +144,12 @@
   "gallery.editImage": "画像を編集",
   "gallery.saveImage": "画像を保存",
   "gallery.delete": "ゴミ箱へ移動",
+  "gallery.allModels": "すべてのモデル",
+
+  "models.gptImage2": "GPT Image 2",
+  "models.nanoBanana": "Nano Banana",
+  "models.nanoBanana2": "Nano Banana 2",
+  "models.nanoBananaPro": "Nano Banana Pro",
 
   "settings.title": "設定",
   "settings.sections": "設定セクション",

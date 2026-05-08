@@ -263,7 +263,7 @@ describe("GeneratePage", () => {
       .map((option) => option.textContent);
 
     expect(optionNames).toEqual(
-      IMAGE_MODEL_CATALOG.map((entry) => entry.label),
+      IMAGE_MODEL_CATALOG.map((entry) => entry.i18nKey),
     );
   });
 

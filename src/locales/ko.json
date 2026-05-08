@@ -144,6 +144,12 @@
   "gallery.editImage": "이미지 편집",
   "gallery.saveImage": "이미지 저장",
   "gallery.delete": "휴지통으로 이동",
+  "gallery.allModels": "모든 모델",
+
+  "models.gptImage2": "GPT Image 2",
+  "models.nanoBanana": "Nano Banana",
+  "models.nanoBanana2": "Nano Banana 2",
+  "models.nanoBananaPro": "Nano Banana Pro",
 
   "settings.title": "설정",
   "settings.sections": "설정 섹션",

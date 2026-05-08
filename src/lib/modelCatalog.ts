@@ -14,6 +14,7 @@ const GEMINI_NANO_BANANA_PRO_MODEL_ID = "gemini-3-pro-image-preview";
 const GPT_IMAGE_2_ENTRY: ImageModelCatalogEntry = {
   id: "gpt-image-2",
   label: "GPT Image 2",
+  i18nKey: "models.gptImage2",
   provider: "openai",
   providerModelId: "gpt-image-2",
   supportsEdit: true,
@@ -45,6 +46,7 @@ const GPT_IMAGE_2_ENTRY: ImageModelCatalogEntry = {
 function createGeminiModelEntry(
   model: Exclude<ImageModel, "gpt-image-2">,
   label: string,
+  i18nKey: string,
   providerModelId: string,
 ): ImageModelCatalogEntry {
   const generationUrl = `${GEMINI_BASE_URL}/${providerModelId}:generateContent`;
@@ -52,6 +54,7 @@ function createGeminiModelEntry(
   return {
     id: model,
     label,
+    i18nKey,
     provider: "google",
     providerModelId,
     supportsEdit: true,
@@ -86,16 +89,19 @@ export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   createGeminiModelEntry(
     "nano-banana",
     "Nano Banana",
+    "models.nanoBanana",
     GEMINI_NANO_BANANA_MODEL_ID,
   ),
   createGeminiModelEntry(
     "nano-banana-2",
     "Nano Banana 2",
+    "models.nanoBanana2",
     GEMINI_NANO_BANANA_2_MODEL_ID,
   ),
   createGeminiModelEntry(
     "nano-banana-pro",
     "Nano Banana Pro",
+    "models.nanoBananaPro",
     GEMINI_NANO_BANANA_PRO_MODEL_ID,
   ),
 ];

@@ -412,7 +412,6 @@ export default function GeneratePage() {
               : m,
           ),
         );
-        setEditSources([]);
         setActiveConversationId(result.conversation_id);
         refreshConversations();
       } catch (e) {
@@ -439,6 +438,7 @@ export default function GeneratePage() {
     if (!promptText) return;
 
     setPrompt("");
+    setEditSources([]);
     setEditingPromptMessageId(null);
     await submitGenerationRequest({
       prompt: promptText,

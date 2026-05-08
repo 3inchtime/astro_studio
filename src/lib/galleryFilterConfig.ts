@@ -100,10 +100,10 @@ export function createGallerySearchConfig(
         t("gallery.filterModel"),
         filters.model ?? "",
         [
-          { value: "", label: "All models" },
+          { value: "", label: t("gallery.allModels") },
           ...IMAGE_MODEL_CATALOG.map((entry) => ({
             value: entry.id,
-            label: entry.label,
+            label: t(entry.i18nKey),
           })),
         ],
         (value) => onFilterChange("model", value),

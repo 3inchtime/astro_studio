@@ -249,6 +249,7 @@ export interface ModelParameterCapabilities {
 export interface ImageModelCatalogEntry {
   id: ImageModel;
   label: string;
+  i18nKey: string;
   provider: string;
   providerModelId: string;
   supportsEdit: boolean;
