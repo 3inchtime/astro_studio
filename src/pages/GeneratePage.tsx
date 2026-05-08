@@ -202,6 +202,11 @@ export default function GeneratePage() {
     activeConversationIdRef.current = activeConversationId;
   }, [activeConversationId]);
 
+  const isGenerating = useMemo(
+    () => messages.some((m) => m.status === "processing"),
+    [messages],
+  );
+
   const promptFavoriteByPrompt = useMemo(() => {
     return new Map(
       promptFavorites.map((favorite) => [
@@ -645,6 +650,7 @@ export default function GeneratePage() {
         onRemoveEditSource={handleRemoveEditSource}
         onCancelPromptEdit={handleCancelPromptEdit}
         onGenerate={() => void handleGenerate()}
+        isGenerating={isGenerating}
       />
 
       <AnimatePresence>

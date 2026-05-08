@@ -18,6 +18,7 @@ import {
   usesSharedEditEndpoint,
 } from "../../lib/settingsEndpoints";
 import { cardVariants, sectionVariants } from "./settingsMotion";
+import { LlmConfigSection } from "./LlmConfigSection";
 
 interface ModelSettingsPanelProps {
   t: TFunction;
@@ -498,6 +499,8 @@ export function ModelSettingsPanel({
           </div>
         </motion.div>
       </motion.section>
+
+      <LlmConfigSection />
     </motion.div>
   );
 }

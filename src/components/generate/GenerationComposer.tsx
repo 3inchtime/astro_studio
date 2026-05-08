@@ -1,12 +1,14 @@
-import { motion } from "framer-motion";
-import { ArrowUp, ImagePlus, Wand2, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowUp, ChevronDown, ImagePlus, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import type { RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toAssetUrl } from "../../lib/api";
 import {
   IMAGE_MODEL_CATALOG,
   getImageModelCatalogEntry,
 } from "../../lib/modelCatalog";
+import { useLlmConfigsQuery, useOptimizePromptMutation } from "../../lib/queries/llm";
 import type {
   EditSourceImage,
   ImageBackground,
@@ -17,6 +19,7 @@ import type {
   ImageQuality,
   ImageSize,
 } from "../../types";
+import OptimizePromptModal from "./OptimizePromptModal";
 
 const sizes: { value: ImageSize; label: string; descKey: string }[] = [
   { value: "auto", label: "Auto", descKey: "generate.auto" },
@@ -59,6 +62,7 @@ interface GenerationComposerProps {
   onRemoveEditSource: (sourceId: string) => void;
   onCancelPromptEdit: () => void;
   onGenerate: () => void;
+  isGenerating?: boolean;
 }
 
 export default function GenerationComposer({
@@ -88,8 +92,107 @@ export default function GenerationComposer({
   onRemoveEditSource,
   onCancelPromptEdit,
   onGenerate,
+  isGenerating = false,
 }: GenerationComposerProps) {
   const { t } = useTranslation();
+
+  // ── Optimize state ──────────────────────────────────────────────────────────
+  const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const [optimizeOriginalPrompt, setOptimizeOriginalPrompt] = useState("");
+  const [optimizedPrompt, setOptimizedPrompt] = useState("");
+  const [showOptimizeModal, setShowOptimizeModal] = useState(false);
+  const [selectedConfigId, setSelectedConfigId] = useState<string>("");
+  const [showConfigDropdown, setShowConfigDropdown] = useState(false);
+
+  const { data: llmConfigs = [] } = useLlmConfigsQuery();
+
+  const enabledTextConfigs = useMemo(
+    () => llmConfigs.filter((c) => c.enabled && c.capability === "text"),
+    [llmConfigs],
+  );
+
+  const optimizeMutation = useOptimizePromptMutation();
+
+  // Auto-select single config; clear selection if chosen config is removed
+  useEffect(() => {
+    if (enabledTextConfigs.length === 1) {
+      setSelectedConfigId(enabledTextConfigs[0].id);
+    } else if (enabledTextConfigs.length === 0) {
+      setSelectedConfigId("");
+    } else if (
+      selectedConfigId &&
+      !enabledTextConfigs.find((c) => c.id === selectedConfigId)
+    ) {
+      setSelectedConfigId("");
+    }
+  }, [enabledTextConfigs, selectedConfigId]);
+
+  // Clear error when prompt changes
+  useEffect(() => {
+    setOptimizeError(null);
+  }, [prompt]);
+
+  // Close config dropdown on click outside
+  const configDropdownRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showConfigDropdown) return;
+    const handleClick = (e: MouseEvent) => {
+      if (
+        configDropdownRef.current &&
+        !configDropdownRef.current.contains(e.target as Node)
+      ) {
+        setShowConfigDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showConfigDropdown]);
+
+  const effectiveConfigId =
+    enabledTextConfigs.length === 1
+      ? enabledTextConfigs[0].id
+      : selectedConfigId;
+
+  const canOptimize =
+    enabledTextConfigs.length > 0 &&
+    prompt.trim().length > 0 &&
+    !!effectiveConfigId &&
+    !optimizeMutation.isPending &&
+    !isGenerating;
+
+  const handleOptimize = useCallback(async () => {
+    const trimmed = prompt.trim();
+    if (!trimmed || !effectiveConfigId) return;
+
+    setOptimizeError(null);
+    setOptimizeOriginalPrompt(trimmed);
+
+    try {
+      const result = await optimizeMutation.mutateAsync({
+        prompt: trimmed,
+        configId: effectiveConfigId,
+      });
+      setOptimizedPrompt(result);
+      setShowOptimizeModal(true);
+    } catch (e) {
+      setOptimizeError(e instanceof Error ? e.message : String(e));
+    }
+  }, [prompt, effectiveConfigId, optimizeMutation]);
+
+  const handleUseOptimized = useCallback(() => {
+    onPromptChange(optimizedPrompt);
+    setShowOptimizeModal(false);
+    setOptimizedPrompt("");
+    setOptimizeOriginalPrompt("");
+  }, [optimizedPrompt, onPromptChange]);
+
+  const handleKeepOriginal = useCallback(() => {
+    setShowOptimizeModal(false);
+    setOptimizedPrompt("");
+    setOptimizeOriginalPrompt("");
+  }, []);
+
+  // ── Model catalog ───────────────────────────────────────────────────────────
   const modelCatalogEntry = getImageModelCatalogEntry(imageModel);
   const { parameterCapabilities } = modelCatalogEntry;
   const showSize = parameterCapabilities.sizes.length > 0;
@@ -338,21 +441,105 @@ export default function GenerationComposer({
                   : t("generate.placeholder")
               }
               rows={2}
-              className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[110px]"
+              className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[190px]"
             />
-            <motion.button
-              onClick={onGenerate}
-              disabled={!prompt.trim()}
-              aria-label={t("generate.submit")}
-              whileHover={{ scale: 1.02, y: -1 }}
-              whileTap={{ scale: 0.97 }}
-              className="absolute right-3 bottom-3 flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
-            >
-              <ArrowUp size={15} strokeWidth={2.5} />
-            </motion.button>
+            <div className="absolute right-3 bottom-3 flex items-center gap-2">
+              {/* Config selector — visible only when multiple enabled text configs */}
+              {enabledTextConfigs.length > 1 && (
+                <div className="relative" ref={configDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfigDropdown(!showConfigDropdown)}
+                    className="flex h-[34px] items-center gap-1 rounded-[9px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-foreground/80 transition-all hover:border-border hover:text-foreground"
+                  >
+                    <span className="max-w-[90px] truncate">
+                      {selectedConfigId
+                        ? enabledTextConfigs.find((c) => c.id === selectedConfigId)
+                            ?.name ?? "Select LLM"
+                        : "Select LLM"}
+                    </span>
+                    <ChevronDown size={11} className="text-muted/60" />
+                  </button>
+                  {showConfigDropdown && (
+                    <div className="absolute bottom-full right-0 z-10 mb-1 min-w-[140px] overflow-hidden rounded-[10px] border border-border-subtle bg-surface shadow-float">
+                      {enabledTextConfigs.map((config) => (
+                        <button
+                          key={config.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedConfigId(config.id);
+                            setShowConfigDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors hover:bg-subtle ${
+                            selectedConfigId === config.id
+                              ? "text-primary"
+                              : "text-foreground/80"
+                          }`}
+                        >
+                          {config.name || "Untitled"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Optimize button */}
+              {enabledTextConfigs.length > 0 && (
+                <motion.button
+                  type="button"
+                  onClick={handleOptimize}
+                  disabled={!canOptimize}
+                  aria-label="Optimize prompt"
+                  title="Optimize prompt with AI"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary disabled:pointer-events-none disabled:opacity-30"
+                >
+                  {optimizeMutation.isPending ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={14} />
+                  )}
+                  <span className="hidden sm:inline">Optimize</span>
+                </motion.button>
+              )}
+
+              {/* Send button */}
+              <motion.button
+                onClick={onGenerate}
+                disabled={!prompt.trim() || optimizeMutation.isPending}
+                aria-label={t("generate.submit")}
+                whileHover={{ scale: 1.02, y: -1 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
+              >
+                <ArrowUp size={15} strokeWidth={2.5} />
+              </motion.button>
+            </div>
+
+            {/* Inline optimize error */}
+            {optimizeError && (
+              <div className="mt-2 rounded-[8px] border border-error/15 bg-error/5 px-3 py-1.5 text-[11px] text-error">
+                {optimizeError}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showOptimizeModal && (
+          <OptimizePromptModal
+            open={showOptimizeModal}
+            originalPrompt={optimizeOriginalPrompt}
+            optimizedPrompt={optimizedPrompt}
+            onUseOptimized={handleUseOptimized}
+            onKeepOriginal={handleKeepOriginal}
+            onOptimizedChange={setOptimizedPrompt}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

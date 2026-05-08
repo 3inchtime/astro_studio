@@ -6,6 +6,7 @@ mod error;
 mod file_manager;
 mod gallery;
 mod image_engines;
+mod llm;
 mod model_registry;
 mod models;
 mod runtime_logs;
@@ -580,6 +581,9 @@ pub fn run() {
             commands::logs::save_log_settings,
             commands::logs::get_trash_settings,
             commands::logs::save_trash_settings,
+            commands::llm::get_llm_configs,
+            commands::llm::save_llm_configs,
+            commands::llm::optimize_prompt,
         ])
         .setup(|app| {
             runtime_logs::attach_app_handle(app.handle().clone());

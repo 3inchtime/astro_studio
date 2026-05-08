@@ -45,6 +45,7 @@ pub const DEFAULT_TRASH_RETENTION_DAYS: u32 = 30;
 pub const SETTING_FONT_SIZE: &str = "font_size";
 pub const DEFAULT_FONT_SIZE: &str = "medium";
 pub const DEFAULT_IMAGE_MODEL: &str = ENGINE_GPT_IMAGE_2;
+pub const SETTING_LLM_CONFIGS: &str = "llm_configs";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -239,4 +240,16 @@ pub struct PromptFavorite {
     pub prompt: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LlmConfig {
+    pub id: String,
+    pub name: String,
+    pub protocol: String,
+    pub model: String,
+    pub api_key: String,
+    pub base_url: String,
+    pub capability: String,
+    pub enabled: bool,
 }

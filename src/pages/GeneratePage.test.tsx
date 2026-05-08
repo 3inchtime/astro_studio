@@ -26,6 +26,8 @@ const onGenerationFailed = vi.fn();
 const createPromptFavorite = vi.fn();
 const getPromptFavorites = vi.fn();
 const deletePromptFavorite = vi.fn();
+const getLlmConfigs = vi.fn().mockResolvedValue([]);
+const optimizePrompt = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -94,6 +96,8 @@ vi.mock("../lib/api", () => ({
     getConversationGenerations(...args),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
   getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
+  getLlmConfigs: (...args: unknown[]) => getLlmConfigs(...args),
+  optimizePrompt: (...args: unknown[]) => optimizePrompt(...args),
   onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
   onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),

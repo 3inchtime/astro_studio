@@ -257,3 +257,14 @@ export interface ImageModelCatalogEntry {
   parameterDefaults: ModelParameterDefaults;
   parameterCapabilities: ModelParameterCapabilities;
 }
+
+export interface LlmConfig {
+  id: string;
+  name: string;
+  protocol: "openai" | "anthropic";
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  capability: "text" | "multimodal";
+  enabled: boolean;
+}

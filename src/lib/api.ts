@@ -23,6 +23,7 @@ import type {
   ModelProviderProfile,
   ModelProviderProfilesState,
   PromptFavorite,
+  LlmConfig,
 } from "../types";
 
 export function toAssetUrl(filePath: string): string {
@@ -523,4 +524,16 @@ export async function getFontSize(): Promise<AppFontSize> {
 
 export async function saveFontSize(fontSize: AppFontSize): Promise<void> {
   await invoke("save_font_size", { fontSize });
+}
+
+export async function getLlmConfigs(): Promise<LlmConfig[]> {
+  return invoke("get_llm_configs");
+}
+
+export async function saveLlmConfigs(configs: LlmConfig[]): Promise<void> {
+  return invoke("save_llm_configs", { configs });
+}
+
+export async function optimizePrompt(prompt: string, configId: string): Promise<string> {
+  return invoke("optimize_prompt", { prompt, configId });
 }
