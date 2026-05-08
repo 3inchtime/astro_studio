@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { generationsToMessages } from "./generationMessages";
-import type { GenerationResult } from "../types";
+import {
+  completeGenerationMessage,
+  generationsToMessages,
+} from "./generationMessages";
+import type { GenerateResponse, GenerationResult, Message } from "../types";
 
 function generationResult(
   id: string,
@@ -99,6 +102,53 @@ describe("generationsToMessages", () => {
       id: "assistant-generation-3",
       role: "assistant",
       status: "processing",
+    });
+  });
+});
+
+describe("completeGenerationMessage", () => {
+  const completedResult: GenerateResponse = {
+    generation_id: "generation-new",
+    conversation_id: "conversation-1",
+    images: [
+      {
+        id: "image-new",
+        generation_id: "generation-new",
+        file_path: "/tmp/generated.png",
+        thumbnail_path: "/tmp/generated-thumb.png",
+        width: 1024,
+        height: 1024,
+        file_size: 2048,
+      },
+    ],
+  };
+
+  it("completes a reloaded processing message that already has the real generation id", () => {
+    const messages: Message[] = [
+      {
+        id: "assistant-generation-new",
+        role: "assistant",
+        content: "",
+        generationId: "generation-new",
+        status: "processing",
+        createdAt: "2026-04-26T00:00:00Z",
+      },
+    ];
+
+    expect(
+      completeGenerationMessage(messages, "temp-local", completedResult)[0],
+    ).toMatchObject({
+      id: "assistant-generation-new",
+      generationId: "generation-new",
+      status: "complete",
+      images: [
+        {
+          imageId: "image-new",
+          generationId: "generation-new",
+          path: "/tmp/generated.png",
+          thumbnailPath: "/tmp/generated-thumb.png",
+        },
+      ],
     });
   });
 });

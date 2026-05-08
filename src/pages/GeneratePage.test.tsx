@@ -21,6 +21,8 @@ const saveImageModel = vi.fn();
 const generateImage = vi.fn();
 const editImage = vi.fn();
 const pickSourceImages = vi.fn();
+const onGenerationComplete = vi.fn();
+const onGenerationFailed = vi.fn();
 const createPromptFavorite = vi.fn();
 const getPromptFavorites = vi.fn();
 const deletePromptFavorite = vi.fn();
@@ -92,6 +94,8 @@ vi.mock("../lib/api", () => ({
     getConversationGenerations(...args),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
   getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
+  onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
+  onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
   messageImageToEditSource: (image: {
     path: string;
@@ -198,6 +202,8 @@ describe("GeneratePage", () => {
     generateImage.mockReset();
     editImage.mockReset();
     pickSourceImages.mockReset();
+    onGenerationComplete.mockReset();
+    onGenerationFailed.mockReset();
     createPromptFavorite.mockReset();
     createPromptFavorite.mockImplementation(async (prompt: string) => ({
       id: `fav-${crypto.randomUUID()}`,
@@ -215,6 +221,7 @@ describe("GeneratePage", () => {
           prompt: "A dramatic mountain temple at sunrise",
           created_at: "2026-04-26T00:00:00Z",
           status: "completed",
+          source_image_paths: [],
         },
         images: [
           {
@@ -247,6 +254,8 @@ describe("GeneratePage", () => {
       images: [],
     });
     pickSourceImages.mockResolvedValue([]);
+    onGenerationComplete.mockResolvedValue(vi.fn());
+    onGenerationFailed.mockResolvedValue(vi.fn());
   });
 
   it("renders every registered model from the shared catalog in the model selector", async () => {
@@ -405,6 +414,51 @@ describe("GeneratePage", () => {
     await waitFor(() => {
       expect(screen.getByText("/tmp/generated-nano-banana.png")).toBeInTheDocument();
     });
+  });
+
+  it("reloads the active conversation when a generation completion event arrives", async () => {
+    let completeHandler: ((data: { generation_id: string; status: string }) => void) | undefined;
+    onGenerationComplete.mockImplementation((handler) => {
+      completeHandler = handler;
+      return Promise.resolve(vi.fn());
+    });
+    getConversationGenerations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          generation: {
+            id: "generation-event",
+            prompt: "A completed event image",
+            created_at: "2026-04-26T00:00:00Z",
+            status: "completed",
+            source_image_paths: [],
+          },
+          images: [
+            {
+              id: "image-event",
+              generation_id: "generation-event",
+              file_path: "/tmp/event-generated.png",
+              thumbnail_path: "/tmp/event-generated-thumb.png",
+            },
+          ],
+        },
+      ]);
+
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(onGenerationComplete).toHaveBeenCalled();
+    });
+
+    completeHandler?.({
+      generation_id: "generation-event",
+      status: "completed",
+    });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText("/tmp/event-generated.png")).toBeInTheDocument();
   });
 
   it("resets parameters to selected model defaults and hides unsupported controls when switching models", async () => {

@@ -122,6 +122,7 @@ export default function AppLayout() {
     // /generate always uses the default project — no cross-contamination
     if (location.pathname === "/generate") {
       setActiveProjectId(null);
+      setActiveConversationId(null);
       return;
     }
 

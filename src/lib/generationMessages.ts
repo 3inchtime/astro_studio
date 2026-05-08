@@ -1,4 +1,21 @@
-import type { GenerationResult, Message, MessageImage } from "../types";
+import type {
+  GeneratedImage,
+  GenerateResponse,
+  GenerationResult,
+  Message,
+  MessageImage,
+} from "../types";
+
+function generatedImagesToMessageImages(
+  images: GeneratedImage[],
+): MessageImage[] {
+  return images.map((img) => ({
+    imageId: img.id,
+    generationId: img.generation_id,
+    path: img.file_path,
+    thumbnailPath: img.thumbnail_path,
+  }));
+}
 
 export function generationsToMessages(
   generations: GenerationResult[],
@@ -6,12 +23,7 @@ export function generationsToMessages(
   const messages: Message[] = [];
 
   for (const gr of generations) {
-    const images: MessageImage[] = gr.images.map((img) => ({
-      imageId: img.id,
-      generationId: img.generation_id,
-      path: img.file_path,
-      thumbnailPath: img.thumbnail_path,
-    }));
+    const images = generatedImagesToMessageImages(gr.images);
 
     messages.push({
       id: `user-${gr.generation.id}`,
@@ -44,4 +56,47 @@ export function generationsToMessages(
   }
 
   return messages;
+}
+
+export function completeGenerationMessage(
+  messages: Message[],
+  localGenerationId: string,
+  result: GenerateResponse,
+): Message[] {
+  return messages.map((message) => {
+    const matchesLocalId = message.id === `assistant-${localGenerationId}`;
+    const matchesGenerationId =
+      message.generationId === result.generation_id ||
+      message.id === `assistant-${result.generation_id}`;
+
+    if (!matchesLocalId && !matchesGenerationId) {
+      return message;
+    }
+
+    return {
+      ...message,
+      id: `assistant-${result.generation_id}`,
+      generationId: result.generation_id,
+      images: generatedImagesToMessageImages(result.images),
+      status: "complete" as const,
+    };
+  });
+}
+
+export function failGenerationMessage(
+  messages: Message[],
+  localGenerationId: string,
+  error: unknown,
+  retryRequest: Message["retryRequest"],
+): Message[] {
+  return messages.map((message) =>
+    message.id === `assistant-${localGenerationId}`
+      ? {
+          ...message,
+          status: "failed" as const,
+          error: String(error),
+          retryRequest,
+        }
+      : message,
+  );
 }
