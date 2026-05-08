@@ -28,18 +28,22 @@ export default function ProjectImagePanel({
   onPreview?: (result: GenerationResult, index: number) => void;
   onManageFolders: (imageId: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<GenerationSearchFilters>({});
 
   const config = useMemo(
     () => ({
-      ...createGallerySearchConfig(t, filters, (key, value) =>
-        setFilters((current) => updateFilterValue(current, key, value)),
+      ...createGallerySearchConfig(
+        t,
+        filters,
+        (key, value) =>
+          setFilters((current) => updateFilterValue(current, key, value)),
+        i18n.resolvedLanguage ?? i18n.language,
       ),
       title: t("projects.imagesTitle"),
     }),
-    [filters, t],
+    [filters, i18n.language, i18n.resolvedLanguage, t],
   );
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));

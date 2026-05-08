@@ -1,0 +1,62 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - link "Astro Studio" [ref=e5] [cursor=pointer]:
+      - /url: /generate
+      - img "Astro Studio" [ref=e7]
+    - navigation [ref=e8]:
+      - link "生成" [ref=e9] [cursor=pointer]:
+        - /url: /generate
+        - img [ref=e10]
+      - link "项目" [ref=e13] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e14]
+      - link "画廊" [ref=e16] [cursor=pointer]:
+        - /url: /gallery
+        - img [ref=e17]
+      - link "收藏" [ref=e22] [cursor=pointer]:
+        - /url: /favorites
+        - img [ref=e23]
+    - generic [ref=e25]:
+      - button [ref=e26]:
+        - img [ref=e28]
+      - link "设置" [ref=e34] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e35]
+  - main [ref=e38]:
+    - generic [ref=e41]:
+      - generic [ref=e43]:
+        - heading "画廊" [level=2] [ref=e45]
+        - search "画廊 filters" [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]: 提示词
+            - img
+            - textbox "提示词" [ref=e49]:
+              - /placeholder: 搜索提示词...
+          - generic [ref=e50]:
+            - text: 模型
+            - img
+            - combobox "模型" [ref=e51] [cursor=pointer]:
+              - option "全部模型" [selected]
+              - option "GPT Image 2"
+              - option "Nano Banana"
+              - option "Nano Banana 2"
+              - option "Nano Banana Pro"
+          - generic [ref=e52]:
+            - generic [ref=e53]: 时间范围
+            - button "时间范围" [active] [ref=e54]:
+              - img [ref=e56]
+              - generic [ref=e58]:
+                - generic [ref=e59]: 全部时间
+                - generic [ref=e60]: 最近 7 天
+              - img [ref=e61]
+          - generic [ref=e63]:
+            - button "应用筛选" [ref=e64]:
+              - img [ref=e65]
+              - text: 应用筛选
+            - button "重置" [disabled] [ref=e67]:
+              - img [ref=e68]
+              - text: 重置
+      - generic [ref=e73]:
+        - img [ref=e75]
+        - paragraph [ref=e79]: 暂无图片
+        - paragraph [ref=e80]: 生成的图片将显示在这里

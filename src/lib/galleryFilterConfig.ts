@@ -1,5 +1,10 @@
 import { IMAGE_MODEL_CATALOG } from "./modelCatalog";
 import type { GenerationSearchFilters } from "../types";
+import {
+  formatDateRangeDisplay,
+  type DateRangeFilterValue,
+} from "./dateRangeFilters";
+import { getDayPickerLocale } from "./dayPickerLocale";
 
 type TranslationFn = (key: string) => string;
 
@@ -25,17 +30,27 @@ export interface GallerySelectFilterConfig<
   onChange: (value: string) => void;
 }
 
-export interface GalleryDateFilterConfig {
-  type: "date";
-  key: "created_from" | "created_to";
+export interface GalleryDateRangeFilterConfig {
+  type: "date-range";
+  key: "created_range";
   label: string;
-  value: string;
-  onChange: (value: string) => void;
+  value: DateRangeFilterValue;
+  displayValue: string;
+  locale: ReturnType<typeof getDayPickerLocale>;
+  presets: {
+    today: string;
+    last7Days: string;
+    last30Days: string;
+    thisMonth: string;
+    clear: string;
+    done: string;
+  };
+  onChange: (value: DateRangeFilterValue) => void;
 }
 
 export type GalleryFilterFieldConfig =
   | GallerySelectFilterConfig
-  | GalleryDateFilterConfig;
+  | GalleryDateRangeFilterConfig;
 
 export interface GallerySearchConfig {
   title: string;
@@ -65,17 +80,30 @@ function selectField<TKey extends SelectFilterKey>(
   };
 }
 
-function dateField(
-  key: "created_from" | "created_to",
+function dateRangeField(
   label: string,
-  value: string,
-  onChange: (value: string) => void,
-): GalleryDateFilterConfig {
+  value: DateRangeFilterValue,
+  t: TranslationFn,
+  language: string | undefined,
+  onChange: (value: DateRangeFilterValue) => void,
+): GalleryDateRangeFilterConfig {
+  const locale = getDayPickerLocale(language);
+
   return {
-    type: "date",
-    key,
+    type: "date-range",
+    key: "created_range",
     label,
     value,
+    displayValue: formatDateRangeDisplay(value, t("gallery.rangeAllTime"), locale.code),
+    locale,
+    presets: {
+      today: t("gallery.rangePresetToday"),
+      last7Days: t("gallery.rangePresetLast7Days"),
+      last30Days: t("gallery.rangePresetLast30Days"),
+      thisMonth: t("gallery.rangePresetThisMonth"),
+      clear: t("gallery.rangePresetClear"),
+      done: t("gallery.rangePresetDone"),
+    },
     onChange,
   };
 }
@@ -87,6 +115,7 @@ export function createGallerySearchConfig(
     key: K,
     value: GenerationSearchFilters[K],
   ) => void,
+  language?: string,
 ): GallerySearchConfig {
   return {
     title: t("gallery.title"),
@@ -108,17 +137,18 @@ export function createGallerySearchConfig(
         ],
         (value) => onFilterChange("model", value),
       ),
-      dateField(
-        "created_from",
-        t("gallery.filterCreatedFrom"),
-        filters.created_from ?? "",
-        (value) => onFilterChange("created_from", value),
-      ),
-      dateField(
-        "created_to",
-        t("gallery.filterCreatedTo"),
-        filters.created_to ?? "",
-        (value) => onFilterChange("created_to", value),
+      dateRangeField(
+        t("gallery.filterCreatedRange"),
+        {
+          from: filters.created_from ?? "",
+          to: filters.created_to ?? "",
+        },
+        t,
+        language,
+        (value) => {
+          onFilterChange("created_from", value.from);
+          onFilterChange("created_to", value.to);
+        },
       ),
     ],
   };

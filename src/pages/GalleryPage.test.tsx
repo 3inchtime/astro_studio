@@ -7,6 +7,7 @@ const searchGenerations = vi.fn();
 const deleteGeneration = vi.fn();
 const setActiveConversationId = vi.fn();
 const navigate = vi.fn();
+const realDate = Date;
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -114,6 +115,24 @@ vi.mock("../components/favorites/FolderSelector", () => ({
   default: () => null,
 }));
 
+class MockDate extends Date {
+  constructor(...args: ConstructorParameters<DateConstructor>) {
+    if (args.length < 1) {
+      super("2026-05-08T12:00:00Z");
+      return;
+    }
+
+    super(...args);
+  }
+
+  static now() {
+    return new realDate("2026-05-08T12:00:00Z").getTime();
+  }
+
+  static parse = realDate.parse;
+  static UTC = realDate.UTC;
+}
+
 let intersectionCallback: IntersectionObserverCallback | null = null;
 
 function triggerIntersection(isIntersecting = true) {
@@ -215,9 +234,11 @@ describe("GalleryPage", () => {
       page: 1,
       page_size: 20,
     });
+
+    vi.stubGlobal("Date", MockDate);
   });
 
-  it("searches with prompt, model, and date only", async () => {
+  it("searches with prompt, model, and a preset date range", async () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
@@ -227,9 +248,8 @@ describe("GalleryPage", () => {
     fireEvent.change(screen.getByLabelText("gallery.filterModel"), {
       target: { value: "gpt-image-2" },
     });
-    fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
-      target: { value: "2026-05-01" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /gallery.filterCreatedRange/i }));
+    fireEvent.click(screen.getByRole("button", { name: "gallery.rangePresetLast7Days" }));
     fireEvent.change(screen.getByPlaceholderText("gallery.search"), {
       target: { value: "sunrise" },
     });
@@ -238,7 +258,8 @@ describe("GalleryPage", () => {
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenLastCalledWith("sunrise", 1, false, {
         model: "gpt-image-2",
-        created_from: "2026-05-01",
+        created_from: "2026-05-02",
+        created_to: "2026-05-08",
       }, undefined);
     });
 
@@ -254,9 +275,8 @@ describe("GalleryPage", () => {
       expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
-    fireEvent.change(screen.getByLabelText("gallery.filterCreatedTo"), {
-      target: { value: "2026-05-31" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /gallery.filterCreatedRange/i }));
+    fireEvent.click(screen.getByRole("button", { name: "gallery.rangePresetThisMonth" }));
     fireEvent.change(screen.getByPlaceholderText("gallery.search"), {
       target: { value: "nebula" },
     });
@@ -266,30 +286,28 @@ describe("GalleryPage", () => {
 
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenLastCalledWith("nebula", 1, false, {
+        created_from: "2026-05-01",
         created_to: "2026-05-31",
       }, undefined);
     });
   });
 
-  it("compacts date filters through the gallery search action", async () => {
+  it("compacts date range filters through the gallery search action", async () => {
     render(<GalleryPage />);
 
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
     });
 
-    fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
-      target: { value: "2026-05-01" },
-    });
-    fireEvent.change(screen.getByLabelText("gallery.filterCreatedTo"), {
-      target: { value: "" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /gallery.filterCreatedRange/i }));
+    fireEvent.click(screen.getByRole("button", { name: "gallery.rangePresetToday" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "gallery.rangePresetClear" })[1],
+    );
     fireEvent.click(screen.getByRole("button", { name: "gallery.applyFilters" }));
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {
-        created_from: "2026-05-01",
-      }, undefined);
+      expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
     });
   });
 
@@ -305,9 +323,8 @@ describe("GalleryPage", () => {
     });
     expect(resetButton).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText("gallery.filterCreatedFrom"), {
-      target: { value: "2026-05-01" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /gallery.filterCreatedRange/i }));
+    fireEvent.click(screen.getByRole("button", { name: "gallery.rangePresetToday" }));
     expect(resetButton).toBeEnabled();
 
     fireEvent.click(resetButton);
@@ -315,7 +332,9 @@ describe("GalleryPage", () => {
     await waitFor(() => {
       expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
     });
-    expect(screen.getByLabelText("gallery.filterCreatedFrom")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /gallery.filterCreatedRange/i })).toHaveTextContent(
+      "gallery.rangeAllTime",
+    );
   });
 
   it("reset clears an active text query", async () => {

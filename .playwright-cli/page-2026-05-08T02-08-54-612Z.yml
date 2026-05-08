@@ -1,0 +1,287 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - link "Astro Studio" [ref=e5] [cursor=pointer]:
+      - /url: /generate
+      - img "Astro Studio" [ref=e7]
+    - navigation [ref=e8]:
+      - link "生成" [ref=e9] [cursor=pointer]:
+        - /url: /generate
+        - img [ref=e10]
+      - link "项目" [ref=e13] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e14]
+      - link "画廊" [ref=e16] [cursor=pointer]:
+        - /url: /gallery
+        - img [ref=e17]
+      - link "收藏" [ref=e22] [cursor=pointer]:
+        - /url: /favorites
+        - img [ref=e23]
+    - generic [ref=e25]:
+      - button [ref=e26]:
+        - img [ref=e28]
+      - link "设置" [ref=e34] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e35]
+  - main [ref=e38]:
+    - generic [ref=e41]:
+      - generic [ref=e43]:
+        - heading "画廊" [level=2] [ref=e45]
+        - search "画廊 filters" [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]: 提示词
+            - img
+            - textbox "提示词" [ref=e49]:
+              - /placeholder: 搜索提示词...
+          - generic [ref=e50]:
+            - text: 模型
+            - img
+            - combobox "模型" [ref=e51] [cursor=pointer]:
+              - option "全部模型" [selected]
+              - option "GPT Image 2"
+              - option "Nano Banana"
+              - option "Nano Banana 2"
+              - option "Nano Banana Pro"
+          - generic [ref=e52]:
+            - generic [ref=e53]: 时间范围
+            - button "时间范围" [expanded] [active] [ref=e54]:
+              - img [ref=e56]
+              - generic [ref=e58]:
+                - generic [ref=e59]: 全部时间
+                - generic [ref=e60]: 最近 7 天
+              - img [ref=e61]
+            - dialog "时间范围" [ref=e82]:
+              - generic [ref=e83]:
+                - button "今天" [ref=e84]
+                - button "最近 7 天" [ref=e85]
+                - button "最近 30 天" [ref=e86]
+                - button "本月" [ref=e87]
+              - generic [ref=e90]:
+                - navigation "Navigation bar" [ref=e91]:
+                  - button "Go to the Previous Month" [ref=e92] [cursor=pointer]:
+                    - img [ref=e93]
+                  - button "Go to the Next Month" [ref=e95] [cursor=pointer]:
+                    - img [ref=e96]
+                - generic [ref=e98]:
+                  - status [ref=e100]: May 2026
+                  - grid "May 2026" [ref=e101]:
+                    - rowgroup [ref=e102]:
+                      - row [ref=e103]:
+                        - columnheader [ref=e104]: Su
+                        - columnheader [ref=e105]: Mo
+                        - columnheader [ref=e106]: Tu
+                        - columnheader [ref=e107]: We
+                        - columnheader [ref=e108]: Th
+                        - columnheader [ref=e109]: Fr
+                        - columnheader [ref=e110]: Sa
+                    - rowgroup [ref=e111]:
+                      - row "Sunday, April 26th, 2026 Monday, April 27th, 2026 Tuesday, April 28th, 2026 Wednesday, April 29th, 2026 Thursday, April 30th, 2026 Friday, May 1st, 2026 Saturday, May 2nd, 2026" [ref=e112]:
+                        - gridcell "Sunday, April 26th, 2026" [ref=e113]:
+                          - button "Sunday, April 26th, 2026" [ref=e114] [cursor=pointer]: "26"
+                        - gridcell "Monday, April 27th, 2026" [ref=e115]:
+                          - button "Monday, April 27th, 2026" [ref=e116] [cursor=pointer]: "27"
+                        - gridcell "Tuesday, April 28th, 2026" [ref=e117]:
+                          - button "Tuesday, April 28th, 2026" [ref=e118] [cursor=pointer]: "28"
+                        - gridcell "Wednesday, April 29th, 2026" [ref=e119]:
+                          - button "Wednesday, April 29th, 2026" [ref=e120] [cursor=pointer]: "29"
+                        - gridcell "Thursday, April 30th, 2026" [ref=e121]:
+                          - button "Thursday, April 30th, 2026" [ref=e122] [cursor=pointer]: "30"
+                        - gridcell "Friday, May 1st, 2026" [ref=e123]:
+                          - button "Friday, May 1st, 2026" [ref=e124] [cursor=pointer]: "1"
+                        - gridcell "Saturday, May 2nd, 2026" [ref=e125]:
+                          - button "Saturday, May 2nd, 2026" [ref=e126] [cursor=pointer]: "2"
+                      - row "Sunday, May 3rd, 2026 Monday, May 4th, 2026 Tuesday, May 5th, 2026 Wednesday, May 6th, 2026 Thursday, May 7th, 2026 Today, Friday, May 8th, 2026 Saturday, May 9th, 2026" [ref=e127]:
+                        - gridcell "Sunday, May 3rd, 2026" [ref=e128]:
+                          - button "Sunday, May 3rd, 2026" [ref=e129] [cursor=pointer]: "3"
+                        - gridcell "Monday, May 4th, 2026" [ref=e130]:
+                          - button "Monday, May 4th, 2026" [ref=e131] [cursor=pointer]: "4"
+                        - gridcell "Tuesday, May 5th, 2026" [ref=e132]:
+                          - button "Tuesday, May 5th, 2026" [ref=e133] [cursor=pointer]: "5"
+                        - gridcell "Wednesday, May 6th, 2026" [ref=e134]:
+                          - button "Wednesday, May 6th, 2026" [ref=e135] [cursor=pointer]: "6"
+                        - gridcell "Thursday, May 7th, 2026" [ref=e136]:
+                          - button "Thursday, May 7th, 2026" [ref=e137] [cursor=pointer]: "7"
+                        - gridcell "Today, Friday, May 8th, 2026" [ref=e138]:
+                          - button "Today, Friday, May 8th, 2026" [ref=e139] [cursor=pointer]: "8"
+                        - gridcell "Saturday, May 9th, 2026" [ref=e140]:
+                          - button "Saturday, May 9th, 2026" [ref=e141] [cursor=pointer]: "9"
+                      - row "Sunday, May 10th, 2026 Monday, May 11th, 2026 Tuesday, May 12th, 2026 Wednesday, May 13th, 2026 Thursday, May 14th, 2026 Friday, May 15th, 2026 Saturday, May 16th, 2026" [ref=e142]:
+                        - gridcell "Sunday, May 10th, 2026" [ref=e143]:
+                          - button "Sunday, May 10th, 2026" [ref=e144] [cursor=pointer]: "10"
+                        - gridcell "Monday, May 11th, 2026" [ref=e145]:
+                          - button "Monday, May 11th, 2026" [ref=e146] [cursor=pointer]: "11"
+                        - gridcell "Tuesday, May 12th, 2026" [ref=e147]:
+                          - button "Tuesday, May 12th, 2026" [ref=e148] [cursor=pointer]: "12"
+                        - gridcell "Wednesday, May 13th, 2026" [ref=e149]:
+                          - button "Wednesday, May 13th, 2026" [ref=e150] [cursor=pointer]: "13"
+                        - gridcell "Thursday, May 14th, 2026" [ref=e151]:
+                          - button "Thursday, May 14th, 2026" [ref=e152] [cursor=pointer]: "14"
+                        - gridcell "Friday, May 15th, 2026" [ref=e153]:
+                          - button "Friday, May 15th, 2026" [ref=e154] [cursor=pointer]: "15"
+                        - gridcell "Saturday, May 16th, 2026" [ref=e155]:
+                          - button "Saturday, May 16th, 2026" [ref=e156] [cursor=pointer]: "16"
+                      - row "Sunday, May 17th, 2026 Monday, May 18th, 2026 Tuesday, May 19th, 2026 Wednesday, May 20th, 2026 Thursday, May 21st, 2026 Friday, May 22nd, 2026 Saturday, May 23rd, 2026" [ref=e157]:
+                        - gridcell "Sunday, May 17th, 2026" [ref=e158]:
+                          - button "Sunday, May 17th, 2026" [ref=e159] [cursor=pointer]: "17"
+                        - gridcell "Monday, May 18th, 2026" [ref=e160]:
+                          - button "Monday, May 18th, 2026" [ref=e161] [cursor=pointer]: "18"
+                        - gridcell "Tuesday, May 19th, 2026" [ref=e162]:
+                          - button "Tuesday, May 19th, 2026" [ref=e163] [cursor=pointer]: "19"
+                        - gridcell "Wednesday, May 20th, 2026" [ref=e164]:
+                          - button "Wednesday, May 20th, 2026" [ref=e165] [cursor=pointer]: "20"
+                        - gridcell "Thursday, May 21st, 2026" [ref=e166]:
+                          - button "Thursday, May 21st, 2026" [ref=e167] [cursor=pointer]: "21"
+                        - gridcell "Friday, May 22nd, 2026" [ref=e168]:
+                          - button "Friday, May 22nd, 2026" [ref=e169] [cursor=pointer]: "22"
+                        - gridcell "Saturday, May 23rd, 2026" [ref=e170]:
+                          - button "Saturday, May 23rd, 2026" [ref=e171] [cursor=pointer]: "23"
+                      - row "Sunday, May 24th, 2026 Monday, May 25th, 2026 Tuesday, May 26th, 2026 Wednesday, May 27th, 2026 Thursday, May 28th, 2026 Friday, May 29th, 2026 Saturday, May 30th, 2026" [ref=e172]:
+                        - gridcell "Sunday, May 24th, 2026" [ref=e173]:
+                          - button "Sunday, May 24th, 2026" [ref=e174] [cursor=pointer]: "24"
+                        - gridcell "Monday, May 25th, 2026" [ref=e175]:
+                          - button "Monday, May 25th, 2026" [ref=e176] [cursor=pointer]: "25"
+                        - gridcell "Tuesday, May 26th, 2026" [ref=e177]:
+                          - button "Tuesday, May 26th, 2026" [ref=e178] [cursor=pointer]: "26"
+                        - gridcell "Wednesday, May 27th, 2026" [ref=e179]:
+                          - button "Wednesday, May 27th, 2026" [ref=e180] [cursor=pointer]: "27"
+                        - gridcell "Thursday, May 28th, 2026" [ref=e181]:
+                          - button "Thursday, May 28th, 2026" [ref=e182] [cursor=pointer]: "28"
+                        - gridcell "Friday, May 29th, 2026" [ref=e183]:
+                          - button "Friday, May 29th, 2026" [ref=e184] [cursor=pointer]: "29"
+                        - gridcell "Saturday, May 30th, 2026" [ref=e185]:
+                          - button "Saturday, May 30th, 2026" [ref=e186] [cursor=pointer]: "30"
+                      - row "Sunday, May 31st, 2026 Monday, June 1st, 2026 Tuesday, June 2nd, 2026 Wednesday, June 3rd, 2026 Thursday, June 4th, 2026 Friday, June 5th, 2026 Saturday, June 6th, 2026" [ref=e187]:
+                        - gridcell "Sunday, May 31st, 2026" [ref=e188]:
+                          - button "Sunday, May 31st, 2026" [ref=e189] [cursor=pointer]: "31"
+                        - gridcell "Monday, June 1st, 2026" [ref=e190]:
+                          - button "Monday, June 1st, 2026" [ref=e191] [cursor=pointer]: "1"
+                        - gridcell "Tuesday, June 2nd, 2026" [ref=e192]:
+                          - button "Tuesday, June 2nd, 2026" [ref=e193] [cursor=pointer]: "2"
+                        - gridcell "Wednesday, June 3rd, 2026" [ref=e194]:
+                          - button "Wednesday, June 3rd, 2026" [ref=e195] [cursor=pointer]: "3"
+                        - gridcell "Thursday, June 4th, 2026" [ref=e196]:
+                          - button "Thursday, June 4th, 2026" [ref=e197] [cursor=pointer]: "4"
+                        - gridcell "Friday, June 5th, 2026" [ref=e198]:
+                          - button "Friday, June 5th, 2026" [ref=e199] [cursor=pointer]: "5"
+                        - gridcell "Saturday, June 6th, 2026" [ref=e200]:
+                          - button "Saturday, June 6th, 2026" [ref=e201] [cursor=pointer]: "6"
+                - generic [ref=e202]:
+                  - status [ref=e204]: June 2026
+                  - grid "June 2026" [ref=e205]:
+                    - rowgroup [ref=e206]:
+                      - row [ref=e207]:
+                        - columnheader [ref=e208]: Su
+                        - columnheader [ref=e209]: Mo
+                        - columnheader [ref=e210]: Tu
+                        - columnheader [ref=e211]: We
+                        - columnheader [ref=e212]: Th
+                        - columnheader [ref=e213]: Fr
+                        - columnheader [ref=e214]: Sa
+                    - rowgroup [ref=e215]:
+                      - row "Sunday, May 31st, 2026 Monday, June 1st, 2026 Tuesday, June 2nd, 2026 Wednesday, June 3rd, 2026 Thursday, June 4th, 2026 Friday, June 5th, 2026 Saturday, June 6th, 2026" [ref=e216]:
+                        - gridcell "Sunday, May 31st, 2026" [ref=e217]:
+                          - button "Sunday, May 31st, 2026" [ref=e218] [cursor=pointer]: "31"
+                        - gridcell "Monday, June 1st, 2026" [ref=e219]:
+                          - button "Monday, June 1st, 2026" [ref=e220] [cursor=pointer]: "1"
+                        - gridcell "Tuesday, June 2nd, 2026" [ref=e221]:
+                          - button "Tuesday, June 2nd, 2026" [ref=e222] [cursor=pointer]: "2"
+                        - gridcell "Wednesday, June 3rd, 2026" [ref=e223]:
+                          - button "Wednesday, June 3rd, 2026" [ref=e224] [cursor=pointer]: "3"
+                        - gridcell "Thursday, June 4th, 2026" [ref=e225]:
+                          - button "Thursday, June 4th, 2026" [ref=e226] [cursor=pointer]: "4"
+                        - gridcell "Friday, June 5th, 2026" [ref=e227]:
+                          - button "Friday, June 5th, 2026" [ref=e228] [cursor=pointer]: "5"
+                        - gridcell "Saturday, June 6th, 2026" [ref=e229]:
+                          - button "Saturday, June 6th, 2026" [ref=e230] [cursor=pointer]: "6"
+                      - row "Sunday, June 7th, 2026 Monday, June 8th, 2026 Tuesday, June 9th, 2026 Wednesday, June 10th, 2026 Thursday, June 11th, 2026 Friday, June 12th, 2026 Saturday, June 13th, 2026" [ref=e231]:
+                        - gridcell "Sunday, June 7th, 2026" [ref=e232]:
+                          - button "Sunday, June 7th, 2026" [ref=e233] [cursor=pointer]: "7"
+                        - gridcell "Monday, June 8th, 2026" [ref=e234]:
+                          - button "Monday, June 8th, 2026" [ref=e235] [cursor=pointer]: "8"
+                        - gridcell "Tuesday, June 9th, 2026" [ref=e236]:
+                          - button "Tuesday, June 9th, 2026" [ref=e237] [cursor=pointer]: "9"
+                        - gridcell "Wednesday, June 10th, 2026" [ref=e238]:
+                          - button "Wednesday, June 10th, 2026" [ref=e239] [cursor=pointer]: "10"
+                        - gridcell "Thursday, June 11th, 2026" [ref=e240]:
+                          - button "Thursday, June 11th, 2026" [ref=e241] [cursor=pointer]: "11"
+                        - gridcell "Friday, June 12th, 2026" [ref=e242]:
+                          - button "Friday, June 12th, 2026" [ref=e243] [cursor=pointer]: "12"
+                        - gridcell "Saturday, June 13th, 2026" [ref=e244]:
+                          - button "Saturday, June 13th, 2026" [ref=e245] [cursor=pointer]: "13"
+                      - row "Sunday, June 14th, 2026 Monday, June 15th, 2026 Tuesday, June 16th, 2026 Wednesday, June 17th, 2026 Thursday, June 18th, 2026 Friday, June 19th, 2026 Saturday, June 20th, 2026" [ref=e246]:
+                        - gridcell "Sunday, June 14th, 2026" [ref=e247]:
+                          - button "Sunday, June 14th, 2026" [ref=e248] [cursor=pointer]: "14"
+                        - gridcell "Monday, June 15th, 2026" [ref=e249]:
+                          - button "Monday, June 15th, 2026" [ref=e250] [cursor=pointer]: "15"
+                        - gridcell "Tuesday, June 16th, 2026" [ref=e251]:
+                          - button "Tuesday, June 16th, 2026" [ref=e252] [cursor=pointer]: "16"
+                        - gridcell "Wednesday, June 17th, 2026" [ref=e253]:
+                          - button "Wednesday, June 17th, 2026" [ref=e254] [cursor=pointer]: "17"
+                        - gridcell "Thursday, June 18th, 2026" [ref=e255]:
+                          - button "Thursday, June 18th, 2026" [ref=e256] [cursor=pointer]: "18"
+                        - gridcell "Friday, June 19th, 2026" [ref=e257]:
+                          - button "Friday, June 19th, 2026" [ref=e258] [cursor=pointer]: "19"
+                        - gridcell "Saturday, June 20th, 2026" [ref=e259]:
+                          - button "Saturday, June 20th, 2026" [ref=e260] [cursor=pointer]: "20"
+                      - row "Sunday, June 21st, 2026 Monday, June 22nd, 2026 Tuesday, June 23rd, 2026 Wednesday, June 24th, 2026 Thursday, June 25th, 2026 Friday, June 26th, 2026 Saturday, June 27th, 2026" [ref=e261]:
+                        - gridcell "Sunday, June 21st, 2026" [ref=e262]:
+                          - button "Sunday, June 21st, 2026" [ref=e263] [cursor=pointer]: "21"
+                        - gridcell "Monday, June 22nd, 2026" [ref=e264]:
+                          - button "Monday, June 22nd, 2026" [ref=e265] [cursor=pointer]: "22"
+                        - gridcell "Tuesday, June 23rd, 2026" [ref=e266]:
+                          - button "Tuesday, June 23rd, 2026" [ref=e267] [cursor=pointer]: "23"
+                        - gridcell "Wednesday, June 24th, 2026" [ref=e268]:
+                          - button "Wednesday, June 24th, 2026" [ref=e269] [cursor=pointer]: "24"
+                        - gridcell "Thursday, June 25th, 2026" [ref=e270]:
+                          - button "Thursday, June 25th, 2026" [ref=e271] [cursor=pointer]: "25"
+                        - gridcell "Friday, June 26th, 2026" [ref=e272]:
+                          - button "Friday, June 26th, 2026" [ref=e273] [cursor=pointer]: "26"
+                        - gridcell "Saturday, June 27th, 2026" [ref=e274]:
+                          - button "Saturday, June 27th, 2026" [ref=e275] [cursor=pointer]: "27"
+                      - row "Sunday, June 28th, 2026 Monday, June 29th, 2026 Tuesday, June 30th, 2026 Wednesday, July 1st, 2026 Thursday, July 2nd, 2026 Friday, July 3rd, 2026 Saturday, July 4th, 2026" [ref=e276]:
+                        - gridcell "Sunday, June 28th, 2026" [ref=e277]:
+                          - button "Sunday, June 28th, 2026" [ref=e278] [cursor=pointer]: "28"
+                        - gridcell "Monday, June 29th, 2026" [ref=e279]:
+                          - button "Monday, June 29th, 2026" [ref=e280] [cursor=pointer]: "29"
+                        - gridcell "Tuesday, June 30th, 2026" [ref=e281]:
+                          - button "Tuesday, June 30th, 2026" [ref=e282] [cursor=pointer]: "30"
+                        - gridcell "Wednesday, July 1st, 2026" [ref=e283]:
+                          - button "Wednesday, July 1st, 2026" [ref=e284] [cursor=pointer]: "1"
+                        - gridcell "Thursday, July 2nd, 2026" [ref=e285]:
+                          - button "Thursday, July 2nd, 2026" [ref=e286] [cursor=pointer]: "2"
+                        - gridcell "Friday, July 3rd, 2026" [ref=e287]:
+                          - button "Friday, July 3rd, 2026" [ref=e288] [cursor=pointer]: "3"
+                        - gridcell "Saturday, July 4th, 2026" [ref=e289]:
+                          - button "Saturday, July 4th, 2026" [ref=e290] [cursor=pointer]: "4"
+                      - row "Sunday, July 5th, 2026 Monday, July 6th, 2026 Tuesday, July 7th, 2026 Wednesday, July 8th, 2026 Thursday, July 9th, 2026 Friday, July 10th, 2026 Saturday, July 11th, 2026" [ref=e291]:
+                        - gridcell "Sunday, July 5th, 2026" [ref=e292]:
+                          - button "Sunday, July 5th, 2026" [ref=e293] [cursor=pointer]: "5"
+                        - gridcell "Monday, July 6th, 2026" [ref=e294]:
+                          - button "Monday, July 6th, 2026" [ref=e295] [cursor=pointer]: "6"
+                        - gridcell "Tuesday, July 7th, 2026" [ref=e296]:
+                          - button "Tuesday, July 7th, 2026" [ref=e297] [cursor=pointer]: "7"
+                        - gridcell "Wednesday, July 8th, 2026" [ref=e298]:
+                          - button "Wednesday, July 8th, 2026" [ref=e299] [cursor=pointer]: "8"
+                        - gridcell "Thursday, July 9th, 2026" [ref=e300]:
+                          - button "Thursday, July 9th, 2026" [ref=e301] [cursor=pointer]: "9"
+                        - gridcell "Friday, July 10th, 2026" [ref=e302]:
+                          - button "Friday, July 10th, 2026" [ref=e303] [cursor=pointer]: "10"
+                        - gridcell "Saturday, July 11th, 2026" [ref=e304]:
+                          - button "Saturday, July 11th, 2026" [ref=e305] [cursor=pointer]: "11"
+              - generic [ref=e306]:
+                - generic [ref=e307]:
+                  - paragraph [ref=e308]: 全部时间
+                  - paragraph [ref=e309]: 时间范围
+                - generic [ref=e310]:
+                  - button "清除" [ref=e311]
+                  - button "完成" [ref=e312]
+          - generic [ref=e63]:
+            - button "应用筛选" [ref=e64]:
+              - img [ref=e65]
+              - text: 应用筛选
+            - button "重置" [disabled] [ref=e67]:
+              - img [ref=e68]
+              - text: 重置
+      - generic [ref=e73]:
+        - img [ref=e75]
+        - paragraph [ref=e79]: 暂无图片
+        - paragraph [ref=e80]: 生成的图片将显示在这里

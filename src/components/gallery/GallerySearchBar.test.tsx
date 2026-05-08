@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import GallerySearchBar from "./GallerySearchBar";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
+import { getDayPickerLocale } from "../../lib/dayPickerLocale";
 
 const config: GallerySearchConfig = {
   title: "Gallery",
@@ -22,24 +23,30 @@ const config: GallerySearchConfig = {
       onChange: vi.fn(),
     },
     {
-      type: "date",
-      key: "created_from",
-      label: "Created from",
-      value: "",
-      onChange: vi.fn(),
-    },
-    {
-      type: "date",
-      key: "created_to",
-      label: "Created to",
-      value: "",
+      type: "date-range",
+      key: "created_range",
+      label: "Created date",
+      value: {
+        from: "",
+        to: "",
+      },
+      displayValue: "All time",
+      locale: getDayPickerLocale("en"),
+      presets: {
+        today: "Today",
+        last7Days: "Last 7 days",
+        last30Days: "Last 30 days",
+        thisMonth: "This month",
+        clear: "Clear",
+        done: "Done",
+      },
       onChange: vi.fn(),
     },
   ],
 };
 
 describe("GallerySearchBar", () => {
-  it("keeps prompt, model, date filters, and actions in one compact filter row", () => {
+  it("keeps prompt, model, range filters, and actions in one compact filter row", () => {
     const { container } = render(
       <GallerySearchBar
         config={config}
@@ -56,14 +63,21 @@ describe("GallerySearchBar", () => {
       name: "Gallery filters",
     });
 
-    expect(filterRow).toHaveClass("flex", "flex-wrap", "items-end");
+    expect(filterRow).toHaveClass("flex", "flex-wrap", "items-center");
     expect(filterRow).not.toHaveClass("grid");
     expect(within(filterRow).getByPlaceholderText("Search prompts...")).toBeInTheDocument();
     expect(within(filterRow).getByLabelText("Model")).toBeInTheDocument();
-    expect(within(filterRow).getByLabelText("Created from")).toBeInTheDocument();
-    expect(within(filterRow).getByLabelText("Created to")).toBeInTheDocument();
+    expect(
+      within(filterRow).getByRole("button", { name: /Created date/i }),
+    ).toBeInTheDocument();
+    expect(within(filterRow).queryByLabelText("Created from")).not.toBeInTheDocument();
+    expect(within(filterRow).queryByLabelText("Created to")).not.toBeInTheDocument();
     expect(within(filterRow).getByRole("button", { name: "Apply" })).toBeInTheDocument();
     expect(within(filterRow).getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(container.querySelector(".grid")).not.toBeInTheDocument();
+    expect(within(filterRow).queryByText("Prompt")).not.toBeInTheDocument();
+    expect(within(filterRow).queryByText("Model")).not.toBeInTheDocument();
+    expect(within(filterRow).queryByText("Created date")).not.toBeInTheDocument();
+    expect(within(filterRow).queryByText("Last 7 days")).not.toBeInTheDocument();
   });
 });

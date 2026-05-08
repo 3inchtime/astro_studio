@@ -13,16 +13,6 @@ use crate::models::*;
 use rusqlite::params;
 use tauri::{Emitter, Manager, State};
 
-const DEFAULT_IMAGE_SIZE: &str = "auto";
-const DEFAULT_IMAGE_QUALITY: &str = "auto";
-const DEFAULT_IMAGE_BACKGROUND: &str = "auto";
-const DEFAULT_OUTPUT_FORMAT: &str = "png";
-const DEFAULT_OUTPUT_COMPRESSION: u8 = 100;
-const DEFAULT_IMAGE_MODERATION: &str = "auto";
-const DEFAULT_INPUT_FIDELITY: &str = "high";
-const DEFAULT_IMAGE_STREAM: bool = false;
-const DEFAULT_PARTIAL_IMAGES: u8 = 0;
-const DEFAULT_IMAGE_COUNT: u8 = 1;
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
 const RECOVERY_STATE_RESPONSE_READY: &str = "response_ready";
 const RECOVERY_KIND_GENERATE: &str = "generate";

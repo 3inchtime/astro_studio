@@ -23,7 +23,7 @@ import {
 } from "../lib/galleryFilters";
 
 export default function GalleryPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { setActiveConversationId } = useLayoutContext();
   const {
@@ -59,8 +59,14 @@ export default function GalleryPage() {
   );
 
   const searchConfig = useMemo(
-    () => createGallerySearchConfig(t, filters, handleFilterChange),
-    [filters, handleFilterChange, t],
+    () =>
+      createGallerySearchConfig(
+        t,
+        filters,
+        handleFilterChange,
+        i18n.resolvedLanguage ?? i18n.language,
+      ),
+    [filters, handleFilterChange, i18n.language, i18n.resolvedLanguage, t],
   );
 
   const performSearch = useCallback(

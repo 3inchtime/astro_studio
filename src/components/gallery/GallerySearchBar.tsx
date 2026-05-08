@@ -1,6 +1,6 @@
 import { Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
-import DateFilterField from "./DateFilterField";
+import DateRangeFilterField from "./DateRangeFilterField";
 
 interface GallerySearchBarProps {
   config: GallerySearchConfig;
@@ -38,19 +38,17 @@ export default function GallerySearchBar({
         <div
           role="search"
           aria-label={`${config.title} filters`}
-          className="flex w-full min-w-0 flex-wrap items-end gap-2 xl:flex-1 xl:justify-end"
+          className="flex w-full min-w-0 flex-wrap items-center gap-2 xl:flex-1 xl:justify-end"
         >
           <label className="relative min-w-[220px] flex-[1_1_260px]">
-            <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
-              {config.searchLabel}
-            </span>
             <Search
               size={13}
-              className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/60"
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60"
               strokeWidth={2}
             />
             <input
               value={query}
+              aria-label={config.searchLabel}
               onChange={(event) => onQueryChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -69,38 +67,15 @@ export default function GallerySearchBar({
             while (i < config.fields.length) {
               const field = config.fields[i];
 
-              if (field.type === "date" && config.fields[i + 1]?.type === "date") {
-                const nextField = config.fields[i + 1] as typeof field & { type: "date" };
+              if (field.type === "date-range") {
                 elements.push(
-                  <div
-                    key={`${field.key}-${nextField.key}`}
-                    className="flex items-end gap-1.5"
-                  >
-                    <DateFilterField
-                      label={field.label}
-                      value={field.value}
-                      onChange={field.onChange}
-                    />
-                    <span className="mb-[11px] text-[11px] text-muted/35 select-none">
-                      —
-                    </span>
-                    <DateFilterField
-                      label={nextField.label}
-                      value={nextField.value}
-                      onChange={nextField.onChange}
-                    />
-                  </div>,
-                );
-                i += 2;
-                continue;
-              }
-
-              if (field.type === "date") {
-                elements.push(
-                  <DateFilterField
+                  <DateRangeFilterField
                     key={field.key}
                     label={field.label}
                     value={field.value}
+                    displayValue={field.displayValue}
+                    locale={field.locale}
+                    presets={field.presets}
                     onChange={field.onChange}
                   />,
                 );
@@ -113,18 +88,16 @@ export default function GallerySearchBar({
                   key={field.key}
                   className="relative min-w-[170px] flex-[1_1_180px] xl:max-w-[220px]"
                 >
-                  <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60">
-                    {field.label}
-                  </span>
                   <SlidersHorizontal
                     size={13}
-                    className="pointer-events-none absolute left-2.5 bottom-[10px] text-muted/55"
+                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/55"
                     strokeWidth={2}
                   />
                   <select
                     value={field.value}
+                    aria-label={field.label}
                     onChange={(event) => field.onChange(event.target.value)}
-                    className="select-control mt-1 h-[34px] w-full min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-8 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
+                    className="select-control h-[34px] w-full min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-8 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
                   >
                     {field.options.map((option) => (
                       <option key={option.value} value={option.value}>

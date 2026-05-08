@@ -263,6 +263,178 @@
   }
 }
 
+.astro-day-picker {
+  --rdp-accent-color: var(--color-primary);
+  --rdp-accent-background-color: rgba(79, 106, 255, 0.12);
+  --rdp-day-height: 27px;
+  --rdp-day-width: 27px;
+  --rdp-day_button-height: 23px;
+  --rdp-day_button-width: 23px;
+  --rdp-months-gap: 10px;
+  --rdp-nav_button-height: 20px;
+  --rdp-nav_button-width: 20px;
+  width: 100%;
+  margin: 0;
+  color: var(--color-foreground);
+}
+
+.astro-day-picker .rdp-months {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  column-gap: 10px;
+  max-width: none;
+}
+
+.astro-day-picker-months {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 10px;
+  max-width: none;
+}
+
+.astro-day-picker .rdp-month {
+  width: 100%;
+  min-width: 0;
+}
+
+.astro-day-picker .rdp-month_caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 24px 4px;
+  color: var(--color-foreground);
+  font-size: calc(10px * var(--app-font-scale));
+  font-weight: 600;
+}
+
+.astro-day-picker .rdp-caption_label {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+}
+
+.astro-day-picker .rdp-weekday {
+  color: rgba(138, 133, 128, 0.76);
+  font-size: calc(8px * var(--app-font-scale));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.astro-day-picker .rdp-day {
+  padding: 0;
+}
+
+.astro-day-picker .rdp-months > .rdp-nav {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  left: 0;
+  height: 20px;
+  pointer-events: none;
+}
+
+.astro-day-picker .rdp-months > .rdp-nav .rdp-button_previous,
+.astro-day-picker .rdp-months > .rdp-nav .rdp-button_next {
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+}
+
+.astro-day-picker .rdp-months > .rdp-nav .rdp-button_previous {
+  left: 0;
+  right: auto;
+}
+
+.astro-day-picker .rdp-months > .rdp-nav .rdp-button_next {
+  right: 0;
+  left: auto;
+}
+
+.astro-day-picker .rdp-day_button {
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: calc(10px * var(--app-font-scale));
+  font-weight: 500;
+  color: var(--color-foreground);
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
+}
+
+.astro-day-picker .rdp-day_button:hover {
+  border-color: rgba(79, 106, 255, 0.16);
+  background: rgba(79, 106, 255, 0.08);
+  transform: translateY(-0.5px);
+}
+
+.astro-day-picker .rdp-selected .rdp-day_button,
+.astro-day-picker .rdp-day_button:focus-visible {
+  border-color: transparent;
+  background: linear-gradient(135deg, #4F6AFF 0%, #7C5CFC 100%);
+  color: white;
+  box-shadow: 0 4px 10px rgba(95, 92, 252, 0.18);
+  outline: none;
+}
+
+.astro-day-picker .rdp-range_middle .rdp-day_button {
+  border-radius: 5px;
+  background: rgba(79, 106, 255, 0.10);
+  color: color-mix(in srgb, var(--color-primary) 72%, var(--color-foreground));
+  box-shadow: none;
+}
+
+.astro-day-picker .rdp-week {
+  height: 24px;
+}
+
+.astro-day-picker .rdp-month_grid {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.astro-day-picker .rdp-weekdays {
+  margin-bottom: 2px;
+}
+
+.astro-day-picker .rdp-weeks {
+  gap: 2px;
+}
+
+.astro-day-picker .rdp-range_start .rdp-day_button,
+.astro-day-picker .rdp-range_end .rdp-day_button {
+  background: linear-gradient(135deg, #4F6AFF 0%, #7C5CFC 100%);
+  color: white;
+}
+
+.astro-day-picker .rdp-outside {
+  opacity: 0.35;
+}
+
+.astro-day-picker .rdp-chevron {
+  fill: var(--color-muted);
+}
+
+.astro-day-picker .rdp-button_previous,
+.astro-day-picker .rdp-button_next {
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out);
+}
+
+.astro-day-picker .rdp-button_previous:hover,
+.astro-day-picker .rdp-button_next:hover {
+  border-color: rgba(79, 106, 255, 0.16);
+  background: rgba(79, 106, 255, 0.08);
+}
+
 @supports (color: color-mix(in srgb, white, black)) {
   @layer components {
     .select-control {

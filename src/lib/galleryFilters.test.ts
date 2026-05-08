@@ -43,7 +43,7 @@ describe("galleryFilters", () => {
     expect(filters.created_to).toBe("2026-05-12");
   });
 
-  it("builds gallery search config with only model and date fields", () => {
+  it("builds gallery search config with a single date range field", () => {
     const filters: GenerationSearchFilters = {
       model: "gpt-image-2",
       created_from: "2026-05-01",
@@ -54,8 +54,28 @@ describe("galleryFilters", () => {
     expect(config.searchLabel).toBe("gallery.prompt");
     expect(config.fields.map((field) => field.key)).toEqual([
       "model",
-      "created_from",
-      "created_to",
+      "created_range",
     ]);
+  });
+
+  it("localizes date range display and calendar locale from the current language", () => {
+    const filters: GenerationSearchFilters = {
+      created_from: "2026-05-01",
+      created_to: "2026-05-31",
+    };
+
+    const config = createGallerySearchConfig(
+      (key) => key,
+      filters,
+      () => undefined,
+      "zh-CN",
+    );
+    const dateField = config.fields.find((field) => field.key === "created_range");
+
+    expect(dateField?.type).toBe("date-range");
+    if (dateField?.type !== "date-range") return;
+
+    expect(dateField.locale.code).toBe("zh-CN");
+    expect(dateField.displayValue).toContain("2026年5月1日");
   });
 });
