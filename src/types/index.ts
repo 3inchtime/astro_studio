@@ -263,8 +263,8 @@ export interface LlmConfig {
   name: string;
   protocol: "openai" | "anthropic";
   model: string;
-  apiKey: string;
-  baseUrl: string;
+  api_key: string;
+  base_url: string;
   capability: "text" | "multimodal";
   enabled: boolean;
 }

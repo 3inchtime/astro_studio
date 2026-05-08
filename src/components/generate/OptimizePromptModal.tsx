@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Sparkles, X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 interface OptimizePromptModalProps {
   open: boolean;
@@ -19,6 +20,7 @@ export default function OptimizePromptModal({
   onKeepOriginal,
   onOptimizedChange,
 }: OptimizePromptModalProps) {
+  const { t } = useTranslation();
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export default function OptimizePromptModal({
         className="glass-strong w-full max-w-[640px] overflow-hidden rounded-[16px] border border-border-subtle shadow-float"
         role="dialog"
         aria-modal="true"
-        aria-label="Optimize Prompt"
+        aria-label={t("generate.llm.modalTitle")}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-6 py-4">
@@ -62,7 +64,7 @@ export default function OptimizePromptModal({
               <Sparkles size={14} className="text-primary" strokeWidth={2} />
             </div>
             <h2 className="text-[14px] font-semibold text-foreground">
-              Optimize Prompt
+              {t("generate.llm.modalTitle")}
             </h2>
           </div>
           <button
@@ -78,7 +80,7 @@ export default function OptimizePromptModal({
           {/* Original */}
           <div className="flex flex-col gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted/60">
-              Original
+              {t("generate.llm.original")}
             </span>
             <textarea
               readOnly
@@ -91,7 +93,7 @@ export default function OptimizePromptModal({
           {/* Optimized */}
           <div className="flex flex-col gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-primary/80">
-              Optimized
+              {t("generate.llm.optimized")}
             </span>
             <textarea
               value={optimizedPrompt}
@@ -109,7 +111,7 @@ export default function OptimizePromptModal({
             whileTap={{ scale: 0.97 }}
             className="flex h-[34px] items-center justify-center gap-1.5 rounded-[9px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
           >
-            Keep Original
+            {t("generate.llm.keepOriginal")}
           </motion.button>
           <motion.button
             onClick={onUseOptimized}
@@ -117,7 +119,7 @@ export default function OptimizePromptModal({
             className="flex h-[34px] items-center justify-center gap-1.5 rounded-[9px] gradient-primary px-4 text-[12px] font-semibold text-white shadow-[0_2px_8px_rgba(79,106,255,0.25)] transition-shadow hover:shadow-[0_4px_12px_rgba(79,106,255,0.35)]"
           >
             <Sparkles size={13} />
-            Use Optimized
+            {t("generate.llm.useOptimized")}
           </motion.button>
         </div>
       </motion.div>

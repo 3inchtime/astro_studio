@@ -11,6 +11,10 @@ const realDate = Date;
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
+    i18n: {
+      language: "en",
+      resolvedLanguage: "en",
+    },
     t: (key: string) => key,
   }),
 }));
@@ -301,9 +305,7 @@ describe("GalleryPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /gallery.filterCreatedRange/i }));
     fireEvent.click(screen.getByRole("button", { name: "gallery.rangePresetToday" }));
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "gallery.rangePresetClear" })[1],
-    );
+    fireEvent.click(screen.getByRole("button", { name: "gallery.rangePresetClear" }));
     fireEvent.click(screen.getByRole("button", { name: "gallery.applyFilters" }));
 
     await waitFor(() => {

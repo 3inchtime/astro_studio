@@ -6,8 +6,8 @@ export function createDefaultLlmConfig(): LlmConfig {
     name: "",
     protocol: "openai",
     model: "",
-    apiKey: "",
-    baseUrl: "https://api.openai.com/v1",
+    api_key: "",
+    base_url: "https://api.openai.com/v1",
     capability: "text",
     enabled: true,
   };

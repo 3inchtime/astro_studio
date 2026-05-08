@@ -1,7 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import type { ModelProviderProfilesState } from "../../types";
+
+vi.mock("../../lib/api", () => ({
+  getLlmConfigs: vi.fn().mockResolvedValue([]),
+  saveLlmConfigs: vi.fn().mockResolvedValue([]),
+}));
 
 const baseEndpoint = {
   mode: "base_url" as const,
@@ -34,6 +40,9 @@ const providerState: ModelProviderProfilesState = {
 };
 
 function renderPanel(overrides = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   const props = {
     t: ((key: string) => key) as never,
     imageModel: "gpt-image-2" as const,
@@ -59,7 +68,11 @@ function renderPanel(overrides = {}) {
     ...overrides,
   };
 
-  render(<ModelSettingsPanel {...props} />);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ModelSettingsPanel {...props} />
+    </QueryClientProvider>,
+  );
   return props;
 }
 

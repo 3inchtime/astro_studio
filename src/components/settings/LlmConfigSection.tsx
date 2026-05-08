@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 import {
   Check,
   Eye,
@@ -26,8 +27,8 @@ function protocolLabel(protocol: string): string {
   return protocol === "anthropic" ? "Anthropic" : "OpenAI";
 }
 
-function capabilityLabel(capability: string): string {
-  return capability === "multimodal" ? "Multimodal" : "Text";
+function capabilityLabel(capability: string, t: (key: string) => string): string {
+  return capability === "multimodal" ? t("settings.llm.capabilityMultimodal") : t("settings.llm.capabilityText");
 }
 
 // ── Inline edit / create form ──────────────────────────────────────────────────
@@ -51,8 +52,9 @@ function ConfigForm({
   onCancel,
   isNew,
 }: ConfigFormProps) {
+  const { t } = useTranslation();
   const displayKey =
-    showKey ? config.apiKey : config.apiKey ? maskKey(config.apiKey) : "";
+    showKey ? config.api_key : config.api_key ? maskKey(config.api_key) : "";
 
   return (
     <motion.div
@@ -65,7 +67,7 @@ function ConfigForm({
       <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Name</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formName")}</span>
             <input
               type="text"
               value={config.name}
@@ -76,7 +78,7 @@ function ConfigForm({
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Protocol</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formProtocol")}</span>
             <select
               value={config.protocol}
               onChange={(e) => {
@@ -84,18 +86,18 @@ function ConfigForm({
                 onChange({
                   ...config,
                   protocol: next,
-                  baseUrl: defaultBaseUrlForProtocol(next),
+                  base_url: defaultBaseUrlForProtocol(next),
                 });
               }}
               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
             >
-              <option value="openai">OpenAI Compatible</option>
-              <option value="anthropic">Anthropic Compatible</option>
+              <option value="openai">{t("settings.llm.protocolOpenai")}</option>
+              <option value="anthropic">{t("settings.llm.protocolAnthropic")}</option>
             </select>
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Model</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formModel")}</span>
             <input
               type="text"
               value={config.model}
@@ -106,20 +108,20 @@ function ConfigForm({
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">API Key</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formApiKey")}</span>
             <div className="relative min-w-0">
               <input
                 type={showKey ? "text" : "password"}
                 value={displayKey}
-                onChange={(e) => onChange({ ...config, apiKey: e.target.value })}
+                onChange={(e) => onChange({ ...config, api_key: e.target.value })}
                 placeholder="sk-..."
                 className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
               />
               <button
                 type="button"
                 onClick={onToggleShowKey}
-                title={showKey ? "Hide key" : "Show key"}
-                aria-label={showKey ? "Hide key" : "Show key"}
+                title={showKey ? t("settings.llm.hideKey") : t("settings.llm.showKey")}
+                aria-label={showKey ? t("settings.llm.hideKey") : t("settings.llm.showKey")}
                 className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
               >
                 {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -128,18 +130,18 @@ function ConfigForm({
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Base URL</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formBaseUrl")}</span>
             <input
               type="text"
-              value={config.baseUrl}
-              onChange={(e) => onChange({ ...config, baseUrl: e.target.value })}
+              value={config.base_url}
+              onChange={(e) => onChange({ ...config, base_url: e.target.value })}
               placeholder={defaultBaseUrlForProtocol(config.protocol)}
               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Capability</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formCapability")}</span>
             <select
               value={config.capability}
               onChange={(e) =>
@@ -147,8 +149,8 @@ function ConfigForm({
               }
               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
             >
-              <option value="text">Text Only</option>
-              <option value="multimodal">Multimodal</option>
+              <option value="text">{t("settings.llm.capabilityText")}</option>
+              <option value="multimodal">{t("settings.llm.capabilityMultimodal")}</option>
             </select>
           </label>
         </div>
@@ -172,7 +174,7 @@ function ConfigForm({
               }`}
             />
           </button>
-          <span className="text-[12px] font-medium text-muted/70">Enabled</span>
+          <span className="text-[12px] font-medium text-muted/70">{t("settings.llm.enabled")}</span>
         </label>
 
         {/* Actions */}
@@ -184,7 +186,7 @@ function ConfigForm({
             className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
           >
             <X size={13} />
-            Cancel
+            {t("settings.llm.cancel")}
           </motion.button>
           <motion.button
             type="button"
@@ -193,7 +195,7 @@ function ConfigForm({
             className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-primary/25 bg-primary/10 px-3 text-[12px] font-medium text-primary transition-all hover:border-primary/40 hover:bg-primary/15"
           >
             <Check size={13} />
-            {isNew ? "Create" : "Save"}
+            {isNew ? t("settings.llm.create") : t("settings.llm.save")}
           </motion.button>
         </div>
       </div>
@@ -216,13 +218,14 @@ function ConfigCard({
   onDelete,
   onToggleEnabled,
 }: ConfigCardProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-[12px] border border-border-subtle bg-surface shadow-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold text-foreground">
-              {config.name || "Untitled"}
+              {config.name || t("settings.llm.untitled")}
             </span>
             <span className={`rounded-[6px] border px-1.5 py-0.5 text-[10px] font-medium uppercase ${
               config.protocol === "anthropic"
@@ -233,12 +236,12 @@ function ConfigCard({
             </span>
           </div>
           <p className="mt-1 truncate font-mono text-[10.5px] text-muted/55">
-            {config.model || "No model set"}
+            {config.model || t("settings.llm.noModel")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="rounded-[6px] border border-border-subtle bg-subtle/40 px-1.5 py-0.5 text-[10.5px] font-medium text-muted/65">
-            {capabilityLabel(config.capability)}
+            {capabilityLabel(config.capability, t)}
           </span>
         </div>
       </div>
@@ -264,7 +267,7 @@ function ConfigCard({
               />
             </button>
             <span className="text-[11px] text-muted/60">
-              {config.enabled ? "Enabled" : "Disabled"}
+              {config.enabled ? t("settings.llm.enabled") : t("settings.llm.disabled")}
             </span>
           </label>
         </div>
@@ -274,13 +277,13 @@ function ConfigCard({
             onClick={onEdit}
             className="flex h-[30px] items-center justify-center rounded-[8px] border border-border-subtle bg-surface px-3 text-[11px] font-medium text-muted/65 transition-all hover:border-border hover:text-foreground"
           >
-            Edit
+            {t("settings.llm.edit")}
           </button>
           <button
             type="button"
             onClick={onDelete}
-            title="Delete config"
-            aria-label="Delete config"
+            title={t("settings.llm.deleteTitle")}
+            aria-label={t("settings.llm.deleteTitle")}
             className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-border-subtle bg-surface text-muted/55 transition-all hover:border-border hover:text-foreground"
           >
             <Trash2 size={13} />
@@ -294,6 +297,7 @@ function ConfigCard({
 // ── Section ────────────────────────────────────────────────────────────────────
 
 export function LlmConfigSection() {
+  const { t } = useTranslation();
   const { data: serverConfigs, isLoading, isError } = useLlmConfigsQuery();
   const saveMutation = useSaveLlmConfigsMutation();
 
@@ -318,7 +322,7 @@ export function LlmConfigSection() {
       setConfigs(updated);
       await saveMutation.mutateAsync(updated);
     } catch {
-      setSaveError("Failed to save LLM configs. Please try again.");
+      setSaveError(t("settings.llm.saveError"));
       // Revert on save failure
       if (serverConfigs) {
         setConfigs(serverConfigs);
@@ -361,8 +365,8 @@ export function LlmConfigSection() {
   function handleDelete(id: string) {
     const config = configs.find((c) => c.id === id);
     if (!config) return;
-    const name = config.name || "Untitled";
-    if (!window.confirm(`Delete LLM config "${name}"? This cannot be undone.`)) return;
+    const name = config.name || t("settings.llm.untitled");
+    if (!window.confirm(t("settings.llm.deleteConfirm", { name }))) return;
     const updated = configs.filter((c) => c.id !== id);
     doSave(updated);
     if (editingId === id) setEditingId(null);
@@ -415,9 +419,9 @@ export function LlmConfigSection() {
             <Sparkles size={14} className="text-primary" strokeWidth={2} />
           </div>
           <div>
-            <h3 className="text-[13px] font-semibold text-foreground">LLM Configuration</h3>
+            <h3 className="text-[13px] font-semibold text-foreground">{t("settings.llm.title")}</h3>
             <p className="mt-0.5 text-[11px] text-muted/60">
-              Configure LLM providers for prompt optimization
+              {t("settings.llm.desc")}
             </p>
           </div>
         </div>
@@ -440,14 +444,14 @@ export function LlmConfigSection() {
             {/* Loading state */}
             {isLoading && (
               <div className="flex items-center justify-center py-8 text-[12px] text-muted/60">
-                Loading LLM configs...
+                {t("settings.llm.loading")}
               </div>
             )}
 
             {/* Error loading */}
             {isError && (
               <div className="rounded-[10px] border border-error/20 bg-error/5 px-4 py-3 text-[12px] text-error">
-                Failed to load LLM configurations. Please try again.
+                {t("settings.llm.loadError")}
               </div>
             )}
 
@@ -457,9 +461,9 @@ export function LlmConfigSection() {
                 <div className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-border-subtle bg-subtle/30">
                   <Sparkles size={20} className="text-muted/40" strokeWidth={1.5} />
                 </div>
-                <p className="text-[12px] text-muted/60">No LLM configurations yet</p>
+                <p className="text-[12px] text-muted/60">{t("settings.llm.emptyTitle")}</p>
                 <p className="text-[11px] text-muted/40">
-                  Add a configuration to enable AI-powered prompt optimization
+                  {t("settings.llm.emptyHint")}
                 </p>
               </div>
             )}
@@ -510,7 +514,7 @@ export function LlmConfigSection() {
                 className="flex h-[38px] w-full items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-border-subtle bg-subtle/15 px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:bg-subtle/30 hover:text-foreground"
               >
                 <Plus size={13} />
-                Add LLM Config
+                {t("settings.llm.add")}
               </button>
             )}
           </div>
@@ -530,11 +534,12 @@ interface NewConfigFormProps {
 }
 
 function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<LlmConfig>(createDefaultLlmConfig());
   const [showKey, setShowKey] = useState(false);
 
   const displayKey =
-    showKey ? config.apiKey : config.apiKey ? maskKey(config.apiKey) : "";
+    showKey ? config.api_key : config.api_key ? maskKey(config.api_key) : "";
 
   return (
     <motion.div
@@ -546,15 +551,15 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
     >
       <div className="rounded-[12px] border border-primary/20 bg-primary/3 p-4">
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-[12px] font-semibold text-foreground">New LLM Config</span>
+          <span className="text-[12px] font-semibold text-foreground">{t("settings.llm.newTitle")}</span>
           <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-            New
+            {t("settings.llm.newBadge")}
           </span>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Name</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formName")}</span>
             <input
               type="text"
               value={config.name}
@@ -565,7 +570,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Protocol</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formProtocol")}</span>
             <select
               value={config.protocol}
               onChange={(e) => {
@@ -573,18 +578,18 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                 setConfig({
                   ...config,
                   protocol: next,
-                  baseUrl: defaultBaseUrlForProtocol(next),
+                  base_url: defaultBaseUrlForProtocol(next),
                 });
               }}
               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
             >
-              <option value="openai">OpenAI Compatible</option>
-              <option value="anthropic">Anthropic Compatible</option>
+              <option value="openai">{t("settings.llm.protocolOpenai")}</option>
+              <option value="anthropic">{t("settings.llm.protocolAnthropic")}</option>
             </select>
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Model</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formModel")}</span>
             <input
               type="text"
               value={config.model}
@@ -595,20 +600,20 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">API Key</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formApiKey")}</span>
             <div className="relative min-w-0">
               <input
                 type={showKey ? "text" : "password"}
                 value={displayKey}
-                onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
+                onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
                 placeholder="sk-..."
                 className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => setShowKey(!showKey)}
-                title={showKey ? "Hide key" : "Show key"}
-                aria-label={showKey ? "Hide key" : "Show key"}
+                title={showKey ? t("settings.llm.hideKey") : t("settings.llm.showKey")}
+                aria-label={showKey ? t("settings.llm.hideKey") : t("settings.llm.showKey")}
                 className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
               >
                 {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -617,18 +622,18 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Base URL</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formBaseUrl")}</span>
             <input
               type="text"
-              value={config.baseUrl}
-              onChange={(e) => setConfig({ ...config, baseUrl: e.target.value })}
+              value={config.base_url}
+              onChange={(e) => setConfig({ ...config, base_url: e.target.value })}
               placeholder={defaultBaseUrlForProtocol(config.protocol)}
               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-muted/70">Capability</span>
+            <span className="text-[11px] font-medium text-muted/70">{t("settings.llm.formCapability")}</span>
             <select
               value={config.capability}
               onChange={(e) =>
@@ -636,8 +641,8 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               }
               className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
             >
-              <option value="text">Text Only</option>
-              <option value="multimodal">Multimodal</option>
+              <option value="text">{t("settings.llm.capabilityText")}</option>
+              <option value="multimodal">{t("settings.llm.capabilityMultimodal")}</option>
             </select>
           </label>
         </div>
@@ -661,7 +666,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               }`}
             />
           </button>
-          <span className="text-[12px] font-medium text-muted/70">Enabled</span>
+          <span className="text-[12px] font-medium text-muted/70">{t("settings.llm.enabled")}</span>
         </label>
 
         {/* Actions */}
@@ -673,7 +678,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
             className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
           >
             <X size={13} />
-            Cancel
+            {t("settings.llm.cancel")}
           </motion.button>
           <motion.button
             type="button"
@@ -682,7 +687,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
             className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-primary/25 bg-primary/10 px-3 text-[12px] font-medium text-primary transition-all hover:border-primary/40 hover:bg-primary/15"
           >
             <Check size={13} />
-            Create
+            {t("settings.llm.create")}
           </motion.button>
         </div>
       </div>

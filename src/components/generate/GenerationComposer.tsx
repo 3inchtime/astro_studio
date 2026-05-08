@@ -455,8 +455,8 @@ export default function GenerationComposer({
                     <span className="max-w-[90px] truncate">
                       {selectedConfigId
                         ? enabledTextConfigs.find((c) => c.id === selectedConfigId)
-                            ?.name ?? "Select LLM"
-                        : "Select LLM"}
+                            ?.name ?? t("generate.llm.selectLlm")
+                        : t("generate.llm.selectLlm")}
                     </span>
                     <ChevronDown size={11} className="text-muted/60" />
                   </button>
@@ -476,7 +476,7 @@ export default function GenerationComposer({
                               : "text-foreground/80"
                           }`}
                         >
-                          {config.name || "Untitled"}
+                          {config.name || t("generate.llm.untitled")}
                         </button>
                       ))}
                     </div>
@@ -490,8 +490,8 @@ export default function GenerationComposer({
                   type="button"
                   onClick={handleOptimize}
                   disabled={!canOptimize}
-                  aria-label="Optimize prompt"
-                  title="Optimize prompt with AI"
+                  aria-label={t("generate.llm.optimize")}
+                  title={t("generate.llm.optimizeTitle")}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.97 }}
                   className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary disabled:pointer-events-none disabled:opacity-30"
@@ -501,7 +501,7 @@ export default function GenerationComposer({
                   ) : (
                     <Sparkles size={14} />
                   )}
-                  <span className="hidden sm:inline">Optimize</span>
+                  <span className="hidden sm:inline">{t("generate.llm.optimize")}</span>
                 </motion.button>
               )}
 

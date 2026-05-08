@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./SettingsPage";
 
 const getFontSize = vi.fn();
 const getImageModel = vi.fn();
 const getLogSettings = vi.fn();
+const getLlmConfigs = vi.fn();
 const getLogs = vi.fn();
 const getModelProviderProfiles = vi.fn();
 const getRuntimeLogs = vi.fn();
@@ -17,12 +20,14 @@ const createModelProviderProfile = vi.fn();
 const deleteModelProviderProfile = vi.fn();
 const setActiveModelProvider = vi.fn();
 const saveImageModel = vi.fn();
+const saveLlmConfigs = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: {
       changeLanguage: vi.fn(),
       language: "en",
+      resolvedLanguage: "en",
     },
     t: (key: string, options?: { count?: number }) =>
       options?.count === undefined ? key : `${key} ${options.count}`,
@@ -33,6 +38,7 @@ vi.mock("../lib/api", () => ({
   clearLogs: (...args: unknown[]) => clearLogs(...args),
   getFontSize: (...args: unknown[]) => getFontSize(...args),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
+  getLlmConfigs: (...args: unknown[]) => getLlmConfigs(...args),
   getLogs: (...args: unknown[]) => getLogs(...args),
   getLogSettings: (...args: unknown[]) => getLogSettings(...args),
   getModelProviderProfiles: (...args: unknown[]) => getModelProviderProfiles(...args),
@@ -42,6 +48,7 @@ vi.mock("../lib/api", () => ({
   readLogResponseFile: vi.fn(),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
   saveFontSize: vi.fn(),
+  saveLlmConfigs: (...args: unknown[]) => saveLlmConfigs(...args),
   saveModelProviderProfiles: (...args: unknown[]) => saveModelProviderProfiles(...args),
   createModelProviderProfile: (...args: unknown[]) => createModelProviderProfile(...args),
   deleteModelProviderProfile: (...args: unknown[]) => deleteModelProviderProfile(...args),
@@ -97,12 +104,20 @@ const geminiProviderState = {
   ],
 } as const;
 
-function renderSettingsPage() {
+function renderWithProviders(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
   render(
-    <MemoryRouter>
-      <SettingsPage />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
   );
+}
+
+function renderSettingsPage() {
+  renderWithProviders(<SettingsPage />);
 }
 
 async function clickModelCard(name: string) {
@@ -131,12 +146,14 @@ describe("SettingsPage logs", () => {
     getFontSize.mockReset();
     getImageModel.mockReset();
     getLogSettings.mockReset();
+    getLlmConfigs.mockReset();
     getLogs.mockReset();
     getModelProviderProfiles.mockReset();
     getRuntimeLogs.mockReset();
     getTrashSettings.mockReset();
     onRuntimeLog.mockReset();
     saveImageModel.mockReset();
+    saveLlmConfigs.mockReset();
     saveModelProviderProfiles.mockReset();
     createModelProviderProfile.mockReset();
     deleteModelProviderProfile.mockReset();
@@ -175,6 +192,7 @@ describe("SettingsPage logs", () => {
     });
     getFontSize.mockResolvedValue("medium");
     getImageModel.mockResolvedValue("gpt-image-2");
+    getLlmConfigs.mockResolvedValue([]);
     getLogSettings.mockResolvedValue({ enabled: true, retention_days: 7 });
     getLogs.mockResolvedValue({ logs: [], total: 0, page: 1, page_size: 20 });
     getTrashSettings.mockResolvedValue({ retention_days: 30 });
@@ -335,11 +353,7 @@ describe("SettingsPage logs", () => {
   });
 
   it("shows Nano Banana models as direct selection cards", async () => {
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -399,11 +413,7 @@ describe("SettingsPage logs", () => {
 
     const { default: CatalogSettingsPage } = await import("./SettingsPage");
 
-    render(
-      <MemoryRouter>
-        <CatalogSettingsPage />
-      </MemoryRouter>,
-    );
+    renderWithProviders(<CatalogSettingsPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -439,11 +449,7 @@ describe("SettingsPage logs", () => {
   });
 
   it("loads provider profiles for the selected model", async () => {
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -464,11 +470,7 @@ describe("SettingsPage logs", () => {
       model === "gpt-image-2" ? gptProfiles.promise : geminiProfiles.promise,
     );
 
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -509,11 +511,7 @@ describe("SettingsPage logs", () => {
       model === "nano-banana" ? geminiProfiles.promise : Promise.resolve(openAiProviderState),
     );
 
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -540,11 +538,7 @@ describe("SettingsPage logs", () => {
   });
 
   it("saves edits to the selected provider profile", async () => {
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -569,11 +563,7 @@ describe("SettingsPage logs", () => {
   });
 
   it("creates a provider for editing without activating it, then activates and deletes providers", async () => {
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -609,11 +599,7 @@ describe("SettingsPage logs", () => {
 
     getImageModel.mockReturnValue(persistedModel.promise);
 
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
@@ -643,11 +629,7 @@ describe("SettingsPage logs", () => {
 
     saveModelProviderProfiles.mockReturnValue(providerSave.promise);
 
-    render(
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>,
-    );
+    renderSettingsPage();
 
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
 
