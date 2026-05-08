@@ -1,16 +1,39 @@
 import "../../i18n";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { render, screen } from "@testing-library/react";
+import { useEffect } from "react";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import AppLayout from "./AppLayout";
+import AppLayout, { useLayoutContext } from "./AppLayout";
 
 vi.mock("../sidebar/ConversationList", () => ({
-  default: () => <div data-testid="conversation-sidebar" />,
+  default: ({
+    activeProjectId,
+    activeConversationId,
+  }: {
+    activeProjectId: string | null;
+    activeConversationId: string | null;
+  }) => (
+    <div data-testid="conversation-sidebar">
+      <span data-testid="conversation-active-project">{activeProjectId ?? "none"}</span>
+      <span data-testid="conversation-active-conversation">{activeConversationId ?? "none"}</span>
+    </div>
+  ),
 }));
 
 vi.mock("../projects/ProjectsSidebar", () => ({
   default: () => <div data-testid="projects-sidebar" />,
 }));
+
+function ProjectChatFixture() {
+  const { setActiveProjectId, setActiveConversationId } = useLayoutContext();
+
+  useEffect(() => {
+    setActiveProjectId("project-1");
+    setActiveConversationId("project-conversation-1");
+  }, [setActiveConversationId, setActiveProjectId]);
+
+  return <Link to="/generate">global conversations</Link>;
+}
 
 describe("AppLayout", () => {
   it("renders the project sidebar on project routes and the conversation sidebar elsewhere", () => {
@@ -85,5 +108,31 @@ describe("AppLayout", () => {
 
     expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
     expect(screen.getByText("favorites")).toBeInTheDocument();
+  });
+
+  it("clears a project conversation selection when returning to global conversations", async () => {
+    render(
+      <MemoryRouter initialEntries={["/projects/project-1/chat/project-conversation-1"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/projects/:projectId/chat/:conversationId" element={<ProjectChatFixture />} />
+            <Route path="/generate" element={<div>generate</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-active-project")).toHaveTextContent("project-1");
+      expect(screen.getByTestId("conversation-active-conversation")).toHaveTextContent("project-conversation-1");
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "global conversations" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-active-project")).toHaveTextContent("none");
+      expect(screen.getByTestId("conversation-active-conversation")).toHaveTextContent("none");
+    });
+    expect(screen.getByText("generate")).toBeInTheDocument();
   });
 });

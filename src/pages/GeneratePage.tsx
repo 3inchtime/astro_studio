@@ -8,10 +8,16 @@ import {
   saveImageModel,
   deleteGeneration,
   messageImageToEditSource,
+  onGenerationComplete,
+  onGenerationFailed,
   pickSourceImages,
 } from "../lib/api";
 import { consumePendingEditSources } from "../lib/editSources";
-import { generationsToMessages } from "../lib/generationMessages";
+import {
+  completeGenerationMessage,
+  failGenerationMessage,
+  generationsToMessages,
+} from "../lib/generationMessages";
 import {
   buildEditParams,
   buildGenerationParams,
@@ -112,6 +118,7 @@ export default function GeneratePage() {
   const imageModelRef = useRef(imageModel);
   const didUserSelectModelRef = useRef(false);
   const hasComposerDraftRef = useRef(false);
+  const activeConversationIdRef = useRef(activeConversationId);
 
   const setActiveImageModel = useCallback((model: ImageModel) => {
     imageModelRef.current = model;
@@ -191,6 +198,10 @@ export default function GeneratePage() {
     setMessages(generationsToMessages(generations));
   }, []);
 
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
   const promptFavoriteByPrompt = useMemo(() => {
     return new Map(
       promptFavorites.map((favorite) => [
@@ -207,6 +218,34 @@ export default function GeneratePage() {
     }
     loadConversationMessages(activeConversationId).catch(() => {});
   }, [activeConversationId, loadConversationMessages]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshActiveConversation = () => {
+      const conversationId = activeConversationIdRef.current;
+      if (!conversationId) return;
+
+      loadConversationMessages(conversationId).catch(() => {});
+      refreshConversations();
+    };
+
+    const completeUnlisten = onGenerationComplete(() => {
+      if (!cancelled) {
+        refreshActiveConversation();
+      }
+    });
+    const failedUnlisten = onGenerationFailed(() => {
+      if (!cancelled) {
+        refreshActiveConversation();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      void completeUnlisten.then((unlisten) => unlisten());
+      void failedUnlisten.then((unlisten) => unlisten());
+    };
+  }, [loadConversationMessages, refreshConversations]);
 
   useEffect(() => {
     if (autoScrollRef.current && scrollRef.current) {
@@ -395,37 +434,13 @@ export default function GeneratePage() {
             ? await editImage(buildEditParams(normalizedRequest))
             : await generateImage(buildGenerationParams(normalizedRequest));
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === `assistant-${tempId}`
-              ? {
-                  ...m,
-                  id: `assistant-${result.generation_id}`,
-                  generationId: result.generation_id,
-                  images: result.images.map((img) => ({
-                    imageId: img.id,
-                    generationId: img.generation_id,
-                    path: img.file_path,
-                    thumbnailPath: img.thumbnail_path,
-                  })),
-                  status: "complete" as const,
-                }
-              : m,
-          ),
+          completeGenerationMessage(prev, tempId, result),
         );
         setActiveConversationId(result.conversation_id);
         refreshConversations();
       } catch (e) {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === `assistant-${tempId}`
-              ? {
-                  ...m,
-                  status: "failed" as const,
-                  error: String(e),
-                  retryRequest: normalizedRequest,
-                }
-              : m,
-          ),
+          failGenerationMessage(prev, tempId, e, normalizedRequest),
         );
         refreshConversations();
       }
