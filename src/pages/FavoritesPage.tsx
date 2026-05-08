@@ -224,7 +224,7 @@ export default function FavoritesPage() {
   });
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-hidden">
       <div className="flex flex-1 flex-col">
         <div className="flex flex-col gap-3 border-b border-border-subtle px-6 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-3">

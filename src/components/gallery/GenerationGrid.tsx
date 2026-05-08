@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { Info } from "lucide-react";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toAssetUrl } from "../../lib/api";
 import type { GenerationResult } from "../../types";
@@ -21,10 +22,12 @@ export default function GenerationGrid({
   onManageFolders,
 }: GenerationGridProps) {
   const { t } = useTranslation();
+  const seenIds = useRef(new Set<string>());
+  let newCardOffset = 0;
 
   return (
     <div className="columns-2 gap-3 sm:columns-3 lg:columns-4">
-      {results.map((result, i) => {
+      {results.map((result) => {
         const img = result.images[0];
         if (!img) return null;
         const aspectRatio =
@@ -32,12 +35,17 @@ export default function GenerationGrid({
             ? `${img.width} / ${img.height}`
             : "1 / 1";
 
+        const isNew = !seenIds.current.has(img.id);
+        if (isNew) seenIds.current.add(img.id);
+        const delay = isNew ? newCardOffset * 0.03 : 0;
+        if (isNew) newCardOffset++;
+
         return (
           <motion.div
             key={img.id}
-            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            initial={isNew ? { opacity: 0, y: 6, scale: 0.98 } : false}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ delay: i * 0.03, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ delay, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             className="group mb-3 break-inside-avoid overflow-hidden rounded-[12px] bg-surface border border-border-subtle shadow-card transition-shadow duration-300 hover:shadow-float hover:border-border"
           >
             <div className="relative overflow-hidden">

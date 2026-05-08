@@ -78,7 +78,7 @@ describe("Lightbox", () => {
     const viewport = screen.getByTestId("image-preview-viewport");
 
     expect(viewport).toHaveClass("overflow-hidden");
-    expect(image.parentElement).toHaveClass("h-full", "w-full");
+    expect(image.parentElement).toHaveClass("absolute", "inset-0");
     expect(image.parentElement).not.toHaveClass(
       "rounded-[28px]",
       "border",

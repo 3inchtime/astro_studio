@@ -52,11 +52,11 @@ export default function GenerationDetailPanel({
 
   return (
     <motion.div
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width: 340, opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
+      initial={{ x: 340, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: 340, opacity: 0 }}
       transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-      className="w-[340px] h-full overflow-y-auto overflow-hidden border-l border-border-subtle bg-surface"
+      className="w-[340px] h-full overflow-y-auto overflow-hidden border-l border-border-subtle bg-surface shrink-0"
     >
       <div className="p-5">
         <div className="mb-4 flex items-center justify-between">

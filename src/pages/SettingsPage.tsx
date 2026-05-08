@@ -357,6 +357,19 @@ export default function SettingsPage() {
     setTimeout(() => setModelSaved(false), 2000);
   }
 
+  async function handleCancelProviderEdit() {
+    const modelAtCancelStart = imageModel;
+    try {
+      const state = await getModelProviderProfiles(modelAtCancelStart);
+      if (imageModelRef.current !== modelAtCancelStart) return;
+      setProviderState(state);
+      setSelectedProviderId(state.active_provider_id);
+    } catch {
+      // keep current state on failure
+    }
+    setShowKey(false);
+  }
+
   function handleSelectImageModel(model: ImageModel) {
     didUserSelectModelRef.current = true;
     setImageModel(model);
@@ -565,6 +578,7 @@ export default function SettingsPage() {
               onDeleteProvider={(providerId) => void handleDeleteProvider(providerId)}
               onSetActiveProvider={(providerId) => void handleSetActiveProvider(providerId)}
               onSaveProvider={() => void handleSaveProvider()}
+              onCancelProviderEdit={() => void handleCancelProviderEdit()}
             />
           ) : (
             <LogsPanel

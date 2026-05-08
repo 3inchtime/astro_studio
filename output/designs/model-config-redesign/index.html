@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Astro Studio Model Config Redesign</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="rail">
+        <div class="traffic"><span></span><span></span><span></span></div>
+        <div class="brand">AS</div>
+        <nav>
+          <button>✦</button>
+          <button>▣</button>
+          <button>◧</button>
+          <button>♡</button>
+        </nav>
+        <button class="rail-active">⚙</button>
+      </aside>
+
+      <main class="workspace">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Settings / Model Configuration</p>
+            <h1>模型配置重设计提案</h1>
+            <p>3 个可落地版本：更清晰地选择模型、管理服务商、编辑端点并确认当前生效配置。</p>
+          </div>
+          <div class="header-status">
+            <span class="dot"></span>
+            当前生效：GPT Image 2 · suxi
+          </div>
+        </header>
+
+        <section class="design-section" id="version-a">
+          <div class="section-title">
+            <div>
+              <span class="version-tag">Version A</span>
+              <h2>控制台总览型</h2>
+              <p>适合默认方案：首屏同时管理图片生成服务和提示词优化服务。</p>
+            </div>
+            <button class="primary-btn">保存全部更改</button>
+          </div>
+
+          <div class="console-layout">
+            <div class="main-console">
+              <section class="vertical-config-block">
+                <div class="block-heading">
+                  <div>
+                    <h3>图片生成模型配置</h3>
+                  </div>
+                  <button class="primary-btn">保存图片模型</button>
+                </div>
+
+                <div class="model-strip">
+                  <button class="model-pill selected">
+                    <span class="provider-mark openai">O</span>
+                    <span><strong>GPT Image 2</strong><small>编辑 · 独立端点</small></span>
+                    <b>✓</b>
+                  </button>
+                  <button class="model-pill">
+                    <span class="provider-mark google">G</span>
+                    <span><strong>Nano Banana</strong><small>编辑 · 共用端点</small></span>
+                  </button>
+                  <button class="model-pill">
+                    <span class="provider-mark google">G</span>
+                    <span><strong>Nano Banana 2</strong><small>编辑 · 共用端点</small></span>
+                  </button>
+                  <button class="model-pill">
+                    <span class="provider-mark google">G</span>
+                    <span><strong>Nano Banana Pro</strong><small>编辑 · 共用端点</small></span>
+                  </button>
+                </div>
+
+                <div class="aligned-grid">
+                  <section class="provider-list-panel">
+                    <div class="panel-head">
+                      <div><h3>服务商</h3><p>为当前模型维护多套凭据</p></div>
+                      <button class="icon-btn">+</button>
+                    </div>
+                    <button class="provider-row selected">
+                      <span><strong>suxi</strong><small>sk-•••••Y5IR</small></span>
+                      <em>生效</em>
+                    </button>
+                    <button class="provider-row">
+                      <span><strong>ss</strong><small>sk-•••••</small></span>
+                    </button>
+                  </section>
+
+                  <section class="editor-panel">
+                    <div class="panel-head">
+                      <div><h3>suxi</h3><p>编辑当前服务商连接信息</p></div>
+                      <button class="ghost-btn">设为生效</button>
+                    </div>
+                    <div class="form-row two">
+                      <label>服务商名称<input value="suxi" /></label>
+                      <label>API 密钥<div class="input-action"><input value="••••••••••••" /><button>👁</button></div></label>
+                    </div>
+                    <div class="mode-switch"><button class="active">Base URL</button><button>完整 URL</button></div>
+                    <label>API 端点<input value="https://new.suxi.ai/v1" /></label>
+                    <div class="endpoint-preview">
+                      <span>生成请求</span>
+                      <code>https://new.suxi.ai/v1/images/generations</code>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="vertical-config-block">
+                <div class="block-heading">
+                  <div>
+                    <h3>提示词优化配置</h3>
+                  </div>
+                  <button class="primary-btn">保存优化配置</button>
+                </div>
+
+                <div class="aligned-grid">
+                  <section class="llm-list-panel">
+                    <div class="panel-head">
+                      <div>
+                        <h3>优化服务</h3>
+                        <p>用于优化生成提示词</p>
+                      </div>
+                      <button class="icon-btn">+</button>
+                    </div>
+                    <button class="llm-row selected">
+                      <span>
+                        <strong>1212</strong>
+                        <small>OpenAI 兼容 · gpt-4o</small>
+                      </span>
+                      <em>已启用</em>
+                    </button>
+                    <button class="llm-row">
+                      <span>
+                        <strong>Claude Writer</strong>
+                        <small>Anthropic 兼容 · claude-opus-4-7</small>
+                      </span>
+                      <em class="muted-em">禁用</em>
+                    </button>
+                    <button class="llm-row dashed">
+                      <span>
+                        <strong>新增优化服务</strong>
+                        <small>OpenAI 或 Anthropic 兼容</small>
+                      </span>
+                      <b>+</b>
+                    </button>
+                  </section>
+
+                  <section class="llm-editor-panel">
+                    <div class="panel-head">
+                      <div>
+                        <h3>1212</h3>
+                        <p>编辑用于提示词优化的模型服务</p>
+                      </div>
+                    </div>
+                    <div class="llm-status-line">
+                      <div>
+                        <span class="health-dot"></span>
+                        当前配置会显示在生成页的“优化”下拉菜单中
+                      </div>
+                      <label class="switch-line"><span>启用</span><i></i></label>
+                    </div>
+
+                    <div class="form-row three">
+                      <label>名称<input value="1212" /></label>
+                      <label>协议<select><option>OpenAI 兼容</option><option>Anthropic 兼容</option></select></label>
+                      <label>能力<select><option>纯文本</option><option>多模态</option></select></label>
+                    </div>
+                    <div class="form-row two">
+                      <label>模型<input value="gpt-4o" /></label>
+                      <label>API 密钥<div class="input-action"><input value="••••••••••••" /><button>👁</button></div></label>
+                    </div>
+                    <label>Base URL<input value="https://api.openai.com/v1" /></label>
+
+                    <div class="llm-preview">
+                      <div>
+                        <span>用途</span>
+                        <strong>提示词优化</strong>
+                        <small>不会影响图像生成 API 的 Key 和端点</small>
+                      </div>
+                      <div>
+                        <span>请求协议</span>
+                        <strong>OpenAI Chat Completions</strong>
+                        <small>Base URL 自动拼接聊天接口</small>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="design-section" id="version-b">
+          <div class="section-title">
+            <div>
+              <span class="version-tag">Version B</span>
+              <h2>模型 x 服务商矩阵型</h2>
+              <p>适合高效管理：像控制台表格一样快速比较模型、服务商、状态和端点。</p>
+            </div>
+            <button class="primary-btn">新增服务商</button>
+          </div>
+
+          <div class="matrix-layout">
+            <div class="matrix-toolbar">
+              <div class="segmented"><button class="active">图像模型</button><button>提示词优化</button></div>
+              <div class="search-box">搜索模型或服务商</div>
+            </div>
+
+            <div class="matrix-table">
+              <div class="matrix-row matrix-head">
+                <span>模型</span><span>服务商</span><span>Key</span><span>端点模式</span><span>能力</span><span>状态</span>
+              </div>
+              <div class="matrix-row active">
+                <span><strong>GPT Image 2</strong><small>gpt-image-2</small></span>
+                <span>suxi</span>
+                <span class="mono">sk-•••••Y5IR</span>
+                <span><em>Base URL</em></span>
+                <span>编辑 · 独立端点</span>
+                <span><b>当前生效</b></span>
+              </div>
+              <div class="matrix-row">
+                <span><strong>GPT Image 2</strong><small>gpt-image-2</small></span>
+                <span>ss</span>
+                <span class="mono">sk-•••••</span>
+                <span><em>Base URL</em></span>
+                <span>编辑 · 独立端点</span>
+                <span>可启用</span>
+              </div>
+              <div class="matrix-row">
+                <span><strong>Nano Banana</strong><small>gemini-2.5-flash-image</small></span>
+                <span>Google Main</span>
+                <span class="warning">缺少 Key</span>
+                <span><em>完整 URL</em></span>
+                <span>编辑 · 共用端点</span>
+                <span>待配置</span>
+              </div>
+              <div class="matrix-row">
+                <span><strong>Nano Banana Pro</strong><small>gemini-3-pro-image-preview</small></span>
+                <span>Google Main</span>
+                <span class="warning">缺少 Key</span>
+                <span><em>完整 URL</em></span>
+                <span>编辑 · 共用端点</span>
+                <span>待配置</span>
+              </div>
+            </div>
+
+            <aside class="drawer-panel">
+              <div class="panel-head">
+                <div><h3>GPT Image 2 / suxi</h3><p>矩阵中选中行的快速编辑</p></div>
+              </div>
+              <div class="form-row two">
+                <label>模型<select><option>GPT Image 2</option></select></label>
+                <label>服务商<select><option>suxi</option></select></label>
+              </div>
+              <label>API Key<input value="••••••••••••" /></label>
+              <label>Base URL<input value="https://new.suxi.ai/v1" /></label>
+              <div class="sticky-actions"><button class="ghost-btn">取消</button><button class="primary-btn">保存并启用</button></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="design-section" id="version-c">
+          <div class="section-title">
+            <div>
+              <span class="version-tag">Version C</span>
+              <h2>分步连接向导型</h2>
+              <p>适合降低配置出错率：把选择模型、选择服务商、填写凭据、确认启用拆成连续流程。</p>
+            </div>
+            <button class="primary-btn">完成并启用</button>
+          </div>
+
+          <div class="wizard-layout">
+            <aside class="steps">
+              <div class="step done"><b>1</b><span><strong>选择模型</strong><small>GPT Image 2</small></span></div>
+              <div class="step current"><b>2</b><span><strong>连接服务商</strong><small>suxi</small></span></div>
+              <div class="step"><b>3</b><span><strong>端点规则</strong><small>Base URL</small></span></div>
+              <div class="step"><b>4</b><span><strong>确认启用</strong><small>保存当前配置</small></span></div>
+            </aside>
+
+            <section class="wizard-card">
+              <div class="panel-head">
+                <div><h3>连接服务商</h3><p>选择已有服务商或创建一套新的服务商配置。</p></div>
+                <button class="ghost-btn">使用默认 OpenAI</button>
+              </div>
+              <div class="choice-grid">
+                <button class="choice selected"><strong>suxi</strong><small>当前生效 · sk-•••••Y5IR</small><b>✓</b></button>
+                <button class="choice"><strong>ss</strong><small>已保存 · sk-•••••</small></button>
+                <button class="choice add"><strong>新增服务商</strong><small>填写新的 Key 和 URL</small></button>
+              </div>
+              <div class="form-row two">
+                <label>服务商名称<input value="suxi" /></label>
+                <label>API 密钥<input value="••••••••••••" /></label>
+              </div>
+              <div class="wizard-footer">
+                <button class="ghost-btn">上一步</button>
+                <button class="primary-btn">继续配置端点</button>
+              </div>
+            </section>
+
+            <aside class="review-card">
+              <h3>即将生效</h3>
+              <dl>
+                <div><dt>模型</dt><dd>GPT Image 2</dd></div>
+                <div><dt>服务商</dt><dd>suxi</dd></div>
+                <div><dt>Key</dt><dd>sk-•••••Y5IR</dd></div>
+                <div><dt>URL</dt><dd>Base URL</dd></div>
+              </dl>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

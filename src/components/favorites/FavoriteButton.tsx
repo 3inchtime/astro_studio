@@ -26,9 +26,9 @@ export default function FavoriteButton({ imageId, className, size = 16, onClick,
 
   if (loading) {
     return (
-      <div
-        className={cn("h-5 w-5 rounded-full bg-subtle animate-pulse cursor-pointer", className)}
-        onClick={handleClick}
+      <Star
+        size={size}
+        className={cn("cursor-pointer text-transparent", className)}
       />
     );
   }

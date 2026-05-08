@@ -62,10 +62,6 @@ export function removeProviderFromState(
   state: ModelProviderProfilesState,
   providerId: string,
 ): ModelProviderProfilesState {
-  if (state.profiles.length <= 1) {
-    return state;
-  }
-
   const profiles = state.profiles.filter((profile) => profile.id !== providerId);
   const activeProviderStillExists = profiles.some(
     (profile) => profile.id === state.active_provider_id,
@@ -74,7 +70,7 @@ export function removeProviderFromState(
   return {
     active_provider_id: activeProviderStillExists
       ? state.active_provider_id
-      : profiles[0].id,
+      : (profiles[0]?.id ?? ""),
     profiles,
   };
 }

@@ -64,6 +64,15 @@ describe("model provider profile helpers", () => {
     });
   });
 
+  it("allows removing the last provider and clears the active id", () => {
+    const state = defaultProviderProfilesStateForModel("gpt-image-2");
+
+    expect(removeProviderFromState(state, DEFAULT_PROVIDER_ID)).toEqual({
+      active_provider_id: "",
+      profiles: [],
+    });
+  });
+
   it("returns the active provider or the first provider", () => {
     const state = {
       active_provider_id: "missing",

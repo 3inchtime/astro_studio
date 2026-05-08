@@ -184,19 +184,16 @@ fn normalize_provider_profiles_state(
         });
     }
 
-    if profiles.is_empty() {
-        return Err(AppError::Validation {
-            message: "At least one provider profile is required.".to_string(),
-        });
-    }
-
     let active_provider_id = if profiles
         .iter()
         .any(|profile| profile.id == state.active_provider_id)
     {
         state.active_provider_id
     } else {
-        profiles[0].id.clone()
+        profiles
+            .first()
+            .map(|profile| profile.id.clone())
+            .unwrap_or_default()
     };
 
     Ok(ModelProviderProfilesState {
@@ -211,12 +208,12 @@ pub(crate) fn read_model_provider_profiles_state(
 ) -> Result<ModelProviderProfilesState, AppError> {
     let normalized_model = normalize_image_model(model);
     let stored_profiles = db.get_setting(&model_provider_profiles_key(normalized_model))?;
-    let profiles = match stored_profiles
-        .as_deref()
-        .and_then(|value| serde_json::from_str::<Vec<ModelProviderProfile>>(value).ok())
-        .filter(|profiles| !profiles.is_empty())
-    {
-        Some(profiles) => profiles,
+    let profiles = match stored_profiles.as_deref() {
+        Some(value) => serde_json::from_str::<Vec<ModelProviderProfile>>(value).map_err(|e| {
+            AppError::Database {
+                message: format!("Deserialize provider profiles failed: {}", e),
+            }
+        })?,
         None => vec![default_provider_profile_for_model(db, normalized_model)?],
     };
     let active_provider_id = db
@@ -518,18 +515,17 @@ pub(crate) fn delete_model_provider_profile(
 ) -> Result<ModelProviderProfilesState, AppError> {
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
-    if state.profiles.len() <= 1 {
-        return Err(AppError::Validation {
-            message: "At least one provider profile is required.".to_string(),
-        });
-    }
     state.profiles.retain(|profile| profile.id != provider_id);
     if !state
         .profiles
         .iter()
         .any(|profile| profile.id == state.active_provider_id)
     {
-        state.active_provider_id = state.profiles[0].id.clone();
+        state.active_provider_id = state
+            .profiles
+            .first()
+            .map(|profile| profile.id.clone())
+            .unwrap_or_default();
     }
     save_model_provider_profiles_state(db.inner(), normalized_model, state)
 }
@@ -595,7 +591,6 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::model_registry::model_setting_key;
-    use crate::models::*;
 
     fn temp_test_db(prefix: &str) -> (Database, std::path::PathBuf) {
         let db_path =
@@ -847,6 +842,42 @@ mod tests {
 
         let settings = read_model_endpoint_settings(&db, ENGINE_GPT_IMAGE_2).unwrap();
         assert_eq!(settings.base_url, "https://provider-b.example/v1");
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn deleting_the_last_provider_is_allowed_and_clears_active_id() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-delete-empty-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-a".to_string(),
+            profiles: vec![ModelProviderProfile {
+                id: "provider-a".to_string(),
+                name: "Provider A".to_string(),
+                api_key: "sk-a".to_string(),
+                endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+            }],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        let mut state = read_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2).unwrap();
+        state.profiles.retain(|profile| profile.id != "provider-a");
+        if !state
+            .profiles
+            .iter()
+            .any(|profile| profile.id == state.active_provider_id)
+        {
+            state.active_provider_id = state
+                .profiles
+                .first()
+                .map(|profile| profile.id.clone())
+                .unwrap_or_default();
+        }
+        let saved = save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        assert!(saved.profiles.is_empty());
+        assert_eq!(saved.active_provider_id, "");
 
         drop(db);
         remove_temp_test_db(db_path);

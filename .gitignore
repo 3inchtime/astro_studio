@@ -45,3 +45,4 @@ docs/
 
 # MCP
 .playwright-mcp/
+.playwright-cli/

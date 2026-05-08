@@ -1,15 +1,12 @@
 import { motion } from "framer-motion";
-import { Check, Cpu, Eye, EyeOff, Globe, Plus, Trash2 } from "lucide-react";
+import { Check, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import type {
   EndpointMode,
   ImageModel,
   ModelProviderProfilesState,
 } from "../../types";
-import {
-  IMAGE_MODEL_CATALOG,
-  getImageModelCatalogEntry,
-} from "../../lib/modelCatalog";
+import { IMAGE_MODEL_CATALOG } from "../../lib/modelCatalog";
 import {
   defaultBaseUrlForModel,
   defaultEditUrlForModel,
@@ -42,6 +39,7 @@ interface ModelSettingsPanelProps {
   onDeleteProvider: (providerId: string) => void;
   onSetActiveProvider: (providerId: string) => void;
   onSaveProvider: () => void;
+  onCancelProviderEdit: () => void;
 }
 
 function formatProviderName(provider: string): string {
@@ -75,61 +73,57 @@ export function ModelSettingsPanel({
   onDeleteProvider,
   onSetActiveProvider,
   onSaveProvider,
+  onCancelProviderEdit,
 }: ModelSettingsPanelProps) {
   const selectedProvider =
     providerState.profiles.find((provider) => provider.id === selectedProviderId) ??
     providerState.profiles[0];
-  const endpointSettings = selectedProvider.endpoint_settings;
-  const apiKey = selectedProvider.api_key;
-  const displayKey = showKey ? apiKey : (apiKey ? maskKey(apiKey) : "");
-  const canDeleteProvider = providerState.profiles.length > 1;
-  const currentModelEntry = getImageModelCatalogEntry(imageModel);
-  const activeProvider =
-    providerState.profiles.find((provider) => provider.id === providerState.active_provider_id) ??
-    selectedProvider;
-  const selectedProviderIsActive = selectedProvider.id === providerState.active_provider_id;
-  const endpointModeLabel = t(
-    activeProvider.endpoint_settings.mode === "base_url"
-      ? "settings.endpointBaseUrlMode"
-      : "settings.endpointFullUrlMode",
-  );
-
-  return (
-    <motion.div
-      key="model"
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 10 }}
-      transition={{ duration: 0.2 }}
-    >
-      <motion.section custom={0} variants={sectionVariants} initial="hidden" animate="visible" className="space-y-3">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-primary/10 bg-primary/5">
-            <Cpu size={14} className="text-primary" strokeWidth={2} />
-          </div>
-          <div>
-            <h3 className="text-[13px] font-semibold text-foreground">{t("settings.modelConfig")}</h3>
-            <p className="mt-0.5 text-[11px] text-muted/60">{t("settings.modelConfigDesc")}</p>
-          </div>
-        </div>
-        <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
-          <div className="border-b border-border-subtle p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
-                  <Cpu size={14} className="text-primary" strokeWidth={2} />
-                </div>
-                <div>
-                  <h4 className="text-[13px] font-semibold text-foreground">{t("settings.currentModel")}</h4>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.modelDesc")}</p>
-                </div>
-              </div>
-              <div className="rounded-full border border-border-subtle bg-subtle/25 px-3 py-1.5 text-[11px] font-medium text-muted/70">
-                {t("settings.selectedModel", { model: currentModelEntry.label })}
-              </div>
+  if (!selectedProvider) {
+    return (
+      <motion.div
+        key="model"
+        initial={{ opacity: 0, x: 10 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 10 }}
+        transition={{ duration: 0.2 }}
+      >
+        <motion.section
+          custom={0}
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          className="space-y-4"
+        >
+          <motion.div
+            custom={0}
+            variants={cardVariants}
+            initial="hidden"
+            animate="visible"
+            className="rounded-[12px] border border-border-subtle bg-surface/90 p-4 shadow-card"
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
+                {t("settings.imageGenerationConfig")}
+              </h3>
+              <motion.button
+                type="button"
+                onClick={onSaveModel}
+                whileTap={{ scale: 0.97 }}
+                className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-primary/20 bg-primary/10 px-3 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15"
+              >
+                {modelSaved ? (
+                  <>
+                    <Check size={13} className="text-success" />
+                    <span className="text-success">{t("settings.saved")}</span>
+                  </>
+                ) : (
+                  t("settings.saveModel")
+                )}
+              </motion.button>
             </div>
-            <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_300px]">
-              <div className="grid gap-2 sm:grid-cols-2">
+
+            <div className="grid gap-4">
+              <div className="grid gap-4 xl:grid-cols-[240px_repeat(3,minmax(0,1fr))]">
                 {IMAGE_MODEL_CATALOG.map((entry) => {
                   const active = imageModel === entry.id;
 
@@ -140,125 +134,191 @@ export function ModelSettingsPanel({
                       aria-pressed={active}
                       aria-label={`Select ${entry.label} model`}
                       onClick={() => onSelectImageModel(entry.id)}
-                      className={`group min-h-[118px] rounded-[12px] border p-4 text-left transition-all ${
+                      className={`group flex min-h-[68px] items-center gap-3 rounded-[12px] border p-3 text-left transition-all ${
                         active
                           ? "border-primary/35 bg-primary/6 shadow-card"
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[13px] font-semibold text-foreground">{entry.label}</span>
-                            <span className="rounded-[6px] border border-border-subtle bg-surface px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted/60">
-                              {formatProviderName(entry.provider)}
-                            </span>
-                          </div>
-                          <p className="mt-1 truncate font-mono text-[10.5px] text-muted/55">
-                            {entry.providerModelId}
-                          </p>
-                        </div>
-                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
-                          active
-                            ? "border-primary bg-primary text-white"
-                            : "border-border-subtle text-transparent group-hover:border-border"
-                        }`}>
-                          <Check size={12} strokeWidth={3} />
-                        </span>
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-1.5">
-                        <span className="rounded-[6px] bg-subtle px-2 py-1 text-[10.5px] font-medium text-muted/65">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-[12px] font-bold text-white ${
+                        entry.provider === "openai"
+                          ? "bg-[#151515]"
+                          : "bg-gradient-to-br from-[#4285F4] to-[#34A853]"
+                      }`}>
+                        {formatProviderName(entry.provider).charAt(0)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-semibold text-foreground">{entry.label}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-muted/65">
                           {entry.supportsEdit ? t("settings.modelSupportsEdit") : t("settings.modelGenerateOnly")}
-                        </span>
-                        <span className="rounded-[6px] bg-subtle px-2 py-1 text-[10.5px] font-medium text-muted/65">
+                          {" · "}
                           {entry.connectionDefaults.generationUrl === entry.connectionDefaults.editUrl
                             ? t("settings.modelSharedEndpoint")
                             : t("settings.modelSeparateEndpoints")}
                         </span>
-                      </div>
+                      </span>
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
+                        active
+                          ? "border-primary bg-primary text-white"
+                          : "border-border-subtle text-transparent group-hover:border-border"
+                      }`}>
+                        <Check size={12} strokeWidth={3} />
+                      </span>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
-                    <Cpu size={14} className="text-primary" strokeWidth={2} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted/60">{t("settings.model")}</p>
-                    <h5 className="mt-1 text-[16px] font-semibold text-foreground">{currentModelEntry.label}</h5>
-                    <p className="mt-1 font-mono text-[10.5px] text-muted/55">{currentModelEntry.providerModelId}</p>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  <span className="rounded-[6px] bg-surface px-2 py-1 text-[10.5px] font-medium text-muted/65">
-                    {currentModelEntry.supportsEdit ? t("settings.modelSupportsEdit") : t("settings.modelGenerateOnly")}
-                  </span>
-                  <span className="rounded-[6px] bg-surface px-2 py-1 text-[10.5px] font-medium text-muted/65">
-                    {currentModelEntry.connectionDefaults.generationUrl === currentModelEntry.connectionDefaults.editUrl
-                      ? t("settings.modelSharedEndpoint")
-                      : t("settings.modelSeparateEndpoints")}
-                  </span>
-                </div>
-                <div className="mt-4 grid gap-2 rounded-[10px] border border-border-subtle bg-surface/80 p-3">
-                  <div className="flex items-center justify-between gap-3 text-[11px]">
-                    <span className="text-muted/60">{t("settings.activeProvider")}</span>
-                    <span className="font-medium text-foreground">{activeProvider.name}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 text-[11px]">
-                    <span className="text-muted/60">{t("settings.endpoint")}</span>
-                    <span className="font-medium text-foreground">{endpointModeLabel}</span>
+              <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-stretch">
+                <div className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providers")}</h4>
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted/60">{t("settings.providersDesc")}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onCreateProvider}
+                      aria-label={t("settings.newProvider")}
+                      className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[9px] border border-border-subtle bg-surface text-muted transition-all hover:border-border hover:text-foreground"
+                    >
+                      <Plus size={14} />
+                    </button>
                   </div>
                 </div>
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-4">
-                  <p className="text-[11px] text-muted/60">
-                    {t("settings.selectedModel", { model: currentModelEntry.label })}
-                  </p>
+
+                <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[12px] border border-dashed border-border-subtle bg-surface text-center">
+                  <p className="text-[12px] text-muted/60">{t("settings.providersDesc")}</p>
                   <motion.button
                     type="button"
-                    onClick={onSaveModel}
+                    onClick={onCreateProvider}
                     whileTap={{ scale: 0.97 }}
-                    className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+                    className="mt-3 flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/10 px-4 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15"
                   >
-                    {modelSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveModel")}
+                    <Plus size={13} />
+                    {t("settings.newProvider")}
                   </motion.button>
                 </div>
               </div>
             </div>
+          </motion.div>
+
+          <LlmConfigSection />
+        </motion.section>
+      </motion.div>
+    );
+  }
+  const endpointSettings = selectedProvider.endpoint_settings;
+  const apiKey = selectedProvider.api_key;
+  const displayKey = showKey ? apiKey : (apiKey ? maskKey(apiKey) : "");
+  const selectedProviderIsActive = selectedProvider.id === providerState.active_provider_id;
+
+  return (
+    <motion.div
+      key="model"
+      initial={{ opacity: 0, x: 10 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 10 }}
+      transition={{ duration: 0.2 }}
+    >
+      <motion.section
+        custom={0}
+        variants={sectionVariants}
+        initial="hidden"
+        animate="visible"
+        className="space-y-4"
+      >
+        <motion.div
+          custom={0}
+          variants={cardVariants}
+          initial="hidden"
+          animate="visible"
+          className="rounded-[12px] border border-border-subtle bg-surface/90 p-4 shadow-card"
+        >
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
+              {t("settings.imageGenerationConfig")}
+            </h3>
+            <motion.button
+              type="button"
+              onClick={onSaveModel}
+              whileTap={{ scale: 0.97 }}
+              className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-primary/20 bg-primary/10 px-3 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15"
+            >
+              {modelSaved ? (
+                <>
+                  <Check size={13} className="text-success" />
+                  <span className="text-success">{t("settings.saved")}</span>
+                </>
+              ) : (
+                t("settings.saveModel")
+              )}
+            </motion.button>
           </div>
 
-          <div className="grid gap-4 p-5 xl:grid-cols-[292px_minmax(0,1fr)] xl:items-start">
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
-                  <Globe size={14} className="text-primary" strokeWidth={2} />
-                </div>
-                <div>
-                  <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providerWorkspace")}</h4>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.providersDesc")}</p>
-                </div>
+          <div className="grid gap-4">
+            <div className="grid gap-4 xl:grid-cols-[240px_repeat(3,minmax(0,1fr))]">
+                {IMAGE_MODEL_CATALOG.map((entry) => {
+                  const active = imageModel === entry.id;
+
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={`Select ${entry.label} model`}
+                      onClick={() => onSelectImageModel(entry.id)}
+                      className={`group flex min-h-[68px] items-center gap-3 rounded-[12px] border p-3 text-left transition-all ${
+                        active
+                          ? "border-primary/35 bg-primary/6 shadow-card"
+                          : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
+                      }`}
+                    >
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-[12px] font-bold text-white ${
+                        entry.provider === "openai"
+                          ? "bg-[#151515]"
+                          : "bg-gradient-to-br from-[#4285F4] to-[#34A853]"
+                      }`}>
+                        {formatProviderName(entry.provider).charAt(0)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-semibold text-foreground">{entry.label}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-muted/65">
+                          {entry.supportsEdit ? t("settings.modelSupportsEdit") : t("settings.modelGenerateOnly")}
+                          {" · "}
+                          {entry.connectionDefaults.generationUrl === entry.connectionDefaults.editUrl
+                            ? t("settings.modelSharedEndpoint")
+                            : t("settings.modelSeparateEndpoints")}
+                        </span>
+                      </span>
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
+                        active
+                          ? "border-primary bg-primary text-white"
+                          : "border-border-subtle text-transparent group-hover:border-border"
+                      }`}>
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
+            <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-stretch">
               <div className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-[7px] border border-border-subtle bg-surface px-2 py-1 text-[10.5px] font-medium text-muted/65">
-                    {providerState.profiles.length} {t("settings.providers")}
-                  </span>
-                  <span className="rounded-[7px] border border-primary/15 bg-primary/8 px-2 py-1 text-[10.5px] font-medium text-primary">
-                    {t("settings.activeProvider")}: {activeProvider.name}
-                  </span>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providers")}</h4>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted/60">{t("settings.providersDesc")}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onCreateProvider}
+                    aria-label={t("settings.newProvider")}
+                    className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[9px] border border-border-subtle bg-surface text-muted transition-all hover:border-border hover:text-foreground"
+                  >
+                    <Plus size={14} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={onCreateProvider}
-                  aria-label={t("settings.newProvider")}
-                  className="flex h-[38px] w-full items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
-                >
-                  <Plus size={13} />
-                  {t("settings.newProvider")}
-                </button>
                 <div className="space-y-2">
                   {providerState.profiles.map((provider) => {
                     const selected = provider.id === selectedProvider.id;
@@ -309,63 +369,15 @@ export function ModelSettingsPanel({
                   })}
                 </div>
               </div>
-            </div>
 
             <div className="min-w-0 space-y-3 rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providers")}</h4>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Delete ${selectedProvider.name} provider`}
-                  disabled={!canDeleteProvider}
-                  onClick={() => onDeleteProvider(selectedProvider.id)}
-                  className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] border border-border-subtle bg-surface text-muted/55 transition-all hover:border-border hover:text-foreground disabled:opacity-30"
-                >
-                  <Trash2 size={13} />
-                </button>
+              <div>
+                <h4 className="text-[13px] font-semibold text-foreground">{selectedProvider.name}</h4>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
               </div>
 
               <div className="min-w-0 space-y-3">
-                <div className="rounded-[12px] border border-border-subtle bg-surface/85 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted/55">
-                        {t("settings.providerName")}
-                      </p>
-                      <h5 className="mt-1 truncate text-[16px] font-semibold text-foreground">
-                        {selectedProvider.name}
-                      </h5>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <span className={`rounded-[7px] border px-2.5 py-1 text-[10.5px] font-medium ${
-                        selectedProviderIsActive
-                          ? "border-primary/15 bg-primary/8 text-primary"
-                          : "border-border-subtle bg-subtle/20 text-muted/70"
-                      }`}>
-                        {selectedProviderIsActive ? t("settings.activeProvider") : t("settings.useProvider")}
-                      </span>
-                      <span className="rounded-[7px] border border-border-subtle bg-subtle/20 px-2.5 py-1 text-[10.5px] font-medium text-muted/70">
-                        {t(
-                          endpointSettings.mode === "base_url"
-                            ? "settings.endpointBaseUrlMode"
-                            : "settings.endpointFullUrlMode",
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-surface/55 p-4">
-                  <div>
-                    <h5 className="text-[12px] font-semibold text-foreground">{t("settings.apiKey")}</h5>
-                    <p className="mt-1 text-[11px] leading-relaxed text-muted/60">
-                      {t("settings.apiKeyDesc")}
-                    </p>
-                  </div>
-
                   <div className="grid gap-2 sm:grid-cols-2">
                   <label className="grid gap-1.5">
                     <span className="text-[11px] font-medium text-muted/70">{t("settings.providerName")}</span>
@@ -473,34 +485,60 @@ export function ModelSettingsPanel({
                       : `${selectedProvider.name} · ${t("settings.providers")}`}
                   </p>
                   <div className="flex flex-wrap justify-end gap-2">
-                  {selectedProvider.id !== providerState.active_provider_id && (
+                    {selectedProvider.id !== providerState.active_provider_id && (
+                      <motion.button
+                        type="button"
+                        onClick={() => onSetActiveProvider(selectedProvider.id)}
+                        whileTap={{ scale: 0.97 }}
+                        className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/10 px-4 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                      >
+                        <Check size={13} />
+                        {t("settings.activateProvider")}
+                      </motion.button>
+                    )}
                     <motion.button
                       type="button"
-                      onClick={() => onSetActiveProvider(selectedProvider.id)}
+                      onClick={onSaveProvider}
                       whileTap={{ scale: 0.97 }}
-                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/10 px-4 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                     >
-                      <Check size={13} />
-                      {t("settings.activateProvider")}
+                      {providerSaved ? (
+                        <>
+                          <Check size={13} className="text-success" />
+                          <span className="text-success">{t("settings.saved")}</span>
+                        </>
+                      ) : (
+                        t("settings.saveProvider")
+                      )}
                     </motion.button>
-                  )}
-                  <motion.button
-                    type="button"
-                    onClick={onSaveProvider}
-                    whileTap={{ scale: 0.97 }}
-                    className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
-                  >
-                    {providerSaved ? (<><Check size={13} className="text-success" /><span className="text-success">{t("settings.saved")}</span></>) : t("settings.saveProvider")}
-                  </motion.button>
+                    <motion.button
+                      type="button"
+                      onClick={onCancelProviderEdit}
+                      whileTap={{ scale: 0.97 }}
+                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
+                    >
+                      <X size={13} />
+                      {t("settings.cancelEdit")}
+                    </motion.button>
+                    <motion.button
+                      type="button"
+                      onClick={() => onDeleteProvider(selectedProvider.id)}
+                      whileTap={{ scale: 0.97 }}
+                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-error/20 bg-error/5 px-4 text-[12px] font-medium text-error transition-all hover:border-error/30 hover:bg-error/10"
+                    >
+                      <Trash2 size={13} />
+                      {t("settings.deleteProvider")}
+                    </motion.button>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+          </div>
         </motion.div>
-      </motion.section>
 
-      <LlmConfigSection />
+        <LlmConfigSection />
+      </motion.section>
     </motion.div>
   );
 }

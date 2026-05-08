@@ -4,6 +4,9 @@ use crate::llm;
 use crate::models::{LlmConfig, SETTING_LLM_CONFIGS};
 use tauri::State;
 
+const MAX_ENABLED_TEXT_CONFIGS: usize = 1;
+const MAX_ENABLED_MULTIMODAL_CONFIGS: usize = 2;
+
 const OPTIMIZE_PROMPT_SYSTEM_PROMPT: &str = "\
 You are an expert at writing prompts for AI image generation models. \
 When the user provides a prompt, improve it by following these rules:\n\
@@ -31,19 +34,7 @@ fn write_llm_configs(db: &Database, configs: &[LlmConfig]) -> Result<(), AppErro
     db.set_setting(SETTING_LLM_CONFIGS, &json)
 }
 
-#[tauri::command]
-pub(crate) fn get_llm_configs(
-    db: State<'_, Database>,
-) -> Result<Vec<LlmConfig>, AppError> {
-    read_llm_configs(db.inner())
-}
-
-#[tauri::command]
-pub(crate) fn save_llm_configs(
-    db: State<'_, Database>,
-    configs: Vec<LlmConfig>,
-) -> Result<(), AppError> {
-    // Validate configs before saving
+fn validate_and_store_llm_configs(db: &Database, configs: Vec<LlmConfig>) -> Result<(), AppError> {
     for config in &configs {
         if config.id.trim().is_empty() {
             return Err(AppError::Validation {
@@ -73,7 +64,104 @@ pub(crate) fn save_llm_configs(
         }
     }
 
-    write_llm_configs(db.inner(), &configs)
+    validate_llm_enabled_limits(&configs)?;
+    let normalized = normalize_llm_enabled_state(&configs);
+    validate_llm_enabled_limits(&normalized)?;
+    write_llm_configs(db, &normalized)
+}
+
+fn validate_llm_enabled_limits(configs: &[LlmConfig]) -> Result<(), AppError> {
+    let enabled_total = configs.iter().filter(|config| config.enabled).count();
+    if enabled_total > 2 {
+        return Err(AppError::Validation {
+            message: "Only 2 LLM configs can be enabled at once.".to_string(),
+        });
+    }
+
+    let text_enabled = configs
+        .iter()
+        .filter(|config| config.enabled && config.capability == "text")
+        .count();
+    if text_enabled > MAX_ENABLED_TEXT_CONFIGS {
+        return Err(AppError::Validation {
+            message: format!(
+                "Only {} text LLM config can be enabled at once.",
+                MAX_ENABLED_TEXT_CONFIGS
+            ),
+        });
+    }
+
+    let multimodal_enabled = configs
+        .iter()
+        .filter(|config| config.enabled && config.capability == "multimodal")
+        .count();
+    if multimodal_enabled > MAX_ENABLED_MULTIMODAL_CONFIGS {
+        return Err(AppError::Validation {
+            message: format!(
+                "Only {} multimodal LLM configs can be enabled at once.",
+                MAX_ENABLED_MULTIMODAL_CONFIGS
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn normalize_llm_enabled_state(configs: &[LlmConfig]) -> Vec<LlmConfig> {
+    let mut text_enabled = 0usize;
+    let mut multimodal_enabled = 0usize;
+    let mut total_enabled = 0usize;
+
+    configs
+        .iter()
+        .cloned()
+        .map(|mut config| {
+            if !config.enabled {
+                return config;
+            }
+
+            if total_enabled >= 2 {
+                config.enabled = false;
+                return config;
+            }
+
+            if config.capability == "text" {
+                if text_enabled >= MAX_ENABLED_TEXT_CONFIGS {
+                    config.enabled = false;
+                } else {
+                    text_enabled += 1;
+                    total_enabled += 1;
+                }
+                return config;
+            }
+
+            if config.capability == "multimodal" {
+                if multimodal_enabled >= MAX_ENABLED_MULTIMODAL_CONFIGS {
+                    config.enabled = false;
+                } else {
+                    multimodal_enabled += 1;
+                    total_enabled += 1;
+                }
+            }
+
+            config
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub(crate) fn get_llm_configs(
+    db: State<'_, Database>,
+) -> Result<Vec<LlmConfig>, AppError> {
+    read_llm_configs(db.inner())
+}
+
+#[tauri::command]
+pub(crate) fn save_llm_configs(
+    db: State<'_, Database>,
+    configs: Vec<LlmConfig>,
+) -> Result<(), AppError> {
+    validate_and_store_llm_configs(db.inner(), configs)
 }
 
 #[tauri::command]
@@ -132,4 +220,74 @@ pub(crate) async fn optimize_prompt(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::models::LlmConfig;
+
+    fn temp_test_db(prefix: &str) -> (Database, std::path::PathBuf) {
+        let db_path =
+            std::env::temp_dir().join(format!("{prefix}-{}.sqlite", uuid::Uuid::new_v4()));
+        let db = Database::open(&db_path).unwrap();
+        db.run_migrations().unwrap();
+        (db, db_path)
+    }
+
+    fn remove_temp_test_db(db_path: std::path::PathBuf) {
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+    }
+
+    #[test]
+    fn saves_an_empty_llm_config_list() {
+        let (db, db_path) = temp_test_db("astro-studio-llm-empty-test");
+
+        validate_and_store_llm_configs(&db, Vec::<LlmConfig>::new()).unwrap();
+
+        assert_eq!(
+            read_llm_configs(&db).unwrap(),
+            Vec::<LlmConfig>::new()
+        );
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn rejects_enabling_more_than_one_text_config() {
+        let (db, db_path) = temp_test_db("astro-studio-llm-limit-test");
+        let configs = vec![
+            LlmConfig {
+                id: "text-a".to_string(),
+                name: "Text A".to_string(),
+                protocol: "openai".to_string(),
+                model: "gpt-4o".to_string(),
+                api_key: "sk-a".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                capability: "text".to_string(),
+                enabled: true,
+            },
+            LlmConfig {
+                id: "text-b".to_string(),
+                name: "Text B".to_string(),
+                protocol: "openai".to_string(),
+                model: "gpt-4o-mini".to_string(),
+                api_key: "sk-b".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                capability: "text".to_string(),
+                enabled: true,
+            },
+        ];
+
+        let result = validate_and_store_llm_configs(&db, configs);
+
+        assert!(matches!(result, Err(AppError::Validation { .. })));
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
 }

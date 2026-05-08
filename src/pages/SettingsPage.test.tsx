@@ -248,7 +248,7 @@ describe("SettingsPage logs", () => {
     });
 
     expect(
-      await screen.findByRole("heading", { name: "settings.modelConfig" }),
+      await screen.findByRole("heading", { name: "settings.imageGenerationConfig" }),
     ).toBeInTheDocument();
   });
 
