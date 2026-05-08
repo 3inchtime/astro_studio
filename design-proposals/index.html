@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Astro Studio - Projects Page Design Proposals</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    background: #0F0F14;
+    color: #E8E6F0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 24px;
+  }
+
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #6C8AFF, #9B7AFF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    font-size: 14px;
+    color: #9896A8;
+    margin-bottom: 40px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    max-width: 860px;
+    width: 100%;
+  }
+
+  .card {
+    background: #1A1A22;
+    border: 1px solid #2A2A36;
+    border-radius: 14px;
+    padding: 24px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.25s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: #3A3A4A;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+  }
+
+  .card-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+  }
+
+  .card-label.a { color: #6C8AFF; }
+  .card-label.b { color: #5CE0D6; }
+  .card-label.c { color: #FF6EB4; }
+  .card-label.d { color: #D4912A; }
+
+  .card-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .card-desc {
+    font-size: 12.5px;
+    color: #9896A8;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .card-tags {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #2A2A36;
+    color: #9896A8;
+  }
+
+  .card-arrow {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #5C5A6E;
+    transition: all 0.2s;
+  }
+
+  .card:hover .card-arrow {
+    background: rgba(108, 138, 255, 0.15);
+    color: #6C8AFF;
+  }
+
+  .card-arrow svg { width: 13px; height: 13px; }
+
+  .note {
+    margin-top: 32px;
+    font-size: 11px;
+    color: #5C5A6E;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <h1>Projects Page</h1>
+  <p class="subtitle">4 UI/UX design proposals for the Projects page</p>
+
+  <div class="grid">
+    <a class="card" href="proposal-a-card-dashboard.html">
+      <div class="card-label a">Proposal A</div>
+      <div class="card-title">Card Dashboard</div>
+      <div class="card-desc">Rich project cards with image mosaic previews, stats overview bar, pinned section with gradient top border, and compact list for unpinned projects. Hover reveals quick actions.</div>
+      <div class="card-tags">
+        <span class="tag">Stats Overview</span>
+        <span class="tag">Image Previews</span>
+        <span class="tag">Pinned Section</span>
+        <span class="tag">Light Theme</span>
+      </div>
+      <div class="card-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+    </a>
+
+    <a class="card" href="proposal-b-split-panel.html">
+      <div class="card-label b">Proposal B</div>
+      <div class="card-title">Split Panel</div>
+      <div class="card-desc">Left panel with filterable project list (All/Pinned/Recent), right panel shows selected project detail with header, search bar, and image grid. No page navigation needed.</div>
+      <div class="card-tags">
+        <span class="tag">Master-Detail</span>
+        <span class="tag">Resizable</span>
+        <span class="tag">Inline Preview</span>
+        <span class="tag">Light Theme</span>
+      </div>
+      <div class="card-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+    </a>
+
+    <a class="card" href="proposal-c-visual-mosaic.html">
+      <div class="card-label c">Proposal C</div>
+      <div class="card-title">Visual Mosaic</div>
+      <div class="card-desc">Dark theme with varied mosaic preview layouts per card (different grid patterns), hover overlay with Open/More buttons, filter chips, and a stats footer. Visual-first approach.</div>
+      <div class="card-tags">
+        <span class="tag">Dark Theme</span>
+        <span class="tag">Varied Layouts</span>
+        <span class="tag">Hover Overlay</span>
+        <span class="tag">Filter Chips</span>
+      </div>
+      <div class="card-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+    </a>
+
+    <a class="card" href="proposal-d-compact-table.html">
+      <div class="card-label d">Proposal D</div>
+      <div class="card-title">Compact Table</div>
+      <div class="card-desc">Dense table layout with sortable columns (name, images, chats, preview thumbnails, updated time), grid/table view toggle, inline actions on hover. Power-user oriented.</div>
+      <div class="card-tags">
+        <span class="tag">Table View</span>
+        <span class="tag">Sortable</span>
+        <span class="tag">Dense</span>
+        <span class="tag">Light Theme</span>
+      </div>
+      <div class="card-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+    </a>
+  </div>
+
+  <p class="note">Click any card to preview. Each shows the Projects page with a different layout strategy.</p>
+</body>
+</html>

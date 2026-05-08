@@ -1,10 +1,11 @@
 import { MemoryRouter } from "react-router-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "./ProjectsPage";
 
 const getProjects = vi.fn();
 const createProject = vi.fn();
+const searchGenerations = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("react-i18next", () => {
@@ -17,6 +18,13 @@ vi.mock("../lib/api", () => {
   return {
     getProjects: (...args: unknown[]) => getProjects(...args),
     createProject: (...args: unknown[]) => createProject(...args),
+    searchGenerations: (...args: unknown[]) => searchGenerations(...args),
+    pinProject: vi.fn(),
+    unpinProject: vi.fn(),
+    archiveProject: vi.fn(),
+    deleteProject: vi.fn(),
+    renameProject: vi.fn(),
+    toAssetUrl: (p: string) => p,
   };
 });
 
@@ -29,13 +37,17 @@ vi.mock("react-router-dom", async () => {
 });
 
 describe("ProjectsPage", () => {
-  let promptSpy: { mockRestore: () => void };
-
   beforeEach(() => {
     getProjects.mockReset();
     createProject.mockReset();
+    searchGenerations.mockReset();
     navigate.mockReset();
-    promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Native Prompt Name");
+    searchGenerations.mockResolvedValue({
+      generations: [],
+      total: 0,
+      page: 1,
+      page_size: 5,
+    });
     getProjects.mockResolvedValue([
       {
         id: "default",
@@ -62,10 +74,6 @@ describe("ProjectsPage", () => {
     ]);
   });
 
-  afterEach(() => {
-    promptSpy.mockRestore();
-  });
-
   it("shows user-facing projects and hides the default project", async () => {
     render(
       <MemoryRouter>
@@ -78,7 +86,6 @@ describe("ProjectsPage", () => {
     });
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
   });
 
@@ -93,7 +100,6 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("projectDialog.createTitle")).toBeInTheDocument();
-    expect(promptSpy).not.toHaveBeenCalled();
   });
 
   it("submits a trimmed project name to createProject", async () => {

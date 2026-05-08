@@ -74,7 +74,8 @@ export default function AppLayout() {
     () =>
       location.pathname === "/settings" ||
       location.pathname === "/gallery" ||
-      location.pathname === "/favorites",
+      location.pathname === "/favorites" ||
+      location.pathname === "/projects",
     [location.pathname],
   );
   const routeProjectId = useMemo(() => {
