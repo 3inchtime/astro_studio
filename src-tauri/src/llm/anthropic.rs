@@ -2,6 +2,7 @@ use crate::error::AppError;
 use crate::llm::{LlmClient, LLM_REQUEST_TIMEOUT_SECS};
 use crate::models::LlmConfig;
 use async_trait::async_trait;
+use base64::Engine;
 use std::time::Duration;
 
 const ANTHROPIC_MAX_TOKENS: u32 = 4096;
@@ -16,6 +17,20 @@ impl AnthropicLlmClient {
     pub fn new(config: &LlmConfig) -> Result<Self, AppError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(LLM_REQUEST_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| AppError::Network {
+                endpoint: String::new(),
+                reason: e.to_string(),
+            })?;
+        Ok(Self {
+            client,
+            config: config.clone(),
+        })
+    }
+
+    pub fn with_timeout(config: &LlmConfig, timeout_secs: u64) -> Result<Self, AppError> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| AppError::Network {
                 endpoint: String::new(),
@@ -108,6 +123,64 @@ impl LlmClient for AnthropicLlmClient {
             "messages": [
                 {"role": "user", "content": user_message}
             ],
+            "max_tokens": ANTHROPIC_MAX_TOKENS
+        });
+
+        let (status, body_text) = self.send_request(&url, &body).await?;
+
+        if status >= 400 {
+            return Err(AppError::Api {
+                status,
+                endpoint: url,
+                body_preview: body_text.chars().take(500).collect(),
+            });
+        }
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body_text).map_err(|_e| AppError::Api {
+                status,
+                endpoint: url.clone(),
+                body_preview: body_text.chars().take(500).collect(),
+            })?;
+
+        parsed["content"][0]["text"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| AppError::Api {
+                status: 200,
+                endpoint: url,
+                body_preview: body_text.chars().take(500).collect(),
+            })
+    }
+
+    async fn chat_with_images(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        images: &[super::ImageData],
+    ) -> Result<String, AppError> {
+        let url = format!(
+            "{}/v1/messages",
+            self.config.base_url.trim_end_matches('/')
+        );
+
+        let mut content = vec![serde_json::json!({"type": "text", "text": user_message})];
+        for img in images {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&img.data);
+            content.push(serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img.media_type,
+                    "data": b64
+                }
+            }));
+        }
+
+        let body = serde_json::json!({
+            "model": self.config.model,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": content}],
             "max_tokens": ANTHROPIC_MAX_TOKENS
         });
 

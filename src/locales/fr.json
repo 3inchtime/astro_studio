@@ -184,6 +184,7 @@
     "pin": "Épingler",
     "unpin": "Désépingler",
     "notFound": "Ce projet est introuvable.",
+    "backToList": "Retour aux projets",
     "conversations": "Liste des conversations",
     "renameConversationError": "Impossible de renommer la conversation.",
     "deleteConversationError": "Impossible de supprimer la conversation.",
@@ -277,6 +278,7 @@
     "llm": {
       "optimize": "Optimiser",
       "optimizeTitle": "Optimiser le prompt avec l'IA",
+      "optimizeWithImages": "Optimiser avec le contexte image",
       "selectLlm": "Choisir un LLM",
       "untitled": "Sans nom",
       "modalTitle": "Optimiser le prompt",

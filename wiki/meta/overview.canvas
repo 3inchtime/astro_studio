@@ -1,0 +1,41 @@
+{
+	"nodes":[
+		{"id":"overview","type":"file","file":"wiki/overview.md","x":0,"y":0,"width":300,"height":140,"color":"1"},
+		{"id":"system-arch","type":"file","file":"wiki/architecture/System Architecture.md","x":400,"y":0,"width":300,"height":140,"color":"1"},
+		{"id":"frontend-arch","type":"file","file":"wiki/architecture/Frontend Architecture.md","x":400,"y":200,"width":300,"height":140,"color":"5"},
+		{"id":"backend-arch","type":"file","file":"wiki/architecture/Backend Architecture.md","x":400,"y":400,"width":300,"height":140,"color":"2"},
+		{"id":"db-schema","type":"file","file":"wiki/architecture/Database Schema.md","x":800,"y":0,"width":300,"height":140,"color":"3"},
+		{"id":"ipc","type":"file","file":"wiki/architecture/IPC Communication.md","x":800,"y":200,"width":300,"height":140,"color":"4"},
+		{"id":"gen-flow","type":"file","file":"wiki/flows/Image Generation Flow.md","x":0,"y":200,"width":300,"height":140,"color":"6"},
+		{"id":"edit-flow","type":"file","file":"wiki/flows/Image Edit Flow.md","x":0,"y":400,"width":300,"height":140,"color":"6"},
+		{"id":"recovery-flow","type":"file","file":"wiki/flows/Generation Recovery Flow.md","x":0,"y":600,"width":300,"height":140,"color":"6"},
+		{"id":"routing-flow","type":"file","file":"wiki/flows/Provider Routing Flow.md","x":0,"y":800,"width":300,"height":140,"color":"4"},
+		{"id":"engines","type":"file","file":"wiki/modules/Image Engines.md","x":400,"y":600,"width":300,"height":140,"color":"2"},
+		{"id":"llm","type":"file","file":"wiki/modules/LLM Integration.md","x":400,"y":800,"width":300,"height":140,"color":"2"},
+		{"id":"gallery","type":"file","file":"wiki/modules/Gallery System.md","x":800,"y":400,"width":300,"height":140,"color":"5"},
+		{"id":"projects","type":"file","file":"wiki/modules/Project Management.md","x":800,"y":600,"width":300,"height":140,"color":"5"},
+		{"id":"settings","type":"file","file":"wiki/modules/Settings System.md","x":800,"y":800,"width":300,"height":140,"color":"3"},
+		{"id":"version-history","type":"file","file":"wiki/history/Version History.md","x":1200,"y":0,"width":300,"height":140,"color":"1"},
+		{"id":"db-migrations","type":"file","file":"wiki/history/Database Migrations.md","x":1200,"y":200,"width":300,"height":140,"color":"3"}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"overview","toNode":"system-arch","label":"架构","fromSide":"right","toSide":"left"},
+		{"id":"e2","fromNode":"system-arch","toNode":"frontend-arch","label":"前端","fromSide":"bottom","toSide":"top"},
+		{"id":"e3","fromNode":"system-arch","toNode":"backend-arch","label":"后端","fromSide":"bottom","toSide":"top"},
+		{"id":"e4","fromNode":"system-arch","toNode":"db-schema","label":"数据库","fromSide":"right","toSide":"left"},
+		{"id":"e5","fromNode":"system-arch","toNode":"ipc","label":"通信","fromSide":"bottom","toSide":"top"},
+		{"id":"e6","fromNode":"overview","toNode":"gen-flow","label":"生成","fromSide":"bottom","toSide":"top"},
+		{"id":"e7","fromNode":"gen-flow","toNode":"edit-flow","label":"编辑","fromSide":"bottom","toSide":"top"},
+		{"id":"e8","fromNode":"gen-flow","toNode":"recovery-flow","label":"恢复","fromSide":"bottom","toSide":"top"},
+		{"id":"e9","fromNode":"gen-flow","toNode":"routing-flow","label":"路由","fromSide":"bottom","toSide":"top"},
+		{"id":"e10","fromNode":"backend-arch","toNode":"engines","label":"引擎","fromSide":"bottom","toSide":"top"},
+		{"id":"e11","fromNode":"backend-arch","toNode":"llm","label":"LLM","fromSide":"bottom","toSide":"top"},
+		{"id":"e12","fromNode":"backend-arch","toNode":"gallery","label":"画廊","fromSide":"right","toSide":"left"},
+		{"id":"e13","fromNode":"backend-arch","toNode":"projects","label":"项目","fromSide":"bottom","toSide":"top"},
+		{"id":"e14","fromNode":"backend-arch","toNode":"settings","label":"设置","fromSide":"bottom","toSide":"top"},
+		{"id":"e15","fromNode":"db-schema","toNode":"db-migrations","label":"迁移","fromSide":"bottom","toSide":"top"},
+		{"id":"e16","fromNode":"overview","toNode":"version-history","label":"版本","fromSide":"right","toSide":"left"},
+		{"id":"e17","fromNode":"routing-flow","toNode":"engines","label":"路由","fromSide":"top","toSide":"bottom"},
+		{"id":"e18","fromNode":"settings","toNode":"routing-flow","label":"配置","fromSide":"left","toSide":"right"}
+	]
+}

@@ -184,6 +184,7 @@
     "pin": "置頂",
     "unpin": "取消置頂",
     "notFound": "找不到這個項目。",
+    "backToList": "返回項目列表",
     "conversations": "對話列表",
     "renameConversationError": "無法重新命名對話。",
     "deleteConversationError": "無法刪除對話。",
@@ -277,6 +278,7 @@
     "llm": {
       "optimize": "優化",
       "optimizeTitle": "使用 AI 優化提示詞",
+      "optimizeWithImages": "結合圖片優化提示詞",
       "selectLlm": "選擇 LLM",
       "untitled": "未命名",
       "modalTitle": "優化提示詞",

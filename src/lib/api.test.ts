@@ -15,7 +15,9 @@ import {
   deletePromptFavorite,
   getConversations,
   getModelProviderProfiles,
+  getPromptExtractions,
   getProjects,
+  extractPromptFromImage,
   getPromptFavoriteFolders,
   getPromptFolders,
   getPromptFavorites,
@@ -148,6 +150,35 @@ describe("api prompt favorite commands", () => {
     });
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "delete_prompt_favorite", {
       id: "favorite-1",
+    });
+  });
+
+  it("extracts prompts from an image through Tauri IPC", async () => {
+    tauriApi.invoke.mockResolvedValue({
+      id: "extract-1",
+      image_path: "/tmp/reference.png",
+      prompt: "cinematic portrait",
+      llm_config_id: "vision-1",
+      created_at: "2026-05-09T00:00:00Z",
+      updated_at: "2026-05-09T00:00:00Z",
+    });
+
+    await extractPromptFromImage("/tmp/reference.png", "vision-1", "zh-CN");
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("extract_prompt_from_image", {
+      imagePath: "/tmp/reference.png",
+      configId: "vision-1",
+      language: "zh-CN",
+    });
+  });
+
+  it("reads prompt extraction history through Tauri IPC", async () => {
+    tauriApi.invoke.mockResolvedValue([]);
+
+    await getPromptExtractions(12);
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("get_prompt_extractions", {
+      limit: 12,
     });
   });
 

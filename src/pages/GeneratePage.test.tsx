@@ -28,6 +28,8 @@ const getPromptFavorites = vi.fn();
 const deletePromptFavorite = vi.fn();
 const getLlmConfigs = vi.fn().mockResolvedValue([]);
 const optimizePrompt = vi.fn();
+const consumePendingPrompt = vi.fn();
+const useLocation = vi.fn<() => { state: unknown }>(() => ({ state: null }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -119,6 +121,18 @@ vi.mock("../lib/api", () => ({
 vi.mock("../lib/editSources", () => ({
   consumePendingEditSources: () => [],
 }));
+
+vi.mock("../lib/pendingPrompt", () => ({
+  consumePendingPrompt: () => consumePendingPrompt(),
+}));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useLocation: () => useLocation(),
+  };
+});
 
 vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({
@@ -217,6 +231,9 @@ describe("GeneratePage", () => {
     }));
     getPromptFavorites.mockReset();
     deletePromptFavorite.mockReset();
+    consumePendingPrompt.mockReset();
+    useLocation.mockReset();
+    useLocation.mockReturnValue({ state: null });
 
     getConversationGenerations.mockResolvedValue([
       {
@@ -260,6 +277,7 @@ describe("GeneratePage", () => {
     pickSourceImages.mockResolvedValue([]);
     onGenerationComplete.mockResolvedValue(vi.fn());
     onGenerationFailed.mockResolvedValue(vi.fn());
+    consumePendingPrompt.mockReturnValue(null);
   });
 
   it("renders every registered model from the shared catalog in the model selector", async () => {
@@ -292,6 +310,32 @@ describe("GeneratePage", () => {
     expect(screen.getByDisplayValue("A dramatic mountain temple at sunrise")).toBeInTheDocument();
     expect(screen.getByText("Editing previous prompt")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel edit" })).toBeInTheDocument();
+  });
+
+  it("prefills the composer with a pending prompt when arriving from prompt extraction", async () => {
+    consumePendingPrompt.mockReturnValue("cinematic portrait");
+
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    expect(
+      await screen.findByDisplayValue("cinematic portrait"),
+    ).toBeInTheDocument();
+  });
+
+  it("prefills the composer from navigation state when arriving from prompt extraction", async () => {
+    useLocation.mockReturnValue({
+      state: {
+        pendingPrompt: "stateful cinematic portrait",
+        activateConversationId: "conversation-new-1",
+      },
+    });
+    consumePendingPrompt.mockReturnValue(null);
+
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    expect(
+      await screen.findByDisplayValue("stateful cinematic portrait"),
+    ).toBeInTheDocument();
   });
 
   it("saves a sent prompt as a prompt favorite from the message actions", async () => {
