@@ -18,6 +18,20 @@ When the user provides a prompt, improve it by following these rules:\n\
 6. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
 7. Keep the output concise — at most 3-4 sentences unless the original prompt is very detailed";
 
+const OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT: &str = "\
+You are an expert at writing prompts for AI image generation models. \
+The user has provided one or more reference images along with their prompt. \
+Analyze the images carefully — note the subject, composition, lighting, color palette, \
+mood, style, textures, and any notable details. Then improve the user's prompt by:\n\
+1. Describing visual elements from the reference images that should be preserved or enhanced\n\
+2. Adding specific details about composition, lighting, color, mood, and style inspired by the images\n\
+3. Using descriptive, visual language that captures the essence of the reference images\n\
+4. Specifying image quality keywords where appropriate (e.g., high resolution, detailed, photorealistic)\n\
+5. Keeping the user's original intent intact while leveraging visual context from the images\n\
+6. Preserving the language of the user's input — output in the same language the user used\n\
+7. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
+8. Keeping the output concise — at most 3-4 sentences unless the original prompt is very detailed";
+
 fn read_llm_configs(db: &Database) -> Result<Vec<LlmConfig>, AppError> {
     match db.get_setting(SETTING_LLM_CONFIGS)? {
         Some(json) => serde_json::from_str(&json).map_err(|e| AppError::Database {
@@ -219,57 +233,103 @@ pub(crate) async fn optimize_prompt(
     db: State<'_, Database>,
     prompt: String,
     config_id: String,
+    image_paths: Option<Vec<String>>,
 ) -> Result<String, AppError> {
     let configs = read_llm_configs(db.inner())?;
+    let has_images = image_paths.as_ref().map_or(false, |p| !p.is_empty());
 
-    let config = configs
-        .iter()
-        .find(|c| c.id == config_id)
-        .ok_or_else(|| AppError::Validation {
-            message: format!("LLM config not found: {}", config_id),
+    let config = if has_images {
+        // Prefer the provided config if it's multimodal, otherwise find the first enabled multimodal
+        let config = configs
+            .iter()
+            .find(|c| c.id == config_id && c.capability == "multimodal" && c.enabled);
+        config
+            .or_else(|| {
+                configs
+                    .iter()
+                    .find(|c| c.enabled && c.capability == "multimodal")
+            })
+            .ok_or_else(|| AppError::Validation {
+                message:
+                    "No enabled multimodal LLM config found. Please configure a multimodal LLM in settings."
+                        .to_string(),
+            })?
+    } else {
+        let config = configs.iter().find(|c| c.id == config_id).ok_or_else(|| {
+            AppError::Validation {
+                message: format!("LLM config not found: {}", config_id),
+            }
         })?;
 
-    if config.capability != "text" {
-        return Err(AppError::Validation {
-            message: format!(
-                "LLM config '{}' has capability '{}' — only text models are supported for prompt optimization",
-                config.name, config.capability
-            ),
-        });
-    }
+        if config.capability != "text" {
+            return Err(AppError::Validation {
+                message: format!(
+                    "LLM config '{}' has capability '{}' — only text models are supported for prompt optimization without images",
+                    config.name, config.capability
+                ),
+            });
+        }
 
-    if !config.enabled {
-        return Err(AppError::Validation {
-            message: format!("LLM config '{}' is disabled", config.name),
-        });
-    }
+        if !config.enabled {
+            return Err(AppError::Validation {
+                message: format!("LLM config '{}' is disabled", config.name),
+            });
+        }
+
+        config
+    };
 
     log::info!(
-        "Optimizing prompt with LLM config '{}' (protocol: {}, model: {})",
+        "Optimizing prompt with LLM config '{}' (protocol: {}, model: {}, images: {})",
         config.name,
         config.protocol,
-        config.model
+        config.model,
+        has_images
     );
 
-    let client = llm::create_llm_client(config)?;
-    let result = client
-        .chat(OPTIMIZE_PROMPT_SYSTEM_PROMPT, &prompt)
-        .await;
-
-    match &result {
-        Ok(optimized) => {
-            log::info!(
-                "Prompt optimization succeeded — original length: {}, optimized length: {}",
-                prompt.len(),
-                optimized.len()
-            );
+    if has_images {
+        let paths = image_paths.unwrap();
+        if paths.len() > 3 {
+            return Err(AppError::Validation {
+                message: "Maximum 3 images supported for multimodal optimization".to_string(),
+            });
         }
-        Err(e) => {
-            log::error!("Prompt optimization failed: {}", e);
+        let images = load_images(&paths)?;
+        let client = create_multimodal_llm_client(config)?;
+        let result = client
+            .chat_with_images(OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT, &prompt, &images)
+            .await;
+        match &result {
+            Ok(optimized) => {
+                log::info!(
+                    "Multimodal prompt optimization succeeded — original length: {}, optimized length: {}, images: {}",
+                    prompt.len(),
+                    optimized.len(),
+                    images.len()
+                );
+            }
+            Err(e) => {
+                log::error!("Multimodal prompt optimization failed: {}", e);
+            }
         }
+        result
+    } else {
+        let client = llm::create_llm_client(config)?;
+        let result = client.chat(OPTIMIZE_PROMPT_SYSTEM_PROMPT, &prompt).await;
+        match &result {
+            Ok(optimized) => {
+                log::info!(
+                    "Prompt optimization succeeded — original length: {}, optimized length: {}",
+                    prompt.len(),
+                    optimized.len()
+                );
+            }
+            Err(e) => {
+                log::error!("Prompt optimization failed: {}", e);
+            }
+        }
+        result
     }
-
-    result
 }
 
 #[cfg(test)]
