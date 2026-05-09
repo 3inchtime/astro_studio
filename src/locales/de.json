@@ -184,6 +184,7 @@
     "pin": "Anheften",
     "unpin": "Lösen",
     "notFound": "Dieses Projekt konnte nicht gefunden werden.",
+    "backToList": "Zurück zu den Projekten",
     "conversations": "Unterhaltungen",
     "renameConversationError": "Unterhaltung konnte nicht umbenannt werden.",
     "deleteConversationError": "Unterhaltung konnte nicht gelöscht werden.",

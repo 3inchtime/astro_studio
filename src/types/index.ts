@@ -158,6 +158,15 @@ export interface PromptFavorite {
   updated_at: string;
 }
 
+export interface PromptExtraction {
+  id: string;
+  image_path: string;
+  prompt: string;
+  llm_config_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LogEntry {
   id: string;
   timestamp: string;

@@ -588,7 +588,7 @@ describe("SettingsPage logs", () => {
       expect(setActiveModelProvider).toHaveBeenCalledWith("gpt-image-2", "company-gateway"),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete Company Gateway provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.deleteProvider" }));
     await waitFor(() =>
       expect(deleteModelProviderProfile).toHaveBeenCalledWith("gpt-image-2", "company-gateway"),
     );

@@ -242,6 +242,16 @@ pub struct PromptFavorite {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptExtraction {
+    pub id: String,
+    pub image_path: String,
+    pub prompt: String,
+    pub llm_config_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmConfig {
     pub id: String,

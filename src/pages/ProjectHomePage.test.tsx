@@ -142,6 +142,19 @@ describe("ProjectHomePage", () => {
     expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
   });
 
+  it("does not render a duplicate back button inside the project content header", async () => {
+    render(
+      <MemoryRouter initialEntries={["/projects/project-1"]}>
+        <Routes>
+          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "projects.backToList" })).not.toBeInTheDocument();
+  });
+
   it("opens the rename dialog with the current project name", async () => {
     render(
       <MemoryRouter initialEntries={["/projects/project-1"]}>

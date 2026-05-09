@@ -584,6 +584,8 @@ pub fn run() {
             commands::llm::get_llm_configs,
             commands::llm::save_llm_configs,
             commands::llm::optimize_prompt,
+            commands::llm::get_prompt_extractions,
+            commands::llm::extract_prompt_from_image,
         ])
         .setup(|app| {
             runtime_logs::attach_app_handle(app.handle().clone());

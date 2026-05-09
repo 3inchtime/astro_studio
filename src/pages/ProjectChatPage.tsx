@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import GeneratePage from "./GeneratePage";
 
 export default function ProjectChatPage() {
+  const { t } = useTranslation();
   const { projectId, conversationId } = useParams();
   const navigate = useNavigate();
   const { setActiveProjectId, setActiveConversationId } = useLayoutContext();
@@ -22,10 +24,13 @@ export default function ProjectChatPage() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-5 py-3">
         <button
-          onClick={() => navigate(`/projects/${projectId}`)}
-          className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
+          type="button"
+          onClick={() => navigate("/projects")}
+          className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:bg-subtle hover:text-foreground"
+          aria-label={t("projects.backToList")}
         >
-          <ArrowLeft size={18} strokeWidth={1.8} />
+          <ArrowLeft size={15} strokeWidth={1.9} />
+          <span>{t("projects.backToList")}</span>
         </button>
         <span className="text-[13px] font-medium text-foreground">Chat</span>
       </div>

@@ -23,6 +23,7 @@ import type {
   ModelProviderProfile,
   ModelProviderProfilesState,
   PromptFavorite,
+  PromptExtraction,
   LlmConfig,
 } from "../types";
 
@@ -204,6 +205,24 @@ export async function getPromptFavorites(
 
 export async function deletePromptFavorite(id: string): Promise<void> {
   await invoke("delete_prompt_favorite", { id });
+}
+
+export async function extractPromptFromImage(
+  imagePath: string,
+  configId: string,
+  language: string,
+): Promise<PromptExtraction> {
+  return invoke("extract_prompt_from_image", {
+    imagePath,
+    configId,
+    language,
+  });
+}
+
+export async function getPromptExtractions(
+  limit = 20,
+): Promise<PromptExtraction[]> {
+  return invoke("get_prompt_extractions", { limit });
 }
 
 export async function createPromptFolder(name: string): Promise<Folder> {

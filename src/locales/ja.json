@@ -184,6 +184,7 @@
     "pin": "ピン留め",
     "unpin": "ピン留めを外す",
     "notFound": "このプロジェクトは見つかりませんでした。",
+    "backToList": "プロジェクト一覧に戻る",
     "conversations": "会話一覧",
     "renameConversationError": "会話名を変更できませんでした。",
     "deleteConversationError": "会話を削除できませんでした。",

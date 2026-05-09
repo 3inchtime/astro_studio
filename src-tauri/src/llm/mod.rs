@@ -21,7 +21,7 @@ pub trait LlmClient: Send + Sync {
         &self,
         system_prompt: &str,
         user_message: &str,
-        images: &[ImageData],
+        _images: &[ImageData],
     ) -> Result<String, AppError> {
         // Default: ignore images, delegate to text-only chat
         self.chat(system_prompt, user_message).await

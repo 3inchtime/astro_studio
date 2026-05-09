@@ -184,6 +184,7 @@
     "pin": "Fijar",
     "unpin": "Quitar fijación",
     "notFound": "No se pudo encontrar este proyecto.",
+    "backToList": "Volver a proyectos",
     "conversations": "Conversaciones",
     "renameConversationError": "No se puede renombrar la conversación.",
     "deleteConversationError": "No se puede eliminar la conversación.",

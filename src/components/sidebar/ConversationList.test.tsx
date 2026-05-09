@@ -1,14 +1,23 @@
 import { MemoryRouter } from "react-router-dom";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationList from "./ConversationList";
 
 const getConversations = vi.fn();
 const getProjects = vi.fn();
+const navigate = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
 
 vi.mock("../../lib/api", () => ({
   getConversations: (...args: unknown[]) => getConversations(...args),
@@ -33,6 +42,7 @@ describe("ConversationList", () => {
   beforeEach(() => {
     getProjects.mockReset();
     getConversations.mockReset();
+    navigate.mockReset();
 
     getProjects.mockResolvedValue([
       {
@@ -64,7 +74,7 @@ describe("ConversationList", () => {
     ]);
   });
 
-  it("shows project context but no visible project strip when scoped", async () => {
+  it("shows a back-to-projects button in the project-scoped sidebar header", async () => {
     render(
       <MemoryRouter>
         <ConversationList
@@ -85,7 +95,12 @@ describe("ConversationList", () => {
     });
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.queryByText("sidebar.projects")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "nav.projects" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "projects.backToList" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "sidebar.newProject" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "projects.backToList" }));
+
+    expect(navigate).toHaveBeenCalledWith("/projects");
   });
 });

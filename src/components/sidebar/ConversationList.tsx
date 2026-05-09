@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import {
   Archive,
   ArchiveRestore,
+  ArrowLeft,
   FolderKanban,
   Image as ImageIcon,
   MessageSquare,
@@ -162,10 +163,13 @@ export default function ConversationList({
           </div>
           {activeProjectId && selectedProject ? (
             <button
+              type="button"
               onClick={() => navigate("/projects")}
-              className="text-[11px] font-medium text-primary"
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-subtle hover:text-foreground"
+              aria-label={t("projects.backToList")}
             >
-              {t("nav.projects")}
+              <ArrowLeft size={12} strokeWidth={1.9} />
+              <span>{t("projects.backToList")}</span>
             </button>
           ) : null}
         </div>

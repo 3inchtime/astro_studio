@@ -229,10 +229,7 @@ export default function ProjectHomePage() {
       <div className="shrink-0 border-b border-border-subtle bg-surface/40 px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] uppercase tracking-[0.1em] text-muted/60 font-medium">
-                {t("projects.directory")}
-              </span>
+            <div className="mb-1 flex items-center gap-2">
               {project.pinned_at && (
                 <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[10px] font-medium text-primary">
                   <Pin size={9} />

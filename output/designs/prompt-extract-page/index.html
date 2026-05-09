@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Astro Studio Prompt Extract Minimal Concepts</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="rail">
+        <div class="traffic"><span></span><span></span><span></span></div>
+        <div class="brand">AS</div>
+        <nav>
+          <button>✦</button>
+          <button class="rail-active">⌁</button>
+          <button>▣</button>
+          <button>◧</button>
+          <button>♡</button>
+        </nav>
+        <button>⚙</button>
+      </aside>
+
+      <main class="workspace">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Prompt Extract / Minimal</p>
+            <h1>图片提取提示词极简版</h1>
+            <p>只做一件事：上传图片，然后提取提示词。</p>
+          </div>
+          <div class="header-status">
+            <span class="dot"></span>
+            单图上传，多模态提取
+          </div>
+        </header>
+
+        <section class="design-section">
+          <div class="section-title">
+            <div>
+              <span class="version-tag">Version A</span>
+              <h2>单栏直出型</h2>
+              <p>最简单，最像工具页。上面上传，下面直接出结果。</p>
+            </div>
+            <button class="primary-btn">推荐</button>
+          </div>
+
+          <div class="minimal-layout single-column">
+            <section class="panel upload-panel">
+              <div class="upload-dropzone">
+                <div class="upload-icon">⬆</div>
+                <strong>上传一张图片</strong>
+                <p>拖入、点击选择，或从剪贴板粘贴。</p>
+                <div class="upload-actions">
+                  <button class="primary-btn">选择图片</button>
+                  <button class="ghost-btn">粘贴图片</button>
+                </div>
+              </div>
+
+              <div class="image-preview scenic-one"></div>
+
+              <div class="submit-row">
+                <div class="meta-text">
+                  <strong>editorial-portrait-reference.png</strong>
+                  <span>3024 × 4032 · 4.8 MB</span>
+                </div>
+                <button class="primary-btn large-btn">提取提示词</button>
+              </div>
+            </section>
+
+            <section class="panel result-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>提取结果</h3>
+                  <p>结果区保持可编辑，方便微调后直接使用。</p>
+                </div>
+                <div class="result-status">
+                  <span class="status-glow"></span>
+                  已生成
+                </div>
+              </div>
+
+              <textarea class="prompt-area" spellcheck="false">A cinematic editorial portrait of a young woman in a charcoal structured coat, standing beneath diffused window light in a minimalist concrete studio, soft cool-gray palette, subtle skin texture, medium-format photography, shallow depth of field, understated luxury styling, refined shadows, crisp tailoring, natural pose, fashion campaign composition.</textarea>
+
+              <div class="result-actions">
+                <button class="ghost-btn">复制</button>
+                <button class="ghost-btn">收藏</button>
+                <button class="ghost-btn">继续修改</button>
+                <button class="primary-btn">使用提示词</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="design-section">
+          <div class="section-title">
+            <div>
+              <span class="version-tag">Version B</span>
+              <h2>左右分栏型</h2>
+              <p>左边放图片，右边放结果，信息更稳定，桌面端更利落。</p>
+            </div>
+            <button class="ghost-btn">更偏桌面端</button>
+          </div>
+
+          <div class="minimal-layout split-column">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>上传图片</h3>
+                  <p>保留最少说明，弱化流程感。</p>
+                </div>
+              </div>
+
+              <div class="image-preview scenic-two"></div>
+
+              <div class="upload-inline">
+                <button class="ghost-btn">更换图片</button>
+                <button class="primary-btn">提取提示词</button>
+              </div>
+            </section>
+
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>提示词</h3>
+                  <p>生成后直接落在一个大文本区里。</p>
+                </div>
+              </div>
+
+              <textarea class="prompt-area" spellcheck="false">A misty botanical editorial scene featuring a glasshouse hidden in woodland, soft morning haze, layered foliage, translucent light, elegant composition, premium magazine atmosphere, cool green palette, cinematic stillness, refined natural textures, atmospheric depth.</textarea>
+
+              <div class="result-actions">
+                <button class="ghost-btn">复制</button>
+                <button class="ghost-btn">收藏</button>
+                <button class="primary-btn">使用提示词</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

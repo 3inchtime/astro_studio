@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { AnimatePresence } from "framer-motion";
+import { useLocation } from "react-router-dom";
 import {
   editImage,
   generateImage,
@@ -13,6 +14,7 @@ import {
   pickSourceImages,
 } from "../lib/api";
 import { consumePendingEditSources } from "../lib/editSources";
+import { consumePendingPrompt } from "../lib/pendingPrompt";
 import {
   completeGenerationMessage,
   failGenerationMessage,
@@ -57,6 +59,7 @@ const DEFAULT_IMAGE_MODEL_ENTRY = getImageModelCatalogEntry(DEFAULT_IMAGE_MODEL)
 
 export default function GeneratePage() {
   const { t } = useTranslation();
+  const location = useLocation();
   const {
     activeProjectId,
     activeConversationId,
@@ -119,6 +122,10 @@ export default function GeneratePage() {
   const didUserSelectModelRef = useRef(false);
   const hasComposerDraftRef = useRef(false);
   const activeConversationIdRef = useRef(activeConversationId);
+  const navigationPendingPrompt = useMemo(() => {
+    const state = location.state as { pendingPrompt?: string } | null;
+    return typeof state?.pendingPrompt === "string" ? state.pendingPrompt : null;
+  }, [location.state]);
 
   const setActiveImageModel = useCallback((model: ImageModel) => {
     imageModelRef.current = model;
@@ -303,6 +310,20 @@ export default function GeneratePage() {
       setEditSources((current) => mergeEditSources(current, pendingSources));
     }
   }, [markComposerDraftStarted]);
+
+  useEffect(() => {
+    if (navigationPendingPrompt) {
+      markComposerDraftStarted();
+      setPrompt(navigationPendingPrompt);
+      return;
+    }
+
+    const pendingPrompt = consumePendingPrompt();
+    if (!pendingPrompt) return;
+
+    markComposerDraftStarted();
+    setPrompt(pendingPrompt);
+  }, [markComposerDraftStarted, navigationPendingPrompt]);
 
   useEffect(() => {
     let cancelled = false;

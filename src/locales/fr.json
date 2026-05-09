@@ -184,6 +184,7 @@
     "pin": "Épingler",
     "unpin": "Désépingler",
     "notFound": "Ce projet est introuvable.",
+    "backToList": "Retour aux projets",
     "conversations": "Liste des conversations",
     "renameConversationError": "Impossible de renommer la conversation.",
     "deleteConversationError": "Impossible de supprimer la conversation.",

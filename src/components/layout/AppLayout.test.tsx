@@ -5,6 +5,24 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import AppLayout, { useLayoutContext } from "./AppLayout";
 
+vi.mock("react-i18next", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-i18next")>();
+  return {
+    ...actual,
+    useTranslation: () => ({
+      t: (key: string) =>
+        ({
+          "nav.generate": "Generate",
+          "nav.extract": "Image Prompt Extract",
+          "nav.projects": "Projects",
+          "nav.gallery": "Gallery",
+          "nav.favorites": "Favorites",
+          "nav.settings": "Settings",
+        })[key] ?? key,
+    }),
+  };
+});
+
 vi.mock("../sidebar/ConversationList", () => ({
   default: ({
     activeProjectId,
@@ -108,6 +126,47 @@ describe("AppLayout", () => {
 
     expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
     expect(screen.getByText("favorites")).toBeInTheDocument();
+  });
+
+  it("shows the extract nav item and collapses the conversation sidebar on extract routes", () => {
+    render(
+      <MemoryRouter initialEntries={["/extract"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/extract" element={<div>extract</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByText("extract")).toBeInTheDocument();
+    expect(screen.getByTitle("Image Prompt Extract")).toBeInTheDocument();
+  });
+
+  it("activates a passed conversation when entering generate from route state", async () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/generate",
+            state: { activateConversationId: "extract-conversation-1" },
+          } as never,
+        ]}
+      >
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/generate" element={<div>generate</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-active-conversation")).toHaveTextContent(
+        "extract-conversation-1",
+      );
+    });
   });
 
   it("clears a project conversation selection when returning to global conversations", async () => {

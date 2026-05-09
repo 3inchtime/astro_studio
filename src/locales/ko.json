@@ -184,6 +184,7 @@
     "pin": "고정",
     "unpin": "고정 해제",
     "notFound": "이 프로젝트를 찾을 수 없습니다.",
+    "backToList": "프로젝트 목록으로 돌아가기",
     "conversations": "대화 목록",
     "renameConversationError": "대화 이름을 변경할 수 없습니다.",
     "deleteConversationError": "대화를 삭제할 수 없습니다.",

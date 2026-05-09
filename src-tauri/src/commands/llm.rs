@@ -1,7 +1,9 @@
 use crate::db::Database;
 use crate::error::AppError;
 use crate::llm::{self, ImageData, MULTIMODAL_TIMEOUT_SECS};
-use crate::models::{LlmConfig, SETTING_LLM_CONFIGS};
+use crate::models::{LlmConfig, PromptExtraction, SETTING_LLM_CONFIGS};
+use crate::current_timestamp;
+use rusqlite::params;
 use tauri::State;
 
 const MAX_ENABLED_TEXT_CONFIGS: usize = 1;
@@ -31,6 +33,34 @@ mood, style, textures, and any notable details. Then improve the user's prompt b
 6. Preserving the language of the user's input — output in the same language the user used\n\
 7. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
 8. Keeping the output concise — at most 3-4 sentences unless the original prompt is very detailed";
+
+const EXTRACT_PROMPT_FROM_IMAGE_SYSTEM_PROMPT: &str = "\
+You are an expert at reverse-engineering prompts for AI image generation models from reference images. \
+Analyze the image carefully and write a ready-to-use image generation prompt that captures the subject, composition, lighting, color palette, mood, style, textures, and camera feel.\n\
+1. Prioritize clear visual description over abstract commentary\n\
+2. Include composition, lighting, palette, style, and material details when they are visible\n\
+3. Keep the prompt concise but production-ready — usually 2-4 sentences\n\
+4. Output ONLY the prompt text, with no explanation, labels, or bullet points";
+
+fn describe_output_language(language: &str) -> &'static str {
+    match language.trim().to_ascii_lowercase().as_str() {
+        "zh-cn" => "Simplified Chinese",
+        "zh-tw" | "zh-hk" | "zh-mo" => "Traditional Chinese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "es" => "Spanish",
+        "fr" => "French",
+        "de" => "German",
+        _ => "English",
+    }
+}
+
+fn build_extract_prompt_from_image_system_prompt(language: &str) -> String {
+    format!(
+        "{EXTRACT_PROMPT_FROM_IMAGE_SYSTEM_PROMPT}\n5. Output the prompt in the user's interface language: {} ({language})",
+        describe_output_language(language),
+    )
+}
 
 fn read_llm_configs(db: &Database) -> Result<Vec<LlmConfig>, AppError> {
     match db.get_setting(SETTING_LLM_CONFIGS)? {
@@ -213,6 +243,115 @@ fn create_multimodal_llm_client(
     }
 }
 
+fn resolve_multimodal_config<'a>(
+    configs: &'a [LlmConfig],
+    config_id: &str,
+) -> Result<&'a LlmConfig, AppError> {
+    configs
+        .iter()
+        .find(|c| c.id == config_id && c.capability == "multimodal" && c.enabled)
+        .or_else(|| {
+            configs
+                .iter()
+                .find(|c| c.enabled && c.capability == "multimodal")
+        })
+        .ok_or_else(|| AppError::Validation {
+            message:
+                "No enabled multimodal LLM config found. Please configure a multimodal LLM in settings."
+                    .to_string(),
+        })
+}
+
+fn insert_prompt_extraction(
+    db: &Database,
+    image_path: &str,
+    prompt: &str,
+    llm_config_id: &str,
+) -> Result<PromptExtraction, AppError> {
+    let image_path = image_path.trim();
+    let prompt = prompt.trim();
+    let llm_config_id = llm_config_id.trim();
+
+    if image_path.is_empty() {
+        return Err(AppError::Validation {
+            message: "Image path cannot be empty".to_string(),
+        });
+    }
+
+    if prompt.is_empty() {
+        return Err(AppError::Validation {
+            message: "Extracted prompt cannot be empty".to_string(),
+        });
+    }
+
+    if llm_config_id.is_empty() {
+        return Err(AppError::Validation {
+            message: "LLM config id cannot be empty".to_string(),
+        });
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let timestamp = current_timestamp();
+    let conn = db.conn.lock().map_err(|e| AppError::Database {
+        message: format!("Lock failed: {}", e),
+    })?;
+
+    conn.execute(
+        "INSERT INTO prompt_extractions (id, image_path, prompt, llm_config_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        params![&id, &image_path, &prompt, &llm_config_id, &timestamp],
+    )
+    .map_err(|e| AppError::Database {
+        message: format!("Insert prompt extraction failed: {}", e),
+    })?;
+
+    Ok(PromptExtraction {
+        id,
+        image_path: image_path.to_string(),
+        prompt: prompt.to_string(),
+        llm_config_id: llm_config_id.to_string(),
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    })
+}
+
+fn list_prompt_extractions(
+    db: &Database,
+    limit: u32,
+) -> Result<Vec<PromptExtraction>, AppError> {
+    let conn = db.conn.lock().map_err(|e| AppError::Database {
+        message: format!("Lock failed: {}", e),
+    })?;
+    let limit = limit.clamp(1, 100) as i64;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, image_path, prompt, llm_config_id, created_at, updated_at
+             FROM prompt_extractions
+             ORDER BY created_at DESC, updated_at DESC
+             LIMIT ?1",
+        )
+        .map_err(|e| AppError::Database {
+            message: format!("Prepare prompt extraction history query failed: {}", e),
+        })?;
+
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok(PromptExtraction {
+                id: row.get(0)?,
+                image_path: row.get(1)?,
+                prompt: row.get(2)?,
+                llm_config_id: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| AppError::Database {
+            message: format!("Query prompt extraction history failed: {}", e),
+        })?;
+
+    Ok(rows.filter_map(|row| row.ok()).collect())
+}
+
 #[tauri::command]
 pub(crate) fn get_llm_configs(
     db: State<'_, Database>,
@@ -229,6 +368,14 @@ pub(crate) fn save_llm_configs(
 }
 
 #[tauri::command]
+pub(crate) fn get_prompt_extractions(
+    db: State<'_, Database>,
+    limit: Option<u32>,
+) -> Result<Vec<PromptExtraction>, AppError> {
+    list_prompt_extractions(db.inner(), limit.unwrap_or(20))
+}
+
+#[tauri::command]
 pub(crate) async fn optimize_prompt(
     db: State<'_, Database>,
     prompt: String,
@@ -239,21 +386,7 @@ pub(crate) async fn optimize_prompt(
     let has_images = image_paths.as_ref().map_or(false, |p| !p.is_empty());
 
     let config = if has_images {
-        // Prefer the provided config if it's multimodal, otherwise find the first enabled multimodal
-        let config = configs
-            .iter()
-            .find(|c| c.id == config_id && c.capability == "multimodal" && c.enabled);
-        config
-            .or_else(|| {
-                configs
-                    .iter()
-                    .find(|c| c.enabled && c.capability == "multimodal")
-            })
-            .ok_or_else(|| AppError::Validation {
-                message:
-                    "No enabled multimodal LLM config found. Please configure a multimodal LLM in settings."
-                        .to_string(),
-            })?
+        resolve_multimodal_config(&configs, &config_id)?
     } else {
         let config = configs.iter().find(|c| c.id == config_id).ok_or_else(|| {
             AppError::Validation {
@@ -332,6 +465,57 @@ pub(crate) async fn optimize_prompt(
     }
 }
 
+#[tauri::command]
+pub(crate) async fn extract_prompt_from_image(
+    db: State<'_, Database>,
+    image_path: String,
+    config_id: String,
+    language: String,
+) -> Result<PromptExtraction, AppError> {
+    let image_path = image_path.trim().to_string();
+    if image_path.is_empty() {
+        return Err(AppError::Validation {
+            message: "Image path cannot be empty".to_string(),
+        });
+    }
+
+    let configs = read_llm_configs(db.inner())?;
+    let config = resolve_multimodal_config(&configs, &config_id)?;
+    let images = load_images(&[image_path.clone()])?;
+    let client = create_multimodal_llm_client(config)?;
+
+    log::info!(
+        "Extracting prompt from image with LLM config '{}' (protocol: {}, model: {})",
+        config.name,
+        config.protocol,
+        config.model,
+    );
+
+    let result = client
+        .chat_with_images(
+            &build_extract_prompt_from_image_system_prompt(&language),
+            "Extract a ready-to-use image generation prompt for this image and keep the output language aligned with the user's interface language.",
+            &images,
+        )
+        .await;
+
+    match &result {
+        Ok(prompt) => {
+            log::info!(
+                "Image prompt extraction succeeded — image: {}, prompt length: {}",
+                image_path,
+                prompt.len(),
+            );
+        }
+        Err(error) => {
+            log::error!("Image prompt extraction failed: {}", error);
+        }
+    }
+
+    let prompt = result?;
+    insert_prompt_extraction(db.inner(), &image_path, &prompt, &config.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,6 +580,81 @@ mod tests {
         let result = validate_and_store_llm_configs(&db, configs);
 
         assert!(matches!(result, Err(AppError::Validation { .. })));
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn extract_prompt_system_prompt_requires_matching_ui_language() {
+        let system_prompt = build_extract_prompt_from_image_system_prompt("zh-CN");
+
+        assert!(system_prompt.contains("Simplified Chinese (zh-CN)"));
+    }
+
+    #[test]
+    fn stores_prompt_extraction_records() {
+        let (db, db_path) = temp_test_db("astro-studio-prompt-extraction-test");
+
+        let record = insert_prompt_extraction(
+            &db,
+            "/tmp/reference.png",
+            "cinematic portrait",
+            "vision-1",
+        )
+        .unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT image_path, prompt, llm_config_id FROM prompt_extractions WHERE id = ?1",
+                rusqlite::params![record.id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert_eq!(row.0, "/tmp/reference.png");
+        assert_eq!(row.1, "cinematic portrait");
+        assert_eq!(row.2, "vision-1");
+
+        drop(conn);
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn get_prompt_extractions_returns_newest_first() {
+        let (db, db_path) = temp_test_db("astro-studio-prompt-extraction-history-test");
+
+        let older = insert_prompt_extraction(
+            &db,
+            "/tmp/older.png",
+            "older prompt",
+            "vision-1",
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let newer = insert_prompt_extraction(
+            &db,
+            "/tmp/newer.png",
+            "newer prompt",
+            "vision-1",
+        )
+        .unwrap();
+
+        let rows = list_prompt_extractions(&db, 20).unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, newer.id);
+        assert_eq!(rows[0].image_path, "/tmp/newer.png");
+        assert_eq!(rows[0].prompt, "newer prompt");
+        assert_eq!(rows[1].id, older.id);
 
         drop(db);
         remove_temp_test_db(db_path);

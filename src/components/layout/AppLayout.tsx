@@ -5,6 +5,7 @@ import {
   FolderKanban,
   Heart,
   Image,
+  MessageSquareText,
   Moon,
   Settings,
   Sparkles,
@@ -41,6 +42,7 @@ export function useLayoutContext() {
 
 const navItems = [
   { to: "/generate", icon: Sparkles, labelKey: "nav.generate" },
+  { to: "/extract", icon: MessageSquareText, labelKey: "nav.extract" },
   { to: "/projects", icon: FolderKanban, labelKey: "nav.projects" },
   { to: "/gallery", icon: Image, labelKey: "nav.gallery" },
   { to: "/favorites", icon: Heart, labelKey: "nav.favorites" },
@@ -73,9 +75,9 @@ export default function AppLayout() {
   const shouldHideSidebar = useMemo(
     () =>
       location.pathname === "/settings" ||
+      location.pathname === "/extract" ||
       location.pathname === "/gallery" ||
-      location.pathname === "/favorites" ||
-      location.pathname === "/projects",
+      location.pathname === "/favorites",
     [location.pathname],
   );
   const routeProjectId = useMemo(() => {
@@ -91,6 +93,12 @@ export default function AppLayout() {
     () => /^\/projects\/[^/]+\/chat/.test(location.pathname),
     [location.pathname],
   );
+  const pendingGenerateConversationId = useMemo(() => {
+    const state = location.state as { activateConversationId?: string } | null;
+    return typeof state?.activateConversationId === "string"
+      ? state.activateConversationId
+      : null;
+  }, [location.state]);
 
   // Synchronously derived from route — prevents stale project ID during navigation
   // (e.g. navigating from a project page to /generate would briefly show project
@@ -123,12 +131,12 @@ export default function AppLayout() {
     // /generate always uses the default project — no cross-contamination
     if (location.pathname === "/generate") {
       setActiveProjectId(null);
-      setActiveConversationId(null);
+      setActiveConversationId(pendingGenerateConversationId);
       return;
     }
 
     setActiveProjectId(null);
-  }, [location.pathname, routeProjectId, isProjectChatRoute]);
+  }, [location.pathname, routeProjectId, isProjectChatRoute, pendingGenerateConversationId]);
 
   const refreshConversations = useCallback(() => {
     setConversationRefreshKey((key) => key + 1);
