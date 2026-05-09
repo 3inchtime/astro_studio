@@ -1,6 +1,6 @@
 use crate::db::Database;
 use crate::error::AppError;
-use crate::llm;
+use crate::llm::{self, ImageData, MULTIMODAL_TIMEOUT_SECS};
 use crate::models::{LlmConfig, SETTING_LLM_CONFIGS};
 use tauri::State;
 
@@ -147,6 +147,56 @@ fn normalize_llm_enabled_state(configs: &[LlmConfig]) -> Vec<LlmConfig> {
             config
         })
         .collect()
+}
+
+fn load_images(paths: &[String]) -> Result<Vec<ImageData>, AppError> {
+    let mut images = Vec::new();
+    for path in paths {
+        let data = std::fs::read(path).map_err(|e| AppError::Validation {
+            message: format!("Failed to read image '{}': {}", path, e),
+        })?;
+        let media_type = match path.rsplit('.').next().unwrap_or("") {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "webp" => "image/webp",
+            ext => {
+                return Err(AppError::Validation {
+                    message: format!(
+                        "Unsupported image format '{}'. Supported: jpg, png, webp",
+                        ext
+                    ),
+                })
+            }
+        };
+        if data.len() > 10 * 1024 * 1024 {
+            return Err(AppError::Validation {
+                message: format!("Image '{}' exceeds 10MB limit", path),
+            });
+        }
+        images.push(ImageData {
+            data,
+            media_type: media_type.to_string(),
+        });
+    }
+    Ok(images)
+}
+
+fn create_multimodal_llm_client(
+    config: &LlmConfig,
+) -> Result<Box<dyn llm::LlmClient>, AppError> {
+    match config.protocol.as_str() {
+        "openai" => {
+            let client = llm::openai::OpenAiLlmClient::with_timeout(config, MULTIMODAL_TIMEOUT_SECS)?;
+            Ok(Box::new(client))
+        }
+        "anthropic" => {
+            let client = llm::anthropic::AnthropicLlmClient::with_timeout(config, MULTIMODAL_TIMEOUT_SECS)?;
+            Ok(Box::new(client))
+        }
+        other => Err(AppError::Validation {
+            message: format!("Unknown LLM protocol: {}", other),
+        }),
+    }
 }
 
 #[tauri::command]

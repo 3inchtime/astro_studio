@@ -1,5 +1,5 @@
-mod anthropic;
-mod openai;
+pub mod anthropic;
+pub mod openai;
 
 use crate::error::AppError;
 use crate::models::LlmConfig;
