@@ -6,10 +6,26 @@ use crate::models::LlmConfig;
 use async_trait::async_trait;
 
 pub const LLM_REQUEST_TIMEOUT_SECS: u64 = 30;
+pub const MULTIMODAL_TIMEOUT_SECS: u64 = 60;
+
+pub struct ImageData {
+    pub data: Vec<u8>,
+    pub media_type: String,
+}
 
 #[async_trait]
 pub trait LlmClient: Send + Sync {
     async fn chat(&self, system_prompt: &str, user_message: &str) -> Result<String, AppError>;
+
+    async fn chat_with_images(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        images: &[ImageData],
+    ) -> Result<String, AppError> {
+        // Default: ignore images, delegate to text-only chat
+        self.chat(system_prompt, user_message).await
+    }
 }
 
 pub fn create_llm_client(config: &LlmConfig) -> Result<Box<dyn LlmClient>, AppError> {
