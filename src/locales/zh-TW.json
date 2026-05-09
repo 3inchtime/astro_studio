@@ -186,7 +186,10 @@
     "editImage": "編輯圖片",
     "saveImage": "儲存圖片",
     "delete": "移至回收站",
-    "allModels": "所有模型"
+    "allModels": "所有模型",
+    "viewMode": "顯示模式",
+    "viewModeMasonry": "瀑布流檢視",
+    "viewModeList": "列表檢視"
   },
   "sidebar": {
     "projects": "項目",

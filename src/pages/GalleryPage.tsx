@@ -12,10 +12,12 @@ import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import GallerySearchBar from "../components/gallery/GallerySearchBar";
+import ViewModeToggle from "../components/gallery/ViewModeToggle";
 import Lightbox from "../components/lightbox/Lightbox";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import { createGallerySearchConfig } from "../lib/galleryFilterConfig";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+import { useStoredGalleryViewMode } from "../hooks/useStoredGalleryViewMode";
 import {
   compactFilters,
   isFilterActive,
@@ -42,6 +44,9 @@ export default function GalleryPage() {
   const [pageSize, setPageSize] = useState(20);
   const [isLoading, setIsLoading] = useState(false);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
+  const [viewMode, setViewMode] = useStoredGalleryViewMode(
+    "astro-gallery-view-mode",
+  );
 
   const hasActiveFilters = useMemo(
     () => isFilterActive(filters, query),
@@ -171,6 +176,9 @@ export default function GalleryPage() {
           onQueryChange={setQuery}
           onSearch={() => void handleSearch()}
           onReset={resetFilters}
+          actions={
+            <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          }
         />
 
         <div className="flex-1 overflow-y-auto p-5">
@@ -182,6 +190,7 @@ export default function GalleryPage() {
           ) : (
             <GenerationGrid
               results={results}
+              viewMode={viewMode}
               favoriteMode="manage"
               onSelect={setSelected}
               onPreview={openResultLightbox}

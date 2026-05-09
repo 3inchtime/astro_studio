@@ -183,10 +183,13 @@
     "rangePresetThisMonth": "Ce mois-ci",
     "rangePresetClear": "Effacer",
     "rangePresetDone": "Terminé",
-    "editImage": "Modifier l'image",
-    "saveImage": "Enregistrer l'image",
+    "editImage": "Modifier l’image",
+    "saveImage": "Enregistrer l’image",
     "delete": "Déplacer vers la corbeille",
-    "allModels": "Tous les modèles"
+    "allModels": "Tous les modèles",
+    "viewMode": "Mode d’affichage",
+    "viewModeMasonry": "Vue cascade",
+    "viewModeList": "Vue liste"
   },
   "sidebar": {
     "projects": "Projets",

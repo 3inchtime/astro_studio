@@ -186,7 +186,10 @@
     "editImage": "Bild bearbeiten",
     "saveImage": "Bild speichern",
     "delete": "In den Papierkorb verschieben",
-    "allModels": "Alle Modelle"
+    "allModels": "Alle Modelle",
+    "viewMode": "Ansichtsmodus",
+    "viewModeMasonry": "Wasserfallansicht",
+    "viewModeList": "Listenansicht"
   },
   "sidebar": {
     "projects": "Projekte",

@@ -29,9 +29,11 @@ import PromptFolderSelector from "../components/favorites/PromptFolderSelector";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
+import ViewModeToggle from "../components/gallery/ViewModeToggle";
 import Lightbox from "../components/lightbox/Lightbox";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+import { useStoredGalleryViewMode } from "../hooks/useStoredGalleryViewMode";
 
 type FavoriteKind = "images" | "prompts";
 
@@ -51,6 +53,9 @@ export default function FavoritesPage() {
   const [imagePage, setImagePage] = useState(1);
   const [imagePageSize, setImagePageSize] = useState(20);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
+  const [imageViewMode, setImageViewMode] = useStoredGalleryViewMode(
+    "astro-favorites-image-view-mode",
+  );
   const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
     null,
   );
@@ -263,6 +268,13 @@ export default function FavoritesPage() {
           </div>
 
           <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto">
+            {activeKind === "images" && (
+              <ViewModeToggle
+                value={imageViewMode}
+                onChange={setImageViewMode}
+              />
+            )}
+
             <div className="relative min-w-0 flex-1 xl:flex-none">
               <Folder
                 size={13}
@@ -341,6 +353,7 @@ export default function FavoritesPage() {
               ) : (
                 <GenerationGrid
                   results={imageResults}
+                  viewMode={imageViewMode}
                   onSelect={setSelectedImage}
                   onPreview={openResultLightbox}
                 />

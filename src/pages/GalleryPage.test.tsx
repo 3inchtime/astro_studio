@@ -49,14 +49,16 @@ vi.mock("../components/gallery/EmptyCollectionState", () => ({
 vi.mock("../components/gallery/GenerationGrid", () => ({
   default: ({
     results,
+    viewMode,
     onPreview,
     onSelect,
   }: {
     results: GenerationResult[];
+    viewMode?: "masonry" | "list";
     onPreview?: (result: GenerationResult, imageIndex: number) => void;
     onSelect: (result: GenerationResult) => void;
   }) => (
-    <div data-testid="grid">
+    <div data-testid="grid" data-view-mode={viewMode}>
       {results.map((result) => (
         <div key={result.generation.id}>
           <button onClick={() => onPreview?.(result, 1)}>
@@ -215,6 +217,7 @@ describe("GalleryPage", () => {
     setActiveConversationId.mockReset();
     navigate.mockReset();
     intersectionCallback = null;
+    localStorage.clear();
 
     vi.stubGlobal(
       "IntersectionObserver",
@@ -448,5 +451,73 @@ describe("GalleryPage", () => {
 
     expect(screen.getByRole("button", { name: "Open preview generation-1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open preview generation-2" })).toBeInTheDocument();
+  });
+
+  it("switches gallery images between waterfall and list display modes", async () => {
+    searchGenerations.mockResolvedValueOnce({
+      generations: [buildResult()],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("grid")).toHaveAttribute(
+        "data-view-mode",
+        "masonry",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "gallery.viewModeList" }));
+
+    expect(screen.getByTestId("grid")).toHaveAttribute("data-view-mode", "list");
+
+    fireEvent.click(screen.getByRole("button", { name: "gallery.viewModeMasonry" }));
+
+    expect(screen.getByTestId("grid")).toHaveAttribute(
+      "data-view-mode",
+      "masonry",
+    );
+  });
+
+  it("restores the saved gallery display mode on remount", async () => {
+    searchGenerations
+      .mockResolvedValueOnce({
+        generations: [buildResult()],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      })
+      .mockResolvedValueOnce({
+        generations: [buildResult()],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      });
+
+    const { unmount } = render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("grid")).toHaveAttribute(
+        "data-view-mode",
+        "masonry",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "gallery.viewModeList" }));
+
+    expect(localStorage.getItem("astro-gallery-view-mode")).toBe("list");
+
+    unmount();
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("grid")).toHaveAttribute(
+        "data-view-mode",
+        "list",
+      );
+    });
   });
 });

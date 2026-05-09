@@ -186,7 +186,10 @@
     "editImage": "이미지 편집",
     "saveImage": "이미지 저장",
     "delete": "휴지통으로 이동",
-    "allModels": "모든 모델"
+    "allModels": "모든 모델",
+    "viewMode": "표시 모드",
+    "viewModeMasonry": "폭포형 보기",
+    "viewModeList": "목록 보기"
   },
   "sidebar": {
     "projects": "프로젝트",

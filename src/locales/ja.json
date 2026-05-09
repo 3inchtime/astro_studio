@@ -186,7 +186,10 @@
     "editImage": "画像を編集",
     "saveImage": "画像を保存",
     "delete": "ゴミ箱へ移動",
-    "allModels": "すべてのモデル"
+    "allModels": "すべてのモデル",
+    "viewMode": "表示モード",
+    "viewModeMasonry": "ウォーターフォール表示",
+    "viewModeList": "リスト表示"
   },
   "sidebar": {
     "projects": "プロジェクト",

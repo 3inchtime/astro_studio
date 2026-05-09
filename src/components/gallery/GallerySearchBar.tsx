@@ -1,4 +1,5 @@
 import { Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
+import type { ReactNode } from "react";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
 import DateRangeFilterField from "./DateRangeFilterField";
 
@@ -10,6 +11,7 @@ interface GallerySearchBarProps {
   onQueryChange: (query: string) => void;
   onSearch: () => void;
   onReset: () => void;
+  actions?: ReactNode;
 }
 
 export default function GallerySearchBar({
@@ -20,6 +22,7 @@ export default function GallerySearchBar({
   onQueryChange,
   onSearch,
   onReset,
+  actions,
 }: GallerySearchBarProps) {
   return (
     <div className="border-b border-border-subtle px-6 py-4">
@@ -131,6 +134,7 @@ export default function GallerySearchBar({
               <RotateCcw size={13} />
               {config.resetFilters}
             </button>
+            {actions}
           </div>
         </div>
       </div>

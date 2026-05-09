@@ -142,4 +142,24 @@ describe("GenerationGrid", () => {
       generation: expect.objectContaining({ id: "generation-wide" }),
     }));
   });
+
+  it("renders results as a compact list when list view is selected", () => {
+    const { container } = render(
+      <GenerationGrid
+        results={[buildResult("wide", 1536, 1024)]}
+        viewMode="list"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const list = container.firstElementChild;
+    const row = list?.firstElementChild;
+
+    expect(list).toHaveClass("space-y-2");
+    expect(list).not.toHaveClass("columns-2");
+    expect(row).toHaveClass("grid", "grid-cols-[104px_minmax(0,1fr)_auto]");
+    expect(screen.getByText("Prompt wide")).toBeInTheDocument();
+    expect(screen.getByText("gpt-image-2")).toBeInTheDocument();
+    expect(screen.getByText("1536x1024")).toBeInTheDocument();
+  });
 });
