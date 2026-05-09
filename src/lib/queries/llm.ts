@@ -26,7 +26,14 @@ export function useSaveLlmConfigsMutation() {
 
 export function useOptimizePromptMutation() {
   return useMutation({
-    mutationFn: ({ prompt, configId }: { prompt: string; configId: string }) =>
-      api.optimizePrompt(prompt, configId),
+    mutationFn: ({
+      prompt,
+      configId,
+      imagePaths,
+    }: {
+      prompt: string;
+      configId: string;
+      imagePaths?: string[];
+    }) => api.optimizePrompt(prompt, configId, imagePaths),
   });
 }
