@@ -39,8 +39,8 @@ src-tauri/Cargo.lock
 .claude/
 CLAUDE.md
 
-# Doc
-docs/
+# Docs
+**/docs/
 .superpowers/
 
 # MCP
