@@ -102,12 +102,18 @@ export default function GenerationComposer({
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [showOptimizeModal, setShowOptimizeModal] = useState(false);
   const [selectedConfigId, setSelectedConfigId] = useState<string>("");
+  const [selectedMultimodalConfigId, setSelectedMultimodalConfigId] = useState<string>("");
   const [showConfigDropdown, setShowConfigDropdown] = useState(false);
 
   const { data: llmConfigs = [] } = useLlmConfigsQuery();
 
   const enabledTextConfigs = useMemo(
     () => llmConfigs.filter((c) => c.enabled && c.capability === "text"),
+    [llmConfigs],
+  );
+
+  const enabledMultimodalConfigs = useMemo(
+    () => llmConfigs.filter((c) => c.enabled && c.capability === "multimodal"),
     [llmConfigs],
   );
 
@@ -126,6 +132,20 @@ export default function GenerationComposer({
       setSelectedConfigId("");
     }
   }, [enabledTextConfigs, selectedConfigId]);
+
+  // Auto-select single multimodal config; clear selection if chosen config is removed
+  useEffect(() => {
+    if (enabledMultimodalConfigs.length === 1) {
+      setSelectedMultimodalConfigId(enabledMultimodalConfigs[0].id);
+    } else if (enabledMultimodalConfigs.length === 0) {
+      setSelectedMultimodalConfigId("");
+    } else if (
+      selectedMultimodalConfigId &&
+      !enabledMultimodalConfigs.find((c) => c.id === selectedMultimodalConfigId)
+    ) {
+      setSelectedMultimodalConfigId("");
+    }
+  }, [enabledMultimodalConfigs, selectedMultimodalConfigId]);
 
   // Clear error when prompt changes
   useEffect(() => {
@@ -148,17 +168,27 @@ export default function GenerationComposer({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showConfigDropdown]);
 
-  const effectiveConfigId =
-    enabledTextConfigs.length === 1
+  const hasEditSources = editSources.length > 0;
+
+  const effectiveConfigId = hasEditSources
+    ? enabledMultimodalConfigs.length === 1
+      ? enabledMultimodalConfigs[0].id
+      : selectedMultimodalConfigId
+    : enabledTextConfigs.length === 1
       ? enabledTextConfigs[0].id
       : selectedConfigId;
 
-  const canOptimize =
-    enabledTextConfigs.length > 0 &&
-    prompt.trim().length > 0 &&
-    !!effectiveConfigId &&
-    !optimizeMutation.isPending &&
-    !isGenerating;
+  const canOptimize = hasEditSources
+    ? enabledMultimodalConfigs.length > 0 &&
+      prompt.trim().length > 0 &&
+      !!effectiveConfigId &&
+      !optimizeMutation.isPending &&
+      !isGenerating
+    : enabledTextConfigs.length > 0 &&
+      prompt.trim().length > 0 &&
+      !!effectiveConfigId &&
+      !optimizeMutation.isPending &&
+      !isGenerating;
 
   const handleOptimize = useCallback(async () => {
     const trimmed = prompt.trim();
@@ -167,17 +197,23 @@ export default function GenerationComposer({
     setOptimizeError(null);
     setOptimizeOriginalPrompt(trimmed);
 
+    const imagePaths =
+      hasEditSources && editSources.length > 0
+        ? editSources.slice(0, 3).map((s) => s.path)
+        : undefined;
+
     try {
       const result = await optimizeMutation.mutateAsync({
         prompt: trimmed,
         configId: effectiveConfigId,
+        imagePaths,
       });
       setOptimizedPrompt(result);
       setShowOptimizeModal(true);
     } catch (e) {
       setOptimizeError(e instanceof Error ? e.message : String(e));
     }
-  }, [prompt, effectiveConfigId, optimizeMutation]);
+  }, [prompt, effectiveConfigId, hasEditSources, editSources, optimizeMutation]);
 
   const handleUseOptimized = useCallback(() => {
     onPromptChange(optimizedPrompt);
@@ -444,54 +480,98 @@ export default function GenerationComposer({
               className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[190px]"
             />
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
-              {/* Config selector — visible only when multiple enabled text configs */}
-              {enabledTextConfigs.length > 1 && (
-                <div className="relative" ref={configDropdownRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowConfigDropdown(!showConfigDropdown)}
-                    className="flex h-[34px] items-center gap-1 rounded-[9px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-foreground/80 transition-all hover:border-border hover:text-foreground"
-                  >
-                    <span className="max-w-[90px] truncate">
-                      {selectedConfigId
-                        ? enabledTextConfigs.find((c) => c.id === selectedConfigId)
-                            ?.name ?? t("generate.llm.selectLlm")
-                        : t("generate.llm.selectLlm")}
-                    </span>
-                    <ChevronDown size={11} className="text-muted/60" />
-                  </button>
-                  {showConfigDropdown && (
-                    <div className="absolute bottom-full right-0 z-10 mb-1 min-w-[140px] overflow-hidden rounded-[10px] border border-border-subtle bg-surface shadow-float">
-                      {enabledTextConfigs.map((config) => (
-                        <button
-                          key={config.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedConfigId(config.id);
-                            setShowConfigDropdown(false);
-                          }}
-                          className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors hover:bg-subtle ${
-                            selectedConfigId === config.id
-                              ? "text-primary"
-                              : "text-foreground/80"
-                          }`}
-                        >
-                          {config.name || t("generate.llm.untitled")}
-                        </button>
-                      ))}
+              {/* Config selector — visible only when multiple enabled configs of the active type */}
+              {hasEditSources
+                ? enabledMultimodalConfigs.length > 1 && (
+                    <div className="relative" ref={configDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowConfigDropdown(!showConfigDropdown)}
+                        className="flex h-[34px] items-center gap-1 rounded-[9px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-foreground/80 transition-all hover:border-border hover:text-foreground"
+                      >
+                        <span className="max-w-[90px] truncate">
+                          {selectedMultimodalConfigId
+                            ? enabledMultimodalConfigs.find(
+                                (c) => c.id === selectedMultimodalConfigId,
+                              )?.name ?? t("generate.llm.selectLlm")
+                            : t("generate.llm.selectLlm")}
+                        </span>
+                        <ChevronDown size={11} className="text-muted/60" />
+                      </button>
+                      {showConfigDropdown && (
+                        <div className="absolute bottom-full right-0 z-10 mb-1 min-w-[140px] overflow-hidden rounded-[10px] border border-border-subtle bg-surface shadow-float">
+                          {enabledMultimodalConfigs.map((config) => (
+                            <button
+                              key={config.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedMultimodalConfigId(config.id);
+                                setShowConfigDropdown(false);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors hover:bg-subtle ${
+                                selectedMultimodalConfigId === config.id
+                                  ? "text-primary"
+                                  : "text-foreground/80"
+                              }`}
+                            >
+                              {config.name || t("generate.llm.untitled")}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                : enabledTextConfigs.length > 1 && (
+                    <div className="relative" ref={configDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowConfigDropdown(!showConfigDropdown)}
+                        className="flex h-[34px] items-center gap-1 rounded-[9px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-foreground/80 transition-all hover:border-border hover:text-foreground"
+                      >
+                        <span className="max-w-[90px] truncate">
+                          {selectedConfigId
+                            ? enabledTextConfigs.find((c) => c.id === selectedConfigId)
+                                ?.name ?? t("generate.llm.selectLlm")
+                            : t("generate.llm.selectLlm")}
+                        </span>
+                        <ChevronDown size={11} className="text-muted/60" />
+                      </button>
+                      {showConfigDropdown && (
+                        <div className="absolute bottom-full right-0 z-10 mb-1 min-w-[140px] overflow-hidden rounded-[10px] border border-border-subtle bg-surface shadow-float">
+                          {enabledTextConfigs.map((config) => (
+                            <button
+                              key={config.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedConfigId(config.id);
+                                setShowConfigDropdown(false);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors hover:bg-subtle ${
+                                selectedConfigId === config.id
+                                  ? "text-primary"
+                                  : "text-foreground/80"
+                              }`}
+                            >
+                              {config.name || t("generate.llm.untitled")}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              )}
 
               {/* Optimize button */}
-              {enabledTextConfigs.length > 0 && (
+              {(hasEditSources ? enabledMultimodalConfigs.length > 0 : enabledTextConfigs.length > 0) && (
                 <motion.button
                   type="button"
                   onClick={handleOptimize}
                   disabled={!canOptimize}
                   aria-label={t("generate.llm.optimize")}
-                  title={t("generate.llm.optimizeTitle")}
+                  title={
+                    hasEditSources
+                      ? t("generate.llm.optimizeWithImages")
+                      : t("generate.llm.optimizeTitle")
+                  }
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.97 }}
                   className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary disabled:pointer-events-none disabled:opacity-30"
