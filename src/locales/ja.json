@@ -277,6 +277,7 @@
     "llm": {
       "optimize": "最適化",
       "optimizeTitle": "AI でプロンプトを最適化",
+      "optimizeWithImages": "画像コンテキストで最適化",
       "selectLlm": "LLMを選択",
       "untitled": "名称未設定",
       "modalTitle": "プロンプトを最適化",

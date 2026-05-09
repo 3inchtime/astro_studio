@@ -143,6 +143,7 @@
   "generate.inputFidelity.low": "低",
   "generate.llm.optimize": "优化",
   "generate.llm.optimizeTitle": "使用 AI 优化提示词",
+  "generate.llm.optimizeWithImages": "结合图片优化提示词",
   "generate.llm.selectLlm": "选择 LLM",
   "generate.llm.untitled": "未命名",
   "generate.llm.modalTitle": "优化提示词",

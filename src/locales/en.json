@@ -143,6 +143,7 @@
   "generate.inputFidelity.low": "Low",
   "generate.llm.optimize": "Optimize",
   "generate.llm.optimizeTitle": "Optimize prompt with AI",
+  "generate.llm.optimizeWithImages": "Optimize with image context",
   "generate.llm.selectLlm": "Select LLM",
   "generate.llm.untitled": "Untitled",
   "generate.llm.modalTitle": "Optimize Prompt",

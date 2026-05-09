@@ -277,6 +277,7 @@
     "llm": {
       "optimize": "최적화",
       "optimizeTitle": "AI로 프롬프트 최적화",
+      "optimizeWithImages": "이미지 컨텍스트로 최적화",
       "selectLlm": "LLM 선택",
       "untitled": "이름 없음",
       "modalTitle": "프롬프트 최적화",

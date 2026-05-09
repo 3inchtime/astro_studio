@@ -277,6 +277,7 @@
     "llm": {
       "optimize": "Optimiser",
       "optimizeTitle": "Optimiser le prompt avec l'IA",
+      "optimizeWithImages": "Optimiser avec le contexte image",
       "selectLlm": "Choisir un LLM",
       "untitled": "Sans nom",
       "modalTitle": "Optimiser le prompt",

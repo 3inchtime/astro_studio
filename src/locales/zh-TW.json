@@ -277,6 +277,7 @@
     "llm": {
       "optimize": "優化",
       "optimizeTitle": "使用 AI 優化提示詞",
+      "optimizeWithImages": "結合圖片優化提示詞",
       "selectLlm": "選擇 LLM",
       "untitled": "未命名",
       "modalTitle": "優化提示詞",

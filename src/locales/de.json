@@ -277,6 +277,7 @@
     "llm": {
       "optimize": "Optimieren",
       "optimizeTitle": "Prompt mit KI optimieren",
+      "optimizeWithImages": "Mit Bildkontext optimieren",
       "selectLlm": "LLM wählen",
       "untitled": "Unbenannt",
       "modalTitle": "Prompt optimieren",
