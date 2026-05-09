@@ -18,6 +18,9 @@ vi.mock("react-i18next", async (importOriginal) => {
           "nav.gallery": "Gallery",
           "nav.favorites": "Favorites",
           "nav.settings": "Settings",
+          "theme.openPicker": "Open theme picker",
+          "theme.title": "Themes",
+          "theme.select": "Select {{name}} theme",
         })[key] ?? key,
     }),
   };
@@ -54,6 +57,51 @@ function ProjectChatFixture() {
 }
 
 describe("AppLayout", () => {
+  it("opens the rail theme picker and applies the selected preset", async () => {
+    localStorage.clear();
+
+    render(
+      <MemoryRouter initialEntries={["/generate"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/generate" element={<div>generate</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open theme picker" }));
+
+    expect(screen.getByRole("heading", { name: "Themes" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Select .* theme/ })).toHaveLength(12);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Ocean Depths theme" }));
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute("data-theme", "ocean-depths");
+      expect(localStorage.getItem("astro-theme")).toBe("ocean-depths");
+    });
+  });
+
+  it("uses the white preset as the default theme when nothing is stored", async () => {
+    localStorage.clear();
+
+    render(
+      <MemoryRouter initialEntries={["/generate"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/generate" element={<div>generate</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute("data-theme", "pure-light");
+      expect(localStorage.getItem("astro-theme")).toBe("pure-light");
+    });
+  });
+
   it("renders the project sidebar on project routes and the conversation sidebar elsewhere", () => {
     const { rerender } = render(
       <MemoryRouter key="projects" initialEntries={["/projects"]}>

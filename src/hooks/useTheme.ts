@@ -1,84 +1,189 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-
-export type Theme = "light" | "dark";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import {
+  DEFAULT_THEME_ID,
+  THEME_CATALOG,
+  getThemeCatalogEntry,
+  resolveThemeId,
+  type ThemeId,
+} from "../lib/themes";
 
 const STORAGE_KEY = "astro-theme";
+const THEME_EVENT = "astro-theme-change";
 
-function getInitialTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+function getStoredThemeId(): ThemeId {
+  if (typeof window === "undefined") {
+    return DEFAULT_THEME_ID;
+  }
+
+  return resolveThemeId(window.localStorage.getItem(STORAGE_KEY));
+}
+
+function getTransitionOrigin(
+  event: ReactMouseEvent<HTMLElement> | null | undefined,
+): { x: number; y: number } | null {
+  if (!event) {
+    return null;
+  }
+
+  return { x: event.clientX, y: event.clientY };
+}
+
+function applyThemeVariables(themeId: ThemeId) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const root = document.documentElement;
+  const theme = getThemeCatalogEntry(themeId);
+
+  root.dataset.theme = theme.id;
+  root.classList.toggle("dark", theme.appearance === "dark");
+
+  for (const [name, value] of Object.entries(theme.variables)) {
+    root.style.setProperty(name, value);
+  }
+}
+
+function notifyThemeListeners() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(THEME_EVENT));
+}
+
+function persistTheme(themeId: ThemeId) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(STORAGE_KEY, themeId);
+}
+
+function applyThemeSelection(
+  themeId: ThemeId,
+  origin: { x: number; y: number } | null = null,
+  emit = true,
+) {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return;
+  }
+
+  const root = document.documentElement;
+
+  root.classList.add("theme-transition");
+
+  const apply = () => {
+    applyThemeVariables(themeId);
+    persistTheme(themeId);
+  };
+
+  if (
+    origin &&
+    "startViewTransition" in document
+  ) {
+    const transitionDocument = document as Document & {
+      startViewTransition: (
+        callback: () => void,
+      ) => { ready: Promise<void> };
+    };
+
+    const transition = transitionDocument.startViewTransition(() => {
+      apply();
+    });
+
+    transition.ready.then(() => {
+      const maxRadius = Math.hypot(
+        Math.max(origin.x, window.innerWidth - origin.x),
+        Math.max(origin.y, window.innerHeight - origin.y),
+      );
+
+      root.animate(
+        {
+          clipPath: [
+            `circle(0px at ${origin.x}px ${origin.y}px)`,
+            `circle(${maxRadius}px at ${origin.x}px ${origin.y}px)`,
+          ],
+        },
+        {
+          duration: 500,
+          easing: "ease-out",
+        },
+      );
+    }).catch(() => {});
+  } else {
+    apply();
+  }
+
+  window.setTimeout(() => {
+    root.classList.remove("theme-transition");
+  }, 500);
+
+  if (emit) {
+    notifyThemeListeners();
+  }
+}
+
+function subscribe(listener: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const handleThemeEvent = () => listener();
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) {
+      listener();
+    }
+  };
+
+  window.addEventListener(THEME_EVENT, handleThemeEvent);
+  window.addEventListener("storage", handleStorage);
+
+  return () => {
+    window.removeEventListener(THEME_EVENT, handleThemeEvent);
+    window.removeEventListener("storage", handleStorage);
+  };
 }
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
-  const pendingTransition = useRef<{ x: number; y: number } | null>(null);
+  const theme = useSyncExternalStore(
+    subscribe,
+    getStoredThemeId,
+    () => DEFAULT_THEME_ID,
+  );
 
   useEffect(() => {
-    // Apply pending view transition (deferred from toggleTheme)
-    if (pendingTransition.current) {
-      const { x, y } = pendingTransition.current;
-      pendingTransition.current = null;
-      applyWithTransition(x, y);
-      return;
-    }
-
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem(STORAGE_KEY, theme);
+    applyThemeVariables(theme);
+    persistTheme(theme);
   }, [theme]);
 
-  function applyWithTransition(x: number, y: number) {
-    const root = document.documentElement;
-    const isDark = theme === "dark";
-
-    // Enable CSS transition class
-    root.classList.add("theme-transition");
-
-    // Use View Transition API if available (Chrome/Edge 111+)
-    if ("startViewTransition" in document) {
-      const vt = (document as unknown as { startViewTransition: (cb: () => void) => { ready: Promise<void> } }).startViewTransition(() => {
-        root.classList.toggle("dark", isDark);
-        localStorage.setItem(STORAGE_KEY, theme);
-      });
-
-      vt.ready.then(() => {
-        const maxRadius = Math.hypot(
-          Math.max(x, window.innerWidth - x),
-          Math.max(y, window.innerHeight - y),
-        );
-        root.animate(
-          {
-            clipPath: [
-              `circle(0px at ${x}px ${y}px)`,
-              `circle(${maxRadius}px at ${x}px ${y}px)`,
-            ],
-          },
-          {
-            duration: 500,
-            easing: "ease-out",
-          },
-        );
-      }).catch(() => {});
-    } else {
-      // Fallback: just toggle with CSS transition
-      root.classList.toggle("dark", isDark);
-      localStorage.setItem(STORAGE_KEY, theme);
-    }
-
-    // Remove transition class after animation
-    setTimeout(() => root.classList.remove("theme-transition"), 500);
-  }
-
-  const toggleTheme = useCallback(() => {
-    // Set state first, then trigger transition in useEffect
-    setThemeState((t) => (t === "dark" ? "light" : "dark"));
+  const setTheme = useCallback((nextTheme: ThemeId) => {
+    applyThemeSelection(nextTheme);
   }, []);
 
-  // Call this from an onClick handler that has access to MouseEvent
-  const toggleThemeWithEvent = useCallback((e: React.MouseEvent) => {
-    pendingTransition.current = { x: e.clientX, y: e.clientY };
-    setThemeState((t) => (t === "dark" ? "light" : "dark"));
-  }, []);
+  const setThemeWithEvent = useCallback(
+    (nextTheme: ThemeId, event?: ReactMouseEvent<HTMLElement>) => {
+      applyThemeSelection(nextTheme, getTransitionOrigin(event));
+    },
+    [],
+  );
 
-  return { theme, toggleTheme, toggleThemeWithEvent };
+  const cycleTheme = useCallback(() => {
+    const currentIndex = THEME_CATALOG.findIndex((entry) => entry.id === theme);
+    const nextIndex = currentIndex === -1
+      ? 0
+      : (currentIndex + 1) % THEME_CATALOG.length;
+
+    applyThemeSelection(THEME_CATALOG[nextIndex].id);
+  }, [theme]);
+
+  return {
+    theme,
+    themeMeta: getThemeCatalogEntry(theme),
+    themes: THEME_CATALOG,
+    setTheme,
+    setThemeWithEvent,
+    cycleTheme,
+  };
 }

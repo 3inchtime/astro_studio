@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -6,10 +6,9 @@ import {
   Heart,
   Image,
   MessageSquareText,
-  Moon,
+  Palette,
   Settings,
   Sparkles,
-  Sun,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../../hooks/useTheme";
@@ -19,6 +18,8 @@ import { ResizeHandle } from "./ResizeHandle";
 import ConversationList from "../sidebar/ConversationList";
 import ProjectsSidebar from "../projects/ProjectsSidebar";
 import { createConversation } from "../../lib/api";
+import { ThemeCardPicker } from "../theme/ThemeCardPicker";
+import { getThemeName } from "../../lib/themes";
 
 interface LayoutContextType {
   activeProjectId: string | null;
@@ -57,12 +58,15 @@ const PANEL_CONFIGS = [
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { theme, toggleThemeWithEvent } = useTheme();
+  const { theme, themeMeta, setThemeWithEvent } = useTheme();
   const { t } = useTranslation();
   const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [conversationRefreshKey, setConversationRefreshKey] = useState(0);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const themeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const themePanelRef = useRef<HTMLDivElement | null>(null);
 
   const isProjectListRoute = useMemo(
     () => location.pathname === "/projects",
@@ -138,6 +142,39 @@ export default function AppLayout() {
     setActiveProjectId(null);
   }, [location.pathname, routeProjectId, isProjectChatRoute, pendingGenerateConversationId]);
 
+  useEffect(() => {
+    if (!themePickerOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+
+      if (
+        themePanelRef.current?.contains(target) ||
+        themeButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setThemePickerOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setThemePickerOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [themePickerOpen]);
+
   const refreshConversations = useCallback(() => {
     setConversationRefreshKey((key) => key + 1);
   }, []);
@@ -208,7 +245,7 @@ export default function AppLayout() {
         refreshConversations,
       }}
     >
-      <div className="flex h-screen overflow-hidden bg-background gradient-mesh">
+      <div className="relative flex h-screen overflow-hidden bg-background gradient-mesh">
         <aside
           className="flex shrink-0 flex-col items-center border-r border-border-subtle py-6"
           style={{ width: NAV_RAIL_WIDTH }}
@@ -251,32 +288,25 @@ export default function AppLayout() {
 
           <div className="mt-auto flex flex-col items-center gap-3">
             <button
-              onClick={toggleThemeWithEvent}
-              className="flex h-10 w-10 items-center justify-center rounded-[10px] text-muted transition-colors hover:text-foreground hover:bg-subtle"
+              ref={themeButtonRef}
+              type="button"
+              title={t("theme.openPicker")}
+              aria-label={t("theme.openPicker")}
+              aria-haspopup="dialog"
+              aria-expanded={themePickerOpen}
+              onClick={() => setThemePickerOpen((open) => !open)}
+              className={`flex h-10 w-10 items-center justify-center rounded-[10px] transition-colors ${
+                themePickerOpen
+                  ? "bg-primary/8 text-primary"
+                  : "text-muted hover:text-foreground hover:bg-subtle"
+              }`}
             >
-              <AnimatePresence mode="wait" initial={false}>
-                {theme === "dark" ? (
-                  <motion.div
-                    key="moon"
-                    initial={{ rotate: -90, scale: 0, opacity: 0 }}
-                    animate={{ rotate: 0, scale: 1, opacity: 1 }}
-                    exit={{ rotate: 90, scale: 0, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                  >
-                    <Moon size={18} strokeWidth={1.8} />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="sun"
-                    initial={{ rotate: 90, scale: 0, opacity: 0 }}
-                    animate={{ rotate: 0, scale: 1, opacity: 1 }}
-                    exit={{ rotate: -90, scale: 0, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                  >
-                    <Sun size={18} strokeWidth={1.8} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <motion.div
+                animate={{ rotate: themePickerOpen ? 12 : 0, scale: themePickerOpen ? 1.04 : 1 }}
+                transition={{ type: "spring", stiffness: 360, damping: 22 }}
+              >
+                <Palette size={18} strokeWidth={1.8} />
+              </motion.div>
             </button>
             <NavLink
               to="/settings"
@@ -335,6 +365,44 @@ export default function AppLayout() {
             </motion.div>
           </AnimatePresence>
         </main>
+
+        <AnimatePresence>
+          {themePickerOpen && (
+            <motion.div
+              ref={themePanelRef}
+              role="dialog"
+              aria-modal="false"
+              initial={{ opacity: 0, x: -8, y: 8 }}
+              animate={{ opacity: 1, x: 0, y: 0 }}
+              exit={{ opacity: 0, x: -8, y: 8 }}
+              transition={{ duration: 0.16 }}
+              className="absolute bottom-6 left-[78px] z-30 w-[360px] rounded-[18px] border border-border-subtle bg-surface/96 p-4 shadow-float backdrop-blur-xl"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-[14px] font-semibold text-foreground">
+                    {t("theme.title")}
+                  </h2>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted/65">
+                    {getThemeName(themeMeta, t)} · {t("settings.themeDesc")}
+                  </p>
+                </div>
+              </div>
+              <div className="max-h-[420px] overflow-y-auto pr-1">
+                <ThemeCardPicker
+                  selectedThemeId={theme}
+                  activeLabel={t("theme.active")}
+                  t={t}
+                  compact
+                  onSelect={(themeId, event) => {
+                    setThemeWithEvent(themeId, event);
+                    setThemePickerOpen(false);
+                  }}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </LayoutContext.Provider>
   );

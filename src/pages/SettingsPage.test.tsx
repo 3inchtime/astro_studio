@@ -252,6 +252,23 @@ describe("SettingsPage logs", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows theme presets in general settings and persists the selected theme", async () => {
+    localStorage.clear();
+
+    renderSettingsPage();
+
+    expect(
+      screen.getByRole("heading", { name: "settings.theme" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Tech Innovation theme" }));
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute("data-theme", "tech-innovation");
+      expect(localStorage.getItem("astro-theme")).toBe("tech-innovation");
+    });
+  });
+
   it("copies the visible runtime logs", async () => {
     renderSettingsPage();
 

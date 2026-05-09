@@ -5,6 +5,8 @@ node_modules/
 dist/
 dist-ssr/
 /.vite/
+output/
+public/
 
 # Logs
 *.log
@@ -19,6 +21,7 @@ npm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+.obsidian/
 .idea/
 *.sw?
 *.suo
@@ -41,6 +44,7 @@ CLAUDE.md
 
 # Docs
 **/docs/
+wiki/
 .superpowers/
 
 # MCP

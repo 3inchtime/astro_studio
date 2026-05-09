@@ -13,6 +13,7 @@ import {
   Cpu, FileText, SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "../hooks/useTheme";
 import type {
   AppFontSize,
   ImageModel,
@@ -76,6 +77,7 @@ const SETTINGS_TABS = [
 export default function SettingsPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">("general");
+  const { theme, setThemeWithEvent } = useTheme();
 
   // General settings state
   const [showKey, setShowKey] = useState(false);
@@ -508,12 +510,14 @@ export default function SettingsPage() {
               trashSaved={trashSaved}
               fontSize={fontSize}
               fontSizeSaved={fontSizeSaved}
+              theme={theme}
               fontSizeLabelKeys={FONT_SIZE_LABEL_KEYS}
               onLanguageChange={handleLanguageChange}
               onTrashSettingsChange={setTrashSettings}
               onSaveTrashRetention={() => void handleSaveTrashRetention()}
               onOpenTrash={() => navigate("/trash")}
               onFontSizeChange={(nextSize) => void handleFontSizeChange(nextSize)}
+              onThemeChange={(nextTheme, event) => setThemeWithEvent(nextTheme, event)}
             />
           ) : activeTab === "model" ? (
             <ModelSettingsPanel

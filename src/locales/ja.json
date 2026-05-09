@@ -84,6 +84,61 @@
     "trash": "ゴミ箱",
     "settings": "設定"
   },
+  "theme": {
+    "title": "テーマ",
+    "openPicker": "テーマピッカーを開く",
+    "active": "選択中"
+  },
+  "themes": {
+    "pure-light": {
+      "name": "ピュアライト",
+      "description": "明るい白を基調にした、抑制の効いたグレートーンの作業空間です。"
+    },
+    "pure-black": {
+      "name": "ピュアブラック",
+      "description": "ほぼモノクロの黒基調で、鋭い高コントラストを持つ作業空間です。"
+    },
+    "ocean-depths": {
+      "name": "オーシャン・デプス",
+      "description": "落ち着いた海のブルーで、信頼感とプロらしさを強めます。"
+    },
+    "sunset-boulevard": {
+      "name": "サンセット・ブールバード",
+      "description": "温かなオレンジと夕景のコントラストで表情を出します。"
+    },
+    "forest-canopy": {
+      "name": "フォレスト・キャノピー",
+      "description": "深い緑の重なりで自然な奥行きと静けさを作ります。"
+    },
+    "modern-minimalist": {
+      "name": "モダン・ミニマリスト",
+      "description": "静かなグレースケールでクリーンな制作空間に整えます。"
+    },
+    "golden-hour": {
+      "name": "ゴールデン・アワー",
+      "description": "金色とテラコッタで柔らかい編集的な温度感を出します。"
+    },
+    "arctic-frost": {
+      "name": "アークティック・フロスト",
+      "description": "冷たいスチールブルーで明快さと精密さを演出します。"
+    },
+    "desert-rose": {
+      "name": "デザート・ローズ",
+      "description": "くすみローズと砂色で上品で柔らかな印象を作ります。"
+    },
+    "tech-innovation": {
+      "name": "テック・イノベーション",
+      "description": "電光ブルーとシアンの強い対比でテック感を高めます。"
+    },
+    "botanical-garden": {
+      "name": "ボタニカル・ガーデン",
+      "description": "自然なグリーンと温かい差し色で軽やかな生命感を出します。"
+    },
+    "midnight-galaxy": {
+      "name": "ミッドナイト・ギャラクシー",
+      "description": "宇宙的な紫とラベンダーでドラマチックな雰囲気を作ります。"
+    }
+  },
   "gallery": {
     "applyFilters": "フィルターを適用",
     "resetFilters": "リセット",
@@ -351,6 +406,9 @@
     "saveUrl": "URL を保存",
     "language": "言語",
     "languageDesc": "インターフェースの表示言語を選択します",
+    "theme": "テーマ",
+    "themeDesc": "Astro Studio 全体の見た目を切り替えます。",
+    "themePreview": "テーマはすぐに反映され、次回起動時にも保持されます。",
     "fontSize": "文字サイズ",
     "fontSizeDesc": "読みやすくするためにインターフェースの文字サイズを調整します。",
     "fontSizeSmall": "小",

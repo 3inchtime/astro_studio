@@ -84,6 +84,61 @@
     "trash": "回收站",
     "settings": "設定"
   },
+  "theme": {
+    "title": "主題",
+    "openPicker": "開啟主題選擇器",
+    "active": "目前"
+  },
+  "themes": {
+    "pure-light": {
+      "name": "純白",
+      "description": "明亮純白的工作空間，以克制灰階維持清晰層次。"
+    },
+    "pure-black": {
+      "name": "純黑",
+      "description": "近乎單色的純黑工作空間，擁有更銳利的高對比邊界。"
+    },
+    "ocean-depths": {
+      "name": "深海之境",
+      "description": "沉穩海洋藍，適合強調專業感與信任感。"
+    },
+    "sunset-boulevard": {
+      "name": "日落大道",
+      "description": "溫暖橙調與電影感暮色，適合更有表現力的介面。"
+    },
+    "forest-canopy": {
+      "name": "森林冠層",
+      "description": "飽和森林綠與自然層次，氣質沉靜而有生命力。"
+    },
+    "modern-minimalist": {
+      "name": "現代極簡",
+      "description": "克制灰階與清爽留白，適合乾淨的工作室介面。"
+    },
+    "golden-hour": {
+      "name": "黃金時刻",
+      "description": "編輯感金色與陶土色，整體更溫潤柔和。"
+    },
+    "arctic-frost": {
+      "name": "極地霜境",
+      "description": "冷調鋼藍與冰霜白，清晰、克制、俐落。"
+    },
+    "desert-rose": {
+      "name": "沙漠玫瑰",
+      "description": "低飽和玫瑰與沙色中和，帶有精品感與柔和氣質。"
+    },
+    "tech-innovation": {
+      "name": "科技新境",
+      "description": "電光藍與霓虹青形成強對比，適合科技感主題。"
+    },
+    "botanical-garden": {
+      "name": "植物花園",
+      "description": "自然綠配活力暖色，清新且富有有機感。"
+    },
+    "midnight-galaxy": {
+      "name": "午夜星河",
+      "description": "深空紫與發光薰衣草色，營造更戲劇化的氛圍。"
+    }
+  },
   "gallery": {
     "applyFilters": "套用篩選",
     "resetFilters": "重設",
@@ -351,6 +406,9 @@
     "saveUrl": "儲存 URL",
     "language": "語言",
     "languageDesc": "選擇介面顯示語言",
+    "theme": "主題",
+    "themeDesc": "切換 Astro Studio 的整體視覺風格。",
+    "themePreview": "主題會立即套用，並在下次啟動時保留。",
     "fontSize": "文字大小",
     "fontSizeDesc": "調整介面文字大小，讓閱讀更舒適。",
     "fontSizeSmall": "小",

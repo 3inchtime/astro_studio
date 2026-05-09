@@ -103,4 +103,44 @@ describe("ConversationList", () => {
 
     expect(navigate).toHaveBeenCalledWith("/projects");
   });
+
+  it("renders larger conversation thumbnails in the sidebar list", async () => {
+    getConversations.mockResolvedValue([
+      {
+        id: "conversation-1",
+        project_id: "project-1",
+        title: "Homepage hero direction",
+        created_at: "",
+        updated_at: "",
+        archived_at: null,
+        pinned_at: null,
+        deleted_at: null,
+        generation_count: 8,
+        latest_generation_at: "",
+        latest_thumbnail: "/tmp/sidebar-thumb.png",
+      },
+    ]);
+
+    const { container } = render(
+      <MemoryRouter>
+        <ConversationList
+          activeProjectId="project-1"
+          activeConversationId={null}
+          refreshKey={0}
+          onSelectProject={vi.fn()}
+          onProjectCreated={vi.fn()}
+          onSelectConversation={vi.fn()}
+          onInitialConversation={vi.fn()}
+          onNewConversation={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Homepage hero direction");
+
+    const thumbnailImage = container.querySelector('img[src="/tmp/sidebar-thumb.png"]');
+
+    expect(thumbnailImage).not.toBeNull();
+    expect(thumbnailImage?.parentElement).toHaveClass("h-[43px]", "w-[43px]");
+  });
 });

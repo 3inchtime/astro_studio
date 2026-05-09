@@ -84,6 +84,61 @@
     "trash": "Papierkorb",
     "settings": "Einstellungen"
   },
+  "theme": {
+    "title": "Themen",
+    "openPicker": "Theme-Auswahl öffnen",
+    "active": "Aktiv"
+  },
+  "themes": {
+    "pure-light": {
+      "name": "Pure Light",
+      "description": "Ein heller weißer Arbeitsraum mit zurückhaltendem Graukontrast."
+    },
+    "pure-black": {
+      "name": "Pure Black",
+      "description": "Ein fast monochrom schwarzer Arbeitsraum mit scharfem Hochkontrast."
+    },
+    "ocean-depths": {
+      "name": "Ocean Depths",
+      "description": "Ruhige Meeresblautöne für mehr Professionalität und Vertrauen."
+    },
+    "sunset-boulevard": {
+      "name": "Sunset Boulevard",
+      "description": "Warme Orangetöne und Abendkontrast für einen lebendigeren Auftritt."
+    },
+    "forest-canopy": {
+      "name": "Forest Canopy",
+      "description": "Tiefe Grüntöne mit natürlicher Ruhe und spürbarer Tiefe."
+    },
+    "modern-minimalist": {
+      "name": "Modern Minimalist",
+      "description": "Zurückhaltende Graustufen für eine saubere Studio-Atmosphäre."
+    },
+    "golden-hour": {
+      "name": "Golden Hour",
+      "description": "Gold und Terrakotta für eine warme, redaktionelle Stimmung."
+    },
+    "arctic-frost": {
+      "name": "Arctic Frost",
+      "description": "Kühles Stahlblau für Klarheit und Präzision."
+    },
+    "desert-rose": {
+      "name": "Desert Rose",
+      "description": "Gedämpftes Rosé und Sandtöne für eine weiche, elegante Wirkung."
+    },
+    "tech-innovation": {
+      "name": "Tech Innovation",
+      "description": "Elektrisches Blau und Neon-Cyan für eine stärkere Tech-Ästhetik."
+    },
+    "botanical-garden": {
+      "name": "Botanical Garden",
+      "description": "Natürliche Grüntöne und warme Akzente für organische Frische."
+    },
+    "midnight-galaxy": {
+      "name": "Midnight Galaxy",
+      "description": "Kosmische Violetttöne und leuchtendes Lavendel für mehr Dramatik."
+    }
+  },
   "gallery": {
     "applyFilters": "Filter anwenden",
     "resetFilters": "Zurücksetzen",
@@ -351,6 +406,9 @@
     "saveUrl": "URL speichern",
     "language": "Sprache",
     "languageDesc": "Wähle die Anzeigesprache der Oberfläche",
+    "theme": "Theme",
+    "themeDesc": "Wechselt den visuellen Gesamtstil von Astro Studio.",
+    "themePreview": "Das Theme wird sofort angewendet und beim nächsten Start beibehalten.",
     "fontSize": "Textgröße",
     "fontSizeDesc": "Skaliere den Interface-Text für komfortableres Lesen.",
     "fontSizeSmall": "Klein",

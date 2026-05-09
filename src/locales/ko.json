@@ -84,6 +84,61 @@
     "trash": "휴지통",
     "settings": "설정"
   },
+  "theme": {
+    "title": "테마",
+    "openPicker": "테마 선택기 열기",
+    "active": "사용 중"
+  },
+  "themes": {
+    "pure-light": {
+      "name": "퓨어 라이트",
+      "description": "밝은 화이트 기반에 절제된 회색 대비를 더한 작업 공간입니다."
+    },
+    "pure-black": {
+      "name": "퓨어 블랙",
+      "description": "거의 단색에 가까운 블랙 기반으로, 날카로운 고대비를 가진 작업 공간입니다."
+    },
+    "ocean-depths": {
+      "name": "오션 뎁스",
+      "description": "차분한 해양 블루로 전문성과 신뢰감을 강조합니다."
+    },
+    "sunset-boulevard": {
+      "name": "선셋 불러바드",
+      "description": "따뜻한 오렌지와 영화 같은 황혼 대비로 더 생동감 있게 보입니다."
+    },
+    "forest-canopy": {
+      "name": "포레스트 캐노피",
+      "description": "짙은 숲의 녹색으로 자연스러운 깊이와 안정감을 만듭니다."
+    },
+    "modern-minimalist": {
+      "name": "모던 미니멀리스트",
+      "description": "잔잔한 회색조로 깔끔한 작업 공간 분위기를 만듭니다."
+    },
+    "golden-hour": {
+      "name": "골든 아워",
+      "description": "금빛과 테라코타 톤으로 부드럽고 에디토리얼한 온도를 더합니다."
+    },
+    "arctic-frost": {
+      "name": "아틱 프로스트",
+      "description": "차가운 스틸 블루로 선명함과 정밀한 인상을 줍니다."
+    },
+    "desert-rose": {
+      "name": "데저트 로즈",
+      "description": "톤 다운된 로즈와 샌드 컬러로 부드럽고 세련된 분위기를 만듭니다."
+    },
+    "tech-innovation": {
+      "name": "테크 이노베이션",
+      "description": "전기 블루와 네온 시안의 강한 대비로 기술적인 느낌을 높입니다."
+    },
+    "botanical-garden": {
+      "name": "보태니컬 가든",
+      "description": "자연스러운 그린과 따뜻한 포인트 컬러로 산뜻한 생동감을 줍니다."
+    },
+    "midnight-galaxy": {
+      "name": "미드나이트 갤럭시",
+      "description": "우주적인 퍼플과 라벤더로 더 극적인 분위기를 연출합니다."
+    }
+  },
   "gallery": {
     "applyFilters": "필터 적용",
     "resetFilters": "초기화",
@@ -351,6 +406,9 @@
     "saveUrl": "URL 저장",
     "language": "언어",
     "languageDesc": "인터페이스 표시 언어를 선택하세요",
+    "theme": "테마",
+    "themeDesc": "Astro Studio 전체 시각 스타일을 전환합니다.",
+    "themePreview": "테마는 즉시 적용되며 다음 실행 때도 유지됩니다.",
     "fontSize": "글자 크기",
     "fontSizeDesc": "더 편하게 읽을 수 있도록 인터페이스 글자 크기를 조정합니다.",
     "fontSizeSmall": "작게",

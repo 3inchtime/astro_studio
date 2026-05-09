@@ -167,7 +167,7 @@ export default function ProjectConversationPanel({
                   onClick={() => navigate(`/projects/${projectId}/chat/${conv.id}`)}
                   className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left transition-colors hover:bg-subtle"
                 >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-subtle border border-border-subtle">
+                  <div className="flex h-[43px] w-[43px] shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-border-subtle bg-subtle">
                     {conv.latest_thumbnail ? (
                       <img
                         src={toAssetUrl(conv.latest_thumbnail)}

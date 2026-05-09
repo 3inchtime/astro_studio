@@ -84,6 +84,61 @@
     "trash": "Papelera",
     "settings": "Ajustes"
   },
+  "theme": {
+    "title": "Temas",
+    "openPicker": "Abrir selector de tema",
+    "active": "Activo"
+  },
+  "themes": {
+    "pure-light": {
+      "name": "Pure Light",
+      "description": "Un espacio blanco brillante con contraste en grises muy contenido."
+    },
+    "pure-black": {
+      "name": "Pure Black",
+      "description": "Un espacio negro casi monocromático con un contraste intenso y definido."
+    },
+    "ocean-depths": {
+      "name": "Ocean Depths",
+      "description": "Azules marinos serenos para reforzar la sensación de confianza y profesionalidad."
+    },
+    "sunset-boulevard": {
+      "name": "Sunset Boulevard",
+      "description": "Naranjas cálidos y contraste de atardecer para una interfaz más expresiva."
+    },
+    "forest-canopy": {
+      "name": "Forest Canopy",
+      "description": "Verdes profundos con capas naturales para una sensación estable y orgánica."
+    },
+    "modern-minimalist": {
+      "name": "Modern Minimalist",
+      "description": "Grises tranquilos para un espacio de trabajo limpio y sobrio."
+    },
+    "golden-hour": {
+      "name": "Golden Hour",
+      "description": "Dorado y terracota para una calidez suave con aire editorial."
+    },
+    "arctic-frost": {
+      "name": "Arctic Frost",
+      "description": "Azul acero frío para transmitir claridad y precisión."
+    },
+    "desert-rose": {
+      "name": "Desert Rose",
+      "description": "Rosa empolvado y arena para una presencia suave y elegante."
+    },
+    "tech-innovation": {
+      "name": "Tech Innovation",
+      "description": "Azul eléctrico y cian neón para potenciar una estética tecnológica."
+    },
+    "botanical-garden": {
+      "name": "Botanical Garden",
+      "description": "Verdes naturales y acentos cálidos para una energía fresca y orgánica."
+    },
+    "midnight-galaxy": {
+      "name": "Midnight Galaxy",
+      "description": "Púrpuras cósmicos y lavanda luminosa para una atmósfera más dramática."
+    }
+  },
   "gallery": {
     "applyFilters": "Aplicar filtros",
     "resetFilters": "Restablecer",
@@ -351,6 +406,9 @@
     "saveUrl": "Guardar URL",
     "language": "Idioma",
     "languageDesc": "Elige el idioma de visualización de la interfaz",
+    "theme": "Tema",
+    "themeDesc": "Cambia el estilo visual general de Astro Studio.",
+    "themePreview": "El tema se aplica al instante y se recordará en el próximo inicio.",
     "fontSize": "Tamaño de texto",
     "fontSizeDesc": "Ajusta el texto de la interfaz para leer con más comodidad.",
     "fontSizeSmall": "Pequeño",

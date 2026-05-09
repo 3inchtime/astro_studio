@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
-import { Check, Languages, SlidersHorizontal, Trash2, Type } from "lucide-react";
+import { Check, Languages, Palette, SlidersHorizontal, Trash2, Type } from "lucide-react";
 import type { TFunction } from "i18next";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import type { AppFontSize, TrashSettings } from "../../types";
 import { APP_FONT_SIZE_OPTIONS } from "../../lib/fontSize";
 import {
@@ -9,6 +10,8 @@ import {
   type SupportedLanguage,
 } from "../../lib/languages";
 import { cardVariants, sectionVariants } from "./settingsMotion";
+import { ThemeCardPicker } from "../theme/ThemeCardPicker";
+import type { ThemeId } from "../../lib/themes";
 
 interface GeneralSettingsPanelProps {
   t: TFunction;
@@ -17,12 +20,14 @@ interface GeneralSettingsPanelProps {
   trashSaved: boolean;
   fontSize: AppFontSize;
   fontSizeSaved: boolean;
+  theme: ThemeId;
   fontSizeLabelKeys: Record<AppFontSize, string>;
   onLanguageChange: (language: SupportedLanguage) => void;
   onTrashSettingsChange: (settings: TrashSettings) => void;
   onSaveTrashRetention: () => void;
   onOpenTrash: () => void;
   onFontSizeChange: (fontSize: AppFontSize) => void;
+  onThemeChange: (theme: ThemeId, event?: ReactMouseEvent<HTMLButtonElement>) => void;
 }
 
 export function GeneralSettingsPanel({
@@ -32,12 +37,14 @@ export function GeneralSettingsPanel({
   trashSaved,
   fontSize,
   fontSizeSaved,
+  theme,
   fontSizeLabelKeys,
   onLanguageChange,
   onTrashSettingsChange,
   onSaveTrashRetention,
   onOpenTrash,
   onFontSizeChange,
+  onThemeChange,
 }: GeneralSettingsPanelProps) {
   return (
     <motion.div
@@ -83,6 +90,34 @@ export function GeneralSettingsPanel({
             </div>
           </motion.div>
           <motion.div custom={1} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+            <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
+                  <Palette size={14} className="text-primary" strokeWidth={2} />
+                </div>
+                <div>
+                  <h4 className="text-[13px] font-semibold text-foreground">{t("settings.theme")}</h4>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.themeDesc")}</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <ThemeCardPicker
+                  selectedThemeId={theme}
+                  activeLabel={t("theme.active")}
+                  t={t}
+                  gridClassName="sm:grid-cols-2 xl:grid-cols-3"
+                  onSelect={(themeId, event) => onThemeChange(themeId, event)}
+                />
+                <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border-subtle bg-subtle/20 px-3 py-2.5">
+                  <p className="text-[11px] text-muted/60">{t("settings.themePreview")}</p>
+                  <span className="text-[11px] font-medium text-primary/80">
+                    {t("theme.active")}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+          <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-error/10 bg-error/5">
@@ -125,7 +160,7 @@ export function GeneralSettingsPanel({
               </div>
             </div>
           </motion.div>
-          <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+          <motion.div custom={3} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">

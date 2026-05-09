@@ -274,7 +274,7 @@ function ConversationRow({
         onClick={onSelect}
         className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-2 text-left"
       >
-        <div className="h-9 w-9 shrink-0 overflow-hidden rounded-[8px] bg-subtle border border-border-subtle">
+        <div className="h-[43px] w-[43px] shrink-0 overflow-hidden rounded-[8px] border border-border-subtle bg-subtle">
           {conversation.latest_thumbnail ? (
             <img
               src={toAssetUrl(conversation.latest_thumbnail)}
