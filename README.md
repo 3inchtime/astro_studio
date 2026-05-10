@@ -42,9 +42,9 @@ If you do not want your workflow tied to a single platform, Astro Studio is buil
 ## Compatibility Progress
 
 - [x] `gpt-image-2`
-- [ ] `nano banana` - adaptation testing in progress
-- [ ] `nano banana 2` - adaptation testing in progress
-- [ ] `nano banana pro` - adaptation testing in progress
+- [x] `nano banana`
+- [x] `nano banana 2`
+- [x] `nano banana pro`
 - [ ] More third-party image generation APIs
 
 ## Why This Product Exists
@@ -93,6 +93,16 @@ Compared with browser tools, Astro Studio emphasizes stability, focus, and repea
 - Continue editing and iterating from existing images
 - Search past results more efficiently
 - Manage the full creative process in a more stable desktop environment
+
+## Feature Screenshots
+
+| Generate Images | Extract Prompts |
+| --- | --- |
+| <img src="./doc/pics/generate.png" alt="Generate images" /> | <img src="./doc/pics/extract-prompt.png" alt="Extract prompts from images" /> |
+
+| API Management | Project Management |
+| --- | --- |
+| <img src="./doc/pics/api-management.png" alt="API management" /> | <img src="./doc/pics/project-management.png" alt="Project management" /> |
 
 ## Current Experience Highlights
 
