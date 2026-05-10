@@ -5,6 +5,7 @@ import ConversationList from "./ConversationList";
 
 const getConversations = vi.fn();
 const getProjects = vi.fn();
+const deleteConversation = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("react-i18next", () => ({
@@ -24,7 +25,7 @@ vi.mock("../../lib/api", () => ({
   getProjects: (...args: unknown[]) => getProjects(...args),
   archiveConversation: vi.fn(),
   createProject: vi.fn(),
-  deleteConversation: vi.fn(),
+  deleteConversation: (...args: unknown[]) => deleteConversation(...args),
   deleteProject: vi.fn(),
   moveConversationToProject: vi.fn(),
   pinConversation: vi.fn(),
@@ -42,7 +43,9 @@ describe("ConversationList", () => {
   beforeEach(() => {
     getProjects.mockReset();
     getConversations.mockReset();
+    deleteConversation.mockReset();
     navigate.mockReset();
+    deleteConversation.mockResolvedValue(undefined);
 
     getProjects.mockResolvedValue([
       {
@@ -85,6 +88,7 @@ describe("ConversationList", () => {
           onProjectCreated={vi.fn()}
           onSelectConversation={vi.fn()}
           onInitialConversation={vi.fn()}
+          onClearActiveConversation={vi.fn()}
           onNewConversation={vi.fn()}
         />
       </MemoryRouter>,
@@ -131,6 +135,7 @@ describe("ConversationList", () => {
           onProjectCreated={vi.fn()}
           onSelectConversation={vi.fn()}
           onInitialConversation={vi.fn()}
+          onClearActiveConversation={vi.fn()}
           onNewConversation={vi.fn()}
         />
       </MemoryRouter>,
@@ -142,5 +147,67 @@ describe("ConversationList", () => {
 
     expect(thumbnailImage).not.toBeNull();
     expect(thumbnailImage?.parentElement).toHaveClass("h-[43px]", "w-[43px]");
+  });
+
+  it("opens an in-app confirmation dialog before deleting a conversation", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <MemoryRouter>
+        <ConversationList
+          activeProjectId="project-1"
+          activeConversationId={null}
+          refreshKey={0}
+          onSelectProject={vi.fn()}
+          onProjectCreated={vi.fn()}
+          onSelectConversation={vi.fn()}
+          onInitialConversation={vi.fn()}
+          onClearActiveConversation={vi.fn()}
+          onNewConversation={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Homepage hero direction");
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.conversationActions" }));
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.delete" }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent("sidebar.deleteConversationConfirm");
+
+    confirmSpy.mockRestore();
+  });
+
+  it("clears the active conversation without navigating to the project page after deleting it", async () => {
+    const onSelectProject = vi.fn();
+    const onClearActiveConversation = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <ConversationList
+          activeProjectId="project-1"
+          activeConversationId="conversation-1"
+          refreshKey={0}
+          onSelectProject={onSelectProject}
+          onProjectCreated={vi.fn()}
+          onSelectConversation={vi.fn()}
+          onInitialConversation={vi.fn()}
+          onClearActiveConversation={onClearActiveConversation}
+          onNewConversation={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Homepage hero direction");
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.conversationActions" }));
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "projects.deleteConfirmAction" }));
+
+    await waitFor(() => {
+      expect(deleteConversation).toHaveBeenCalledWith("conversation-1");
+    });
+
+    expect(onClearActiveConversation).toHaveBeenCalledTimes(1);
+    expect(onSelectProject).not.toHaveBeenCalled();
   });
 });

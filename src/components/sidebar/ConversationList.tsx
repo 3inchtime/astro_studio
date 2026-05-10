@@ -32,6 +32,7 @@ import {
 } from "../../lib/api";
 import { formatConversationTime } from "../../lib/utils";
 import type { Conversation, Project } from "../../types";
+import ConfirmDialog from "../common/ConfirmDialog";
 
 interface ConversationListProps {
   activeProjectId: string | null;
@@ -41,6 +42,7 @@ interface ConversationListProps {
   onProjectCreated: (id: string) => void;
   onSelectConversation: (id: string) => void;
   onInitialConversation: (id: string) => void;
+  onClearActiveConversation: () => void;
   onNewConversation: () => void;
 }
 
@@ -55,6 +57,7 @@ export default function ConversationList({
   onSelectProject,
   onSelectConversation,
   onInitialConversation,
+  onClearActiveConversation,
   onNewConversation,
 }: ConversationListProps) {
   const navigate = useNavigate();
@@ -62,6 +65,9 @@ export default function ConversationList({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState("");
   const [openMenu, setOpenMenu] = useState<ActionMenu>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { t } = useTranslation();
 
   const loadProjects = useCallback(async () => {
@@ -126,11 +132,9 @@ export default function ConversationList({
       } else if (action === "unarchive") {
         await unarchiveConversation(conversation.id);
       } else if (action === "delete") {
-        if (!window.confirm(t("sidebar.deleteConversationConfirm"))) return;
-        await deleteConversation(conversation.id);
-        if (activeConversationId === conversation.id) {
-          onSelectProject(activeProjectId);
-        }
+        setDeleteTarget(conversation);
+        setDeleteError(null);
+        return;
       } else if (action.startsWith("move:")) {
         const projectId = action.slice("move:".length);
         await moveConversationToProject(conversation.id, projectId);
@@ -148,6 +152,32 @@ export default function ConversationList({
       t,
     ],
   );
+
+  const confirmDeleteConversation = useCallback(async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+
+    try {
+      await deleteConversation(deleteTarget.id);
+      if (activeConversationId === deleteTarget.id) {
+        onClearActiveConversation();
+      }
+      setDeleteTarget(null);
+      await loadAll(query);
+    } catch {
+      setDeleteError(t("projects.deleteConversationError"));
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [
+    activeConversationId,
+    deleteTarget,
+    loadAll,
+    onClearActiveConversation,
+    query,
+    t,
+  ]);
 
   return (
     <div className="flex h-full flex-col">
@@ -236,6 +266,22 @@ export default function ConversationList({
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={t("sidebar.deleteConversationConfirm")}
+        confirmLabel={t("projects.deleteConfirmAction")}
+        cancelLabel={t("projects.deleteCancel")}
+        loading={deleteLoading}
+        error={deleteError}
+        onConfirm={() => void confirmDeleteConversation()}
+        onCancel={() => {
+          if (!deleteLoading) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+      />
     </div>
   );
 }

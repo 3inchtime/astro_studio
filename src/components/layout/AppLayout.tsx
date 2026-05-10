@@ -213,6 +213,15 @@ export default function AppLayout() {
     setActiveConversationId((current) => current ?? id);
   }, []);
 
+  const clearActiveConversation = useCallback(() => {
+    setActiveConversationId(null);
+    if (activeProjectId && activeProjectId !== "default") {
+      navigate(`/projects/${activeProjectId}/chat`);
+    } else {
+      navigate("/generate");
+    }
+  }, [activeProjectId, navigate]);
+
   const createNewConversation = useCallback(() => {
     createConversation(undefined, activeProjectId)
       .then((conversation) => {
@@ -342,6 +351,7 @@ export default function AppLayout() {
                   onProjectCreated={selectCreatedProject}
                   onSelectConversation={selectConversation}
                   onInitialConversation={selectInitialConversation}
+                  onClearActiveConversation={clearActiveConversation}
                   onNewConversation={createNewConversation}
                 />
               )}
