@@ -92,7 +92,7 @@ jobs:
         run: |
           version="${RELEASE_TAG#v}"
           npm version "$version" --no-git-tag-version
-          npm pkg set "version=$version" --prefix src-tauri
+          RELEASE_VERSION="$version" node -e 'const fs = require("node:fs"); const path = "src-tauri/tauri.conf.json"; const config = JSON.parse(fs.readFileSync(path, "utf8")); config.version = process.env.RELEASE_VERSION; fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);'
         env:
           RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
 
