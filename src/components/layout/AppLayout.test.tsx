@@ -30,13 +30,18 @@ vi.mock("../sidebar/ConversationList", () => ({
   default: ({
     activeProjectId,
     activeConversationId,
+    onClearActiveConversation,
   }: {
     activeProjectId: string | null;
     activeConversationId: string | null;
+    onClearActiveConversation: () => void;
   }) => (
     <div data-testid="conversation-sidebar">
       <span data-testid="conversation-active-project">{activeProjectId ?? "none"}</span>
       <span data-testid="conversation-active-conversation">{activeConversationId ?? "none"}</span>
+      <button type="button" onClick={onClearActiveConversation}>
+        clear active conversation
+      </button>
     </div>
   ),
 }));
@@ -241,5 +246,31 @@ describe("AppLayout", () => {
       expect(screen.getByTestId("conversation-active-conversation")).toHaveTextContent("none");
     });
     expect(screen.getByText("generate")).toBeInTheDocument();
+  });
+
+  it("keeps project chat context when clearing the active project conversation", async () => {
+    render(
+      <MemoryRouter initialEntries={["/projects/project-1/chat/project-conversation-1"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/projects/:projectId/chat/:conversationId" element={<ProjectChatFixture />} />
+            <Route path="/projects/:projectId/chat" element={<div>project chat empty</div>} />
+            <Route path="/projects/:projectId" element={<div>project home</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-active-conversation")).toHaveTextContent("project-conversation-1");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "clear active conversation" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-active-conversation")).toHaveTextContent("none");
+    });
+    expect(screen.getByText("project chat empty")).toBeInTheDocument();
+    expect(screen.queryByText("project home")).not.toBeInTheDocument();
   });
 });
