@@ -8,6 +8,112 @@ pub struct Database {
     pub conn: Mutex<Connection>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db_path(prefix: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        dir.join("astro_studio.db")
+    }
+
+    fn table_has_column(conn: &Connection, table: &str, column: &str) -> bool {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare table info");
+        let has_column = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info")
+            .filter_map(|row| row.ok())
+            .any(|name| name == column);
+        has_column
+    }
+
+    fn migration_version_exists(conn: &Connection, version: i32) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
+            params![version],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query migration version")
+            != 0
+    }
+
+    fn create_legacy_database_with_recorded_v7_but_missing_conversation_columns(db_path: &Path) {
+        let conn = Connection::open(db_path).expect("open legacy test db");
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                archived_at TEXT,
+                pinned_at TEXT,
+                deleted_at TEXT
+            );
+            CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                project_id TEXT REFERENCES projects(id) ON DELETE SET NULL
+            );",
+        )
+        .expect("create legacy schema");
+
+        for version in 1..=13 {
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                params![version, crate::current_timestamp()],
+            )
+            .expect("insert migration version");
+        }
+    }
+
+    #[test]
+    fn fresh_database_migrations_create_required_project_and_conversation_columns() {
+        let db_path = test_db_path("astro-studio-fresh-migration-test");
+        let database = Database::open(&db_path).expect("open test db");
+
+        database.run_migrations().expect("run migrations");
+
+        {
+            let conn = database.conn.lock().expect("lock db");
+            assert!(table_has_column(&conn, "projects", "deleted_at"));
+            assert!(table_has_column(&conn, "conversations", "archived_at"));
+            assert!(table_has_column(&conn, "conversations", "pinned_at"));
+            assert!(table_has_column(&conn, "conversations", "deleted_at"));
+            assert!(migration_version_exists(&conn, 7));
+        }
+
+        std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
+    }
+
+    #[test]
+    fn migrations_repair_legacy_recorded_v7_missing_conversation_columns() {
+        let db_path = test_db_path("astro-studio-legacy-v7-repair-test");
+        create_legacy_database_with_recorded_v7_but_missing_conversation_columns(&db_path);
+        let database = Database::open(&db_path).expect("open test db");
+
+        database.run_migrations().expect("run migrations");
+
+        {
+            let conn = database.conn.lock().expect("lock db");
+            assert!(table_has_column(&conn, "projects", "deleted_at"));
+            assert!(table_has_column(&conn, "conversations", "archived_at"));
+            assert!(table_has_column(&conn, "conversations", "pinned_at"));
+            assert!(table_has_column(&conn, "conversations", "deleted_at"));
+        }
+
+        std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
+    }
+}
+
 fn ensure_schema_migrations(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -45,24 +151,57 @@ fn record_migration(conn: &Connection, version: i32) -> Result<(), AppError> {
 }
 
 fn execute_migration_sql(conn: &Connection, sql: &str) -> Result<(), AppError> {
-    conn.execute_batch(sql).or_else(|e| {
-        let msg = e.to_string();
-        if msg.contains("already exists") || msg.contains("duplicate column") {
-            Ok(())
-        } else {
-            Err(AppError::Database {
-                message: format!("Migration SQL failed: {}", msg),
-            })
-        }
-    })
+    for statement in sql
+        .split(';')
+        .map(str::trim)
+        .filter(|stmt| !stmt.is_empty())
+    {
+        conn.execute_batch(statement).or_else(|e| {
+            let msg = e.to_string();
+            if msg.contains("already exists") || msg.contains("duplicate column") {
+                Ok(())
+            } else {
+                Err(AppError::Database {
+                    message: format!("Migration SQL failed: {}", msg),
+                })
+            }
+        })?;
+    }
+
+    Ok(())
 }
 
-fn apply_migration(conn: &Connection, version: i32, _description: &str, sql: &str) -> Result<(), AppError> {
+fn apply_migration(
+    conn: &Connection,
+    version: i32,
+    _description: &str,
+    sql: &str,
+) -> Result<(), AppError> {
     if migration_applied(conn, version)? {
         return Ok(());
     }
     execute_migration_sql(conn, sql)?;
     record_migration(conn, version)
+}
+
+fn ensure_migration_compatibility(conn: &Connection) -> Result<(), AppError> {
+    execute_migration_sql(
+        conn,
+        "ALTER TABLE projects ADD COLUMN deleted_at TEXT;
+        ALTER TABLE conversations ADD COLUMN archived_at TEXT;
+        ALTER TABLE conversations ADD COLUMN pinned_at TEXT;
+        ALTER TABLE conversations ADD COLUMN deleted_at TEXT;
+        UPDATE conversations SET project_id = 'default' WHERE project_id IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_conversations_project_id ON conversations(project_id);
+        CREATE INDEX IF NOT EXISTS idx_conversations_pinned_at ON conversations(pinned_at);
+        CREATE INDEX IF NOT EXISTS idx_conversations_archived_at ON conversations(archived_at);
+        CREATE INDEX IF NOT EXISTS idx_conversations_deleted_at ON conversations(deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_projects_deleted_at ON projects(deleted_at);",
+    )
+    .map_err(|error| AppError::Database {
+        message: format!("Repair project conversation migration failed: {}", error),
+    })
 }
 
 impl Database {
@@ -325,6 +464,8 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_prompt_extractions_updated_at ON prompt_extractions(updated_at);",
         )?;
 
+        ensure_migration_compatibility(&conn)?;
+
         Ok(())
     }
 
@@ -443,11 +584,9 @@ impl Database {
         let all_refs: Vec<&dyn rusqlite::types::ToSql> =
             all_params.iter().map(|p| p.as_ref()).collect();
 
-        let mut stmt = conn
-            .prepare(&query_sql)
-            .map_err(|e| AppError::Database {
-                message: format!("search_logs query: {}", e),
-            })?;
+        let mut stmt = conn.prepare(&query_sql).map_err(|e| AppError::Database {
+            message: format!("search_logs query: {}", e),
+        })?;
         let logs = stmt
             .query_map(all_refs.as_slice(), |row| {
                 Ok(LogEntry {
