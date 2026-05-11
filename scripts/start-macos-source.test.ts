@@ -13,6 +13,11 @@ describe("macOS source startup script", () => {
     expect(mode & 0o111).toBeGreaterThan(0);
     expect(script).toContain('$(uname -s)');
     expect(script).toContain('"Darwin"');
+    expect(script).toContain("install_with_brew_if_missing npm node");
+    expect(script).toContain("install_with_brew_if_missing cargo rust");
+    expect(script).toContain("brew install \"$formula\"");
+    expect(script).toContain("Homebrew is required");
+    expect(script).toContain("https://brew.sh");
     expect(script).toContain("npm install");
     expect(script).toContain("cargo fetch --manifest-path src-tauri/Cargo.toml");
     expect(script).toContain("npm run tauri dev");

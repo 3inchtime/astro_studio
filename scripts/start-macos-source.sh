@@ -14,15 +14,31 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-if ! command -v npm >/dev/null 2>&1; then
-    echo "Error: npm is not installed. Install Node.js 22+ and npm 11+ first."
-    exit 1
-fi
+ensure_brew_available() {
+    if command -v brew >/dev/null 2>&1; then
+        return
+    fi
 
-if ! command -v cargo >/dev/null 2>&1; then
-    echo "Error: cargo is not installed. Install the Rust stable toolchain first."
+    echo "Error: Homebrew is required to install missing dependencies."
+    echo "Install Homebrew first: https://brew.sh"
     exit 1
-fi
+}
+
+install_with_brew_if_missing() {
+    local command_name="$1"
+    local formula="$2"
+
+    if command -v "$command_name" >/dev/null 2>&1; then
+        return
+    fi
+
+    ensure_brew_available
+    echo "'$command_name' is missing. Installing '$formula' with Homebrew..."
+    brew install "$formula"
+}
+
+install_with_brew_if_missing npm node
+install_with_brew_if_missing cargo rust
 
 echo "Installing frontend dependencies..."
 npm install
