@@ -154,6 +154,12 @@ npm install
 npm run tauri dev
 ```
 
+在 macOS 上，也可以用一条命令自动安装依赖、拉取 Rust crates、编译并从源码启动：
+
+```bash
+./scripts/start-macos-source.sh
+```
+
 如果你只想单独启动前端页面：
 
 ```bash

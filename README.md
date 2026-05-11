@@ -154,6 +154,12 @@ Start the desktop app in development mode:
 npm run tauri dev
 ```
 
+On macOS, you can install dependencies, fetch Rust crates, compile, and start from source with one command:
+
+```bash
+./scripts/start-macos-source.sh
+```
+
 If you only want to run the frontend in the browser:
 
 ```bash
