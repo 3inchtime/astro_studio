@@ -627,7 +627,6 @@ export default function GeneratePage() {
         textareaRef={textareaRef}
         prompt={prompt}
         imageModel={imageModel}
-        size={size}
         quality={quality}
         background={background}
         outputFormat={outputFormat}
@@ -641,10 +640,6 @@ export default function GeneratePage() {
           setPrompt(value);
         }}
         onModelChange={handleModelChange}
-        onSizeChange={(value) => {
-          markComposerDraftStarted();
-          setSize(value);
-        }}
         onQualityChange={(value) => {
           markComposerDraftStarted();
           setQuality(value);

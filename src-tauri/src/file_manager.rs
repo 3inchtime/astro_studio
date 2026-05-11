@@ -1,6 +1,6 @@
 use image::{GenericImageView, ImageFormat};
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -15,23 +15,6 @@ pub fn extension_for_output_format(output_format: &str) -> &'static str {
         "jpeg" | "jpg" => "jpeg",
         "webp" => "webp",
         _ => "png",
-    }
-}
-
-pub fn output_format_for_extension(extension: &str) -> Option<&'static str> {
-    match extension.to_ascii_lowercase().as_str() {
-        "png" => Some("png"),
-        "jpg" | "jpeg" => Some("jpeg"),
-        "webp" => Some("webp"),
-        _ => None,
-    }
-}
-
-fn image_format_for_output_format(output_format: &str) -> ImageFormat {
-    match extension_for_output_format(output_format) {
-        "jpeg" => ImageFormat::Jpeg,
-        "webp" => ImageFormat::WebP,
-        _ => ImageFormat::Png,
     }
 }
 
@@ -61,31 +44,15 @@ fn temporary_output_path(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{}.{}.tmp", file_name, uuid::Uuid::new_v4()))
 }
 
-pub fn write_image_in_output_format(
-    img: &image::DynamicImage,
-    path: &Path,
-    output_format: &str,
-) -> Result<i64, String> {
+fn write_original_image_bytes(data: &[u8], path: &Path) -> Result<i64, String> {
     let temp_path = temporary_output_path(path);
-    let format = image_format_for_output_format(output_format);
+    let mut file = File::create(&temp_path).map_err(|e| format!("Create image failed: {}", e))?;
+    file.write_all(data)
+        .map_err(|e| format!("Write image failed: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Sync image failed: {}", e))?;
 
-    if format == ImageFormat::Jpeg {
-        let rgb = img.to_rgb8();
-        let (width, height) = rgb.dimensions();
-        let file = File::create(&temp_path).map_err(|e| format!("Create image failed: {}", e))?;
-        let mut writer = BufWriter::new(file);
-        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 95);
-        encoder
-            .encode(rgb.as_raw(), width, height, image::ColorType::Rgb8.into())
-            .map_err(|e| format!("Encode jpeg failed: {}", e))?;
-    } else {
-        img.save_with_format(&temp_path, format)
-            .map_err(|e| format!("Encode image failed: {}", e))?;
-    }
-
-    let file_size = std::fs::metadata(&temp_path)
-        .map_err(|e| format!("Read image metadata failed: {}", e))?
-        .len() as i64;
+    let file_size = data.len() as i64;
 
     if path.exists() {
         std::fs::remove_file(path).map_err(|e| format!("Replace image failed: {}", e))?;
@@ -129,7 +96,8 @@ impl FileManager {
         let img =
             image::load_from_memory(data).map_err(|e| format!("Decode image failed: {}", e))?;
         let (width, height) = img.dimensions();
-        let extension = extension_for_output_format(output_format);
+        let extension =
+            detected_image_extension(data).unwrap_or_else(|| extension_for_output_format(output_format));
         let filename = format!("{}.{}", generation_id, extension);
 
         let image_dir = self.base_dir.join("images").join(&date_path);
@@ -137,7 +105,7 @@ impl FileManager {
             .map_err(|e| format!("Create date dir failed: {}", e))?;
 
         let file_path = image_dir.join(&filename);
-        let file_size = write_image_in_output_format(&img, &file_path, output_format)?;
+        let file_size = write_original_image_bytes(data, &file_path)?;
 
         let thumb_path = self.generate_thumbnail(&img, &date_path, generation_id)?;
 
@@ -214,50 +182,26 @@ mod tests {
     }
 
     #[test]
-    fn save_image_uses_requested_extension_when_response_format_differs() {
-        let base_dir = test_base_dir();
-        let manager = FileManager::new(base_dir.clone());
-        let saved = manager
-            .save_image_at(
-                "jpeg-response",
-                &jpeg_bytes(),
-                "png",
-                Some("2026-04-29T05:57:11Z"),
-            )
-            .expect("save jpeg response");
-
-        assert!(
-            saved.file_path.ends_with("jpeg-response.png"),
-            "expected requested png extension, got {}",
-            saved.file_path
-        );
-        assert!(std::path::Path::new(&saved.file_path).exists());
-        assert!(std::path::Path::new(&saved.thumbnail_path).exists());
-
-        std::fs::remove_dir_all(base_dir).ok();
-    }
-
-    #[test]
-    fn save_image_normalizes_response_bytes_to_requested_output_format() {
+    fn save_image_preserves_response_bytes_without_reencoding() {
         let base_dir = test_base_dir();
         let manager = FileManager::new(base_dir.clone());
         let source = jpeg_bytes();
         let saved = manager
             .save_image_at(
-                "normalized-response",
+                "original-response",
                 &source,
                 "png",
                 Some("2026-04-29T06:18:01Z"),
             )
-            .expect("save normalized response");
-        let saved_data = std::fs::read(&saved.file_path).expect("read normalized image");
+            .expect("save original response");
+        let saved_data = std::fs::read(&saved.file_path).expect("read saved image");
 
         assert!(
-            saved.file_path.ends_with("normalized-response.png"),
-            "expected requested png extension, got {}",
+            saved.file_path.ends_with("original-response.jpeg"),
+            "expected detected jpeg extension, got {}",
             saved.file_path
         );
-        assert_eq!(detected_image_extension(&saved_data), Some("png"));
+        assert_eq!(saved_data, source);
         assert_eq!(saved.file_size, saved_data.len() as i64);
 
         std::fs::remove_dir_all(base_dir).ok();

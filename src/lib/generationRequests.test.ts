@@ -33,7 +33,6 @@ describe("generation request helpers", () => {
     expect(buildGenerationParams(request())).toEqual({
       prompt: "A luminous glass observatory",
       model: "gpt-image-2",
-      size: "1536x1024",
       quality: "high",
       background: "transparent",
       outputFormat: "webp",
@@ -54,7 +53,6 @@ describe("generation request helpers", () => {
     ).toEqual({
       prompt: "A luminous glass observatory",
       model: "nano-banana",
-      size: "1536x1024",
       imageCount: 3,
       conversationId: "conversation-1",
       projectId: "project-1",
@@ -83,7 +81,6 @@ describe("generation request helpers", () => {
     ).toEqual({
       prompt: "A luminous glass observatory",
       model: "nano-banana",
-      size: "1536x1024",
       imageCount: 3,
       conversationId: "conversation-1",
       projectId: "project-1",
@@ -95,7 +92,6 @@ describe("generation request helpers", () => {
     expect(buildEditParams(request())).toEqual({
       prompt: "A luminous glass observatory",
       model: "gpt-image-2",
-      size: "1536x1024",
       quality: "high",
       background: "transparent",
       outputFormat: "webp",

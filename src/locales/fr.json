@@ -292,6 +292,15 @@
     "square": "Carré",
     "landscape": "Paysage",
     "portrait": "Portrait",
+    "size": {
+      "square1k": "Carré 1K",
+      "landscape1k": "Paysage 1K",
+      "portrait1k": "Portrait 1K",
+      "square2k": "Carré 2K",
+      "landscape2k": "Paysage 2K",
+      "landscape4k": "Paysage 4K",
+      "portrait4k": "Portrait 4K"
+    },
     "modelLabel": "Modèle",
     "sizeLabel": "Taille",
     "qualityLabel": "Qualité",

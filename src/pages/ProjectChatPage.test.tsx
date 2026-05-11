@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectChatPage from "./ProjectChatPage";
@@ -39,7 +39,7 @@ describe("ProjectChatPage", () => {
     setActiveConversationId.mockReset();
   });
 
-  it("shows a clear back button that returns to the projects list", () => {
+  it("does not render a duplicate back-to-projects button inside the chat area", () => {
     render(
       <MemoryRouter initialEntries={["/projects/project-1/chat/conversation-1"]}>
         <Routes>
@@ -48,8 +48,9 @@ describe("ProjectChatPage", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "projects.backToList" }));
-
-    expect(navigate).toHaveBeenCalledWith("/projects");
+    expect(
+      screen.queryByRole("button", { name: "projects.backToList" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("generate-page")).toBeInTheDocument();
   });
 });

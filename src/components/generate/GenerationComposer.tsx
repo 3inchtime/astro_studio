@@ -17,16 +17,8 @@ import type {
   ImageModel,
   ImageOutputFormat,
   ImageQuality,
-  ImageSize,
 } from "../../types";
 import OptimizePromptModal from "./OptimizePromptModal";
-
-const sizes: { value: ImageSize; label: string; descKey: string }[] = [
-  { value: "auto", label: "Auto", descKey: "generate.auto" },
-  { value: "1024x1024", label: "1:1", descKey: "generate.square" },
-  { value: "1536x1024", label: "3:2", descKey: "generate.landscape" },
-  { value: "1024x1536", label: "2:3", descKey: "generate.portrait" },
-];
 
 const qualityOptions: ImageQuality[] = ["auto", "high", "medium", "low"];
 const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
@@ -39,7 +31,6 @@ interface GenerationComposerProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   prompt: string;
   imageModel: ImageModel;
-  size: ImageSize;
   quality: ImageQuality;
   background: ImageBackground;
   outputFormat: ImageOutputFormat;
@@ -50,7 +41,6 @@ interface GenerationComposerProps {
   editingPromptMessageId: string | null;
   onPromptChange: (value: string) => void;
   onModelChange: (model: ImageModel) => void;
-  onSizeChange: (size: ImageSize) => void;
   onQualityChange: (quality: ImageQuality) => void;
   onBackgroundChange: (background: ImageBackground) => void;
   onOutputFormatChange: (outputFormat: ImageOutputFormat) => void;
@@ -69,7 +59,6 @@ export default function GenerationComposer({
   textareaRef,
   prompt,
   imageModel,
-  size,
   quality,
   background,
   outputFormat,
@@ -80,7 +69,6 @@ export default function GenerationComposer({
   editingPromptMessageId,
   onPromptChange,
   onModelChange,
-  onSizeChange,
   onQualityChange,
   onBackgroundChange,
   onOutputFormatChange,
@@ -231,7 +219,6 @@ export default function GenerationComposer({
   // ── Model catalog ───────────────────────────────────────────────────────────
   const modelCatalogEntry = getImageModelCatalogEntry(imageModel);
   const { parameterCapabilities } = modelCatalogEntry;
-  const showSize = parameterCapabilities.sizes.length > 0;
   const showQuality = parameterCapabilities.qualities.length > 1;
   const showBackground = parameterCapabilities.backgrounds.length > 1;
   const showImageCount = parameterCapabilities.imageCounts.length > 0;
@@ -244,7 +231,6 @@ export default function GenerationComposer({
     parameterCapabilities.inputFidelityOptions.length > 1;
   const parameterColumnCount = [
     true,
-    showSize,
     showQuality,
     showBackground,
     showImageCount,
@@ -277,21 +263,6 @@ export default function GenerationComposer({
                 label: t(entry.i18nKey),
               }))}
             />
-            {showSize && (
-              <SelectField
-                label={t("generate.sizeLabel")}
-                value={size}
-                onChange={(value) => onSizeChange(value as ImageSize)}
-                options={sizes
-                  .filter((item) =>
-                    parameterCapabilities.sizes.includes(item.value),
-                  )
-                  .map((item) => ({
-                    value: item.value,
-                    label: `${item.label} · ${t(item.descKey)}`,
-                  }))}
-              />
-            )}
             {showQuality && (
               <SelectField
                 label={t("generate.qualityLabel")}

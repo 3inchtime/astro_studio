@@ -20,7 +20,6 @@ export function buildGenerationParams(
   return {
     prompt: request.prompt,
     model: request.model,
-    ...(capabilities.sizes.length > 0 ? { size: request.size } : {}),
     ...(capabilities.qualities.length > 1 ? { quality: request.quality } : {}),
     ...(capabilities.backgrounds.length > 1
       ? { background: request.background }

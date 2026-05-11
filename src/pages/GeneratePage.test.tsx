@@ -69,6 +69,13 @@ vi.mock("react-i18next", () => ({
         "generate.square": "Square",
         "generate.landscape": "Landscape",
         "generate.portrait": "Portrait",
+        "generate.size.square1k": "Square 1K",
+        "generate.size.landscape1k": "Landscape 1K",
+        "generate.size.portrait1k": "Portrait 1K",
+        "generate.size.square2k": "Square 2K",
+        "generate.size.landscape2k": "Landscape 2K",
+        "generate.size.landscape4k": "Landscape 4K",
+        "generate.size.portrait4k": "Portrait 4K",
         "generate.quality.auto": "Auto",
         "generate.quality.high": "High",
         "generate.quality.medium": "Medium",
@@ -298,6 +305,31 @@ describe("GeneratePage", () => {
     );
   });
 
+  it("hides the size selector and omits size from new generation requests", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A quiet moonlit observatory" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => {
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-image-2",
+          prompt: "A quiet moonlit observatory",
+        }),
+      );
+    });
+    expect(generateImage.mock.calls[0][0]).not.toHaveProperty("size");
+  });
+
   it("loads a sent prompt back into the composer when editing", async () => {
     render(<GeneratePage />, { wrapper: TestWrapper });
 
@@ -520,9 +552,7 @@ describe("GeneratePage", () => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
     });
 
-    fireEvent.change(screen.getByLabelText("Size"), {
-      target: { value: "1536x1024" },
-    });
+    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Quality"), {
       target: { value: "high" },
     });
@@ -552,9 +582,7 @@ describe("GeneratePage", () => {
       expect(saveImageModel).toHaveBeenCalledWith("nano-banana");
     });
 
-    expect(screen.getByLabelText("Size")).toHaveValue(
-      geminiEntry.parameterDefaults.size,
-    );
+    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Count")).toHaveValue(
       String(geminiEntry.parameterDefaults.imageCount),
     );
@@ -583,11 +611,11 @@ describe("GeneratePage", () => {
           prompt: "A polished chrome crane",
           model: "nano-banana",
           sourceImagePaths: ["/tmp/source-edit.png"],
-          size: geminiEntry.parameterDefaults.size,
           imageCount: geminiEntry.parameterDefaults.imageCount,
         }),
       );
     });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("size");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("quality");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("background");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
@@ -607,9 +635,7 @@ describe("GeneratePage", () => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
     });
 
-    fireEvent.change(screen.getByLabelText("Size"), {
-      target: { value: "1536x1024" },
-    });
+    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Upload Source" }));
 
     await waitFor(() => {
@@ -656,12 +682,12 @@ describe("GeneratePage", () => {
         expect.objectContaining({
           model: "nano-banana",
           prompt: "Turn it into etched silver",
-          size: "1536x1024",
           imageCount: 1,
           sourceImagePaths: ["/tmp/hydration-source.png"],
         }),
       );
     });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("size");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("quality");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("background");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
