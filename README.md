@@ -160,6 +160,12 @@ On macOS, you can install dependencies, fetch Rust crates, compile, and start fr
 ./scripts/start-macos-source.sh
 ```
 
+To build a runnable macOS app bundle from source:
+
+```bash
+./scripts/build-macos-source.sh
+```
+
 If you only want to run the frontend in the browser:
 
 ```bash

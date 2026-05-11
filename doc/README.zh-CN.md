@@ -160,6 +160,12 @@ npm run tauri dev
 ./scripts/start-macos-source.sh
 ```
 
+如果要从源码编译出可运行的 macOS 应用包：
+
+```bash
+./scripts/build-macos-source.sh
+```
+
 如果你只想单独启动前端页面：
 
 ```bash
