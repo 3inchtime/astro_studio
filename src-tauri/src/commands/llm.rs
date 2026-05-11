@@ -10,29 +10,25 @@ const MAX_ENABLED_TEXT_CONFIGS: usize = 1;
 const MAX_ENABLED_MULTIMODAL_CONFIGS: usize = 2;
 
 const OPTIMIZE_PROMPT_SYSTEM_PROMPT: &str = "\
-You are an expert at writing prompts for AI image generation models. \
-When the user provides a prompt, improve it by following these rules:\n\
-1. Add specific details about composition, lighting, color, mood, and style\n\
-2. Use descriptive, visual language — paint a picture with words\n\
-3. Specify image quality keywords where appropriate (e.g., high resolution, detailed, photorealistic)\n\
-4. Keep the original intent and subject matter intact\n\
-5. Preserve the language of the user's input — output in the same language the user used\n\
-6. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
-7. Keep the output concise — at most 3-4 sentences unless the original prompt is very detailed";
+You are an expert prompt editor for modern AI image generation models, running through a text-only or multimodal LLM. \
+Rewrite the user's prompt into one production-ready image prompt.\n\
+1. Preserve the user's subject, intent, language, and any explicit constraints\n\
+2. Add concrete visual details only when they help: composition, camera angle, lighting, color palette, materials, texture, setting, atmosphere, and style\n\
+3. Prefer natural, imageable language over generic quality tags; use quality terms sparingly and only when useful\n\
+4. Remove ambiguity, filler, contradictions, and chatty wording without changing the request\n\
+5. Keep the result concise and directly usable, usually 1-3 sentences\n\
+6. Output ONLY the improved prompt text, with no labels, explanations, bullets, quotes, or meta-commentary";
 
 const OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT: &str = "\
-You are an expert at writing prompts for AI image generation models. \
-The user has provided one or more reference images along with their prompt. \
-Analyze the images carefully — note the subject, composition, lighting, color palette, \
-mood, style, textures, and any notable details. Then improve the user's prompt by:\n\
-1. Describing visual elements from the reference images that should be preserved or enhanced\n\
-2. Adding specific details about composition, lighting, color, mood, and style inspired by the images\n\
-3. Using descriptive, visual language that captures the essence of the reference images\n\
-4. Specifying image quality keywords where appropriate (e.g., high resolution, detailed, photorealistic)\n\
-5. Keeping the user's original intent intact while leveraging visual context from the images\n\
-6. Preserving the language of the user's input — output in the same language the user used\n\
-7. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
-8. Keeping the output concise — at most 3-4 sentences unless the original prompt is very detailed";
+You are an expert prompt editor for AI image generation with reference images. \
+Use the user's prompt as the main instruction and the images as visual context.\n\
+1. Preserve the user's requested edit, subject, language, and explicit constraints\n\
+2. Pull in only relevant image details: subject identity, layout, pose, lighting, palette, materials, texture, style, and mood\n\
+3. Make the instruction clear enough for an image model to follow without over-describing invisible details\n\
+4. For image editing, describe what should change and what should stay consistent\n\
+5. Prefer natural, imageable language over generic quality tags\n\
+6. Keep the result concise and directly usable, usually 1-3 sentences\n\
+7. Output ONLY the improved prompt text, with no labels, explanations, bullets, quotes, or meta-commentary";
 
 const EXTRACT_PROMPT_FROM_IMAGE_SYSTEM_PROMPT: &str = "\
 You are an expert at reverse-engineering prompts for AI image generation models from reference images. \
@@ -262,6 +258,36 @@ fn resolve_multimodal_config<'a>(
         })
 }
 
+fn resolve_prompt_optimization_config<'a>(
+    configs: &'a [LlmConfig],
+    config_id: &str,
+) -> Result<&'a LlmConfig, AppError> {
+    let config =
+        configs
+            .iter()
+            .find(|c| c.id == config_id)
+            .ok_or_else(|| AppError::Validation {
+                message: format!("LLM config not found: {}", config_id),
+            })?;
+
+    if config.capability != "text" && config.capability != "multimodal" {
+        return Err(AppError::Validation {
+            message: format!(
+                "LLM config '{}' has unsupported capability '{}'",
+                config.name, config.capability
+            ),
+        });
+    }
+
+    if !config.enabled {
+        return Err(AppError::Validation {
+            message: format!("LLM config '{}' is disabled", config.name),
+        });
+    }
+
+    Ok(config)
+}
+
 fn insert_prompt_extraction(
     db: &Database,
     image_path: &str,
@@ -388,28 +414,7 @@ pub(crate) async fn optimize_prompt(
     let config = if has_images {
         resolve_multimodal_config(&configs, &config_id)?
     } else {
-        let config = configs.iter().find(|c| c.id == config_id).ok_or_else(|| {
-            AppError::Validation {
-                message: format!("LLM config not found: {}", config_id),
-            }
-        })?;
-
-        if config.capability != "text" {
-            return Err(AppError::Validation {
-                message: format!(
-                    "LLM config '{}' has capability '{}' — only text models are supported for prompt optimization without images",
-                    config.name, config.capability
-                ),
-            });
-        }
-
-        if !config.enabled {
-            return Err(AppError::Validation {
-                message: format!("LLM config '{}' is disabled", config.name),
-            });
-        }
-
-        config
+        resolve_prompt_optimization_config(&configs, &config_id)?
     };
 
     log::info!(
@@ -590,6 +595,32 @@ mod tests {
         let system_prompt = build_extract_prompt_from_image_system_prompt("zh-CN");
 
         assert!(system_prompt.contains("Simplified Chinese (zh-CN)"));
+    }
+
+    #[test]
+    fn text_prompt_optimization_prompt_allows_multimodal_llms() {
+        assert!(
+            OPTIMIZE_PROMPT_SYSTEM_PROMPT.contains("text-only or multimodal LLM"),
+            "text prompt optimization should document that multimodal configs are valid without reference images",
+        );
+    }
+
+    #[test]
+    fn resolves_multimodal_config_for_text_prompt_optimization() {
+        let configs = vec![LlmConfig {
+            id: "vision-helper".to_string(),
+            name: "Vision Helper".to_string(),
+            protocol: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            api_key: "sk-vision".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            capability: "multimodal".to_string(),
+            enabled: true,
+        }];
+
+        let config = resolve_prompt_optimization_config(&configs, "vision-helper").unwrap();
+
+        assert_eq!(config.id, "vision-helper");
     }
 
     #[test]
