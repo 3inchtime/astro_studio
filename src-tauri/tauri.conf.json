@@ -46,9 +46,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "YOUR_PUBLIC_KEY_HERE",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFMENFRTMyNjY5MTc3NTgKUldSWWQ1Rm1NdTRNanJmTm5FbU56M3JmaE4zSkg2MEl5bzNZUjZLK3hSdjBDaDlLR2xQUHBqb0cK",
       "endpoints": [
-        "https://github.com/YOUR_USERNAME/astro_studio/releases/latest/download/latest.json"
+        "https://github.com/3inchtime/astro_studio/releases/latest/download/latest.json"
       ]
     }
   }
