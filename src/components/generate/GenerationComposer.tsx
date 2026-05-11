@@ -532,29 +532,27 @@ export default function GenerationComposer({
                   )}
 
               {/* Optimize button */}
-              {(hasEditSources ? enabledMultimodalConfigs.length > 0 : enabledTextConfigs.length > 0) && (
-                <motion.button
-                  type="button"
-                  onClick={handleOptimize}
-                  disabled={!canOptimize}
-                  aria-label={t("generate.llm.optimize")}
-                  title={
-                    hasEditSources
-                      ? t("generate.llm.optimizeWithImages")
-                      : t("generate.llm.optimizeTitle")
-                  }
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary disabled:pointer-events-none disabled:opacity-30"
-                >
-                  {optimizeMutation.isPending ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Sparkles size={14} />
-                  )}
-                  <span className="hidden sm:inline">{t("generate.llm.optimize")}</span>
-                </motion.button>
-              )}
+              <motion.button
+                type="button"
+                onClick={handleOptimize}
+                disabled={!canOptimize}
+                aria-label={t("generate.llm.optimize")}
+                title={
+                  hasEditSources
+                    ? t("generate.llm.optimizeWithImages")
+                    : t("generate.llm.optimizeTitle")
+                }
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary disabled:pointer-events-none disabled:opacity-30"
+              >
+                {optimizeMutation.isPending ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                <span className="hidden sm:inline">{t("generate.llm.optimize")}</span>
+              </motion.button>
 
               {/* Send button */}
               <motion.button
