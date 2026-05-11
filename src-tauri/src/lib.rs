@@ -14,7 +14,6 @@ mod runtime_logs;
 use chrono::{SecondsFormat, Utc};
 use db::Database;
 use error::AppError;
-use model_registry::is_gemini_model;
 use models::*;
 use rusqlite::{params, Connection};
 use tauri::Manager;
@@ -76,22 +75,6 @@ fn repaired_image_path(path: &std::path::Path, extension: &str) -> std::path::Pa
     ))
 }
 
-fn target_repair_output_format(
-    engine: &str,
-    path: &std::path::Path,
-    detected_extension: &str,
-) -> &'static str {
-    if is_gemini_model(engine) && normalized_path_extension(path).as_deref() != Some("png") {
-        return "png";
-    }
-
-    normalized_path_extension(path)
-        .as_deref()
-        .and_then(file_manager::output_format_for_extension)
-        .or_else(|| file_manager::output_format_for_extension(detected_extension))
-        .unwrap_or("png")
-}
-
 fn repair_mismatched_image_extensions(db: &Database) -> Result<usize, AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
@@ -117,7 +100,7 @@ fn repair_mismatched_image_extensions(db: &Database) -> Result<usize, AppError> 
     };
 
     let mut repaired = 0;
-    for (image_id, file_path, engine) in rows {
+    for (image_id, file_path, _engine) in rows {
         let path = std::path::PathBuf::from(&file_path);
         if !path.is_file() {
             continue;
@@ -136,37 +119,21 @@ fn repair_mismatched_image_extensions(db: &Database) -> Result<usize, AppError> 
         let Some(detected_extension) = file_manager::detected_image_extension(&data) else {
             continue;
         };
-        let output_format = target_repair_output_format(&engine, &path, detected_extension);
-        let target_extension = file_manager::extension_for_output_format(output_format);
-
-        if normalized_path_extension(&path).as_deref() == Some(target_extension)
-            && detected_extension == target_extension
-        {
+        if normalized_path_extension(&path).as_deref() == Some(detected_extension) {
             continue;
         }
 
-        let img = image::load_from_memory(&data)
-            .map_err(|e| AppError::FileSystem {
-                message: format!("Decode image for repair failed: {}", e),
-            })?;
-        let next_path = if normalized_path_extension(&path).as_deref() == Some(target_extension) {
-            path.clone()
-        } else {
-            repaired_image_path(&path, target_extension)
-        };
-        let file_size =
-            file_manager::write_image_in_output_format(&img, &next_path, output_format)?;
-        if next_path != path {
-            let _ = std::fs::remove_file(&path);
-        }
+        let next_path = repaired_image_path(&path, detected_extension);
+        std::fs::rename(&path, &next_path).map_err(|e| AppError::FileSystem {
+            message: format!("Rename image for extension repair failed: {}", e),
+        })?;
+        let file_size = data.len() as i64;
         let next_path_str = next_path.to_string_lossy().to_string();
         if let Err(e) = conn.execute(
             "UPDATE images SET file_path = ?1, file_size = ?2 WHERE id = ?3",
             params![next_path_str, file_size, image_id],
         ) {
-            if next_path != path {
-                let _ = std::fs::rename(&next_path, &path);
-            }
+            let _ = std::fs::rename(&next_path, &path);
             return Err(AppError::Database {
                 message: format!("Update repaired image path failed: {}", e),
             });
@@ -719,7 +686,8 @@ mod image_repair_tests {
             .parent()
             .expect("db parent")
             .join("bad-extension.png");
-        std::fs::write(&image_path, jpeg_bytes()).expect("write mismatched image");
+        let source = jpeg_bytes();
+        std::fs::write(&image_path, &source).expect("write mismatched image");
 
         {
             let conn = database.conn.lock().expect("lock db");
@@ -755,12 +723,9 @@ mod image_repair_tests {
 
         let repaired_data = std::fs::read(&repaired_path).expect("read repaired image");
 
-        assert!(repaired_path.ends_with("bad-extension.png"));
-        assert!(image_path.exists());
-        assert_eq!(
-            file_manager::detected_image_extension(&repaired_data),
-            Some("png")
-        );
+        assert!(repaired_path.ends_with("bad-extension.jpeg"));
+        assert!(!image_path.exists());
+        assert_eq!(repaired_data, source);
 
         std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
     }
@@ -774,7 +739,8 @@ mod image_repair_tests {
             .parent()
             .expect("db parent")
             .join("legacy-gemini.jpeg");
-        std::fs::write(&image_path, jpeg_bytes()).expect("write legacy image");
+        let source = jpeg_bytes();
+        std::fs::write(&image_path, &source).expect("write legacy image");
 
         {
             let conn = database.conn.lock().expect("lock db");
@@ -809,12 +775,9 @@ mod image_repair_tests {
         };
         let repaired_data = std::fs::read(&repaired_path).expect("read repaired image");
 
-        assert!(repaired_path.ends_with("legacy-gemini.png"));
-        assert!(!image_path.exists());
-        assert_eq!(
-            file_manager::detected_image_extension(&repaired_data),
-            Some("png")
-        );
+        assert!(repaired_path.ends_with("legacy-gemini.jpeg"));
+        assert!(image_path.exists());
+        assert_eq!(repaired_data, source);
 
         std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
     }

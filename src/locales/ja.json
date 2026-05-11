@@ -292,6 +292,15 @@
     "square": "正方形",
     "landscape": "横長",
     "portrait": "縦長",
+    "size": {
+      "square1k": "1K 正方形",
+      "landscape1k": "1K 横長",
+      "portrait1k": "1K 縦長",
+      "square2k": "2K 正方形",
+      "landscape2k": "2K 横長",
+      "landscape4k": "4K 横長",
+      "portrait4k": "4K 縦長"
+    },
     "modelLabel": "モデル",
     "sizeLabel": "サイズ",
     "qualityLabel": "品質",

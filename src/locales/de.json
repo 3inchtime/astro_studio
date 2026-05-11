@@ -292,6 +292,15 @@
     "square": "Quadrat",
     "landscape": "Querformat",
     "portrait": "Hochformat",
+    "size": {
+      "square1k": "Quadrat 1K",
+      "landscape1k": "Querformat 1K",
+      "portrait1k": "Hochformat 1K",
+      "square2k": "Quadrat 2K",
+      "landscape2k": "Querformat 2K",
+      "landscape4k": "Querformat 4K",
+      "portrait4k": "Hochformat 4K"
+    },
     "modelLabel": "Modell",
     "sizeLabel": "Größe",
     "qualityLabel": "Qualität",

@@ -213,11 +213,6 @@ export default function Lightbox({
               }}
               onDoubleClick={toggleZoom}
               onClick={(e) => e.stopPropagation()}
-              onError={() => {
-                if (currentImage.thumbnailPath && displayPath !== currentImage.thumbnailPath) {
-                  setDisplayPath(currentImage.thumbnailPath);
-                }
-              }}
               draggable={false}
             />
           </motion.div>

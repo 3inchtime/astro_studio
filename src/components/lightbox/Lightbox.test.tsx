@@ -92,7 +92,7 @@ describe("Lightbox", () => {
     });
   });
 
-  it("falls back to the thumbnail when the full-resolution lightbox image fails", () => {
+  it("keeps the full-resolution source for the lightbox image", () => {
     render(
       <Lightbox
         images={[
@@ -111,7 +111,7 @@ describe("Lightbox", () => {
     const image = screen.getByAltText("Preview");
     fireEvent.error(image);
 
-    expect(image).toHaveAttribute("src", "/tmp/thumb.png");
+    expect(image).toHaveAttribute("src", "/tmp/image.jpeg");
   });
 
   it("closes when clicking the empty preview area but not the image itself", () => {

@@ -292,6 +292,15 @@
     "square": "Cuadrado",
     "landscape": "Horizontal",
     "portrait": "Vertical",
+    "size": {
+      "square1k": "Cuadrado 1K",
+      "landscape1k": "Horizontal 1K",
+      "portrait1k": "Vertical 1K",
+      "square2k": "Cuadrado 2K",
+      "landscape2k": "Horizontal 2K",
+      "landscape4k": "Horizontal 4K",
+      "portrait4k": "Vertical 4K"
+    },
     "modelLabel": "Modelo",
     "sizeLabel": "Tamaño",
     "qualityLabel": "Calidad",

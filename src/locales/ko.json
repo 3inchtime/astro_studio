@@ -292,6 +292,15 @@
     "square": "정사각형",
     "landscape": "가로",
     "portrait": "세로",
+    "size": {
+      "square1k": "1K 정사각형",
+      "landscape1k": "1K 가로",
+      "portrait1k": "1K 세로",
+      "square2k": "2K 정사각형",
+      "landscape2k": "2K 가로",
+      "landscape4k": "4K 가로",
+      "portrait4k": "4K 세로"
+    },
     "modelLabel": "모델",
     "sizeLabel": "크기",
     "qualityLabel": "품질",
