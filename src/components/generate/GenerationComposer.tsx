@@ -95,8 +95,11 @@ export default function GenerationComposer({
 
   const { data: llmConfigs = [] } = useLlmConfigsQuery();
 
-  const enabledTextConfigs = useMemo(
-    () => llmConfigs.filter((c) => c.enabled && c.capability === "text"),
+  const enabledPromptConfigs = useMemo(
+    () =>
+      llmConfigs.filter(
+        (c) => c.enabled && (c.capability === "text" || c.capability === "multimodal"),
+      ),
     [llmConfigs],
   );
 
@@ -107,19 +110,19 @@ export default function GenerationComposer({
 
   const optimizeMutation = useOptimizePromptMutation();
 
-  // Auto-select single config; clear selection if chosen config is removed
+  // Auto-select a single text prompt optimizer. Multimodal LLMs can also optimize text-only prompts.
   useEffect(() => {
-    if (enabledTextConfigs.length === 1) {
-      setSelectedConfigId(enabledTextConfigs[0].id);
-    } else if (enabledTextConfigs.length === 0) {
+    if (enabledPromptConfigs.length === 1) {
+      setSelectedConfigId(enabledPromptConfigs[0].id);
+    } else if (enabledPromptConfigs.length === 0) {
       setSelectedConfigId("");
     } else if (
       selectedConfigId &&
-      !enabledTextConfigs.find((c) => c.id === selectedConfigId)
+      !enabledPromptConfigs.find((c) => c.id === selectedConfigId)
     ) {
       setSelectedConfigId("");
     }
-  }, [enabledTextConfigs, selectedConfigId]);
+  }, [enabledPromptConfigs, selectedConfigId]);
 
   // Auto-select single multimodal config; clear selection if chosen config is removed
   useEffect(() => {
@@ -157,30 +160,42 @@ export default function GenerationComposer({
   }, [showConfigDropdown]);
 
   const hasEditSources = editSources.length > 0;
+  const activeOptimizeConfigCount = hasEditSources
+    ? enabledMultimodalConfigs.length
+    : enabledPromptConfigs.length;
 
   const effectiveConfigId = hasEditSources
     ? enabledMultimodalConfigs.length === 1
       ? enabledMultimodalConfigs[0].id
       : selectedMultimodalConfigId
-    : enabledTextConfigs.length === 1
-      ? enabledTextConfigs[0].id
+    : enabledPromptConfigs.length === 1
+      ? enabledPromptConfigs[0].id
       : selectedConfigId;
-
-  const canOptimize = hasEditSources
-    ? enabledMultimodalConfigs.length > 0 &&
-      prompt.trim().length > 0 &&
-      !!effectiveConfigId &&
-      !optimizeMutation.isPending &&
-      !isGenerating
-    : enabledTextConfigs.length > 0 &&
-      prompt.trim().length > 0 &&
-      !!effectiveConfigId &&
-      !optimizeMutation.isPending &&
-      !isGenerating;
 
   const handleOptimize = useCallback(async () => {
     const trimmed = prompt.trim();
-    if (!trimmed || !effectiveConfigId) return;
+    if (optimizeMutation.isPending) return;
+    if (isGenerating) {
+      setOptimizeError(t("generate.llm.generating"));
+      return;
+    }
+    if (!trimmed) {
+      setOptimizeError(t("generate.llm.emptyPrompt"));
+      return;
+    }
+    if (activeOptimizeConfigCount === 0) {
+      setOptimizeError(
+        hasEditSources
+          ? t("generate.llm.noMultimodalConfig")
+          : t("generate.llm.noPromptConfig"),
+      );
+      return;
+    }
+    if (!effectiveConfigId) {
+      setOptimizeError(t("generate.llm.selectConfigFirst"));
+      setShowConfigDropdown(true);
+      return;
+    }
 
     setOptimizeError(null);
     setOptimizeOriginalPrompt(trimmed);
@@ -201,7 +216,16 @@ export default function GenerationComposer({
     } catch (e) {
       setOptimizeError(e instanceof Error ? e.message : String(e));
     }
-  }, [prompt, effectiveConfigId, hasEditSources, editSources, optimizeMutation]);
+  }, [
+    prompt,
+    optimizeMutation,
+    isGenerating,
+    t,
+    activeOptimizeConfigCount,
+    hasEditSources,
+    effectiveConfigId,
+    editSources,
+  ]);
 
   const handleUseOptimized = useCallback(() => {
     onPromptChange(optimizedPrompt);
@@ -492,7 +516,7 @@ export default function GenerationComposer({
                       )}
                     </div>
                   )
-                : enabledTextConfigs.length > 1 && (
+                : enabledPromptConfigs.length > 1 && (
                     <div className="relative" ref={configDropdownRef}>
                       <button
                         type="button"
@@ -501,7 +525,7 @@ export default function GenerationComposer({
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedConfigId
-                            ? enabledTextConfigs.find((c) => c.id === selectedConfigId)
+                            ? enabledPromptConfigs.find((c) => c.id === selectedConfigId)
                                 ?.name ?? t("generate.llm.selectLlm")
                             : t("generate.llm.selectLlm")}
                         </span>
@@ -509,7 +533,7 @@ export default function GenerationComposer({
                       </button>
                       {showConfigDropdown && (
                         <div className="absolute bottom-full right-0 z-10 mb-1 min-w-[140px] overflow-hidden rounded-[10px] border border-border-subtle bg-surface shadow-float">
-                          {enabledTextConfigs.map((config) => (
+                          {enabledPromptConfigs.map((config) => (
                             <button
                               key={config.id}
                               type="button"
@@ -532,29 +556,27 @@ export default function GenerationComposer({
                   )}
 
               {/* Optimize button */}
-              {(hasEditSources ? enabledMultimodalConfigs.length > 0 : enabledTextConfigs.length > 0) && (
-                <motion.button
-                  type="button"
-                  onClick={handleOptimize}
-                  disabled={!canOptimize}
-                  aria-label={t("generate.llm.optimize")}
-                  title={
-                    hasEditSources
-                      ? t("generate.llm.optimizeWithImages")
-                      : t("generate.llm.optimizeTitle")
-                  }
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary disabled:pointer-events-none disabled:opacity-30"
-                >
-                  {optimizeMutation.isPending ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Sparkles size={14} />
-                  )}
-                  <span className="hidden sm:inline">{t("generate.llm.optimize")}</span>
-                </motion.button>
-              )}
+              <motion.button
+                type="button"
+                onClick={handleOptimize}
+                aria-busy={optimizeMutation.isPending}
+                aria-label={t("generate.llm.optimize")}
+                title={
+                  hasEditSources
+                    ? t("generate.llm.optimizeWithImages")
+                    : t("generate.llm.optimizeTitle")
+                }
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
+              >
+                {optimizeMutation.isPending ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                <span className="hidden sm:inline">{t("generate.llm.optimize")}</span>
+              </motion.button>
 
               {/* Send button */}
               <motion.button

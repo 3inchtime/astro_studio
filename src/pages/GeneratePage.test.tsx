@@ -47,6 +47,14 @@ vi.mock("react-i18next", () => ({
         "generate.moderationLabel": "Moderation",
         "generate.compressionLabel": "Compression",
         "generate.inputFidelityLabel": "Input fidelity",
+        "generate.llm.optimize": "Optimize",
+        "generate.llm.optimizeTitle": "Optimize prompt with AI",
+        "generate.llm.optimizeWithImages": "Optimize with image context",
+        "generate.llm.emptyPrompt": "Enter a prompt before optimizing.",
+        "generate.llm.noPromptConfig": "Enable a text or multimodal LLM in Settings before optimizing prompts.",
+        "generate.llm.noMultimodalConfig": "Enable a multimodal LLM in Settings before optimizing with image context.",
+        "generate.llm.selectConfigFirst": "Select an LLM before optimizing.",
+        "generate.llm.generating": "Wait for the current generation to finish before optimizing.",
         "generate.parametersLabel": "Generation parameters",
         "generate.submit": "Generate",
         "generate.uploadSource": "Upload Source",
@@ -221,6 +229,7 @@ function createDeferred<T>() {
 
 describe("GeneratePage", () => {
   beforeEach(() => {
+    queryClient.clear();
     getConversationGenerations.mockReset();
     getImageModel.mockReset();
     saveImageModel.mockReset();
@@ -237,6 +246,8 @@ describe("GeneratePage", () => {
       updated_at: new Date().toISOString(),
     }));
     getPromptFavorites.mockReset();
+    getLlmConfigs.mockReset();
+    optimizePrompt.mockReset();
     deletePromptFavorite.mockReset();
     consumePendingPrompt.mockReset();
     useLocation.mockReset();
@@ -263,6 +274,8 @@ describe("GeneratePage", () => {
     ]);
     getImageModel.mockResolvedValue("gpt-image-2");
     getPromptFavorites.mockResolvedValue([]);
+    getLlmConfigs.mockResolvedValue([]);
+    optimizePrompt.mockResolvedValue("A cinematic moonlit observatory with refined lighting.");
     createPromptFavorite.mockImplementation(async (prompt: string) => ({
       id: "favorite-1",
       prompt,
@@ -342,6 +355,68 @@ describe("GeneratePage", () => {
     expect(screen.getByDisplayValue("A dramatic mountain temple at sunrise")).toBeInTheDocument();
     expect(screen.getByText("Editing previous prompt")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel edit" })).toBeInTheDocument();
+  });
+
+  it("keeps the prompt optimize button visible when no LLM config is enabled", async () => {
+    getLlmConfigs.mockResolvedValue([]);
+
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A quiet moonlit observatory" } },
+    );
+
+    const optimizeButton = screen.getByRole("button", { name: "Optimize" });
+    expect(optimizeButton).toBeInTheDocument();
+    expect(optimizeButton).not.toBeDisabled();
+    fireEvent.click(optimizeButton);
+
+    expect(
+      screen.getByText("Enable a text or multimodal LLM in Settings before optimizing prompts."),
+    ).toBeInTheDocument();
+  });
+
+  it("optimizes text prompts with an enabled multimodal LLM config", async () => {
+    getLlmConfigs.mockResolvedValue([
+      {
+        id: "vision-helper",
+        name: "Vision Helper",
+        protocol: "openai",
+        model: "gpt-4o",
+        api_key: "sk-vision",
+        base_url: "https://api.openai.com/v1",
+        capability: "multimodal",
+        enabled: true,
+      },
+    ]);
+
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A quiet moonlit observatory" } },
+    );
+
+    const optimizeButton = screen.getByRole("button", { name: "Optimize" });
+    expect(optimizeButton).not.toBeDisabled();
+    fireEvent.click(optimizeButton);
+
+    await waitFor(() => {
+      expect(optimizePrompt).toHaveBeenCalledWith(
+        "A quiet moonlit observatory",
+        "vision-helper",
+        undefined,
+      );
+    });
   });
 
   it("prefills the composer with a pending prompt when arriving from prompt extraction", async () => {

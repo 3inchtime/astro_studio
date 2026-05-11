@@ -10,29 +10,26 @@ const MAX_ENABLED_TEXT_CONFIGS: usize = 1;
 const MAX_ENABLED_MULTIMODAL_CONFIGS: usize = 2;
 
 const OPTIMIZE_PROMPT_SYSTEM_PROMPT: &str = "\
-You are an expert at writing prompts for AI image generation models. \
-When the user provides a prompt, improve it by following these rules:\n\
-1. Add specific details about composition, lighting, color, mood, and style\n\
-2. Use descriptive, visual language — paint a picture with words\n\
-3. Specify image quality keywords where appropriate (e.g., high resolution, detailed, photorealistic)\n\
-4. Keep the original intent and subject matter intact\n\
-5. Preserve the language of the user's input — output in the same language the user used\n\
-6. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
-7. Keep the output concise — at most 3-4 sentences unless the original prompt is very detailed";
+You are a senior prompt editor for AI image generation. \
+Rewrite the user's input into one polished, directly usable image-generation prompt.\n\
+1. Detect the primary language of the user's prompt and output in the same language and writing system. Do not translate unless the user explicitly asks for translation.\n\
+2. Preserve the user's subject, intent, named entities, style requests, negative constraints, and any concrete details.\n\
+3. Add only useful visual specificity: composition, camera/viewpoint, lighting, palette, materials, texture, setting, atmosphere, era, and artistic medium.\n\
+4. Prefer natural, imageable description over generic quality tags; avoid keyword stuffing and repeated adjectives.\n\
+5. Resolve vague wording into visual direction, but do not invent major subjects, actions, brands, people, text, or story context.\n\
+6. Keep it concise and production-ready, usually 1-3 sentences.\n\
+7. Output ONLY the optimized prompt text, with no labels, explanations, bullets, quotes, markdown, or meta-commentary.";
 
 const OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT: &str = "\
-You are an expert at writing prompts for AI image generation models. \
-The user has provided one or more reference images along with their prompt. \
-Analyze the images carefully — note the subject, composition, lighting, color palette, \
-mood, style, textures, and any notable details. Then improve the user's prompt by:\n\
-1. Describing visual elements from the reference images that should be preserved or enhanced\n\
-2. Adding specific details about composition, lighting, color, mood, and style inspired by the images\n\
-3. Using descriptive, visual language that captures the essence of the reference images\n\
-4. Specifying image quality keywords where appropriate (e.g., high resolution, detailed, photorealistic)\n\
-5. Keeping the user's original intent intact while leveraging visual context from the images\n\
-6. Preserving the language of the user's input — output in the same language the user used\n\
-7. Output ONLY the improved prompt text, no explanations or meta-commentary\n\
-8. Keeping the output concise — at most 3-4 sentences unless the original prompt is very detailed";
+You are a senior prompt editor for AI image generation with reference images. \
+Use the user's text as the instruction and the images as visual evidence.\n\
+1. Detect the primary language of the user's prompt and output in the same language and writing system. Do not translate unless the user explicitly asks for translation.\n\
+2. Preserve the user's requested change, subject, intent, named entities, style requests, negative constraints, and explicit details.\n\
+3. Use image context selectively: identity, layout, pose, lighting, palette, materials, texture, environment, style, and mood when they matter.\n\
+4. For image editing, clearly state what should change and what should remain consistent with the reference images.\n\
+5. Avoid over-describing details that are not visible or not relevant; do not invent major new subjects, brands, people, text, or story context.\n\
+6. Prefer natural, imageable description over generic quality tags; keep it concise and production-ready, usually 1-3 sentences.\n\
+7. Output ONLY the optimized prompt text, with no labels, explanations, bullets, quotes, markdown, or meta-commentary.";
 
 const EXTRACT_PROMPT_FROM_IMAGE_SYSTEM_PROMPT: &str = "\
 You are an expert at reverse-engineering prompts for AI image generation models from reference images. \
@@ -262,6 +259,36 @@ fn resolve_multimodal_config<'a>(
         })
 }
 
+fn resolve_prompt_optimization_config<'a>(
+    configs: &'a [LlmConfig],
+    config_id: &str,
+) -> Result<&'a LlmConfig, AppError> {
+    let config =
+        configs
+            .iter()
+            .find(|c| c.id == config_id)
+            .ok_or_else(|| AppError::Validation {
+                message: format!("LLM config not found: {}", config_id),
+            })?;
+
+    if config.capability != "text" && config.capability != "multimodal" {
+        return Err(AppError::Validation {
+            message: format!(
+                "LLM config '{}' has unsupported capability '{}'",
+                config.name, config.capability
+            ),
+        });
+    }
+
+    if !config.enabled {
+        return Err(AppError::Validation {
+            message: format!("LLM config '{}' is disabled", config.name),
+        });
+    }
+
+    Ok(config)
+}
+
 fn insert_prompt_extraction(
     db: &Database,
     image_path: &str,
@@ -388,28 +415,7 @@ pub(crate) async fn optimize_prompt(
     let config = if has_images {
         resolve_multimodal_config(&configs, &config_id)?
     } else {
-        let config = configs.iter().find(|c| c.id == config_id).ok_or_else(|| {
-            AppError::Validation {
-                message: format!("LLM config not found: {}", config_id),
-            }
-        })?;
-
-        if config.capability != "text" {
-            return Err(AppError::Validation {
-                message: format!(
-                    "LLM config '{}' has capability '{}' — only text models are supported for prompt optimization without images",
-                    config.name, config.capability
-                ),
-            });
-        }
-
-        if !config.enabled {
-            return Err(AppError::Validation {
-                message: format!("LLM config '{}' is disabled", config.name),
-            });
-        }
-
-        config
+        resolve_prompt_optimization_config(&configs, &config_id)?
     };
 
     log::info!(
@@ -590,6 +596,44 @@ mod tests {
         let system_prompt = build_extract_prompt_from_image_system_prompt("zh-CN");
 
         assert!(system_prompt.contains("Simplified Chinese (zh-CN)"));
+    }
+
+    #[test]
+    fn text_prompt_optimization_prompt_allows_multimodal_llms() {
+        assert!(
+            OPTIMIZE_PROMPT_SYSTEM_PROMPT.contains("directly usable image-generation prompt"),
+            "text prompt optimization should remain focused on producing image-generation prompts",
+        );
+    }
+
+    #[test]
+    fn optimize_prompt_system_prompts_require_matching_input_language() {
+        for system_prompt in [
+            OPTIMIZE_PROMPT_SYSTEM_PROMPT,
+            OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT,
+        ] {
+            assert!(system_prompt.contains("Detect the primary language"));
+            assert!(system_prompt.contains("same language and writing system"));
+            assert!(system_prompt.contains("Do not translate"));
+        }
+    }
+
+    #[test]
+    fn resolves_multimodal_config_for_text_prompt_optimization() {
+        let configs = vec![LlmConfig {
+            id: "vision-helper".to_string(),
+            name: "Vision Helper".to_string(),
+            protocol: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            api_key: "sk-vision".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            capability: "multimodal".to_string(),
+            enabled: true,
+        }];
+
+        let config = resolve_prompt_optimization_config(&configs, "vision-helper").unwrap();
+
+        assert_eq!(config.id, "vision-helper");
     }
 
     #[test]
