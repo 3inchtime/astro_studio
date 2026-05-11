@@ -46,8 +46,8 @@ const GPT_IMAGE_2_ENTRY: ImageModelCatalogEntry = {
     qualities: ["auto", "high", "medium", "low"],
     backgrounds: ["auto", "opaque", "transparent"],
     outputFormats: ["png", "jpeg", "webp"],
-    moderationLevels: ["auto", "low"],
-    inputFidelityOptions: ["high", "low"],
+    moderationLevels: ["auto"],
+    inputFidelityOptions: ["high"],
     imageCounts: [1, 2, 3, 4],
   },
 };

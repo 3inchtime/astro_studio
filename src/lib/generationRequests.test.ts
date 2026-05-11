@@ -29,14 +29,13 @@ function request(
 }
 
 describe("generation request helpers", () => {
-  it("includes supported GPT generation controls", () => {
+  it("includes supported visible GPT generation controls", () => {
     expect(buildGenerationParams(request())).toEqual({
       prompt: "A luminous glass observatory",
       model: "gpt-image-2",
       quality: "high",
       background: "transparent",
       outputFormat: "webp",
-      moderation: "low",
       imageCount: 3,
       conversationId: "conversation-1",
       projectId: "project-1",
@@ -88,19 +87,17 @@ describe("generation request helpers", () => {
     });
   });
 
-  it("includes supported GPT edit controls with source image paths", () => {
+  it("includes supported visible GPT edit controls with source image paths", () => {
     expect(buildEditParams(request())).toEqual({
       prompt: "A luminous glass observatory",
       model: "gpt-image-2",
       quality: "high",
       background: "transparent",
       outputFormat: "webp",
-      moderation: "low",
       imageCount: 3,
       conversationId: "conversation-1",
       projectId: "project-1",
       sourceImagePaths: ["/tmp/source-1.png"],
-      inputFidelity: "low",
     });
   });
 });
