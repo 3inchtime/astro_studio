@@ -389,7 +389,7 @@ describe("GeneratePage", () => {
     ).toBeInTheDocument();
   });
 
-  it("submits selected generation parameters from the settings bar", async () => {
+  it("hides GPT Image 2 moderation while submitting selected visible generation parameters", async () => {
     render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
@@ -403,12 +403,10 @@ describe("GeneratePage", () => {
     fireEvent.change(screen.getByLabelText("Background"), {
       target: { value: "transparent" },
     });
-    fireEvent.change(screen.getByLabelText("Moderation"), {
-      target: { value: "low" },
-    });
     fireEvent.change(screen.getByLabelText("Format"), {
       target: { value: "webp" },
     });
+    expect(screen.queryByLabelText("Moderation")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Compression")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
 
@@ -417,11 +415,11 @@ describe("GeneratePage", () => {
         expect.objectContaining({
           prompt: "A luminous glass observatory",
           background: "transparent",
-          moderation: "low",
           outputFormat: "webp",
         }),
       );
     });
+    expect(generateImage.mock.calls[0][0]).not.toHaveProperty("moderation");
     expect(generateImage.mock.calls[0][0]).not.toHaveProperty("outputCompression");
   });
 
@@ -562,18 +560,14 @@ describe("GeneratePage", () => {
     fireEvent.change(screen.getByLabelText("Format"), {
       target: { value: "webp" },
     });
-    fireEvent.change(screen.getByLabelText("Moderation"), {
-      target: { value: "low" },
-    });
+    expect(screen.queryByLabelText("Moderation")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Upload Source" }));
 
     await waitFor(() => {
       expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByLabelText("Input fidelity"), {
-      target: { value: "low" },
-    });
+    expect(screen.queryByLabelText("Input fidelity")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Model"), {
       target: { value: "nano-banana" },
     });
@@ -849,7 +843,22 @@ describe("GeneratePage", () => {
     expect(composerSurface?.className).not.toContain("max-w-[900px]");
   });
 
-  it("submits edit-only input fidelity with selected source images", async () => {
+  it("keeps the chat feed in a shrinkable internal scroll area", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    const feedSurface = screen
+      .getByRole("button", { name: "Edit prompt" })
+      .closest(".space-y-7");
+    const scrollContainer = feedSurface?.parentElement;
+
+    expect(scrollContainer).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
+  });
+
+  it("hides GPT Image 2 input fidelity while submitting selected source images", async () => {
     pickSourceImages.mockResolvedValue(["/tmp/source-edit.png"]);
 
     render(<GeneratePage />, { wrapper: TestWrapper });
@@ -864,9 +873,7 @@ describe("GeneratePage", () => {
       expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByLabelText("Input fidelity"), {
-      target: { value: "low" },
-    });
+    expect(screen.queryByLabelText("Input fidelity")).not.toBeInTheDocument();
     fireEvent.change(
       screen.getByPlaceholderText("Describe how you want to edit these source images..."),
       { target: { value: "Make the source image look like a lithograph" } },
@@ -878,9 +885,9 @@ describe("GeneratePage", () => {
         expect.objectContaining({
           prompt: "Make the source image look like a lithograph",
           sourceImagePaths: ["/tmp/source-edit.png"],
-          inputFidelity: "low",
         }),
       );
     });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty("inputFidelity");
   });
 });

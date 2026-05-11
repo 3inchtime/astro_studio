@@ -16,6 +16,17 @@ describe("model catalog", () => {
       ]);
   });
 
+  it("keeps GPT Image 2 moderation and input fidelity hidden in the composer", () => {
+    expect(
+      getImageModelCatalogEntry("gpt-image-2").parameterCapabilities
+        .moderationLevels,
+    ).toEqual(["auto"]);
+    expect(
+      getImageModelCatalogEntry("gpt-image-2").parameterCapabilities
+        .inputFidelityOptions,
+    ).toEqual(["high"]);
+  });
+
   it("keeps Gemini image models on the supported aspect-ratio presets", () => {
     expect(getImageModelCatalogEntry("nano-banana").parameterCapabilities.sizes)
       .toEqual(["1024x1024", "1536x1024", "1024x1536"]);
