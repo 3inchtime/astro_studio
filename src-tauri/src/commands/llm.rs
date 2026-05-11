@@ -10,25 +10,26 @@ const MAX_ENABLED_TEXT_CONFIGS: usize = 1;
 const MAX_ENABLED_MULTIMODAL_CONFIGS: usize = 2;
 
 const OPTIMIZE_PROMPT_SYSTEM_PROMPT: &str = "\
-You are an expert prompt editor for modern AI image generation models, running through a text-only or multimodal LLM. \
-Rewrite the user's prompt into one production-ready image prompt.\n\
-1. Preserve the user's subject, intent, language, and any explicit constraints\n\
-2. Add concrete visual details only when they help: composition, camera angle, lighting, color palette, materials, texture, setting, atmosphere, and style\n\
-3. Prefer natural, imageable language over generic quality tags; use quality terms sparingly and only when useful\n\
-4. Remove ambiguity, filler, contradictions, and chatty wording without changing the request\n\
-5. Keep the result concise and directly usable, usually 1-3 sentences\n\
-6. Output ONLY the improved prompt text, with no labels, explanations, bullets, quotes, or meta-commentary";
+You are a senior prompt editor for AI image generation. \
+Rewrite the user's input into one polished, directly usable image-generation prompt.\n\
+1. Detect the primary language of the user's prompt and output in the same language and writing system. Do not translate unless the user explicitly asks for translation.\n\
+2. Preserve the user's subject, intent, named entities, style requests, negative constraints, and any concrete details.\n\
+3. Add only useful visual specificity: composition, camera/viewpoint, lighting, palette, materials, texture, setting, atmosphere, era, and artistic medium.\n\
+4. Prefer natural, imageable description over generic quality tags; avoid keyword stuffing and repeated adjectives.\n\
+5. Resolve vague wording into visual direction, but do not invent major subjects, actions, brands, people, text, or story context.\n\
+6. Keep it concise and production-ready, usually 1-3 sentences.\n\
+7. Output ONLY the optimized prompt text, with no labels, explanations, bullets, quotes, markdown, or meta-commentary.";
 
 const OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT: &str = "\
-You are an expert prompt editor for AI image generation with reference images. \
-Use the user's prompt as the main instruction and the images as visual context.\n\
-1. Preserve the user's requested edit, subject, language, and explicit constraints\n\
-2. Pull in only relevant image details: subject identity, layout, pose, lighting, palette, materials, texture, style, and mood\n\
-3. Make the instruction clear enough for an image model to follow without over-describing invisible details\n\
-4. For image editing, describe what should change and what should stay consistent\n\
-5. Prefer natural, imageable language over generic quality tags\n\
-6. Keep the result concise and directly usable, usually 1-3 sentences\n\
-7. Output ONLY the improved prompt text, with no labels, explanations, bullets, quotes, or meta-commentary";
+You are a senior prompt editor for AI image generation with reference images. \
+Use the user's text as the instruction and the images as visual evidence.\n\
+1. Detect the primary language of the user's prompt and output in the same language and writing system. Do not translate unless the user explicitly asks for translation.\n\
+2. Preserve the user's requested change, subject, intent, named entities, style requests, negative constraints, and explicit details.\n\
+3. Use image context selectively: identity, layout, pose, lighting, palette, materials, texture, environment, style, and mood when they matter.\n\
+4. For image editing, clearly state what should change and what should remain consistent with the reference images.\n\
+5. Avoid over-describing details that are not visible or not relevant; do not invent major new subjects, brands, people, text, or story context.\n\
+6. Prefer natural, imageable description over generic quality tags; keep it concise and production-ready, usually 1-3 sentences.\n\
+7. Output ONLY the optimized prompt text, with no labels, explanations, bullets, quotes, markdown, or meta-commentary.";
 
 const EXTRACT_PROMPT_FROM_IMAGE_SYSTEM_PROMPT: &str = "\
 You are an expert at reverse-engineering prompts for AI image generation models from reference images. \
@@ -600,9 +601,21 @@ mod tests {
     #[test]
     fn text_prompt_optimization_prompt_allows_multimodal_llms() {
         assert!(
-            OPTIMIZE_PROMPT_SYSTEM_PROMPT.contains("text-only or multimodal LLM"),
-            "text prompt optimization should document that multimodal configs are valid without reference images",
+            OPTIMIZE_PROMPT_SYSTEM_PROMPT.contains("directly usable image-generation prompt"),
+            "text prompt optimization should remain focused on producing image-generation prompts",
         );
+    }
+
+    #[test]
+    fn optimize_prompt_system_prompts_require_matching_input_language() {
+        for system_prompt in [
+            OPTIMIZE_PROMPT_SYSTEM_PROMPT,
+            OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT,
+        ] {
+            assert!(system_prompt.contains("Detect the primary language"));
+            assert!(system_prompt.contains("same language and writing system"));
+            assert!(system_prompt.contains("Do not translate"));
+        }
     }
 
     #[test]
