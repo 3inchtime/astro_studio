@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, Languages, Palette, SlidersHorizontal, Trash2, Type } from "lucide-react";
+import { Check, Download, Languages, Palette, SlidersHorizontal, Trash2, Type } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { AppFontSize, TrashSettings } from "../../types";
@@ -28,6 +28,8 @@ interface GeneralSettingsPanelProps {
   onOpenTrash: () => void;
   onFontSizeChange: (fontSize: AppFontSize) => void;
   onThemeChange: (theme: ThemeId, event?: ReactMouseEvent<HTMLButtonElement>) => void;
+  onCheckUpdate: () => void;
+  updateChecking: boolean;
 }
 
 export function GeneralSettingsPanel({
@@ -45,6 +47,8 @@ export function GeneralSettingsPanel({
   onOpenTrash,
   onFontSizeChange,
   onThemeChange,
+  onCheckUpdate,
+  updateChecking,
 }: GeneralSettingsPanelProps) {
   return (
     <motion.div
@@ -204,6 +208,47 @@ export function GeneralSettingsPanel({
                     {fontSizeSaved ? t("settings.saved") : t(fontSizeLabelKeys[fontSize])}
                   </span>
                 </div>
+              </div>
+            </div>
+          </motion.div>
+          <motion.div custom={4} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+            <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
+                  <Download size={14} className="text-primary" strokeWidth={2} />
+                </div>
+                <div>
+                  <h4 className="text-[13px] font-semibold text-foreground">{t("settings.about")}</h4>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.aboutDesc")}</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between rounded-[10px] border border-border-subtle bg-subtle/20 px-3 py-2.5">
+                  <span className="text-[12px] text-foreground">{t("settings.currentVersion")}</span>
+                  <span className="text-[12px] font-medium text-muted/75">v{__APP_VERSION__}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onCheckUpdate}
+                  disabled={updateChecking}
+                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-[10px] gradient-primary px-4 text-[12px] font-medium text-white shadow-button transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {updateChecking ? (
+                    <>
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white"
+                      />
+                      {t("update.checking")}
+                    </>
+                  ) : (
+                    <>
+                      <Download size={13} strokeWidth={2.5} />
+                      {t("update.check")}
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </motion.div>

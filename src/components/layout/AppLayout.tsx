@@ -17,9 +17,11 @@ import appLogo from "../../assets/logo.png";
 import { ResizeHandle } from "./ResizeHandle";
 import ConversationList from "../sidebar/ConversationList";
 import ProjectsSidebar from "../projects/ProjectsSidebar";
-import { createConversation } from "../../lib/api";
+import { createConversation, checkForUpdate } from "../../lib/api";
 import { ThemeCardPicker } from "../theme/ThemeCardPicker";
 import { getThemeName } from "../../lib/themes";
+import UpdateDialog from "../common/UpdateDialog";
+import type { UpdateMetadata } from "../../lib/api";
 
 interface LayoutContextType {
   activeProjectId: string | null;
@@ -67,6 +69,8 @@ export default function AppLayout() {
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const themeButtonRef = useRef<HTMLButtonElement | null>(null);
   const themePanelRef = useRef<HTMLDivElement | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateMetadata | null>(null);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
 
   const isProjectListRoute = useMemo(
     () => location.pathname === "/projects",
@@ -174,6 +178,28 @@ export default function AppLayout() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [themePickerOpen]);
+
+  // Check for updates on app start (silently)
+  useEffect(() => {
+    const checkUpdateOnStart = async () => {
+      try {
+        const update = await checkForUpdate();
+        if (update) {
+          setPendingUpdate(update);
+          setUpdateDialogOpen(true);
+        }
+      } catch {
+        // Silently ignore update check failures on startup
+      }
+    };
+
+    // Delay update check by 5 seconds to avoid impacting startup performance
+    const timer = setTimeout(() => {
+      checkUpdateOnStart();
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   const refreshConversations = useCallback(() => {
     setConversationRefreshKey((key) => key + 1);
@@ -413,6 +439,12 @@ export default function AppLayout() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <UpdateDialog
+          open={updateDialogOpen}
+          update={pendingUpdate}
+          onClose={() => setUpdateDialogOpen(false)}
+        />
       </div>
     </LayoutContext.Provider>
   );

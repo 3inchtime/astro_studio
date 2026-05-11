@@ -340,6 +340,7 @@
   "settings.about": "About",
   "settings.aboutDesc": "AI Image Generation Desktop Client",
   "settings.poweredBy": "Powered by GPT Image",
+  "settings.currentVersion": "Current Version",
   "settings.llm.title": "LLM Configuration",
   "settings.llm.desc": "Configure LLM for prompt optimization",
   "settings.llm.formName": "Name",
@@ -468,5 +469,23 @@
     "prev": "Prev",
     "next": "Next",
     "back": "Back"
+  },
+  "update": {
+    "title": "App Update",
+    "check": "Check for Updates",
+    "checking": "Checking...",
+    "available": "New version v{{version}} available",
+    "download": "Download Update",
+    "downloading": "Downloading...",
+    "downloadComplete": "Download complete. Please restart the app to install.",
+    "relaunch": "Restart Now",
+    "later": "Remind Later",
+    "close": "Close",
+    "retry": "Retry",
+    "noUpdate": "You are using the latest version",
+    "checkFailed": "Failed to check for updates. Please try again later.",
+    "currentVersion": "Current Version",
+    "latestVersion": "Latest Version",
+    "updateNotes": "Release Notes"
   }
 }

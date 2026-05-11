@@ -8,6 +8,7 @@ import {
   getRuntimeLogs, onRuntimeLog, getModelProviderProfiles,
   saveModelProviderProfiles, createModelProviderProfile,
   deleteModelProviderProfile, setActiveModelProvider,
+  checkForUpdate,
 } from "../lib/api";
 import {
   Cpu, FileText, SlidersHorizontal,
@@ -96,6 +97,7 @@ export default function SettingsPage() {
   const [fontSizeSaved, setFontSizeSaved] = useState(false);
   const [trashSettings, setTrashSettings] = useState<TrashSettings>({ retention_days: 30 });
   const [trashSaved, setTrashSaved] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
 
   // Logs state
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -408,6 +410,24 @@ export default function SettingsPage() {
     setTimeout(() => setTrashSaved(false), 2000);
   }
 
+  async function handleCheckUpdate() {
+    setUpdateChecking(true);
+    try {
+      const update = await checkForUpdate();
+      if (update) {
+        // Update available - the AppLayout will handle showing the dialog
+        // For now, just show an alert or trigger the update dialog through a different mechanism
+        alert(t("update.available", { version: update.version }));
+      } else {
+        alert(t("update.noUpdate"));
+      }
+    } catch (err) {
+      alert(t("update.checkFailed"));
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
   async function handleFontSizeChange(nextSize: AppFontSize) {
     setFontSize(nextSize);
     applyAppFontSize(nextSize);
@@ -518,6 +538,8 @@ export default function SettingsPage() {
               onOpenTrash={() => navigate("/trash")}
               onFontSizeChange={(nextSize) => void handleFontSizeChange(nextSize)}
               onThemeChange={(nextTheme, event) => setThemeWithEvent(nextTheme, event)}
+              onCheckUpdate={() => void handleCheckUpdate()}
+              updateChecking={updateChecking}
             />
           ) : activeTab === "model" ? (
             <ModelSettingsPanel

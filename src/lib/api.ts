@@ -27,6 +27,18 @@ import type {
   LlmConfig,
 } from "../types";
 
+export interface UpdateMetadata {
+  version: string;
+  current_version: string;
+  body: string | null;
+  date: string | null;
+}
+
+export type DownloadEvent =
+  | { event: "Started"; data: { contentLength: number | null } }
+  | { event: "Progress"; data: { chunkLength: number; totalDownloaded: number } }
+  | { event: "Finished" };
+
 export function toAssetUrl(filePath: string): string {
   return convertFileSrc(filePath);
 }
@@ -563,4 +575,26 @@ export async function optimizePrompt(
     configId,
     imagePaths: imagePaths ?? null,
   });
+}
+
+export async function checkForUpdate(): Promise<UpdateMetadata | null> {
+  return invoke("check_update");
+}
+
+export async function installUpdate(
+  onEvent: (event: DownloadEvent) => void,
+): Promise<void> {
+  const channel = await listen<DownloadEvent>("installer-event", (event) => {
+    onEvent(event.payload);
+  });
+
+  try {
+    await invoke("install_update");
+  } finally {
+    channel();
+  }
+}
+
+export async function relaunchApp(): Promise<void> {
+  await invoke("relaunch_app");
 }

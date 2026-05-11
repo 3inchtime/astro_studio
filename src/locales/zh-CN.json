@@ -340,6 +340,7 @@
   "settings.about": "关于",
   "settings.aboutDesc": "AI 图像生成桌面客户端",
   "settings.poweredBy": "由 GPT Image 驱动",
+  "settings.currentVersion": "当前版本",
   "settings.llm.title": "LLM 配置",
   "settings.llm.desc": "配置 LLM 以启用提示词优化",
   "settings.llm.formName": "名称",
@@ -468,5 +469,23 @@
     "prev": "上一页",
     "next": "下一页",
     "back": "返回"
+  },
+  "update": {
+    "title": "应用更新",
+    "check": "检查更新",
+    "checking": "检查中...",
+    "available": "发现新版本 v{{version}}",
+    "download": "下载更新",
+    "downloading": "下载中...",
+    "downloadComplete": "下载完成，请重启应用以完成安装",
+    "relaunch": "立即重启",
+    "later": "稍后提醒",
+    "close": "关闭",
+    "retry": "重试",
+    "noUpdate": "已是最新版本",
+    "checkFailed": "检查更新失败，请稍后重试",
+    "currentVersion": "当前版本",
+    "latestVersion": "最新版本",
+    "updateNotes": "更新日志"
   }
 }
