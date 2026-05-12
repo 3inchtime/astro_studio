@@ -51,13 +51,13 @@ export default function GenerationGrid({
                 duration: 0.3,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              className="group grid grid-cols-[104px_minmax(0,1fr)_auto] gap-3 rounded-[10px] border border-border-subtle bg-surface p-2.5 shadow-sm transition-colors hover:border-border hover:bg-surface/95"
+              className="studio-card group grid grid-cols-[104px_minmax(0,1fr)_auto] gap-3 rounded-[10px] p-2.5 hover:studio-card-hover"
             >
               <button
                 type="button"
                 onClick={() => (onPreview ? onPreview(result, 0) : onSelect(result))}
                 aria-label={`Preview ${result.generation.prompt}`}
-                className="relative h-[104px] overflow-hidden rounded-[8px] bg-subtle text-left"
+                className="focus-ring relative h-[104px] overflow-hidden rounded-[8px] bg-subtle text-left"
               >
                 <img
                   src={toAssetUrl(img.thumbnail_path)}
@@ -75,7 +75,7 @@ export default function GenerationGrid({
               <button
                 type="button"
                 onClick={() => onSelect(result)}
-                className="min-w-0 py-1 text-left"
+                className="focus-ring min-w-0 rounded-[8px] py-1 text-left"
               >
                 <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground/88 transition-colors group-hover:text-foreground">
                   {result.generation.prompt}
@@ -97,7 +97,7 @@ export default function GenerationGrid({
                 {favoriteMode !== "hidden" && (
                   <div
                     onClick={(e) => e.stopPropagation()}
-                    className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
+                    className="focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
                   >
                     <FavoriteButton
                       imageId={img.id}
@@ -115,7 +115,7 @@ export default function GenerationGrid({
                   aria-label={t("gallery.detail")}
                   title={t("gallery.detail")}
                   onClick={() => onSelect(result)}
-                  className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
+                  className="focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
                 >
                   <Info size={14} />
                 </button>
@@ -148,14 +148,14 @@ export default function GenerationGrid({
             initial={isNew ? { opacity: 0, y: 6, scale: 0.98 } : false}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ delay, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="group mb-3 break-inside-avoid overflow-hidden rounded-[12px] bg-surface border border-border-subtle shadow-card transition-shadow duration-300 hover:shadow-float hover:border-border"
+            className="studio-card group mb-3 break-inside-avoid overflow-hidden rounded-[12px] hover:studio-card-hover"
           >
             <div className="relative overflow-hidden">
               <button
                 type="button"
                 onClick={() => (onPreview ? onPreview(result, 0) : onSelect(result))}
                 aria-label={`Preview ${result.generation.prompt}`}
-                className="block h-full w-full cursor-pointer overflow-hidden text-left"
+                className="focus-ring block h-full w-full cursor-pointer overflow-hidden text-left"
                 style={{ aspectRatio }}
               >
                 <img
@@ -175,7 +175,7 @@ export default function GenerationGrid({
                   <div
                     onClick={(e) => e.stopPropagation()}
                     className={cn(
-                      "flex h-7 w-7 items-center justify-center rounded-[8px] bg-black/45 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white",
+                      "focus-ring flex h-7 w-7 items-center justify-center rounded-[8px] bg-black/45 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white",
                       favoriteMode === "manage"
                         ? "opacity-0 group-hover:opacity-100"
                         : "",
@@ -196,7 +196,7 @@ export default function GenerationGrid({
                     event.stopPropagation();
                     onSelect(result);
                   }}
-                  className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-black/45 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white"
+                  className="focus-ring flex h-7 w-7 cursor-pointer items-center justify-center rounded-[8px] bg-black/45 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white"
                 >
                   <Info size={13} />
                 </button>

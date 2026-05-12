@@ -109,7 +109,7 @@ export default function PromptExtractPage() {
   return (
     <div className="flex h-full flex-col overflow-auto px-6 py-6">
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6">
-        <header className="rounded-[18px] border border-border-subtle bg-glass px-6 py-5 shadow-card">
+        <header className="studio-panel rounded-[16px] px-6 py-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary/80">
             {t("extract.title")}
           </p>
@@ -122,7 +122,7 @@ export default function PromptExtractPage() {
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
-          <section className="flex flex-col gap-4 rounded-[18px] border border-border-subtle bg-surface p-5 shadow-card">
+          <section className="studio-panel flex flex-col gap-4 rounded-[16px] p-5">
             <div>
               <h2 className="text-[15px] font-semibold text-foreground">
                 {t("extract.uploadTitle")}
@@ -135,7 +135,7 @@ export default function PromptExtractPage() {
             <button
               type="button"
               onClick={handlePickImage}
-              className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-[16px] border border-dashed border-primary/20 bg-gradient-to-br from-primary/6 via-surface to-accent/6 px-6 py-8 text-center transition-colors hover:border-primary/35"
+              className="focus-ring flex min-h-[320px] cursor-pointer flex-col items-center justify-center gap-3 rounded-[16px] border border-dashed border-primary/20 bg-gradient-to-br from-primary/6 via-surface to-accent/6 px-6 py-8 text-center transition-colors hover:border-primary/35 hover:bg-surface"
             >
               {imagePath ? (
                 <img
@@ -170,7 +170,7 @@ export default function PromptExtractPage() {
                 <button
                   type="button"
                   onClick={handlePickImage}
-                  className="rounded-[10px] border border-border-subtle bg-surface px-4 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:bg-subtle"
+                  className="studio-control focus-ring rounded-[10px] px-4 py-2 text-[12px] font-medium hover:studio-control-hover"
                 >
                   {imagePath ? t("extract.changeImage") : t("extract.selectImage")}
                 </button>
@@ -178,7 +178,7 @@ export default function PromptExtractPage() {
                   type="button"
                   onClick={handleExtract}
                   disabled={!canExtract}
-                  className="inline-flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-[12px] font-semibold text-white shadow-button disabled:cursor-not-allowed disabled:opacity-50"
+                  className="studio-control-primary focus-ring inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-[12px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Sparkles size={13} />
                   {extractMutation.isPending
@@ -195,7 +195,7 @@ export default function PromptExtractPage() {
             )}
           </section>
 
-          <section className="flex min-h-0 flex-col gap-4 rounded-[18px] border border-border-subtle bg-surface p-5 shadow-card">
+          <section className="studio-panel flex min-h-0 flex-col gap-4 rounded-[16px] p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-[15px] font-semibold text-foreground">
@@ -212,7 +212,7 @@ export default function PromptExtractPage() {
               onChange={(event) => setPrompt(event.target.value)}
               placeholder={t("extract.resultPlaceholder")}
               spellCheck={false}
-              className="min-h-[260px] w-full resize-none rounded-[16px] border border-border-subtle bg-subtle/40 px-4 py-4 text-[14px] leading-[1.75] text-foreground outline-none transition-colors placeholder:text-muted/50 focus:border-primary/30 focus:bg-surface"
+              className="studio-input focus-ring min-h-[260px] w-full resize-none rounded-[16px] px-4 py-4 text-[14px] leading-[1.75] placeholder:text-muted/50 focus:border-primary/30 focus:bg-surface"
             />
 
             {favoriteError && (
@@ -226,7 +226,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleCopy}
                 disabled={!prompt}
-                className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-4 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control focus-ring inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Copy size={13} />
                 {copied ? t("extract.copied") : t("extract.copy")}
@@ -235,7 +235,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleFavorite}
                 disabled={!prompt}
-                className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-4 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control focus-ring inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Heart size={13} fill={favoritedPrompt ? "currentColor" : "none"} />
                 {favoritedPrompt ? t("extract.unfavorite") : t("extract.favorite")}
@@ -244,7 +244,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleUsePrompt}
                 disabled={!prompt}
-                className="inline-flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-[12px] font-semibold text-white shadow-button disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control-primary focus-ring inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-[12px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Sparkles size={13} />
                 {t("extract.usePrompt")}
@@ -253,7 +253,7 @@ export default function PromptExtractPage() {
           </section>
         </div>
 
-        <section className="rounded-[18px] border border-border-subtle bg-surface p-5 shadow-card">
+        <section className="studio-panel rounded-[16px] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-[15px] font-semibold text-foreground">
@@ -281,7 +281,7 @@ export default function PromptExtractPage() {
                     type="button"
                     aria-label={historyItem.prompt}
                     onClick={() => handleSelectHistory(historyItem)}
-                    className={`flex items-start gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors ${
+                    className={`focus-ring flex cursor-pointer items-start gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors ${
                       isActive
                         ? "border-primary/35 bg-primary/6"
                         : "border-border-subtle bg-surface hover:bg-subtle"

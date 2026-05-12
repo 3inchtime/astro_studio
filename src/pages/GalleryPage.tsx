@@ -166,7 +166,7 @@ export default function GalleryPage() {
   });
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden bg-transparent">
       <div className="flex flex-1 flex-col">
         <GallerySearchBar
           config={searchConfig}

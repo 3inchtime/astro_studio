@@ -73,7 +73,7 @@ export function GeneralSettingsPanel({
               <p className="mt-0.5 text-[11px] text-muted/60">{t("settings.generalDesc")}</p>
             </div>
           </div>
-          <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+          <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
@@ -87,7 +87,7 @@ export function GeneralSettingsPanel({
               <select
                 value={language}
                 onChange={(e) => onLanguageChange(normalizeLanguage(e.target.value))}
-                className="select-control h-[38px] w-full rounded-[10px] border border-border-subtle bg-subtle/30 px-3 pr-8 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                className="select-control studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 pr-8 text-[12px]"
               >
                 {LANGUAGE_OPTIONS.map((option) => (
                   <option key={option.code} value={option.code}>
@@ -97,7 +97,7 @@ export function GeneralSettingsPanel({
               </select>
             </div>
           </motion.div>
-          <motion.div custom={1} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+          <motion.div custom={1} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
@@ -125,7 +125,7 @@ export function GeneralSettingsPanel({
               </div>
             </div>
           </motion.div>
-          <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+          <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-error/10 bg-error/5">
@@ -137,7 +137,7 @@ export function GeneralSettingsPanel({
                 </div>
               </div>
               <div className="flex min-w-0 flex-col gap-2 lg:flex-row">
-                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-border-subtle bg-subtle/30 px-3">
+                <div className="studio-input flex min-w-0 flex-1 items-center gap-2 rounded-[10px] px-3 focus-within:border-primary/30 focus-within:shadow-[0_0_0_3px_rgba(79,106,255,0.12)]">
                   <input
                     type="number"
                     min={1}
@@ -153,7 +153,7 @@ export function GeneralSettingsPanel({
                 </div>
                 <button
                   onClick={onSaveTrashRetention}
-                  className="inline-flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] gradient-primary px-4 text-[12px] font-medium text-white shadow-button transition-transform hover:-translate-y-0.5"
+                  className="studio-control-primary focus-ring inline-flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] px-4 text-[12px] font-medium"
                 >
                   {trashSaved && <Check size={13} strokeWidth={2.5} />}
                   {trashSaved ? t("settings.saved") : t("settings.saveTrashRetention")}
@@ -161,14 +161,14 @@ export function GeneralSettingsPanel({
                 <button
                   type="button"
                   onClick={onOpenTrash}
-                  className="inline-flex h-[38px] shrink-0 items-center justify-center rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-foreground/75 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
+                  className="studio-control focus-ring inline-flex h-[38px] shrink-0 items-center justify-center rounded-[10px] px-4 text-[12px] font-medium hover:studio-control-hover"
                 >
                   {t("settings.openTrash")}
                 </button>
               </div>
             </div>
           </motion.div>
-          <motion.div custom={3} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+          <motion.div custom={3} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
@@ -189,7 +189,7 @@ export function GeneralSettingsPanel({
                         key={option}
                         type="button"
                         onClick={() => onFontSizeChange(option)}
-                        className={`rounded-[10px] border px-3 py-3 text-left transition-all ${
+                        className={`focus-ring cursor-pointer rounded-[10px] border px-3 py-3 text-left transition-all ${
                           active
                             ? "border-primary/30 bg-primary/6 shadow-card"
                             : "border-border-subtle bg-subtle/20 hover:border-border hover:bg-subtle/40"
@@ -215,7 +215,7 @@ export function GeneralSettingsPanel({
               </div>
             </div>
           </motion.div>
-          <motion.div custom={4} variants={cardVariants} initial="hidden" animate="visible" className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+          <motion.div custom={4} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
             <div className="grid gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/10 bg-primary/5">
@@ -236,7 +236,7 @@ export function GeneralSettingsPanel({
                     type="button"
                     onClick={onCheckUpdate}
                     disabled={updateChecking}
-                    className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-[10px] gradient-primary px-4 text-[12px] font-medium text-white shadow-button transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="studio-control-primary focus-ring inline-flex h-[38px] items-center justify-center gap-1.5 rounded-[10px] px-4 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {updateChecking ? (
                       <>

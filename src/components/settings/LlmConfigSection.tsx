@@ -70,7 +70,7 @@ function ConfigForm({
               value={config.name}
               onChange={(e) => onChange({ ...config, name: e.target.value })}
               placeholder="e.g. GPT-4o"
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
             />
           </label>
 
@@ -86,7 +86,7 @@ function ConfigForm({
                   base_url: defaultBaseUrlForProtocol(next),
                 });
               }}
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px]"
             >
               <option value="openai">{t("settings.llm.protocolOpenai")}</option>
               <option value="anthropic">{t("settings.llm.protocolAnthropic")}</option>
@@ -100,7 +100,7 @@ function ConfigForm({
               value={config.model}
               onChange={(e) => onChange({ ...config, model: e.target.value })}
               placeholder={config.protocol === "anthropic" ? "claude-opus-4-7" : "gpt-4o"}
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
             />
           </label>
 
@@ -114,7 +114,7 @@ function ConfigForm({
                 onFocus={() => { if (!showKey) onToggleShowKey(); }}
                 onBlur={() => { if (showKey) onToggleShowKey(); }}
                 placeholder="sk-..."
-                className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 pr-9 text-[12px] placeholder:text-muted/40"
               />
               <button
                 type="button"
@@ -135,7 +135,7 @@ function ConfigForm({
               value={config.base_url}
               onChange={(e) => onChange({ ...config, base_url: e.target.value })}
               placeholder={defaultBaseUrlForProtocol(config.protocol)}
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
             />
           </label>
 
@@ -146,7 +146,7 @@ function ConfigForm({
               onChange={(e) =>
                 onChange({ ...config, capability: e.target.value as LlmConfig["capability"] })
               }
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px]"
             >
               <option value="text">{t("settings.llm.capabilityText")}</option>
               <option value="multimodal">{t("settings.llm.capabilityMultimodal")}</option>
@@ -343,7 +343,7 @@ export function LlmConfigSection() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: 10 }}
       transition={{ duration: 0.2, delay: 0.1 }}
-      className="rounded-[12px] border border-border-subtle bg-surface/90 p-4 shadow-card"
+      className="studio-card rounded-[12px] p-4"
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
@@ -593,7 +593,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               value={config.name}
               onChange={(e) => setConfig({ ...config, name: e.target.value })}
               placeholder="e.g. GPT-4o"
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
             />
           </label>
 
@@ -609,7 +609,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                   base_url: defaultBaseUrlForProtocol(next),
                 });
               }}
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px]"
             >
               <option value="openai">{t("settings.llm.protocolOpenai")}</option>
               <option value="anthropic">{t("settings.llm.protocolAnthropic")}</option>
@@ -623,7 +623,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               value={config.model}
               onChange={(e) => setConfig({ ...config, model: e.target.value })}
               placeholder={config.protocol === "anthropic" ? "claude-opus-4-7" : "gpt-4o"}
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
             />
           </label>
 
@@ -637,7 +637,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                 onFocus={() => { if (!showKey) setShowKey(true); }}
                 onBlur={() => { if (showKey) setShowKey(false); }}
                 placeholder="sk-..."
-                className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 pr-9 text-[12px] placeholder:text-muted/40"
               />
               <button
                 type="button"
@@ -658,7 +658,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               value={config.base_url}
               onChange={(e) => setConfig({ ...config, base_url: e.target.value })}
               placeholder={defaultBaseUrlForProtocol(config.protocol)}
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
             />
           </label>
 
@@ -669,7 +669,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               onChange={(e) =>
                 setConfig({ ...config, capability: e.target.value as LlmConfig["capability"] })
               }
-              className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+              className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px]"
             >
               <option value="text">{t("settings.llm.capabilityText")}</option>
               <option value="multimodal">{t("settings.llm.capabilityMultimodal")}</option>

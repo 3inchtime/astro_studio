@@ -265,11 +265,11 @@ export default function GenerationComposer({
 
   return (
     <>
-      <div className="border-t border-border-subtle bg-subtle/30 px-4 py-2.5 sm:px-6">
+      <div className="studio-toolbar border-t border-border-subtle px-4 py-2.5 sm:px-6">
         <div
           role="toolbar"
           aria-label={t("generate.parametersLabel")}
-          className="w-full overflow-hidden"
+          className="studio-toolbar w-full overflow-hidden border-b-0 bg-transparent"
         >
           <div
             data-testid="generation-parameter-row"
@@ -389,9 +389,12 @@ export default function GenerationComposer({
         </div>
       </div>
 
-      <div className="bg-surface px-6 pt-4 pb-5">
+      <div className="bg-surface/88 px-6 pt-4 pb-5 shadow-panel">
         <div className="w-full">
-          <div className="relative rounded-[18px] border border-border-subtle bg-subtle/40 p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]">
+          <div
+            data-testid="generation-command-surface"
+            className="studio-panel-strong relative rounded-[16px] p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]"
+          >
             {editingPromptMessageId && (
               <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
                 <div className="text-[12px] font-medium text-foreground/80">
@@ -399,7 +402,7 @@ export default function GenerationComposer({
                 </div>
                 <button
                   onClick={onCancelPromptEdit}
-                  className="text-[12px] font-medium text-primary transition-colors hover:text-primary/80"
+                  className="focus-ring rounded-[8px] px-2 py-1 text-[12px] font-medium text-primary transition-colors hover:bg-primary/8 hover:text-primary/80"
                 >
                   {t("generate.cancelEditPrompt")}
                 </button>
@@ -411,7 +414,7 @@ export default function GenerationComposer({
                 {showSourceEditing && (
                   <button
                     onClick={onAddUploadedSources}
-                    className="inline-flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 py-2 text-[12px] font-medium text-foreground/80 transition-colors hover:border-border hover:text-foreground"
+                    className="studio-control focus-ring inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
                   >
                     <ImagePlus size={14} />
                     {t("generate.uploadSource")}
@@ -422,7 +425,7 @@ export default function GenerationComposer({
               {editSources.length > 0 && (
                 <button
                   onClick={onClearEditSources}
-                  className="text-[12px] font-medium text-muted transition-colors hover:text-foreground"
+                  className="studio-control-subtle focus-ring rounded-[8px] px-2 py-1 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
                 >
                   {t("generate.clearSources")}
                 </button>
@@ -439,7 +442,7 @@ export default function GenerationComposer({
                   {editSources.map((source) => (
                     <div
                       key={source.id}
-                      className="relative overflow-hidden rounded-[12px] border border-border-subtle bg-surface"
+                      className="studio-card relative overflow-hidden rounded-[12px]"
                     >
                       <img
                         src={toAssetUrl(source.path)}
@@ -448,7 +451,7 @@ export default function GenerationComposer({
                       />
                       <button
                         onClick={() => onRemoveEditSource(source.id)}
-                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                        className="focus-ring absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-black/60 text-white transition-colors hover:bg-black/80"
                         title={t("generate.removeSource")}
                       >
                         <X size={12} />
@@ -472,7 +475,7 @@ export default function GenerationComposer({
                   : t("generate.placeholder")
               }
               rows={2}
-              className="w-full resize-none border-none bg-transparent text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:outline-none pr-[190px]"
+              className="studio-input w-full resize-none rounded-[12px] border-transparent bg-transparent px-3 py-2 pr-[190px] text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:border-transparent focus:bg-transparent focus:outline-none"
             />
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
               {/* Config selector — visible only when multiple enabled configs of the active type */}
@@ -482,7 +485,7 @@ export default function GenerationComposer({
                       <button
                         type="button"
                         onClick={() => setShowConfigDropdown(!showConfigDropdown)}
-                        className="flex h-[34px] items-center gap-1 rounded-[9px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-foreground/80 transition-all hover:border-border hover:text-foreground"
+                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-[9px] px-2 text-[11px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedMultimodalConfigId
@@ -521,7 +524,7 @@ export default function GenerationComposer({
                       <button
                         type="button"
                         onClick={() => setShowConfigDropdown(!showConfigDropdown)}
-                        className="flex h-[34px] items-center gap-1 rounded-[9px] border border-border-subtle bg-surface px-2 text-[11px] font-medium text-foreground/80 transition-all hover:border-border hover:text-foreground"
+                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-[9px] px-2 text-[11px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedConfigId
@@ -568,7 +571,7 @@ export default function GenerationComposer({
                 }
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
-                className="flex items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
+                className="focus-ring flex cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
               >
                 {optimizeMutation.isPending ? (
                   <Loader2 size={14} className="animate-spin" />
@@ -585,7 +588,7 @@ export default function GenerationComposer({
                 aria-label={t("generate.submit")}
                 whileHover={{ scale: 1.02, y: -1 }}
                 whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-2 rounded-[12px] gradient-primary px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(79,106,255,0.3)] transition-shadow hover:shadow-[0_6px_16px_rgba(79,106,255,0.4)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
+                className="studio-control-primary focus-ring flex items-center gap-2 rounded-[12px] px-5 py-2.5 text-[13px] font-semibold disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none"
               >
                 <ArrowUp size={15} strokeWidth={2.5} />
               </motion.button>
@@ -626,7 +629,7 @@ interface SelectFieldProps {
 
 function SelectField({ label, value, onChange, options }: SelectFieldProps) {
   return (
-    <label className="flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] border border-border-subtle bg-surface px-2 text-[12px] text-foreground transition-colors focus-within:border-border">
+    <label className="studio-control focus-ring flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] px-2 text-[12px] text-foreground focus-within:border-primary/35">
       <span
         className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
         title={label}
@@ -636,7 +639,7 @@ function SelectField({ label, value, onChange, options }: SelectFieldProps) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="select-control min-w-0 flex-1 truncate bg-transparent pr-8 text-[12px] font-medium text-foreground focus:outline-none"
+        className="select-control min-w-0 flex-1 cursor-pointer truncate bg-transparent pr-8 text-[12px] font-medium text-foreground focus:outline-none"
       >
         {options.map((option) => (
           <option

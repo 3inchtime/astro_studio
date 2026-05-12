@@ -64,10 +64,10 @@ function EmptyState() {
         initial={{ opacity: 0, y: 16, filter: "blur(8px)" }}
         animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="flex flex-col items-center text-center"
+        className="studio-empty flex max-w-[360px] flex-col items-center rounded-[18px] px-8 py-8 text-center shadow-card"
       >
         <div className="relative mb-6">
-          <div className="h-20 w-20 rounded-[20px] bg-gradient-to-br from-primary/8 via-lavender-light to-accent/6 flex items-center justify-center border border-border-subtle">
+          <div className="flex h-20 w-20 items-center justify-center rounded-[20px] border border-border-subtle bg-gradient-to-br from-primary/8 via-lavender-light to-accent/6">
             <ImageIcon size={32} className="text-lavender" strokeWidth={1.4} />
           </div>
           <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary/30 animate-pulse" />

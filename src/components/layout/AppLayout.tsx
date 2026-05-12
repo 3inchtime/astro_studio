@@ -329,13 +329,16 @@ export default function AppLayout() {
         checkForUpdates,
       }}
     >
-      <div className="relative flex h-screen overflow-hidden bg-background gradient-mesh">
+      <div className="studio-app-shell relative flex h-screen overflow-hidden bg-background">
         <aside
-          className="flex shrink-0 flex-col items-center border-r border-border-subtle py-6"
+          className="studio-nav-rail flex shrink-0 flex-col items-center border-r py-6"
           style={{ width: NAV_RAIL_WIDTH }}
         >
-          <NavLink to="/generate" className="mb-10 group">
-            <div className="relative h-9 w-9 overflow-hidden rounded-[10px] shadow-button transition-transform duration-200 group-hover:scale-105">
+          <NavLink
+            to="/generate"
+            className="focus-ring mb-10 rounded-[12px] border border-transparent p-1 transition-colors hover:border-border-subtle hover:bg-surface/70"
+          >
+            <div className="relative h-9 w-9 overflow-hidden rounded-[10px] shadow-button transition-shadow duration-200">
               <img src={appLogo} alt="Astro Studio" className="h-full w-full object-cover" />
             </div>
           </NavLink>
@@ -347,10 +350,10 @@ export default function AppLayout() {
                 to={to}
                 title={t(labelKey)}
                 className={({ isActive }) =>
-                  `relative flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-200 ${
+                  `focus-ring relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                     isActive
-                      ? "text-primary bg-primary/6 shadow-card"
-                      : "text-muted hover:text-foreground hover:bg-subtle"
+                      ? "border-primary/12 bg-primary/9 text-primary shadow-card"
+                      : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground"
                   }`
                 }
               >
@@ -379,10 +382,10 @@ export default function AppLayout() {
               aria-haspopup="dialog"
               aria-expanded={themePickerOpen}
               onClick={() => setThemePickerOpen((open) => !open)}
-              className={`flex h-10 w-10 items-center justify-center rounded-[10px] transition-colors ${
+              className={`focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
                 themePickerOpen
-                  ? "bg-primary/8 text-primary"
-                  : "text-muted hover:text-foreground hover:bg-subtle"
+                  ? "border-primary/12 bg-primary/9 text-primary"
+                  : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground"
               }`}
             >
               <motion.div
@@ -396,10 +399,10 @@ export default function AppLayout() {
               to="/settings"
               title={t("nav.settings")}
               className={({ isActive }) =>
-                `flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-200 ${
+                `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                   isActive
-                    ? "text-primary bg-primary/6 shadow-card"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
+                    ? "border-primary/12 bg-primary/9 text-primary shadow-card"
+                    : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground"
                 }`
               }
             >
@@ -410,7 +413,7 @@ export default function AppLayout() {
 
         {!shouldHideSidebar && (
           <>
-            <aside className="flex shrink-0 flex-col border-r border-border-subtle" style={{ width: widths[0] }}>
+            <aside className="flex shrink-0 flex-col border-r border-border-subtle bg-surface/72" style={{ width: widths[0] }}>
               {isProjectListRoute ? (
                 <ProjectsSidebar
                   activeProjectId={activeProjectId}
@@ -436,7 +439,7 @@ export default function AppLayout() {
           </>
         )}
 
-        <main className="relative flex-1 overflow-hidden" style={{ minWidth: widths[1] }}>
+        <main className="studio-main-canvas relative flex-1 overflow-hidden" style={{ minWidth: widths[1] }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
@@ -461,7 +464,7 @@ export default function AppLayout() {
               animate={{ opacity: 1, x: 0, y: 0 }}
               exit={{ opacity: 0, x: -8, y: 8 }}
               transition={{ duration: 0.16 }}
-              className="absolute bottom-6 left-[78px] z-30 w-[360px] rounded-[18px] border border-border-subtle bg-surface/96 p-4 shadow-float backdrop-blur-xl"
+              className="studio-floating-panel absolute bottom-6 left-[78px] z-30 w-[360px] rounded-[16px] p-4"
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>

@@ -94,12 +94,11 @@ export default function DateRangeFilterField({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          "group flex h-[34px] w-full items-center gap-2 rounded-[10px] border px-2.5 text-left transition-all duration-150",
-          "shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]",
+          "studio-control focus-ring group flex h-[34px] w-full items-center gap-2 rounded-[10px] px-2.5 text-left",
           hasValue
-            ? "border-border bg-surface"
+            ? "border-border bg-surface text-foreground"
             : "border-border-subtle bg-subtle/45",
-          "hover:border-border hover:bg-surface",
+          "hover:studio-control-hover",
           open
             ? "border-primary/25 bg-surface shadow-[0_0_0_4px_rgba(79,106,255,0.12),inset_0_1px_0_rgba(255,255,255,0.75)]"
             : "",
@@ -130,7 +129,7 @@ export default function DateRangeFilterField({
           role="dialog"
           aria-modal="false"
           aria-label={label}
-          className="absolute right-0 top-[calc(100%+8px)] z-30 w-[min(456px,calc(100vw-132px))] overflow-hidden rounded-[16px] border border-border bg-[rgba(255,255,255,0.97)] p-2.5 shadow-[0_18px_40px_rgba(45,42,38,0.14)] backdrop-blur-xl"
+          className="studio-floating-panel absolute right-0 top-[calc(100%+8px)] z-30 w-[min(456px,calc(100vw-132px))] overflow-hidden rounded-[16px] p-2.5"
         >
           <div className="mb-2 flex flex-nowrap gap-1 overflow-hidden">
             {presetOrder.map((presetId) => (
@@ -139,7 +138,7 @@ export default function DateRangeFilterField({
                 type="button"
                 onClick={() => onChange(buildPresetRange(presetId))}
                 aria-label={presetLabels[presetId]}
-                className="min-w-0 rounded-full border border-primary/12 bg-primary/[0.06] px-2 py-0.5 text-[9px] font-medium text-primary/80 transition-colors hover:bg-primary/[0.12]"
+                className="focus-ring min-w-0 rounded-full border border-primary/12 bg-primary/[0.06] px-2 py-0.5 text-[9px] font-medium text-primary/80 transition-colors hover:bg-primary/[0.12]"
               >
                 {presetLabels[presetId]}
               </button>
@@ -180,14 +179,14 @@ export default function DateRangeFilterField({
               <button
                 type="button"
                 onClick={() => onChange({ from: "", to: "" })}
-                className="rounded-[9px] border border-border-subtle px-2 py-1 text-[10px] font-medium text-foreground/80 transition-colors hover:border-border hover:bg-subtle"
+                className="studio-control focus-ring rounded-[9px] px-2 py-1 text-[10px] font-medium hover:studio-control-hover"
               >
                 {presets.clear}
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-[9px] gradient-primary px-2.5 py-1 text-[10px] font-semibold text-white shadow-button transition-transform hover:-translate-y-0.5"
+                className="studio-control-primary focus-ring rounded-[9px] px-2.5 py-1 text-[10px] font-semibold"
               >
                 {presets.done}
               </button>

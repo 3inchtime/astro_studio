@@ -60,9 +60,9 @@ export default function TrashPage() {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden bg-transparent">
       <div className="flex flex-1 flex-col">
-        <div className="flex flex-col gap-3 border-b border-border-subtle px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="studio-toolbar flex flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-[15px] font-semibold text-foreground tracking-tight">
               {t("trash.title")}
@@ -81,13 +81,13 @@ export default function TrashPage() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               placeholder={t("trash.search")}
-              className="h-[30px] w-52 rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-border focus:bg-surface transition-colors"
+              className="studio-input focus-ring h-[30px] w-52 rounded-[8px] pl-7 pr-3 text-[12px] placeholder:text-muted/50"
             />
           </div>
         </div>
 
         <div className="border-b border-border-subtle bg-subtle/20 px-6 py-3">
-          <div className="flex items-start gap-3 rounded-[12px] border border-border-subtle bg-surface px-4 py-3 shadow-card">
+          <div className="studio-card flex items-start gap-3 rounded-[12px] px-4 py-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-error/10 bg-error/5">
               <Trash2 size={14} className="text-error/70" />
             </div>

@@ -46,7 +46,7 @@ export default function MessageBubble({
         className="flex justify-end"
       >
         <div className="group flex max-w-[75%] items-start gap-2">
-          <div className="rounded-[16px] rounded-br-[5px] border border-primary/35 bg-white px-5 py-3.5 text-foreground shadow-[0_14px_34px_rgba(79,106,255,0.12)] selection:bg-primary/18 selection:text-foreground">
+          <div className="rounded-[16px] rounded-br-[5px] border border-primary/24 bg-surface px-5 py-3.5 text-foreground shadow-[0_12px_28px_rgba(79,106,255,0.1)] selection:bg-primary/18 selection:text-foreground dark:bg-surface-elevated">
             <p className="text-[14px] leading-[1.7] text-foreground whitespace-pre-wrap">
               {message.content}
             </p>
@@ -81,10 +81,10 @@ export default function MessageBubble({
               {onFavoritePrompt && (
                 <button
                   onClick={() => onFavoritePrompt(message)}
-                  className={`flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm ring-1 transition-all focus:outline-none focus:ring-2 focus:ring-primary/25 ${
+                  className={`focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border bg-surface shadow-sm transition-all ${
                     isPromptFavorited
-                      ? "text-primary ring-primary/18 hover:bg-primary/6"
-                      : "text-primary/70 ring-primary/18 hover:bg-primary/6 hover:text-primary"
+                      ? "border-primary/18 text-primary hover:bg-primary/6"
+                      : "border-primary/14 text-primary/70 hover:bg-primary/6 hover:text-primary"
                   }`}
                   aria-label={
                     isPromptFavorited
@@ -107,7 +107,7 @@ export default function MessageBubble({
               {onEditPrompt && (
                 <button
                   onClick={() => onEditPrompt(message)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-primary/70 shadow-sm ring-1 ring-primary/18 transition-all hover:bg-primary/6 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
+                  className="focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-primary/14 bg-surface text-primary/70 shadow-sm transition-all hover:bg-primary/6 hover:text-primary"
                   aria-label={t("generate.editPrompt")}
                   title={t("generate.editPrompt")}
                 >
@@ -155,7 +155,7 @@ export default function MessageBubble({
                 initial={{ opacity: 0, scale: 0.85, filter: "blur(8px)" }}
                 animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
                 transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-                className="inline-block overflow-hidden rounded-[14px] shadow-[0_12px_34px_rgba(0,0,0,0.16)]"
+                className="inline-block overflow-hidden rounded-[14px] border border-border-subtle bg-surface shadow-[0_12px_34px_rgba(0,0,0,0.14)]"
               >
                 <ImageGrid
                   images={message.images.map((image) => ({
@@ -195,7 +195,7 @@ export default function MessageBubble({
           {message.status === "failed" && (
             <div
               key="error"
-              className="rounded-[16px] rounded-bl-[5px] bg-surface border border-border-subtle px-5 py-3.5 shadow-sm"
+              className="studio-card rounded-[16px] rounded-bl-[5px] px-5 py-3.5"
             >
               <motion.div
                 initial={{ opacity: 0, y: 5 }}
@@ -208,7 +208,7 @@ export default function MessageBubble({
               {message.retryRequest && onRetry && (
                 <button
                   onClick={() => onRetry(message)}
-                  className="mt-3 inline-flex items-center gap-2 rounded-[10px] border border-border-subtle px-3 py-2 text-[12px] font-medium text-foreground/75 transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
+                  className="studio-control focus-ring mt-3 inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
                 >
                   <RotateCcw size={13} />
                   {t("generate.retry")}

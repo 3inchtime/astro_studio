@@ -31,6 +31,9 @@
   --color-foreground: #2D2A26;
   --color-muted: #8A8580;
   --color-subtle: #F2F0EC;
+  --color-canvas: #F8F7F4;
+  --color-rail: #F1EFE9;
+  --color-surface-muted: #FAF9F6;
 
   /* Bubble */
   --color-bubble: #ECE9F7;
@@ -52,6 +55,7 @@
   --shadow-panel: 0 -1px 4px rgba(45, 42, 38, 0.02), 0 -4px 20px rgba(45, 42, 38, 0.04);
   --shadow-button: 0 1px 3px rgba(45, 42, 38, 0.06);
   --shadow-inset: inset 0 1px 2px rgba(45, 42, 38, 0.04);
+  --shadow-focus: 0 0 0 3px rgba(79, 106, 255, 0.16);
 
   /* Typography */
   --font-sans: "Geist Sans", "SF Pro Text", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
@@ -109,6 +113,9 @@
     --color-foreground: #EAE6E0;
     --color-muted: #918B85;
     --color-subtle: #242028;
+    --color-canvas: #161418;
+    --color-rail: #1B181F;
+    --color-surface-muted: #211E27;
     --color-bubble: rgba(79, 106, 255, 0.1);
     --color-lavender-light: rgba(124, 92, 252, 0.12);
     --color-glass: rgba(30, 27, 34, 0.78);
@@ -117,6 +124,7 @@
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.12);
     --shadow-float: 0 2px 4px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.16);
     --shadow-panel: 0 -1px 4px rgba(0, 0, 0, 0.16), 0 -4px 20px rgba(0, 0, 0, 0.12);
+    --shadow-focus: 0 0 0 3px rgba(124, 92, 252, 0.24);
     --loading-shell-bg:
       radial-gradient(ellipse 62% 60% at 18% 22%, rgba(90, 116, 255, 0.24), transparent 72%),
       radial-gradient(ellipse 55% 48% at 82% 16%, rgba(228, 130, 186, 0.18), transparent 70%),
@@ -177,7 +185,6 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow: hidden;
-    letter-spacing: -0.01em;
   }
 
   /* Scrollbar — near invisible, appears on hover */
@@ -441,6 +448,166 @@
       --select-chevron-color: color-mix(in srgb, var(--color-muted) 78%, transparent);
     }
   }
+}
+
+/* ── Studio OS Utilities ── */
+
+@utility focus-ring {
+  outline: none;
+  transition:
+    border-color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out),
+    background-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out);
+}
+
+@utility focus-ring-visible {
+  outline: none;
+}
+
+.focus-ring:focus-visible,
+.focus-ring-visible:focus-visible {
+  border-color: rgba(79, 106, 255, 0.42);
+  box-shadow: var(--shadow-focus);
+}
+
+@utility studio-app-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38), transparent 40%),
+    var(--color-canvas);
+}
+
+@utility studio-main-canvas {
+  background:
+    radial-gradient(ellipse 52% 44% at 28% 0%, rgba(79, 106, 255, 0.035), transparent 72%),
+    var(--color-canvas);
+}
+
+@utility studio-nav-rail {
+  border-color: var(--color-border-subtle);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.16)),
+    var(--color-rail);
+}
+
+@utility studio-panel {
+  border: 1px solid var(--color-border-subtle);
+  background-color: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  box-shadow: var(--shadow-card);
+}
+
+@utility studio-panel-strong {
+  border: 1px solid var(--color-border);
+  background-color: color-mix(in srgb, var(--color-surface) 97%, transparent);
+  box-shadow: var(--shadow-float);
+}
+
+@utility studio-floating-panel {
+  border: 1px solid var(--color-border);
+  background-color: var(--color-glass-strong);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+}
+
+@utility studio-toolbar {
+  border-bottom: 1px solid var(--color-border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 88%, transparent), color-mix(in srgb, var(--color-surface-muted) 82%, transparent));
+}
+
+@utility studio-card {
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out),
+    background-color 0.18s var(--ease-out);
+}
+
+@utility studio-card-hover {
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-float);
+}
+
+@utility studio-control {
+  cursor: pointer;
+  border: 1px solid var(--color-border-subtle);
+  background-color: color-mix(in srgb, var(--color-surface) 86%, transparent);
+  color: color-mix(in srgb, var(--color-foreground) 82%, var(--color-muted));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  transition:
+    border-color 0.18s var(--ease-out),
+    background-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out);
+}
+
+@utility studio-control-hover {
+  border-color: var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-foreground);
+}
+
+@utility studio-control-primary {
+  cursor: pointer;
+  border: 1px solid rgba(79, 106, 255, 0.2);
+  background: linear-gradient(135deg, #4F6AFF 0%, #7C5CFC 100%);
+  color: var(--color-primary-foreground);
+  box-shadow: 0 8px 20px rgba(79, 106, 255, 0.24);
+  transition:
+    filter 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out),
+    opacity 0.18s var(--ease-out);
+}
+
+@utility studio-control-subtle {
+  cursor: pointer;
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--color-muted);
+  transition:
+    background-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out);
+}
+
+@utility studio-control-danger {
+  cursor: pointer;
+  border: 1px solid rgba(209, 69, 69, 0.16);
+  background-color: rgba(209, 69, 69, 0.06);
+  color: var(--color-error);
+  transition:
+    background-color 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out),
+    color 0.18s var(--ease-out);
+}
+
+@utility studio-input {
+  border: 1px solid var(--color-border-subtle);
+  background-color: color-mix(in srgb, var(--color-surface-muted) 72%, transparent);
+  color: var(--color-foreground);
+  transition:
+    border-color 0.18s var(--ease-out),
+    background-color 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out);
+}
+
+@utility studio-empty {
+  border: 1px dashed var(--color-border);
+  background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+}
+
+@utility studio-status-bar {
+  border-top: 1px solid var(--color-border-subtle);
+  background-color: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  color: var(--color-muted);
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 /* ── Glass Utilities ── */
@@ -880,7 +1047,9 @@
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0ms !important;
-    transition-duration: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
