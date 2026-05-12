@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   getLogs, clearLogs, getLogSettings, saveLogSettings,
   readLogResponseFile, getTrashSettings, saveTrashSettings,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../hooks/useTheme";
+import { useLayoutContext } from "../components/layout/AppLayout";
 import type {
   AppFontSize,
   ImageModel,
@@ -76,6 +78,7 @@ const SETTINGS_TABS = [
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const { checkForUpdates, updateSupported } = useLayoutContext();
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">("general");
   const { theme, setThemeWithEvent } = useTheme();
 
@@ -96,6 +99,8 @@ export default function SettingsPage() {
   const [fontSizeSaved, setFontSizeSaved] = useState(false);
   const [trashSettings, setTrashSettings] = useState<TrashSettings>({ retention_days: 30 });
   const [trashSaved, setTrashSaved] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
 
   // Logs state
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -121,6 +126,12 @@ export default function SettingsPage() {
   useEffect(() => {
     imageModelRef.current = imageModel;
   }, [imageModel]);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(""));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -408,6 +419,24 @@ export default function SettingsPage() {
     setTimeout(() => setTrashSaved(false), 2000);
   }
 
+  async function handleCheckUpdate() {
+    if (updateSupported !== true) {
+      return;
+    }
+
+    setUpdateChecking(true);
+    try {
+      const update = await checkForUpdates();
+      if (!update) {
+        alert(t("update.noUpdate"));
+      }
+    } catch (err) {
+      alert(t("update.checkFailed"));
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
   async function handleFontSizeChange(nextSize: AppFontSize) {
     setFontSize(nextSize);
     applyAppFontSize(nextSize);
@@ -511,6 +540,8 @@ export default function SettingsPage() {
               fontSize={fontSize}
               fontSizeSaved={fontSizeSaved}
               theme={theme}
+              appVersion={appVersion}
+              updateSupported={updateSupported === true}
               fontSizeLabelKeys={FONT_SIZE_LABEL_KEYS}
               onLanguageChange={handleLanguageChange}
               onTrashSettingsChange={setTrashSettings}
@@ -518,6 +549,8 @@ export default function SettingsPage() {
               onOpenTrash={() => navigate("/trash")}
               onFontSizeChange={(nextSize) => void handleFontSizeChange(nextSize)}
               onThemeChange={(nextTheme, event) => setThemeWithEvent(nextTheme, event)}
+              onCheckUpdate={() => void handleCheckUpdate()}
+              updateChecking={updateChecking}
             />
           ) : activeTab === "model" ? (
             <ModelSettingsPanel

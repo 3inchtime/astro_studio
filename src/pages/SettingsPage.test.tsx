@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./SettingsPage";
+import { LayoutContext } from "../components/layout/AppLayout";
 
 const getFontSize = vi.fn();
 const getImageModel = vi.fn();
@@ -21,6 +22,7 @@ const deleteModelProviderProfile = vi.fn();
 const setActiveModelProvider = vi.fn();
 const saveImageModel = vi.fn();
 const saveLlmConfigs = vi.fn();
+const getVersion = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -55,6 +57,10 @@ vi.mock("../lib/api", () => ({
   setActiveModelProvider: (...args: unknown[]) => setActiveModelProvider(...args),
   saveLogSettings: vi.fn(),
   saveTrashSettings: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: () => getVersion(),
 }));
 
 const openAiProviderState = {
@@ -120,6 +126,24 @@ function renderSettingsPage() {
   renderWithProviders(<SettingsPage />);
 }
 
+function renderSettingsPageWithUpdatesUnsupported() {
+  renderWithProviders(
+    <LayoutContext.Provider
+      value={{
+        activeProjectId: null,
+        setActiveProjectId: vi.fn(),
+        activeConversationId: null,
+        setActiveConversationId: vi.fn(),
+        refreshConversations: vi.fn(),
+        updateSupported: false,
+        checkForUpdates: vi.fn(),
+      }}
+    >
+      <SettingsPage />
+    </LayoutContext.Provider>,
+  );
+}
+
 async function clickModelCard(name: string) {
   const card = await screen.findByRole("button", { name: `Select ${name} model` });
   await act(async () => {
@@ -158,6 +182,7 @@ describe("SettingsPage logs", () => {
     createModelProviderProfile.mockReset();
     deleteModelProviderProfile.mockReset();
     setActiveModelProvider.mockReset();
+    getVersion.mockReset();
     writeText.mockReset();
 
     clearLogs.mockResolvedValue(1);
@@ -190,6 +215,7 @@ describe("SettingsPage logs", () => {
       ...openAiProviderState,
       active_provider_id: "company-gateway",
     });
+    getVersion.mockResolvedValue("0.0.23");
     getFontSize.mockResolvedValue("medium");
     getImageModel.mockResolvedValue("gpt-image-2");
     getLlmConfigs.mockResolvedValue([]);
@@ -250,6 +276,19 @@ describe("SettingsPage logs", () => {
     expect(
       await screen.findByRole("heading", { name: "settings.imageGenerationConfig" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows the runtime app version in general settings", async () => {
+    renderSettingsPage();
+
+    expect(await screen.findByText("v0.0.23")).toBeInTheDocument();
+  });
+
+  it("hides update checks when updater support is disabled for the platform", async () => {
+    renderSettingsPageWithUpdatesUnsupported();
+
+    expect(await screen.findByText("v0.0.23")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "update.check" })).not.toBeInTheDocument();
   });
 
   it("shows theme presets in general settings and persists the selected theme", async () => {

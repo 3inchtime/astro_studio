@@ -21,6 +21,8 @@ import {
   getPromptFavoriteFolders,
   getPromptFolders,
   getPromptFavorites,
+  installUpdate,
+  isUpdateSupported,
   pinConversation,
   renameConversation,
   renameProject,
@@ -34,11 +36,65 @@ import {
 import type { ModelProviderProfilesState } from "./api";
 
 const tauriApi = vi.hoisted(() => ({
+  createdChannels: [] as unknown[],
   convertFileSrc: vi.fn((path: string) => path),
   invoke: vi.fn(),
+  Channel: class MockChannel<T = unknown> {
+    onmessage: (message: T) => void;
+
+    constructor(onmessage: (message: T) => void = () => {}) {
+      this.onmessage = onmessage;
+      tauriApi.createdChannels.push(this);
+    }
+  },
 }));
 
 vi.mock("@tauri-apps/api/core", () => tauriApi);
+
+const tauriEvent = vi.hoisted(() => ({
+  listen: vi.fn(async () => vi.fn()),
+}));
+
+vi.mock("@tauri-apps/api/event", () => tauriEvent);
+
+describe("api updater commands", () => {
+  beforeEach(() => {
+    tauriApi.invoke.mockReset();
+    tauriApi.createdChannels.length = 0;
+    tauriEvent.listen.mockClear();
+  });
+
+  it("passes a Tauri channel to the install update command", async () => {
+    const onEvent = vi.fn();
+    tauriApi.invoke.mockImplementation(async (_command, args) => {
+      const channel = (args as { onEvent: InstanceType<typeof tauriApi.Channel> }).onEvent;
+      channel.onmessage({
+        event: "Progress",
+        data: { chunkLength: 4, totalDownloaded: 12 },
+      });
+    });
+
+    await installUpdate(onEvent);
+
+    expect(tauriApi.createdChannels).toHaveLength(1);
+    expect(tauriApi.invoke).toHaveBeenCalledWith("install_update", {
+      onEvent: tauriApi.createdChannels[0],
+    });
+    expect(tauriEvent.listen).not.toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledWith({
+      event: "Progress",
+      data: { chunkLength: 4, totalDownloaded: 12 },
+    });
+  });
+
+  it("checks whether updater commands are supported on the current platform", async () => {
+    tauriApi.invoke.mockResolvedValue(false);
+
+    await expect(isUpdateSupported()).resolves.toBe(false);
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("is_update_supported");
+  });
+});
 
 describe("api log commands", () => {
   beforeEach(() => {

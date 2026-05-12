@@ -1,9 +1,12 @@
 import "../../i18n";
 import { useEffect } from "react";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import AppLayout, { useLayoutContext } from "./AppLayout";
+
+const checkForUpdate = vi.fn();
+const isUpdateSupported = vi.fn();
 
 vi.mock("react-i18next", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-i18next")>();
@@ -21,10 +24,23 @@ vi.mock("react-i18next", async (importOriginal) => {
           "theme.openPicker": "Open theme picker",
           "theme.title": "Themes",
           "theme.select": "Select {{name}} theme",
+          "update.title": "App Update",
+          "update.available": "New version available",
+          "update.close": "Close",
+          "update.later": "Remind Later",
+          "update.download": "Download Update",
         })[key] ?? key,
     }),
   };
 });
+
+vi.mock("../../lib/api", () => ({
+  checkForUpdate: () => checkForUpdate(),
+  isUpdateSupported: () => isUpdateSupported(),
+  createConversation: vi.fn(),
+  installUpdate: vi.fn(),
+  relaunchApp: vi.fn(),
+}));
 
 vi.mock("../sidebar/ConversationList", () => ({
   default: ({
@@ -61,7 +77,29 @@ function ProjectChatFixture() {
   return <Link to="/generate">global conversations</Link>;
 }
 
+function CheckUpdateFixture() {
+  const { checkForUpdates, updateSupported } = useLayoutContext();
+
+  return (
+    <button
+      type="button"
+      disabled={!updateSupported}
+      onClick={() => void checkForUpdates({ silent: false })}
+    >
+      check updates
+    </button>
+  );
+}
+
 describe("AppLayout", () => {
+  beforeEach(() => {
+    checkForUpdate.mockReset();
+    checkForUpdate.mockResolvedValue(null);
+    isUpdateSupported.mockReset();
+    isUpdateSupported.mockImplementation(() => new Promise(() => {}));
+    vi.useRealTimers();
+  });
+
   it("opens the rail theme picker and applies the selected preset", async () => {
     localStorage.clear();
 
@@ -272,5 +310,66 @@ describe("AppLayout", () => {
     });
     expect(screen.getByText("project chat empty")).toBeInTheDocument();
     expect(screen.queryByText("project home")).not.toBeInTheDocument();
+  });
+
+  it("opens the update dialog when a child route manually checks and finds an update", async () => {
+    isUpdateSupported.mockResolvedValue(true);
+    checkForUpdate.mockResolvedValue({
+      version: "0.0.24",
+      current_version: "0.0.23",
+      body: "Release notes",
+      date: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/settings" element={<CheckUpdateFixture />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const checkButton = screen.getByRole("button", { name: "check updates" });
+    await waitFor(() => expect(checkButton).not.toBeDisabled());
+
+    fireEvent.click(checkButton);
+
+    expect(await screen.findByRole("dialog", { name: "App Update" })).toBeInTheDocument();
+    expect(screen.getByText("Release notes")).toBeInTheDocument();
+  });
+
+  it("does not check for updates when updater support is disabled for the platform", async () => {
+    vi.useFakeTimers();
+    isUpdateSupported.mockResolvedValue(false);
+
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/settings" element={<CheckUpdateFixture />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const checkButton = screen.getByRole("button", { name: "check updates" });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(isUpdateSupported).toHaveBeenCalled();
+    expect(checkButton).toBeDisabled();
+
+    fireEvent.click(checkButton);
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(checkForUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "App Update" })).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 });

@@ -10,6 +10,9 @@ mod llm;
 mod model_registry;
 mod models;
 mod runtime_logs;
+mod updater;
+
+use std::sync::Mutex;
 
 use chrono::{SecondsFormat, Utc};
 use db::Database;
@@ -471,9 +474,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(app_config)
         .manage(database)
         .manage(engine)
+        .manage(updater::PendingUpdate(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             commands::settings::save_api_key,
             commands::settings::get_api_key,
@@ -553,6 +559,10 @@ pub fn run() {
             commands::llm::optimize_prompt,
             commands::llm::get_prompt_extractions,
             commands::llm::extract_prompt_from_image,
+            updater::is_update_supported,
+            updater::check_update,
+            updater::install_update,
+            updater::relaunch_app,
         ])
         .setup(|app| {
             runtime_logs::attach_app_handle(app.handle().clone());

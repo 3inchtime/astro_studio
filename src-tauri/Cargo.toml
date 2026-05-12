@@ -1,6 +1,6 @@
 [package]
 name = "astro-studio"
-version = "0.0.6"
+version = "0.0.23"
 description = "Astro Studio - AI Image Generation Desktop Client"
 authors = ["Astro Studio"]
 edition = "2021"
@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 window-vibrancy = "0.5"
