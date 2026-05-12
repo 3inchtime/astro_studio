@@ -56,7 +56,7 @@ export default function GenerationDetailPanel({
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 340, opacity: 0 }}
       transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-      className="w-[340px] h-full overflow-y-auto overflow-hidden border-l border-border-subtle bg-surface shrink-0"
+      className="studio-panel-strong h-full w-[340px] shrink-0 overflow-y-auto overflow-hidden rounded-l-[16px] border-y-0 border-r-0"
     >
       <div className="p-5">
         <div className="mb-4 flex items-center justify-between">
@@ -65,7 +65,7 @@ export default function GenerationDetailPanel({
           </h3>
           <button
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded-[8px] text-muted hover:bg-subtle transition-colors"
+            className="focus-ring flex h-6 w-6 cursor-pointer items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle"
           >
             <X size={14} />
           </button>
@@ -84,7 +84,7 @@ export default function GenerationDetailPanel({
                   type="button"
                   onClick={() => onPreview(selectedIndex)}
                   aria-label={`Preview ${result.generation.prompt}`}
-                  className="block w-full cursor-zoom-in text-left"
+                  className="focus-ring block w-full cursor-zoom-in text-left"
                 >
                   <img
                     src={toAssetUrl(image.file_path)}
@@ -108,7 +108,7 @@ export default function GenerationDetailPanel({
                     key={item.id}
                     onClick={() => setSelectedIndex(index)}
                     aria-label={`${t("lightbox.preview")} ${index + 1}`}
-                    className={`overflow-hidden rounded-[10px] border transition-all ${
+                    className={`focus-ring overflow-hidden rounded-[10px] border transition-all ${
                       index === selectedIndex
                         ? "border-primary shadow-card"
                         : "border-border-subtle hover:border-border"
@@ -202,7 +202,7 @@ export default function GenerationDetailPanel({
               onClick={() =>
                 onEditImage(image.file_path, image.id, generation.id)
               }
-              className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-primary/20 py-2.5 text-[12px] font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
+              className="focus-ring flex w-full cursor-pointer items-center justify-center gap-2 rounded-[10px] border border-primary/20 py-2.5 text-[12px] font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
             >
               <Wand2 size={13} />
               {t("gallery.editImage")}
@@ -211,7 +211,7 @@ export default function GenerationDetailPanel({
           {showManageFolders && image && (
             <button
               onClick={() => onManageFolders?.(image.id)}
-              className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
             >
               {t("favorites.manageFolders")}
             </button>
@@ -219,7 +219,7 @@ export default function GenerationDetailPanel({
           {showSaveButton && image && (
             <button
               onClick={() => void saveImageToFile(image.file_path)}
-              className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
             >
               <Download size={13} />
               {t("gallery.saveImage")}
@@ -228,7 +228,7 @@ export default function GenerationDetailPanel({
           {onRestore && (
             <button
               onClick={() => onRestore(generation.id)}
-              className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border-subtle py-2.5 text-[12px] font-medium text-foreground/70 transition-all hover:border-border hover:bg-subtle hover:text-foreground"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
             >
               <RotateCcw size={13} />
               {restoreLabel || t("trash.restore")}
@@ -236,7 +236,7 @@ export default function GenerationDetailPanel({
           )}
           <button
             onClick={() => onDelete(generation.id)}
-            className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-error/10 py-2.5 text-[12px] font-medium text-error/60 transition-all hover:border-error/20 hover:bg-error/4 hover:text-error"
+            className="studio-control-danger focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium"
           >
             <Trash2 size={13} />
             {deleteLabel || t("gallery.delete")}

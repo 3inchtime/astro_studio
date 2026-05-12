@@ -470,12 +470,12 @@ export default function SettingsPage() {
   const activeSection = SETTINGS_TABS.find((section) => section.id === activeTab) ?? SETTINGS_TABS[0];
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto bg-transparent">
       <div className="mx-auto w-full max-w-[1320px] p-6 md:p-8">
         <motion.header
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6 rounded-[14px] border border-border-subtle bg-surface px-5 py-5 shadow-card"
+          className="studio-panel mb-6 rounded-[16px] px-5 py-5"
         >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
@@ -506,9 +506,9 @@ export default function SettingsPage() {
                 aria-label={t(labelKey)}
                 aria-current={active ? "page" : undefined}
                 onClick={() => setActiveTab(id)}
-                className={`flex min-h-[88px] items-start gap-3 rounded-[14px] border px-4 py-4 text-left transition-all ${
+                className={`focus-ring flex min-h-[88px] cursor-pointer items-start gap-3 rounded-[14px] border px-4 py-4 text-left transition-all ${
                   active
-                    ? "border-border bg-surface shadow-card"
+                    ? "border-primary/20 bg-surface shadow-card"
                     : "border-border-subtle bg-surface/70 hover:border-border hover:bg-surface"
                 }`}
               >

@@ -34,7 +34,7 @@ export default function ViewModeToggle({
   return (
     <div
       aria-label={t("gallery.viewMode")}
-      className="flex h-[34px] shrink-0 items-center rounded-[10px] border border-border-subtle bg-subtle/45 p-0.5"
+      className="studio-control flex h-[34px] shrink-0 items-center rounded-[10px] p-0.5"
       role="group"
     >
       {options.map((option) => {
@@ -50,7 +50,7 @@ export default function ViewModeToggle({
             title={option.label}
             onClick={() => onChange(option.value)}
             className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-all hover:text-foreground",
+              "focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] text-muted transition-all hover:text-foreground",
               active &&
                 "bg-surface text-foreground shadow-[0_4px_14px_rgba(15,23,42,0.08)]",
             )}

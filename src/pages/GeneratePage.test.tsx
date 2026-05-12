@@ -893,6 +893,26 @@ describe("GeneratePage", () => {
     );
   });
 
+  it("uses the Studio OS command surface for generation controls", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    const toolbar = screen.getByRole("toolbar", {
+      name: "Generation parameters",
+    });
+    const promptInput = screen.getByPlaceholderText(
+      "Describe the image you want to generate...",
+    );
+    const commandSurface = promptInput.closest("[data-testid='generation-command-surface']");
+
+    expect(toolbar).toHaveClass("studio-toolbar");
+    expect(commandSurface).toHaveClass("studio-panel-strong");
+    expect(promptInput).toHaveClass("studio-input");
+  });
+
   it("lets the generate surface stretch across the available main panel", async () => {
     render(<GeneratePage />, { wrapper: TestWrapper });
 

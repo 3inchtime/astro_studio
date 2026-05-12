@@ -229,9 +229,9 @@ export default function FavoritesPage() {
   });
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden bg-transparent">
       <div className="flex flex-1 flex-col">
-        <div className="flex flex-col gap-3 border-b border-border-subtle px-6 py-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="studio-toolbar flex flex-col gap-3 px-6 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h2 className="text-[15px] font-semibold text-foreground tracking-tight">
               {t("favorites.title")}
@@ -241,10 +241,10 @@ export default function FavoritesPage() {
                 {activeTotal}
               </span>
             )}
-            <div className="flex rounded-[8px] border border-border-subtle bg-subtle/40 p-0.5">
+            <div className="studio-control flex rounded-[8px] p-0.5">
               <button
                 onClick={() => setActiveKind("images")}
-                className={`flex h-7 items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
+                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
                   activeKind === "images"
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -255,7 +255,7 @@ export default function FavoritesPage() {
               </button>
               <button
                 onClick={() => setActiveKind("prompts")}
-                className={`flex h-7 items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
+                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
                   activeKind === "prompts"
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -290,12 +290,10 @@ export default function FavoritesPage() {
                   handleFolderFilterChange(event.target.value)
                 }
                 className={cn(
-                  "select-control h-[34px] w-full rounded-[10px] border pl-7 pr-8 text-[12px] font-medium transition-all outline-none xl:w-44",
-                  "shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+                  "select-control studio-input focus-ring h-[34px] w-full rounded-[10px] pl-7 pr-8 text-[12px] font-medium xl:w-44",
                   activeFolderId
                     ? "border-primary/20 bg-surface text-foreground shadow-[0_10px_24px_rgba(79,106,255,0.08)]"
                     : "border-border-subtle bg-subtle/55 text-muted hover:border-border hover:bg-surface/92 hover:text-foreground",
-                  "focus:border-primary/30 focus:bg-surface focus:text-foreground focus:shadow-[0_0_0_4px_rgba(79,106,255,0.12)]",
                 )}
                 title={t("favorites.folderFilter")}
                 aria-label={t("favorites.folderFilter")}
@@ -336,7 +334,7 @@ export default function FavoritesPage() {
                     ? t("favorites.search")
                     : t("favorites.searchPrompts")
                 }
-                className="h-[30px] w-full rounded-[8px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground transition-colors placeholder:text-muted/50 focus:border-border focus:bg-surface focus:outline-none xl:w-52"
+                className="studio-input focus-ring h-[30px] w-full rounded-[8px] pl-7 pr-3 text-[12px] placeholder:text-muted/50 xl:w-52"
               />
             </div>
           </div>
@@ -446,7 +444,7 @@ function PromptFavoritesList({
       {favorites.map((favorite) => (
         <article
           key={favorite.id}
-          className="rounded-[8px] border border-border-subtle bg-surface p-4 shadow-sm"
+          className="studio-card rounded-[10px] p-4"
         >
           <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/85">
             {favorite.prompt}
@@ -460,7 +458,7 @@ function PromptFavoritesList({
             <div className="flex shrink-0 items-center gap-1">
               <button
                 onClick={() => onCopy(favorite)}
-                className="flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium text-muted transition-colors hover:bg-subtle hover:text-foreground"
+                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
               >
                 <Copy size={13} />
                 {copiedPromptId === favorite.id
@@ -469,14 +467,14 @@ function PromptFavoritesList({
               </button>
               <button
                 onClick={() => onManageFolders(favorite.id)}
-                className="flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium text-muted transition-colors hover:bg-subtle hover:text-foreground"
+                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
               >
                 <Folder size={13} />
                 {t("favorites.manageFolders")}
               </button>
               <button
                 onClick={() => onDelete(favorite.id)}
-                className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-error/6 hover:text-error"
+                className="studio-control-subtle focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-error/6 hover:text-error"
                 aria-label={t("favorites.deletePrompt")}
                 title={t("favorites.deletePrompt")}
               >

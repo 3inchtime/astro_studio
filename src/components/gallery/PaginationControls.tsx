@@ -16,7 +16,7 @@ export default function PaginationControls({ page, totalPages, onPageChange }: P
       <button
         onClick={() => onPageChange(page - 1)}
         disabled={page <= 1}
-        className="h-[28px] rounded-[8px] px-3 text-[11px] text-muted hover:bg-subtle disabled:opacity-30 transition-all"
+        className="studio-control focus-ring h-[28px] rounded-[8px] px-3 text-[11px] hover:studio-control-hover disabled:opacity-30"
       >
         {t("gallery.prev")}
       </button>
@@ -26,7 +26,7 @@ export default function PaginationControls({ page, totalPages, onPageChange }: P
       <button
         onClick={() => onPageChange(page + 1)}
         disabled={page >= totalPages}
-        className="h-[28px] rounded-[8px] px-3 text-[11px] text-muted hover:bg-subtle disabled:opacity-30 transition-all"
+        className="studio-control focus-ring h-[28px] rounded-[8px] px-3 text-[11px] hover:studio-control-hover disabled:opacity-30"
       >
         {t("gallery.next")}
       </button>

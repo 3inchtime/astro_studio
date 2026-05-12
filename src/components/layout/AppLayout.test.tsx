@@ -103,7 +103,7 @@ describe("AppLayout", () => {
   it("opens the rail theme picker and applies the selected preset", async () => {
     localStorage.clear();
 
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={["/generate"]}>
         <Routes>
           <Route element={<AppLayout />}>
@@ -113,9 +113,13 @@ describe("AppLayout", () => {
       </MemoryRouter>,
     );
 
+    expect(container.querySelector(".studio-app-shell")).toBeInTheDocument();
+    expect(container.querySelector(".studio-nav-rail")).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Open theme picker" }));
 
     expect(screen.getByRole("heading", { name: "Themes" })).toBeInTheDocument();
+    expect(container.querySelector(".studio-floating-panel")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Select .* theme/ })).toHaveLength(12);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Ocean Depths theme" }));

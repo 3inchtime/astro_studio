@@ -231,17 +231,17 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-transparent">
       {/* Filter bar */}
-      <div className="shrink-0 flex items-center gap-2 border-b border-border-subtle bg-surface/40 px-6 py-2.5">
+      <div className="studio-toolbar flex shrink-0 items-center gap-2 px-6 py-2.5">
         {(["all", "pinned", "mostImages", "recent"] as Filter[]).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`rounded-[20px] px-3 py-1 text-[12px] font-medium transition-colors ${
+            className={`focus-ring cursor-pointer rounded-[20px] border px-3 py-1 text-[12px] font-medium transition-colors ${
               filter === f
-                ? "bg-primary/10 text-primary"
-                : "text-muted hover:text-foreground hover:bg-subtle"
+                ? "border-primary/14 bg-primary/10 text-primary"
+                : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/70 hover:text-foreground"
             }`}
           >
             {t(`projects.filter.${f}`)}
@@ -255,7 +255,7 @@ export default function ProjectsPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("projects.searchPlaceholder")}
-            className="h-7 w-48 rounded-[8px] border border-border-subtle bg-surface pl-7 pr-2.5 text-[12px] text-foreground outline-none transition-colors placeholder:text-muted focus:border-primary/45"
+            className="studio-input focus-ring h-7 w-48 rounded-[8px] pl-7 pr-2.5 text-[12px] placeholder:text-muted"
           />
         </div>
         <button
@@ -263,7 +263,7 @@ export default function ProjectsPage() {
             setCreateError(null);
             setCreateDialogOpen(true);
           }}
-          className="flex h-7 items-center gap-1.5 rounded-[8px] bg-primary px-3 text-[12px] font-medium text-white transition-colors hover:bg-primary/90"
+          className="studio-control-primary focus-ring flex h-7 items-center gap-1.5 rounded-[8px] px-3 text-[12px] font-medium"
         >
           <Plus size={13} />
           {t("sidebar.newProject")}
@@ -297,7 +297,7 @@ export default function ProjectsPage() {
                   setCreateError(null);
                   setCreateDialogOpen(true);
                 }}
-                className="mt-1 flex items-center gap-1.5 rounded-[10px] bg-primary px-4 py-2 text-[12px] font-medium text-white"
+                className="studio-control-primary focus-ring mt-1 flex items-center gap-1.5 rounded-[10px] px-4 py-2 text-[12px] font-medium"
               >
                 <Plus size={13} />
                 {t("sidebar.newProject")}
@@ -336,7 +336,7 @@ export default function ProjectsPage() {
 
       {/* Stats footer */}
       {!loading && !loadError && projects.length > 0 && (
-        <div className="shrink-0 flex items-center gap-5 border-t border-border-subtle bg-surface/40 px-6 py-2 text-[11px] text-muted">
+        <div className="studio-status-bar flex shrink-0 items-center gap-5 px-6 py-2 text-[11px]">
           <span>
             <span className="font-semibold text-foreground/70 tabular-nums font-[family-name:var(--font-mono)]">
               {stats.totalProjects}
@@ -434,7 +434,7 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      className="group relative rounded-[14px] border border-border-subtle bg-surface shadow-card transition-all duration-200 hover:shadow-float hover:border-border hover:-translate-y-0.5 cursor-pointer"
+      className="studio-card group relative cursor-pointer overflow-hidden rounded-[14px] hover:studio-card-hover"
       onClick={onOpen}
     >
       {/* Mosaic Preview */}
@@ -489,14 +489,14 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
         </div>
       </div>
 
-      {/* Hover Overlay */}
-      <div className="absolute inset-0 rounded-[14px] bg-foreground/80 backdrop-blur-sm flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+      {/* Action Tray */}
+      <div className="absolute bottom-3 right-3 z-10 flex items-center justify-center gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
         <button
           onClick={(e) => {
             e.stopPropagation();
             onOpen();
           }}
-          className="flex items-center gap-1.5 rounded-[8px] bg-primary px-4 py-2 text-[12px] font-medium text-white transition-colors hover:bg-primary/90 shadow-sm"
+          className="studio-control-primary focus-ring flex items-center gap-1.5 rounded-[8px] px-4 py-2 text-[12px] font-medium"
         >
           {t("projects.open")}
         </button>
@@ -506,13 +506,13 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
               e.stopPropagation();
               setShowActions((c) => !c);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-white/20 bg-white/10 text-white/80 backdrop-blur-sm transition-colors hover:bg-white/20 hover:text-white"
+            className="studio-floating-panel focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] text-foreground/80 transition-colors hover:text-foreground"
           >
             <MoreHorizontal size={15} />
           </button>
           {showActions && (
             <div
-              className="absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[10px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]"
+              className="studio-floating-panel absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[10px] py-1"
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -520,7 +520,7 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
                   setShowActions(false);
                   onAction("rename");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 <Pencil size={13} />
                 <span>{t("sidebar.rename")}</span>
@@ -530,7 +530,7 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
                   setShowActions(false);
                   onAction("pin");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 {project.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
                 <span>{project.pinned_at ? t("projects.unpin") : t("projects.pin")}</span>
@@ -540,7 +540,7 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
                   setShowActions(false);
                   onAction("archive");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 <Archive size={13} />
                 <span>{t("sidebar.archive")}</span>
@@ -550,7 +550,7 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
                   setShowActions(false);
                   onAction("delete");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error hover:bg-error/8 transition-colors"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error transition-colors hover:bg-error/8"
               >
                 <Trash2 size={13} />
                 <span>{t("sidebar.delete")}</span>

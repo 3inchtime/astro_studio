@@ -25,7 +25,7 @@ export default function GallerySearchBar({
   actions,
 }: GallerySearchBarProps) {
   return (
-    <div className="border-b border-border-subtle px-6 py-4">
+    <div className="studio-toolbar px-6 py-4">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div className="flex shrink-0 items-center gap-3 pb-0.5">
           <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
@@ -59,7 +59,7 @@ export default function GallerySearchBar({
                 }
               }}
               placeholder={config.searchPlaceholder}
-              className="h-[34px] w-full rounded-[10px] border border-border-subtle bg-subtle/40 pl-7 pr-3 text-[12px] text-foreground placeholder:text-muted/50 transition-colors focus:border-border focus:bg-surface focus:outline-none"
+              className="studio-input focus-ring h-[34px] w-full rounded-[10px] pl-7 pr-3 text-[12px] placeholder:text-muted/50"
             />
           </label>
 
@@ -100,7 +100,7 @@ export default function GallerySearchBar({
                     value={field.value}
                     aria-label={field.label}
                     onChange={(event) => field.onChange(event.target.value)}
-                    className="select-control h-[34px] w-full min-w-0 rounded-[10px] border border-border-subtle bg-subtle/35 pl-7 pr-8 text-[12px] text-foreground outline-none transition-colors focus:border-border focus:bg-surface"
+                    className="select-control studio-input focus-ring h-[34px] w-full min-w-0 rounded-[10px] pl-7 pr-8 text-[12px]"
                   >
                     {field.options.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -120,7 +120,7 @@ export default function GallerySearchBar({
             <button
               type="button"
               onClick={onSearch}
-              className="inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[10px] gradient-primary px-4 text-[12px] font-medium text-white shadow-button transition-transform hover:-translate-y-0.5"
+              className="studio-control-primary focus-ring inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[10px] px-4 text-[12px] font-medium"
             >
               <Filter size={13} />
               {config.applyFilters}
@@ -129,7 +129,7 @@ export default function GallerySearchBar({
               type="button"
               onClick={onReset}
               disabled={!hasActiveFilters}
-              className="inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle px-4 text-[12px] font-medium text-foreground/75 transition-colors hover:border-border hover:bg-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              className="studio-control focus-ring inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[10px] px-4 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RotateCcw size={13} />
               {config.resetFilters}

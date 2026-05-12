@@ -48,13 +48,11 @@ export default function DateFilterField({
         <div
           onClick={() => inputRef.current?.showPicker()}
           className={cn(
-            "group flex h-[36px] w-full cursor-pointer items-center gap-2 rounded-[10px] border px-2.5 transition-all duration-150",
-            "shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]",
+            "studio-control focus-ring group flex h-[36px] w-full cursor-pointer items-center gap-2 rounded-[10px] px-2.5",
             value
-              ? "border-border bg-surface"
+              ? "border-border bg-surface text-foreground"
               : "border-border-subtle bg-subtle/35",
-            "hover:border-border hover:bg-surface",
-            "focus-within:border-primary/30 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.12),inset_0_1px_0_rgba(255,255,255,0.65)]",
+            "hover:studio-control-hover focus-within:border-primary/30 focus-within:bg-surface focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.12)]",
           )}
         >
           <CalendarDays
@@ -85,7 +83,7 @@ export default function DateFilterField({
                 e.stopPropagation();
                 onChange("");
               }}
-              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] -mr-0.5 text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
+              className="-mr-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
             >
               <X size={12} strokeWidth={2} />
             </button>

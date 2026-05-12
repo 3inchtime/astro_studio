@@ -99,7 +99,7 @@ export function ModelSettingsPanel({
             variants={cardVariants}
             initial="hidden"
             animate="visible"
-            className="rounded-[12px] border border-border-subtle bg-surface/90 p-4 shadow-card"
+            className="studio-card rounded-[12px] p-4"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
@@ -233,7 +233,7 @@ export function ModelSettingsPanel({
           variants={cardVariants}
           initial="hidden"
           animate="visible"
-          className="rounded-[12px] border border-border-subtle bg-surface/90 p-4 shadow-card"
+          className="studio-card rounded-[12px] p-4"
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
@@ -386,7 +386,7 @@ export function ModelSettingsPanel({
                       value={selectedProvider.name}
                       onChange={(e) => onProviderNameChange(e.target.value)}
                       placeholder={t("settings.providerNamePlaceholder")}
-                      className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                      className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
                     />
                   </label>
                   <label className="grid gap-1.5">
@@ -398,7 +398,7 @@ export function ModelSettingsPanel({
                         onChange={(e) => onProviderApiKeyChange(e.target.value)}
                         onFocus={() => { if (!showKey) onShowKeyChange(true); }}
                         placeholder={t("settings.apiKeyPlaceholder")}
-                        className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 pr-9 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                        className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 pr-9 text-[12px] placeholder:text-muted/40"
                       />
                       <button
                         type="button"
@@ -447,7 +447,7 @@ export function ModelSettingsPanel({
                         value={endpointSettings.base_url}
                         onChange={(e) => onProviderBaseUrlChange(e.target.value)}
                         placeholder={defaultBaseUrlForModel(imageModel)}
-                        className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                        className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
                       />
                     </label>
                   ) : (
@@ -459,7 +459,7 @@ export function ModelSettingsPanel({
                           value={endpointSettings.generation_url}
                           onChange={(e) => onProviderGenerationUrlChange(e.target.value)}
                           placeholder={defaultGenerationUrlForModel(imageModel)}
-                          className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                          className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
                         />
                       </label>
                       {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
@@ -470,7 +470,7 @@ export function ModelSettingsPanel({
                             value={endpointSettings.edit_url}
                             onChange={(e) => onProviderEditUrlChange(e.target.value)}
                             placeholder={defaultEditUrlForModel(imageModel)}
-                            className="h-[38px] w-full rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground transition-all duration-200 placeholder:text-muted/40 focus:border-primary/25 focus:bg-surface focus:shadow-card focus:outline-none"
+                            className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
                           />
                         </label>
                       )}

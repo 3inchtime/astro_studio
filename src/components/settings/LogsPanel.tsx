@@ -95,7 +95,7 @@ export function LogsPanel({
       transition={{ duration: 0.2 }}
     >
       <div className="space-y-4">
-        <div className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+        <div className="studio-card rounded-[12px]">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border-subtle px-4 py-3">
             <div>
               <div className="flex items-center gap-2">
@@ -121,7 +121,7 @@ export function LogsPanel({
                 type="button"
                 onClick={() => onCopyText(formatRuntimeLogs(runtimeLogs), "runtime")}
                 disabled={runtimeLogs.length === 0}
-                className="flex h-[30px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[11px] text-muted transition-all hover:border-border hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                className="studio-control focus-ring flex h-[30px] items-center gap-1.5 rounded-[8px] px-3 text-[11px] hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Copy size={12} />
                 {copiedLogTarget === "runtime" ? t("log.copied") : t("log.copyRuntimeLogs")}
@@ -129,7 +129,7 @@ export function LogsPanel({
               <button
                 type="button"
                 onClick={onClearRuntimeLogs}
-                className="flex h-[30px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[11px] text-muted transition-all hover:border-border hover:text-foreground"
+                className="studio-control focus-ring flex h-[30px] items-center gap-1.5 rounded-[8px] px-3 text-[11px] hover:studio-control-hover"
               >
                 <X size={12} />
                 {t("log.clearView")}
@@ -176,7 +176,7 @@ export function LogsPanel({
           <select
             value={logType}
             onChange={(e) => onLogTypeChange(e.target.value)}
-            className="select-control h-[34px] rounded-[8px] border border-border-subtle bg-subtle/30 px-3 pr-8 text-[12px] text-foreground transition-all focus:border-primary/25 focus:outline-none"
+            className="select-control studio-input focus-ring h-[34px] rounded-[8px] px-3 pr-8 text-[12px]"
           >
             <option value="">{t("log.allTypes")}</option>
             {LOG_TYPES.filter(Boolean).map((lt) => (
@@ -187,7 +187,7 @@ export function LogsPanel({
           <select
             value={logLevel}
             onChange={(e) => onLogLevelChange(e.target.value)}
-            className="select-control h-[34px] rounded-[8px] border border-border-subtle bg-subtle/30 px-3 pr-8 text-[12px] text-foreground transition-all focus:border-primary/25 focus:outline-none"
+            className="select-control studio-input focus-ring h-[34px] rounded-[8px] px-3 pr-8 text-[12px]"
           >
             <option value="">{t("log.allLevels")}</option>
             {LOG_LEVELS.filter(Boolean).map((ll) => (
@@ -200,7 +200,7 @@ export function LogsPanel({
             <select
               value={logSettings.retention_days}
               onChange={(e) => onSaveRetention(Number(e.target.value))}
-              className="select-control h-[30px] rounded-[6px] border border-border-subtle bg-subtle/30 px-2 pr-7 text-[11px] text-foreground focus:border-primary/25 focus:outline-none"
+              className="select-control studio-input focus-ring h-[30px] rounded-[6px] px-2 pr-7 text-[11px]"
             >
               {[3, 7, 14, 30].map((d) => (
                 <option key={d} value={d}>{d} {t("log.days")}</option>
@@ -211,14 +211,14 @@ export function LogsPanel({
           <button
             type="button"
             onClick={onOpenClearLogs}
-            className="ml-auto flex h-[34px] items-center gap-1.5 rounded-[8px] border border-border-subtle px-3 text-[12px] text-muted transition-all hover:border-red-300 hover:text-red-500"
+            className="studio-control-danger focus-ring ml-auto flex h-[34px] items-center gap-1.5 rounded-[8px] px-3 text-[12px]"
           >
             <Trash2 size={12} />
             {t("log.clearLogs")}
           </button>
         </div>
 
-        <div className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+        <div className="studio-card rounded-[12px]">
           {logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted/40">
               <FileText size={32} className="mb-3" />
@@ -238,7 +238,7 @@ export function LogsPanel({
                   <button
                     key={log.id}
                     onClick={() => onSelectLog(log)}
-                    className={`grid w-full grid-cols-[140px_100px_70px_1fr] gap-2 border-b border-border-subtle/50 px-4 py-2.5 text-left text-[12px] transition-colors hover:bg-subtle/30 ${
+                    className={`focus-ring grid w-full grid-cols-[140px_100px_70px_1fr] gap-2 border-b border-border-subtle/50 px-4 py-2.5 text-left text-[12px] transition-colors hover:bg-subtle/30 ${
                       selectedLog?.id === log.id ? "bg-primary/5" : ""
                     }`}
                   >
@@ -262,7 +262,7 @@ export function LogsPanel({
                   <button
                     disabled={logPage <= 1}
                     onClick={() => onLogPageChange((p) => p - 1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted/50 transition-colors hover:bg-subtle hover:text-foreground disabled:opacity-30"
+                    className="focus-ring flex h-7 w-7 items-center justify-center rounded-[6px] text-muted/50 transition-colors hover:bg-subtle hover:text-foreground disabled:opacity-30"
                   >
                     <ChevronLeft size={14} />
                   </button>
@@ -270,7 +270,7 @@ export function LogsPanel({
                   <button
                     disabled={logPage >= totalPages}
                     onClick={() => onLogPageChange((p) => p + 1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted/50 transition-colors hover:bg-subtle hover:text-foreground disabled:opacity-30"
+                    className="focus-ring flex h-7 w-7 items-center justify-center rounded-[6px] text-muted/50 transition-colors hover:bg-subtle hover:text-foreground disabled:opacity-30"
                   >
                     <ChevronRight size={14} />
                   </button>
@@ -288,21 +288,21 @@ export function LogsPanel({
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden"
             >
-              <div className="rounded-[12px] border border-border-subtle bg-surface shadow-card">
+              <div className="studio-card rounded-[12px]">
                 <div className="flex items-center justify-between border-b border-border-subtle px-4 py-2.5">
                   <span className="text-[12px] font-medium text-foreground">{t("log.detail")}</span>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => onCopyText(formatPersistedLog(selectedLog, responseContent), "detail")}
-                      className="flex h-7 items-center gap-1.5 rounded-[6px] border border-border-subtle px-2 text-[11px] text-muted transition-colors hover:border-border hover:text-foreground"
+                      className="studio-control focus-ring flex h-7 items-center gap-1.5 rounded-[6px] px-2 text-[11px] hover:studio-control-hover"
                     >
                       <Copy size={12} />
                       {copiedLogTarget === "detail" ? t("log.copied") : t("log.copyLog")}
                     </button>
                     <button
                       onClick={onCloseSelectedLog}
-                      className="flex h-6 w-6 items-center justify-center rounded-[6px] text-muted/40 hover:bg-subtle hover:text-muted"
+                      className="focus-ring flex h-6 w-6 items-center justify-center rounded-[6px] text-muted/40 hover:bg-subtle hover:text-muted"
                     >
                       <X size={13} />
                     </button>
