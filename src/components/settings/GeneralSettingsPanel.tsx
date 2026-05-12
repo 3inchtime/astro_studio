@@ -21,6 +21,8 @@ interface GeneralSettingsPanelProps {
   fontSize: AppFontSize;
   fontSizeSaved: boolean;
   theme: ThemeId;
+  appVersion: string;
+  updateSupported: boolean;
   fontSizeLabelKeys: Record<AppFontSize, string>;
   onLanguageChange: (language: SupportedLanguage) => void;
   onTrashSettingsChange: (settings: TrashSettings) => void;
@@ -40,6 +42,8 @@ export function GeneralSettingsPanel({
   fontSize,
   fontSizeSaved,
   theme,
+  appVersion,
+  updateSupported,
   fontSizeLabelKeys,
   onLanguageChange,
   onTrashSettingsChange,
@@ -225,30 +229,32 @@ export function GeneralSettingsPanel({
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between rounded-[10px] border border-border-subtle bg-subtle/20 px-3 py-2.5">
                   <span className="text-[12px] text-foreground">{t("settings.currentVersion")}</span>
-                  <span className="text-[12px] font-medium text-muted/75">v{__APP_VERSION__}</span>
+                  <span className="text-[12px] font-medium text-muted/75">v{appVersion}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={onCheckUpdate}
-                  disabled={updateChecking}
-                  className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-[10px] gradient-primary px-4 text-[12px] font-medium text-white shadow-button transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {updateChecking ? (
-                    <>
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white"
-                      />
-                      {t("update.checking")}
-                    </>
-                  ) : (
-                    <>
-                      <Download size={13} strokeWidth={2.5} />
-                      {t("update.check")}
-                    </>
-                  )}
-                </button>
+                {updateSupported && (
+                  <button
+                    type="button"
+                    onClick={onCheckUpdate}
+                    disabled={updateChecking}
+                    className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-[10px] gradient-primary px-4 text-[12px] font-medium text-white shadow-button transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {updateChecking ? (
+                      <>
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white"
+                        />
+                        {t("update.checking")}
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} strokeWidth={2.5} />
+                        {t("update.check")}
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   getLogs, clearLogs, getLogSettings, saveLogSettings,
   readLogResponseFile, getTrashSettings, saveTrashSettings,
@@ -8,13 +9,13 @@ import {
   getRuntimeLogs, onRuntimeLog, getModelProviderProfiles,
   saveModelProviderProfiles, createModelProviderProfile,
   deleteModelProviderProfile, setActiveModelProvider,
-  checkForUpdate,
 } from "../lib/api";
 import {
   Cpu, FileText, SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../hooks/useTheme";
+import { useLayoutContext } from "../components/layout/AppLayout";
 import type {
   AppFontSize,
   ImageModel,
@@ -77,6 +78,7 @@ const SETTINGS_TABS = [
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const { checkForUpdates, updateSupported } = useLayoutContext();
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">("general");
   const { theme, setThemeWithEvent } = useTheme();
 
@@ -98,6 +100,7 @@ export default function SettingsPage() {
   const [trashSettings, setTrashSettings] = useState<TrashSettings>({ retention_days: 30 });
   const [trashSaved, setTrashSaved] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
 
   // Logs state
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -123,6 +126,12 @@ export default function SettingsPage() {
   useEffect(() => {
     imageModelRef.current = imageModel;
   }, [imageModel]);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(""));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -411,14 +420,14 @@ export default function SettingsPage() {
   }
 
   async function handleCheckUpdate() {
+    if (updateSupported !== true) {
+      return;
+    }
+
     setUpdateChecking(true);
     try {
-      const update = await checkForUpdate();
-      if (update) {
-        // Update available - the AppLayout will handle showing the dialog
-        // For now, just show an alert or trigger the update dialog through a different mechanism
-        alert(t("update.available", { version: update.version }));
-      } else {
+      const update = await checkForUpdates();
+      if (!update) {
         alert(t("update.noUpdate"));
       }
     } catch (err) {
@@ -531,6 +540,8 @@ export default function SettingsPage() {
               fontSize={fontSize}
               fontSizeSaved={fontSizeSaved}
               theme={theme}
+              appVersion={appVersion}
+              updateSupported={updateSupported === true}
               fontSizeLabelKeys={FONT_SIZE_LABEL_KEYS}
               onLanguageChange={handleLanguageChange}
               onTrashSettingsChange={setTrashSettings}

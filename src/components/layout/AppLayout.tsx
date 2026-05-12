@@ -17,7 +17,7 @@ import appLogo from "../../assets/logo.png";
 import { ResizeHandle } from "./ResizeHandle";
 import ConversationList from "../sidebar/ConversationList";
 import ProjectsSidebar from "../projects/ProjectsSidebar";
-import { createConversation, checkForUpdate } from "../../lib/api";
+import { createConversation, checkForUpdate, isUpdateSupported } from "../../lib/api";
 import { ThemeCardPicker } from "../theme/ThemeCardPicker";
 import { getThemeName } from "../../lib/themes";
 import UpdateDialog from "../common/UpdateDialog";
@@ -29,6 +29,8 @@ interface LayoutContextType {
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
   refreshConversations: () => void;
+  updateSupported: boolean | null;
+  checkForUpdates: (options?: { silent?: boolean }) => Promise<UpdateMetadata | null>;
 }
 
 export const LayoutContext = createContext<LayoutContextType>({
@@ -37,6 +39,8 @@ export const LayoutContext = createContext<LayoutContextType>({
   activeConversationId: null,
   setActiveConversationId: () => {},
   refreshConversations: () => {},
+  updateSupported: true,
+  checkForUpdates: async () => null,
 });
 
 export function useLayoutContext() {
@@ -71,6 +75,7 @@ export default function AppLayout() {
   const themePanelRef = useRef<HTMLDivElement | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<UpdateMetadata | null>(null);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updateSupported, setUpdateSupported] = useState<boolean | null>(null);
 
   const isProjectListRoute = useMemo(
     () => location.pathname === "/projects",
@@ -179,27 +184,69 @@ export default function AppLayout() {
     };
   }, [themePickerOpen]);
 
-  // Check for updates on app start (silently)
   useEffect(() => {
-    const checkUpdateOnStart = async () => {
+    let cancelled = false;
+
+    isUpdateSupported()
+      .then((supported) => {
+        if (cancelled) {
+          return;
+        }
+        setUpdateSupported(supported);
+        if (!supported) {
+          setPendingUpdate(null);
+          setUpdateDialogOpen(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUpdateSupported(false);
+          setPendingUpdate(null);
+          setUpdateDialogOpen(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const checkForUpdates = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      if (updateSupported !== true) {
+        return null;
+      }
+
       try {
         const update = await checkForUpdate();
+        setPendingUpdate(update);
         if (update) {
-          setPendingUpdate(update);
           setUpdateDialogOpen(true);
         }
-      } catch {
-        // Silently ignore update check failures on startup
+        return update;
+      } catch (error) {
+        if (options.silent) {
+          return null;
+        }
+        throw error;
       }
-    };
+    },
+    [updateSupported],
+  );
+
+  // Check for updates on app start (silently)
+  useEffect(() => {
+    if (updateSupported !== true) {
+      return;
+    }
 
     // Delay update check by 5 seconds to avoid impacting startup performance
     const timer = setTimeout(() => {
-      checkUpdateOnStart();
+      void checkForUpdates({ silent: true });
     }, 5000);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [checkForUpdates, updateSupported]);
 
   const refreshConversations = useCallback(() => {
     setConversationRefreshKey((key) => key + 1);
@@ -278,6 +325,8 @@ export default function AppLayout() {
         activeConversationId,
         setActiveConversationId,
         refreshConversations,
+        updateSupported,
+        checkForUpdates,
       }}
     >
       <div className="relative flex h-screen overflow-hidden bg-background gradient-mesh">

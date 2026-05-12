@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type {
@@ -581,18 +581,15 @@ export async function checkForUpdate(): Promise<UpdateMetadata | null> {
   return invoke("check_update");
 }
 
+export async function isUpdateSupported(): Promise<boolean> {
+  return invoke("is_update_supported");
+}
+
 export async function installUpdate(
   onEvent: (event: DownloadEvent) => void,
 ): Promise<void> {
-  const channel = await listen<DownloadEvent>("installer-event", (event) => {
-    onEvent(event.payload);
-  });
-
-  try {
-    await invoke("install_update");
-  } finally {
-    channel();
-  }
+  const channel = new Channel<DownloadEvent>(onEvent);
+  await invoke("install_update", { onEvent: channel });
 }
 
 export async function relaunchApp(): Promise<void> {
