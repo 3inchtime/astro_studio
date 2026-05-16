@@ -134,6 +134,28 @@ describe("ImageGrid", () => {
     expect(imageFrame).toHaveClass("h-72");
   });
 
+  it("renders image actions as an overlay tool cluster", () => {
+    render(
+      <ImageGrid
+        images={[
+          {
+            path: "/tmp/image.png",
+            thumbnail: "/tmp/thumb.png",
+            imageId: "image-1",
+            generationId: "generation-1",
+          },
+        ]}
+        onImageClick={vi.fn()}
+      />,
+    );
+
+    const controls = screen
+      .getByRole("button", { name: "Delete" })
+      .parentElement;
+
+    expect(controls).toHaveClass("absolute", "bottom-3", "opacity-0");
+  });
+
   it("passes the generation id to delete without relying on native confirm", () => {
     const onDelete = vi.fn();
 

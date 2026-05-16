@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[allow(unused_imports)]
+pub use crate::prompt_agent::types::{
+    PromptAgentMessage, PromptAgentSession, PromptAgentSuggestedParams, PromptAgentTurnResponse,
+    SendPromptAgentMessageRequest, StartPromptAgentSessionRequest,
+};
+
 pub const ENGINE_GPT_IMAGE_2: &str = "gpt-image-2";
 pub const ENGINE_NANO_BANANA: &str = "nano-banana";
 pub const ENGINE_NANO_BANANA_2: &str = "nano-banana-2";
@@ -225,6 +231,93 @@ pub struct Project {
     pub deleted_at: Option<String>,
     pub conversation_count: i32,
     pub image_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasDocument {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub document_path: String,
+    pub preview_path: Option<String>,
+    pub width: i32,
+    pub height: i32,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasViewport {
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasFrame {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub aspect: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasObject {
+    #[serde(rename = "type")]
+    pub object_type: String,
+    pub id: String,
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub points: Vec<f64>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub size: Option<f64>,
+    #[serde(default)]
+    pub opacity: Option<f64>,
+    #[serde(default)]
+    pub image_path: Option<String>,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
+    #[serde(default)]
+    pub original_width: Option<f64>,
+    #[serde(default)]
+    pub original_height: Option<f64>,
+    #[serde(default)]
+    pub rotation: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasLayer {
+    pub id: String,
+    pub name: String,
+    pub visible: bool,
+    pub locked: bool,
+    pub objects: Vec<CanvasObject>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasDocumentContent {
+    pub version: i32,
+    pub viewport: CanvasViewport,
+    pub frame: CanvasFrame,
+    pub layers: Vec<CanvasLayer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasDocumentWithContent {
+    #[serde(flatten)]
+    pub document: CanvasDocument,
+    pub content: CanvasDocumentContent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -149,6 +149,30 @@ describe("ConversationList", () => {
     expect(thumbnailImage?.parentElement).toHaveClass("h-[43px]", "w-[43px]");
   });
 
+  it("renders the active conversation as an elevated compact card", async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ConversationList
+          activeProjectId="project-1"
+          activeConversationId="conversation-1"
+          refreshKey={0}
+          onSelectProject={vi.fn()}
+          onProjectCreated={vi.fn()}
+          onSelectConversation={vi.fn()}
+          onInitialConversation={vi.fn()}
+          onClearActiveConversation={vi.fn()}
+          onNewConversation={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Homepage hero direction");
+
+    const activeRow = container.querySelector("[data-active-conversation='true']");
+
+    expect(activeRow).toHaveClass("bg-surface", "shadow-card", "ring-1");
+  });
+
   it("opens an in-app confirmation dialog before deleting a conversation", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 

@@ -180,8 +180,8 @@ export default function ConversationList({
   ]);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="px-4 pt-5 pb-3">
+    <div className="flex h-full flex-col bg-gradient-to-b from-surface/92 via-surface/74 to-surface-muted/52">
+      <div className="px-4 pb-3 pt-5">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <MessageSquare size={13} className="text-muted" strokeWidth={1.8} />
@@ -195,7 +195,7 @@ export default function ConversationList({
             <button
               type="button"
               onClick={() => navigate("/projects")}
-              className="inline-flex items-center gap-1.5 rounded-[8px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-subtle hover:text-foreground"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 shadow-card transition-colors hover:bg-subtle hover:text-foreground"
               aria-label={t("projects.backToList")}
             >
               <ArrowLeft size={12} strokeWidth={1.9} />
@@ -209,7 +209,7 @@ export default function ConversationList({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("sidebar.search")}
-            className="h-[28px] w-full rounded-[8px] border border-border-subtle bg-subtle/50 pl-7 pr-2 text-[12px] text-foreground placeholder:text-muted/60 focus:outline-none focus:border-border focus:bg-surface transition-colors"
+            className="h-8 w-full rounded-full border border-border-subtle bg-surface/72 pl-7 pr-2 text-[12px] text-foreground shadow-inset placeholder:text-muted/60 transition-colors focus:border-primary/24 focus:bg-surface focus:outline-none"
           />
         </div>
       </div>
@@ -217,9 +217,9 @@ export default function ConversationList({
       <div className="flex-1 overflow-y-auto px-2.5 pb-4 pt-3">
         <button
           onClick={onNewConversation}
-          className="mb-3 flex w-full items-center gap-2.5 rounded-[10px] border border-dashed border-border-subtle px-2 py-2 text-left transition-all hover:border-primary/30 hover:bg-primary/4"
+          className="focus-ring mb-3 flex w-full items-center gap-2.5 rounded-[14px] border border-dashed border-border-subtle bg-surface/42 px-2 py-2 text-left transition-all hover:border-primary/30 hover:bg-surface hover:shadow-card"
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-border-subtle bg-subtle">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border-subtle bg-surface shadow-card">
             <Plus size={14} className="text-primary" strokeWidth={2} />
           </div>
           <div className="min-w-0 flex-1">
@@ -241,7 +241,7 @@ export default function ConversationList({
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-1.5">
             {conversations.map((conv, i) => (
               <ConversationRow
                 key={conv.id}
@@ -312,15 +312,18 @@ function ConversationRow({
       initial={{ opacity: 0, x: -6 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.25 }}
-      className={`group relative rounded-[10px] transition-colors hover:bg-subtle ${
-        active ? "bg-primary/6" : ""
+      data-active-conversation={active ? "true" : "false"}
+      className={`group relative rounded-[14px] border transition-all duration-200 ${
+        active
+          ? "border-white/72 bg-surface shadow-card ring-1 ring-primary/12"
+          : "border-transparent hover:border-border-subtle hover:bg-surface/72 hover:shadow-card"
       }`}
     >
       <button
         onClick={onSelect}
-        className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-2 text-left"
+        className="flex w-full items-center gap-2.5 rounded-[14px] px-2 py-2 text-left"
       >
-        <div className="h-[43px] w-[43px] shrink-0 overflow-hidden rounded-[8px] border border-border-subtle bg-subtle">
+        <div className="h-[43px] w-[43px] shrink-0 overflow-hidden rounded-[10px] border border-border-subtle bg-subtle shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
           {conversation.latest_thumbnail ? (
             <img
               src={toAssetUrl(conversation.latest_thumbnail)}
@@ -337,7 +340,9 @@ function ConversationRow({
         <div className="min-w-0 flex-1 pr-6">
           <div className="flex min-w-0 items-center gap-1.5">
             {conversation.pinned_at && <Pin size={10} className="shrink-0 text-primary" />}
-            <p className="truncate text-[12px] leading-snug text-foreground/80 group-hover:text-foreground transition-colors">
+            <p className={`truncate text-[12px] leading-snug transition-colors ${
+              active ? "font-semibold text-foreground" : "text-foreground/78 group-hover:text-foreground"
+            }`}>
               {conversation.title}
             </p>
           </div>
@@ -348,7 +353,7 @@ function ConversationRow({
               )}
             </span>
             {conversation.generation_count > 1 && (
-              <span className="rounded-[4px] bg-primary/8 px-1 text-[9px] font-medium text-primary">
+              <span className="rounded-[5px] bg-primary/8 px-1.5 text-[9px] font-medium text-primary">
                 {conversation.generation_count}
               </span>
             )}
@@ -365,7 +370,9 @@ function ConversationRow({
           event.stopPropagation();
           onToggleMenu();
         }}
-        className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-muted/60 opacity-0 transition-all hover:bg-surface hover:text-foreground group-hover:opacity-100"
+        className={`absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[9px] text-muted/60 transition-all hover:bg-subtle hover:text-foreground ${
+          menuOpen ? "bg-subtle opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
         aria-label={t("sidebar.conversationActions")}
       >
         <MoreHorizontal size={14} />

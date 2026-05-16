@@ -9,6 +9,7 @@ mod image_engines;
 mod llm;
 mod model_registry;
 mod models;
+mod prompt_agent;
 mod runtime_logs;
 mod updater;
 
@@ -502,6 +503,12 @@ pub fn run() {
             commands::settings::save_image_model,
             commands::generation::generate_image,
             commands::generation::edit_image,
+            commands::prompt_agent::get_prompt_agent_health,
+            commands::prompt_agent::start_prompt_agent_session,
+            commands::prompt_agent::send_prompt_agent_message,
+            commands::prompt_agent::accept_prompt_agent_draft,
+            commands::prompt_agent::cancel_prompt_agent_session,
+            commands::prompt_agent::get_prompt_agent_session,
             gallery::search_generations,
             gallery::delete_generation,
             gallery::restore_generation,
@@ -514,6 +521,13 @@ pub fn run() {
             commands::projects::pin_project,
             commands::projects::unpin_project,
             commands::projects::delete_project,
+            commands::canvas::create_canvas_document,
+            commands::canvas::list_canvas_documents,
+            commands::canvas::get_canvas_document,
+            commands::canvas::save_canvas_document,
+            commands::canvas::rename_canvas_document,
+            commands::canvas::delete_canvas_document,
+            commands::canvas::save_canvas_export,
             commands::conversations::create_conversation,
             commands::conversations::get_conversations,
             commands::conversations::rename_conversation,

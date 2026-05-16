@@ -12,6 +12,7 @@ import FavoritesPage from "./pages/FavoritesPage";
 import SettingsPage from "./pages/SettingsPage";
 import TrashPage from "./pages/TrashPage";
 import PromptExtractPage from "./pages/PromptExtractPage";
+import CanvasPage from "./pages/CanvasPage";
 import { getFontSize } from "./lib/api";
 import { applyAppFontSize, getStoredAppFontSize } from "./lib/fontSize";
 
@@ -44,6 +45,7 @@ function App() {
           <Route element={<AppLayout />}>
             <Route path="/generate" element={<GeneratePage />} />
             <Route path="/extract" element={<PromptExtractPage />} />
+            <Route path="/canvas" element={<CanvasPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/:projectId/chat/:conversationId?" element={<ProjectChatPage />} />
             <Route path="/projects/:projectId" element={<ProjectHomePage />} />

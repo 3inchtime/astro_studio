@@ -28,6 +28,11 @@ const getPromptFavorites = vi.fn();
 const deletePromptFavorite = vi.fn();
 const getLlmConfigs = vi.fn().mockResolvedValue([]);
 const optimizePrompt = vi.fn();
+const startPromptAgentSession = vi.fn();
+const sendPromptAgentMessage = vi.fn();
+const acceptPromptAgentDraft = vi.fn();
+const cancelPromptAgentSession = vi.fn();
+const getPromptAgentSession = vi.fn();
 const consumePendingPrompt = vi.fn();
 const useLocation = vi.fn<() => { state: unknown }>(() => ({ state: null }));
 
@@ -57,6 +62,14 @@ vi.mock("react-i18next", () => ({
         "generate.llm.generating": "Wait for the current generation to finish before optimizing.",
         "generate.parametersLabel": "Generation parameters",
         "generate.submit": "Generate",
+        "generate.mode.direct": "Direct",
+        "generate.mode.deepThinking": "Deep thinking",
+        "generate.agent.selectLlm": "Select an enabled LLM before using deep thinking mode.",
+        "generate.agent.thinking": "Thinking through the prompt...",
+        "generate.agent.finalPrompt": "Final prompt",
+        "generate.agent.acceptAndGenerate": "Accept and generate",
+        "generate.agent.continueRefining": "Continue refining",
+        "generate.agent.editManually": "Edit manually",
         "generate.uploadSource": "Upload Source",
         "generate.clearSources": "Clear sources",
         "generate.editingPrompt": "Editing previous prompt",
@@ -115,6 +128,11 @@ vi.mock("../lib/api", () => ({
   getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
   getLlmConfigs: (...args: unknown[]) => getLlmConfigs(...args),
   optimizePrompt: (...args: unknown[]) => optimizePrompt(...args),
+  startPromptAgentSession: (...args: unknown[]) => startPromptAgentSession(...args),
+  sendPromptAgentMessage: (...args: unknown[]) => sendPromptAgentMessage(...args),
+  acceptPromptAgentDraft: (...args: unknown[]) => acceptPromptAgentDraft(...args),
+  cancelPromptAgentSession: (...args: unknown[]) => cancelPromptAgentSession(...args),
+  getPromptAgentSession: (...args: unknown[]) => getPromptAgentSession(...args),
   onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
   onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
@@ -248,6 +266,11 @@ describe("GeneratePage", () => {
     getPromptFavorites.mockReset();
     getLlmConfigs.mockReset();
     optimizePrompt.mockReset();
+    startPromptAgentSession.mockReset();
+    sendPromptAgentMessage.mockReset();
+    acceptPromptAgentDraft.mockReset();
+    cancelPromptAgentSession.mockReset();
+    getPromptAgentSession.mockReset();
     deletePromptFavorite.mockReset();
     consumePendingPrompt.mockReset();
     useLocation.mockReset();
@@ -276,6 +299,47 @@ describe("GeneratePage", () => {
     getPromptFavorites.mockResolvedValue([]);
     getLlmConfigs.mockResolvedValue([]);
     optimizePrompt.mockResolvedValue("A cinematic moonlit observatory with refined lighting.");
+    startPromptAgentSession.mockResolvedValue({
+      session: {
+        id: "agent-session-1",
+        status: "active",
+        original_prompt: "A prompt",
+        draft_prompt: null,
+        accepted_prompt: null,
+        selected_skill_ids: [],
+        suggested_params: {},
+        created_at: "2026-05-16T00:00:00Z",
+        updated_at: "2026-05-16T00:00:00Z",
+      },
+      messages: [],
+    });
+    sendPromptAgentMessage.mockResolvedValue({
+      session: {
+        id: "agent-session-1",
+        status: "active",
+        original_prompt: "A prompt",
+        draft_prompt: null,
+        accepted_prompt: null,
+        selected_skill_ids: [],
+        suggested_params: {},
+        created_at: "2026-05-16T00:00:00Z",
+        updated_at: "2026-05-16T00:00:00Z",
+      },
+      messages: [],
+    });
+    acceptPromptAgentDraft.mockResolvedValue({
+      id: "agent-session-1",
+      status: "accepted",
+      original_prompt: "A prompt",
+      draft_prompt: "Final prompt",
+      accepted_prompt: "Final prompt",
+      selected_skill_ids: [],
+      suggested_params: {},
+      created_at: "2026-05-16T00:00:00Z",
+      updated_at: "2026-05-16T00:00:00Z",
+    });
+    cancelPromptAgentSession.mockResolvedValue({});
+    getPromptAgentSession.mockResolvedValue({ session: {}, messages: [] });
     createPromptFavorite.mockImplementation(async (prompt: string) => ({
       id: "favorite-1",
       prompt,
@@ -417,6 +481,54 @@ describe("GeneratePage", () => {
         undefined,
       );
     });
+  });
+
+  it("uses prompt agent instead of direct generation in deep thinking mode", async () => {
+    getLlmConfigs.mockResolvedValue([
+      {
+        id: "llm-a",
+        name: "Prompt Director",
+        protocol: "openai",
+        model: "gpt-4.1",
+        api_key: "sk-test",
+        base_url: "",
+        capability: "text",
+        enabled: true,
+      },
+    ]);
+    startPromptAgentSession.mockResolvedValueOnce({
+      session: {
+        id: "agent-session-1",
+        status: "active",
+        original_prompt: "Design a floating tea house",
+        draft_prompt: "A floating tea house above a misty lake",
+        accepted_prompt: null,
+        selected_skill_ids: ["composition"],
+        suggested_params: {},
+        created_at: "2026-05-16T00:00:00Z",
+        updated_at: "2026-05-16T00:00:00Z",
+      },
+      messages: [],
+    });
+
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Deep thinking" }));
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "Design a floating tea house" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => expect(startPromptAgentSession).toHaveBeenCalled());
+    expect(startPromptAgentSession.mock.calls[0][0]).toEqual({
+      prompt: "Design a floating tea house",
+      configId: "llm-a",
+      conversationId: "conversation-1",
+      projectId: "project-1",
+      sourceImagePaths: [],
+    });
+    expect(generateImage).not.toHaveBeenCalled();
   });
 
   it("prefills the composer with a pending prompt when arriving from prompt extraction", async () => {
@@ -911,6 +1023,24 @@ describe("GeneratePage", () => {
     expect(toolbar).toHaveClass("studio-toolbar");
     expect(commandSurface).toHaveClass("studio-panel-strong");
     expect(promptInput).toHaveClass("studio-input");
+  });
+
+  it("presents the composer as a command dock with a compact parameter rail", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    const toolbar = screen.getByRole("toolbar", {
+      name: "Generation parameters",
+    });
+    const commandSurface = screen
+      .getByPlaceholderText("Describe the image you want to generate...")
+      .closest("[data-testid='generation-command-surface']");
+
+    expect(toolbar).toHaveAttribute("data-variant", "parameter-rail");
+    expect(commandSurface).toHaveClass("rounded-[22px]", "shadow-float");
   });
 
   it("lets the generate surface stretch across the available main panel", async () => {
