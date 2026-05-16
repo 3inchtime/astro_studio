@@ -2,6 +2,9 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type {
+  CanvasDocument,
+  CanvasDocumentContent,
+  CanvasDocumentWithContent,
   EditSourceImage,
   GenerationParams,
   GenerationSearchFilters,
@@ -25,7 +28,12 @@ import type {
   PromptFavorite,
   PromptExtraction,
   LlmConfig,
+  PromptAgentSession,
+  PromptAgentTurnResponse,
 } from "../types";
+
+const BROWSER_CANVAS_STORAGE_KEY = "astro-studio.browser.canvas-documents.v1";
+const BROWSER_DEFAULT_PROJECT_ID = "browser-default-project";
 
 export interface UpdateMetadata {
   version: string;
@@ -39,8 +47,85 @@ export type DownloadEvent =
   | { event: "Progress"; data: { chunkLength: number; totalDownloaded: number } }
   | { event: "Finished" };
 
+export function hasTauriRuntime(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return Boolean(
+    (window as typeof window & {
+      __TAURI_INTERNALS__?: { invoke?: unknown };
+    }).__TAURI_INTERNALS__?.invoke,
+  );
+}
+
 export function toAssetUrl(filePath: string): string {
+  if (!hasTauriRuntime()) {
+    return filePath;
+  }
   return convertFileSrc(filePath);
+}
+
+function defaultCanvasContent(): CanvasDocumentContent {
+  return {
+    version: 1,
+    viewport: { x: 0, y: 0, scale: 1 },
+    frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
+    layers: [
+      {
+        id: "layer-1",
+        name: "Sketch",
+        visible: true,
+        locked: false,
+        objects: [],
+      },
+    ],
+  };
+}
+
+function cloneCanvasContent(
+  content: CanvasDocumentContent,
+): CanvasDocumentContent {
+  return JSON.parse(JSON.stringify(content)) as CanvasDocumentContent;
+}
+
+function readBrowserCanvasDocuments(): CanvasDocumentWithContent[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(BROWSER_CANVAS_STORAGE_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    return JSON.parse(raw) as CanvasDocumentWithContent[];
+  } catch {
+    return [];
+  }
+}
+
+function writeBrowserCanvasDocuments(documents: CanvasDocumentWithContent[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    BROWSER_CANVAS_STORAGE_KEY,
+    JSON.stringify(documents),
+  );
+}
+
+function browserCanvasProjectId(projectId?: string | null): string {
+  return projectId?.trim() ? projectId : BROWSER_DEFAULT_PROJECT_ID;
+}
+
+function browserCanvasMetadata(
+  document: CanvasDocumentWithContent,
+): CanvasDocument {
+  const { content, ...metadata } = document;
+  return metadata;
 }
 
 export async function saveApiKey(key: string): Promise<void> {
@@ -178,6 +263,10 @@ export async function editImage(
     inputFidelity?: ImageInputFidelity;
   },
 ): Promise<GenerateResponse> {
+  if (!hasTauriRuntime()) {
+    throw new Error("Image editing is only available in the desktop app.");
+  }
+
   return invoke("edit_image", {
     prompt: params.prompt,
     model: params.model,
@@ -196,7 +285,59 @@ export async function editImage(
 }
 
 export async function pickSourceImages(): Promise<string[]> {
+  if (!hasTauriRuntime()) {
+    return pickBrowserSourceImages();
+  }
+
   return invoke("pick_source_images");
+}
+
+async function pickBrowserSourceImages(): Promise<string[]> {
+  if (typeof document === "undefined") {
+    return [];
+  }
+
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.multiple = true;
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+
+    input.addEventListener(
+      "change",
+      async () => {
+        const files = Array.from(input.files ?? []);
+        const results = await Promise.all(files.map(fileToDataUrl));
+        input.remove();
+        resolve(results.filter((value): value is string => Boolean(value)));
+      },
+      { once: true },
+    );
+
+    input.addEventListener(
+      "cancel",
+      () => {
+        input.remove();
+        resolve([]);
+      },
+      { once: true },
+    );
+
+    input.click();
+  });
+}
+
+async function fileToDataUrl(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
 }
 
 export async function createPromptFavorite(
@@ -403,6 +544,160 @@ export async function deleteProject(id: string): Promise<void> {
   await invoke("delete_project", { id });
 }
 
+export async function createCanvasDocument(
+  projectId?: string | null,
+  name?: string | null,
+): Promise<CanvasDocument> {
+  if (!hasTauriRuntime()) {
+    const documents = readBrowserCanvasDocuments();
+    const timestamp = new Date().toISOString();
+    const browserProjectId = browserCanvasProjectId(projectId);
+    const document: CanvasDocumentWithContent = {
+      id: crypto.randomUUID(),
+      project_id: browserProjectId,
+      name: name?.trim() || "Untitled Canvas",
+      document_path: `browser-canvas://${crypto.randomUUID()}.json`,
+      preview_path: null,
+      width: 1024,
+      height: 1024,
+      created_at: timestamp,
+      updated_at: timestamp,
+      deleted_at: null,
+      content: defaultCanvasContent(),
+    };
+    writeBrowserCanvasDocuments([document, ...documents]);
+    return browserCanvasMetadata(document);
+  }
+
+  return invoke("create_canvas_document", {
+    projectId: projectId || null,
+    name: name || null,
+  });
+}
+
+export async function listCanvasDocuments(
+  projectId?: string | null,
+): Promise<CanvasDocument[]> {
+  if (!hasTauriRuntime()) {
+    const browserProjectId = browserCanvasProjectId(projectId);
+    return readBrowserCanvasDocuments()
+      .filter(
+        (document) =>
+          document.project_id === browserProjectId && document.deleted_at === null,
+      )
+      .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+      .map(browserCanvasMetadata);
+  }
+
+  return invoke("list_canvas_documents", {
+    projectId: projectId || null,
+  });
+}
+
+export async function getCanvasDocument(
+  id: string,
+): Promise<CanvasDocumentWithContent> {
+  if (!hasTauriRuntime()) {
+    const document = readBrowserCanvasDocuments().find((entry) => entry.id === id);
+    if (!document) {
+      throw new Error(`Canvas document not found: ${id}`);
+    }
+    return {
+      ...document,
+      content: cloneCanvasContent(document.content),
+    };
+  }
+
+  return invoke("get_canvas_document", { id });
+}
+
+export async function saveCanvasDocument(
+  id: string,
+  content: CanvasDocumentContent,
+  previewPngBase64?: string | null,
+): Promise<CanvasDocument> {
+  if (!hasTauriRuntime()) {
+    const documents = readBrowserCanvasDocuments();
+    const nextDocuments = documents.map((document) =>
+      document.id === id
+        ? {
+            ...document,
+            preview_path: previewPngBase64 || document.preview_path,
+            width: Math.round(content.frame.width),
+            height: Math.round(content.frame.height),
+            updated_at: new Date().toISOString(),
+            content: cloneCanvasContent(content),
+          }
+        : document,
+    );
+    writeBrowserCanvasDocuments(nextDocuments);
+    const updated = nextDocuments.find((document) => document.id === id);
+    if (!updated) {
+      throw new Error(`Canvas document not found: ${id}`);
+    }
+    return browserCanvasMetadata(updated);
+  }
+
+  return invoke("save_canvas_document", {
+    id,
+    content,
+    previewPngBase64: previewPngBase64 || null,
+  });
+}
+
+export async function renameCanvasDocument(
+  id: string,
+  name: string,
+): Promise<CanvasDocument> {
+  if (!hasTauriRuntime()) {
+    const documents = readBrowserCanvasDocuments();
+    const nextDocuments = documents.map((document) =>
+      document.id === id
+        ? {
+            ...document,
+            name,
+            updated_at: new Date().toISOString(),
+          }
+        : document,
+    );
+    writeBrowserCanvasDocuments(nextDocuments);
+    const updated = nextDocuments.find((document) => document.id === id);
+    if (!updated) {
+      throw new Error(`Canvas document not found: ${id}`);
+    }
+    return browserCanvasMetadata(updated);
+  }
+
+  return invoke("rename_canvas_document", { id, name });
+}
+
+export async function deleteCanvasDocument(id: string): Promise<void> {
+  if (!hasTauriRuntime()) {
+    const timestamp = new Date().toISOString();
+    writeBrowserCanvasDocuments(
+      readBrowserCanvasDocuments().map((document) =>
+        document.id === id
+          ? { ...document, deleted_at: timestamp, updated_at: timestamp }
+          : document,
+      ),
+    );
+    return;
+  }
+
+  await invoke("delete_canvas_document", { id });
+}
+
+export async function saveCanvasExport(
+  documentId: string,
+  pngBase64: string,
+): Promise<string> {
+  if (!hasTauriRuntime()) {
+    return pngBase64;
+  }
+
+  return invoke("save_canvas_export", { documentId, pngBase64 });
+}
+
 export async function copyImageToClipboard(imagePath: string): Promise<void> {
   await invoke("copy_image_to_clipboard", { imagePath });
 }
@@ -575,6 +870,62 @@ export async function optimizePrompt(
     configId,
     imagePaths: imagePaths ?? null,
   });
+}
+
+export async function startPromptAgentSession(params: {
+  prompt: string;
+  configId: string;
+  conversationId?: string | null;
+  projectId?: string | null;
+  sourceImagePaths?: string[];
+}): Promise<PromptAgentTurnResponse> {
+  return invoke("start_prompt_agent_session", {
+    request: {
+      prompt: params.prompt,
+      config_id: params.configId,
+      conversation_id: params.conversationId ?? null,
+      project_id: params.projectId ?? null,
+      source_image_paths: params.sourceImagePaths ?? [],
+    },
+  });
+}
+
+export async function sendPromptAgentMessage(params: {
+  sessionId: string;
+  message: string;
+  configId: string;
+  sourceImagePaths?: string[];
+}): Promise<PromptAgentTurnResponse> {
+  return invoke("send_prompt_agent_message", {
+    request: {
+      session_id: params.sessionId,
+      message: params.message,
+      config_id: params.configId,
+      source_image_paths: params.sourceImagePaths ?? [],
+    },
+  });
+}
+
+export async function acceptPromptAgentDraft(
+  sessionId: string,
+  acceptedPrompt: string,
+): Promise<PromptAgentSession> {
+  return invoke("accept_prompt_agent_draft", {
+    sessionId,
+    acceptedPrompt,
+  });
+}
+
+export async function cancelPromptAgentSession(
+  sessionId: string,
+): Promise<PromptAgentSession> {
+  return invoke("cancel_prompt_agent_session", { sessionId });
+}
+
+export async function getPromptAgentSession(
+  sessionId: string,
+): Promise<PromptAgentTurnResponse> {
+  return invoke("get_prompt_agent_session", { sessionId });
 }
 
 export async function checkForUpdate(): Promise<UpdateMetadata | null> {

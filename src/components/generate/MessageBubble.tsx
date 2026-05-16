@@ -1,14 +1,15 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Pencil, RotateCcw, Sparkles, Star } from "lucide-react";
 import { toAssetUrl } from "../../lib/api";
-import type { Message, MessageImage } from "../../types";
+import type { Message, MessageImage, PromptAgentMessage } from "../../types";
 import ImageGrid from "./ImageGrid";
 import GenerationLoadingScene from "./GenerationLoadingScene";
 import { useTranslation } from "react-i18next";
 
 interface MessageBubbleProps {
-  message: Message;
-  onImageClick: (images: MessageImage[], index: number) => void;
+  message?: Message;
+  agentMessage?: PromptAgentMessage;
+  onImageClick?: (images: MessageImage[], index: number) => void;
   onDelete?: (generationId: string) => void;
   onEditImage?: (image: MessageImage) => void;
   onEditPrompt?: (message: Message) => void;
@@ -16,6 +17,9 @@ interface MessageBubbleProps {
   isPromptFavorited?: boolean;
   onFavoriteClick?: (imageId: string) => void;
   onRetry?: (message: Message) => void;
+  onAcceptAgentDraft?: (message: PromptAgentMessage) => void;
+  onContinueAgentDraft?: (message: PromptAgentMessage) => void;
+  onEditAgentDraft?: (message: PromptAgentMessage) => void;
   chatViewportHeight?: number;
 }
 
@@ -29,6 +33,10 @@ export default function MessageBubble({
   isPromptFavorited,
   onFavoriteClick,
   onRetry,
+  agentMessage,
+  onAcceptAgentDraft,
+  onContinueAgentDraft,
+  onEditAgentDraft,
   chatViewportHeight,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
@@ -36,6 +44,82 @@ export default function MessageBubble({
     chatViewportHeight && chatViewportHeight > 0
       ? `${Math.round(chatViewportHeight * 0.8)}px`
       : undefined;
+  const hasSourceImages = Boolean(message?.sourceImages?.length);
+
+  if (agentMessage) {
+    const isUser = agentMessage.role === "user";
+    if (isUser) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          data-message-role="user"
+          className="flex justify-end"
+        >
+          <div className="max-w-[68%] rounded-[18px] border border-border-subtle bg-surface/88 px-5 py-2.5 text-foreground shadow-card">
+            <p className="text-[14px] leading-[1.65] text-foreground whitespace-pre-wrap">
+              {agentMessage.content}
+            </p>
+          </div>
+        </motion.div>
+      );
+    }
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        data-message-role="assistant"
+        className="flex items-start justify-start gap-3"
+      >
+        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full gradient-primary shadow-card">
+          <Sparkles size={14} className="text-white" strokeWidth={2.5} />
+        </div>
+        <div className="studio-card max-w-[min(78vw,760px)] rounded-[16px] rounded-bl-[5px] px-5 py-3.5">
+          <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/86">
+            {agentMessage.content}
+          </p>
+          {agentMessage.draft_prompt && agentMessage.ready_to_generate && (
+            <div className="mt-3 rounded-md border border-border/70 bg-surface/80 p-3">
+              <p className="text-[11px] font-semibold uppercase text-muted/70">
+                {t("generate.agent.finalPrompt")}
+              </p>
+              <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground">
+                {agentMessage.draft_prompt}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-white"
+                  onClick={() => onAcceptAgentDraft?.(agentMessage)}
+                >
+                  {t("generate.agent.acceptAndGenerate")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-border/70 px-3 py-1.5 text-[12px] font-medium text-foreground"
+                  onClick={() => onContinueAgentDraft?.(agentMessage)}
+                >
+                  {t("generate.agent.continueRefining")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-border/70 px-3 py-1.5 text-[12px] font-medium text-foreground"
+                  onClick={() => onEditAgentDraft?.(agentMessage)}
+                >
+                  {t("generate.agent.editManually")}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (!message) return null;
 
   if (message.role === "user") {
     return (
@@ -43,16 +127,21 @@ export default function MessageBubble({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        data-message-role="user"
         className="flex justify-end"
       >
-        <div className="group flex max-w-[75%] items-start gap-2">
-          <div className="rounded-[16px] rounded-br-[5px] border border-primary/24 bg-surface px-5 py-3.5 text-foreground shadow-[0_12px_28px_rgba(79,106,255,0.1)] selection:bg-primary/18 selection:text-foreground dark:bg-surface-elevated">
-            <p className="text-[14px] leading-[1.7] text-foreground whitespace-pre-wrap">
+        <div className="group flex max-w-[68%] items-start gap-2">
+          <div
+            className={`border border-border-subtle bg-surface/88 px-5 py-2.5 text-foreground shadow-card selection:bg-primary/18 selection:text-foreground dark:bg-surface-elevated ${
+              hasSourceImages ? "rounded-[18px]" : "rounded-[999px]"
+            }`}
+          >
+            <p className="line-clamp-3 text-[14px] leading-[1.65] text-foreground whitespace-pre-wrap">
               {message.content}
             </p>
-            {message.sourceImages && message.sourceImages.length > 0 && (
+            {hasSourceImages && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {message.sourceImages.map((image, index) => (
+                {message.sourceImages?.map((image, index) => (
                   <div
                     key={`${image.path}-${index}`}
                     className="max-w-full overflow-hidden rounded-[12px] border border-primary/18 bg-primary/5"
@@ -127,12 +216,13 @@ export default function MessageBubble({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      className="flex items-start gap-3"
+      data-message-role="assistant"
+      className="flex items-start justify-start gap-3"
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full gradient-primary shadow-card">
+      <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full gradient-primary shadow-card">
         <Sparkles size={14} className="text-white" strokeWidth={2.5} />
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 max-w-[min(78vw,760px)]">
         <AnimatePresence mode="wait">
           {message.status === "processing" && (
             <motion.div
@@ -155,7 +245,7 @@ export default function MessageBubble({
                 initial={{ opacity: 0, scale: 0.85, filter: "blur(8px)" }}
                 animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
                 transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-                className="inline-block overflow-hidden rounded-[14px] border border-border-subtle bg-surface shadow-[0_12px_34px_rgba(0,0,0,0.14)]"
+                className="inline-block overflow-hidden rounded-[20px] border border-white/70 bg-surface shadow-[0_20px_54px_rgba(45,42,38,0.16)] ring-1 ring-border-subtle/70"
               >
                 <ImageGrid
                   images={message.images.map((image) => ({
@@ -165,7 +255,7 @@ export default function MessageBubble({
                     generationId: image.generationId,
                   }))}
                   onImageClick={(images, idx) =>
-                    onImageClick(
+                    onImageClick?.(
                       images.map((image) => ({
                         imageId: image.imageId,
                         generationId: image.generationId,

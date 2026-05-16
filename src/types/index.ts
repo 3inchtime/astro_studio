@@ -62,6 +62,80 @@ export interface Project {
   image_count: number;
 }
 
+export type CanvasTool = "select" | "brush" | "eraser" | "pan";
+
+export interface CanvasStrokeObject {
+  type: "stroke";
+  id: string;
+  tool: "brush" | "eraser";
+  points: number[];
+  color: string;
+  size: number;
+  opacity: number;
+}
+
+export interface CanvasImageObject {
+  type: "image";
+  id: string;
+  image_path: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  original_width: number;
+  original_height: number;
+  rotation: number;
+  opacity: number;
+}
+
+export type CanvasObject = CanvasStrokeObject | CanvasImageObject;
+
+export interface CanvasLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  objects: CanvasObject[];
+}
+
+export interface CanvasViewport {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+export interface CanvasFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  aspect: string;
+}
+
+export interface CanvasDocumentContent {
+  version: number;
+  viewport: CanvasViewport;
+  frame: CanvasFrame;
+  layers: CanvasLayer[];
+}
+
+export interface CanvasDocument {
+  id: string;
+  project_id: string;
+  name: string;
+  document_path: string;
+  preview_path: string | null;
+  width: number;
+  height: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface CanvasDocumentWithContent extends CanvasDocument {
+  content: CanvasDocumentContent;
+}
+
 export interface SearchResult {
   generations: GenerationResult[];
   total: number;
@@ -87,6 +161,49 @@ export interface GenerationParams {
   imageCount?: number;
   conversationId?: string | null;
   projectId?: string | null;
+}
+
+export type ComposerMode = "direct" | "deep-thinking";
+
+export interface PromptAgentSuggestedParams {
+  model?: ImageModel;
+  size?: ImageSize;
+  quality?: ImageQuality;
+  background?: ImageBackground;
+  output_format?: ImageOutputFormat;
+  moderation?: ImageModeration;
+  image_count?: number;
+}
+
+export interface PromptAgentSession {
+  id: string;
+  conversation_id?: string | null;
+  project_id?: string | null;
+  status: "active" | "accepted" | "cancelled";
+  original_prompt: string;
+  draft_prompt?: string | null;
+  accepted_prompt?: string | null;
+  selected_skill_ids: string[];
+  suggested_params: PromptAgentSuggestedParams;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptAgentMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  draft_prompt?: string | null;
+  selected_skill_ids: string[];
+  suggested_params: PromptAgentSuggestedParams;
+  ready_to_generate: boolean;
+  created_at: string;
+}
+
+export interface PromptAgentTurnResponse {
+  session: PromptAgentSession;
+  messages: PromptAgentMessage[];
 }
 
 export interface MessageImage {

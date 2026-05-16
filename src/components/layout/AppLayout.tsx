@@ -5,6 +5,7 @@ import {
   FolderKanban,
   Heart,
   Image,
+  LayoutTemplate,
   MessageSquareText,
   Palette,
   Settings,
@@ -50,6 +51,7 @@ export function useLayoutContext() {
 const navItems = [
   { to: "/generate", icon: Sparkles, labelKey: "nav.generate" },
   { to: "/extract", icon: MessageSquareText, labelKey: "nav.extract" },
+  { to: "/canvas", icon: LayoutTemplate, labelKey: "nav.canvas" },
   { to: "/projects", icon: FolderKanban, labelKey: "nav.projects" },
   { to: "/gallery", icon: Image, labelKey: "nav.gallery" },
   { to: "/favorites", icon: Heart, labelKey: "nav.favorites" },
@@ -89,6 +91,7 @@ export default function AppLayout() {
     () =>
       location.pathname === "/settings" ||
       location.pathname === "/extract" ||
+      location.pathname === "/canvas" ||
       location.pathname === "/gallery" ||
       location.pathname === "/favorites",
     [location.pathname],
@@ -331,7 +334,7 @@ export default function AppLayout() {
     >
       <div className="studio-app-shell relative flex h-screen overflow-hidden bg-background">
         <aside
-          className="studio-nav-rail flex shrink-0 flex-col items-center border-r py-6"
+          className="studio-nav-rail flex shrink-0 flex-col items-center border-r py-5"
           style={{ width: NAV_RAIL_WIDTH }}
         >
           <NavLink
@@ -350,10 +353,10 @@ export default function AppLayout() {
                 to={to}
                 title={t(labelKey)}
                 className={({ isActive }) =>
-                  `focus-ring relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
+                  `focus-ring relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[12px] border transition-all duration-200 ${
                     isActive
-                      ? "border-primary/12 bg-primary/9 text-primary shadow-card"
-                      : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground"
+                      ? "border-white/70 bg-surface text-primary shadow-float ring-1 ring-primary/12"
+                      : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground hover:shadow-card"
                   }`
                 }
               >
@@ -363,7 +366,7 @@ export default function AppLayout() {
                     {isActive && (
                       <motion.div
                         layoutId="nav-indicator"
-                        className="absolute -left-[8px] top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full gradient-primary"
+                        className="absolute -left-[8px] top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full gradient-primary"
                         transition={{ type: "spring", stiffness: 500, damping: 35 }}
                       />
                     )}
@@ -384,8 +387,8 @@ export default function AppLayout() {
               onClick={() => setThemePickerOpen((open) => !open)}
               className={`focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
                 themePickerOpen
-                  ? "border-primary/12 bg-primary/9 text-primary"
-                  : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground"
+                  ? "border-white/70 bg-surface text-primary shadow-float ring-1 ring-primary/12"
+                  : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground hover:shadow-card"
               }`}
             >
               <motion.div
@@ -401,8 +404,8 @@ export default function AppLayout() {
               className={({ isActive }) =>
                 `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                   isActive
-                    ? "border-primary/12 bg-primary/9 text-primary shadow-card"
-                    : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground"
+                    ? "border-white/70 bg-surface text-primary shadow-float ring-1 ring-primary/12"
+                    : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground hover:shadow-card"
                 }`
               }
             >
@@ -413,7 +416,7 @@ export default function AppLayout() {
 
         {!shouldHideSidebar && (
           <>
-            <aside className="flex shrink-0 flex-col border-r border-border-subtle bg-surface/72" style={{ width: widths[0] }}>
+            <aside className="flex shrink-0 flex-col border-r border-border-subtle bg-surface/78 backdrop-blur-xl" style={{ width: widths[0] }}>
               {isProjectListRoute ? (
                 <ProjectsSidebar
                   activeProjectId={activeProjectId}

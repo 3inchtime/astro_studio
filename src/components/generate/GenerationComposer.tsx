@@ -10,6 +10,7 @@ import {
 } from "../../lib/modelCatalog";
 import { useLlmConfigsQuery, useOptimizePromptMutation } from "../../lib/queries/llm";
 import type {
+  ComposerMode,
   EditSourceImage,
   ImageBackground,
   ImageInputFidelity,
@@ -52,6 +53,11 @@ interface GenerationComposerProps {
   onRemoveEditSource: (sourceId: string) => void;
   onCancelPromptEdit: () => void;
   onGenerate: () => void;
+  composerMode: ComposerMode;
+  onComposerModeChange: (mode: ComposerMode) => void;
+  onDeepThinkingSend: () => void;
+  onPromptAgentConfigChange?: (configId: string) => void;
+  isPromptAgentRunning?: boolean;
   isGenerating?: boolean;
 }
 
@@ -80,6 +86,11 @@ export default function GenerationComposer({
   onRemoveEditSource,
   onCancelPromptEdit,
   onGenerate,
+  composerMode,
+  onComposerModeChange,
+  onDeepThinkingSend,
+  onPromptAgentConfigChange,
+  isPromptAgentRunning = false,
   isGenerating = false,
 }: GenerationComposerProps) {
   const { t } = useTranslation();
@@ -171,6 +182,10 @@ export default function GenerationComposer({
     : enabledPromptConfigs.length === 1
       ? enabledPromptConfigs[0].id
       : selectedConfigId;
+
+  useEffect(() => {
+    onPromptAgentConfigChange?.(effectiveConfigId);
+  }, [effectiveConfigId, onPromptAgentConfigChange]);
 
   const handleOptimize = useCallback(async () => {
     const trimmed = prompt.trim();
@@ -265,11 +280,12 @@ export default function GenerationComposer({
 
   return (
     <>
-      <div className="studio-toolbar border-t border-border-subtle px-4 py-2.5 sm:px-6">
+      <div className="border-t border-border-subtle bg-surface/74 px-4 py-2.5 shadow-panel backdrop-blur-xl sm:px-6">
         <div
           role="toolbar"
+          data-variant="parameter-rail"
           aria-label={t("generate.parametersLabel")}
-          className="studio-toolbar w-full overflow-hidden border-b-0 bg-transparent"
+          className="studio-toolbar mx-auto w-full max-w-[980px] overflow-hidden rounded-[16px] border border-border-subtle bg-surface/76 px-2 py-1.5 shadow-card"
         >
           <div
             data-testid="generation-parameter-row"
@@ -389,11 +405,11 @@ export default function GenerationComposer({
         </div>
       </div>
 
-      <div className="bg-surface/88 px-6 pt-4 pb-5 shadow-panel">
-        <div className="w-full">
+      <div className="bg-surface/88 px-6 pb-5 pt-3 shadow-panel">
+        <div className="mx-auto w-full max-w-[980px]">
           <div
             data-testid="generation-command-surface"
-            className="studio-panel-strong relative rounded-[16px] p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1)]"
+            className="studio-panel-strong shadow-float relative rounded-[22px] p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1),var(--shadow-float)]"
           >
             {editingPromptMessageId && (
               <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
@@ -409,12 +425,36 @@ export default function GenerationComposer({
               </div>
             )}
 
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
+                <div className="flex rounded-md border border-border/60 bg-surface/80 p-0.5">
+                  <button
+                    type="button"
+                    className={`rounded px-2.5 py-1 text-[12px] font-medium transition ${
+                      composerMode === "direct"
+                        ? "bg-foreground text-background"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                    onClick={() => onComposerModeChange("direct")}
+                  >
+                    {t("generate.mode.direct")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded px-2.5 py-1 text-[12px] font-medium transition ${
+                      composerMode === "deep-thinking"
+                        ? "bg-foreground text-background"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                    onClick={() => onComposerModeChange("deep-thinking")}
+                  >
+                    {t("generate.mode.deepThinking")}
+                  </button>
+                </div>
                 {showSourceEditing && (
                   <button
                     onClick={onAddUploadedSources}
-                    className="studio-control focus-ring inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
+                    className="studio-control focus-ring inline-flex items-center gap-2 rounded-full px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
                   >
                     <ImagePlus size={14} />
                     {t("generate.uploadSource")}
@@ -425,7 +465,7 @@ export default function GenerationComposer({
               {editSources.length > 0 && (
                 <button
                   onClick={onClearEditSources}
-                  className="studio-control-subtle focus-ring rounded-[8px] px-2 py-1 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
+                  className="studio-control-subtle focus-ring rounded-full px-2.5 py-1 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
                 >
                   {t("generate.clearSources")}
                 </button>
@@ -475,7 +515,7 @@ export default function GenerationComposer({
                   : t("generate.placeholder")
               }
               rows={2}
-              className="studio-input w-full resize-none rounded-[12px] border-transparent bg-transparent px-3 py-2 pr-[190px] text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:border-transparent focus:bg-transparent focus:outline-none"
+              className="studio-input w-full resize-none rounded-[16px] border-transparent bg-surface-muted/42 px-4 py-3 pr-[190px] text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:border-primary/18 focus:bg-surface focus:outline-none"
             />
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
               {/* Config selector — visible only when multiple enabled configs of the active type */}
@@ -485,7 +525,7 @@ export default function GenerationComposer({
                       <button
                         type="button"
                         onClick={() => setShowConfigDropdown(!showConfigDropdown)}
-                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-[9px] px-2 text-[11px] font-medium hover:studio-control-hover"
+                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-full px-2 text-[11px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedMultimodalConfigId
@@ -524,7 +564,7 @@ export default function GenerationComposer({
                       <button
                         type="button"
                         onClick={() => setShowConfigDropdown(!showConfigDropdown)}
-                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-[9px] px-2 text-[11px] font-medium hover:studio-control-hover"
+                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-full px-2 text-[11px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedConfigId
@@ -571,7 +611,7 @@ export default function GenerationComposer({
                 }
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
-                className="focus-ring flex cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
+                className="focus-ring flex cursor-pointer items-center justify-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
               >
                 {optimizeMutation.isPending ? (
                   <Loader2 size={14} className="animate-spin" />
@@ -583,12 +623,17 @@ export default function GenerationComposer({
 
               {/* Send button */}
               <motion.button
-                onClick={onGenerate}
-                disabled={!prompt.trim() || optimizeMutation.isPending}
+                onClick={composerMode === "deep-thinking" ? onDeepThinkingSend : onGenerate}
+                disabled={
+                  !prompt.trim() ||
+                  isGenerating ||
+                  optimizeMutation.isPending ||
+                  isPromptAgentRunning
+                }
                 aria-label={t("generate.submit")}
                 whileHover={{ scale: 1.02, y: -1 }}
                 whileTap={{ scale: 0.97 }}
-                className="studio-control-primary focus-ring flex items-center gap-2 rounded-[12px] px-5 py-2.5 text-[13px] font-semibold disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none"
+                className="studio-control-primary focus-ring breathe flex h-11 w-11 items-center justify-center rounded-full text-[13px] font-semibold disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none disabled:[animation:none]"
               >
                 <ArrowUp size={15} strokeWidth={2.5} />
               </motion.button>
@@ -629,7 +674,7 @@ interface SelectFieldProps {
 
 function SelectField({ label, value, onChange, options }: SelectFieldProps) {
   return (
-    <label className="studio-control focus-ring flex h-[34px] min-w-0 items-center gap-1 rounded-[10px] px-2 text-[12px] text-foreground focus-within:border-primary/35">
+    <label className="studio-control focus-ring flex h-[34px] min-w-0 items-center gap-1 rounded-full px-2.5 text-[12px] text-foreground focus-within:border-primary/35">
       <span
         className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
         title={label}

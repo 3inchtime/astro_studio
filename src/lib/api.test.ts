@@ -4,15 +4,19 @@ import {
   clearLogs,
   addPromptFavoriteToFolders,
   archiveConversation,
+  createCanvasDocument,
   createModelProviderProfile,
   createConversation,
   createProject,
   createPromptFolder,
   createPromptFavorite,
+  deleteCanvasDocument,
   deleteConversation,
   deleteModelProviderProfile,
   deletePromptFolder,
   deletePromptFavorite,
+  getCanvasDocument,
+  listCanvasDocuments,
   getConversations,
   getModelProviderProfiles,
   getPromptExtractions,
@@ -28,6 +32,14 @@ import {
   renameProject,
   searchGenerations,
   removePromptFavoriteFromFolders,
+  renameCanvasDocument,
+  startPromptAgentSession,
+  sendPromptAgentMessage,
+  acceptPromptAgentDraft,
+  cancelPromptAgentSession,
+  getPromptAgentSession,
+  saveCanvasDocument,
+  saveCanvasExport,
   saveModelProviderProfiles,
   setActiveModelProvider,
   toAssetUrl,
@@ -57,11 +69,38 @@ const tauriEvent = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/event", () => tauriEvent);
 
+const localStorageMock = (() => {
+  const store = new Map<string, string>();
+  return {
+    clear() {
+      store.clear();
+    },
+    getItem(key: string) {
+      return store.has(key) ? store.get(key)! : null;
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+    setItem(key: string, value: string) {
+      store.set(key, value);
+    },
+  };
+})();
+
 describe("api updater commands", () => {
   beforeEach(() => {
     tauriApi.invoke.mockReset();
     tauriApi.createdChannels.length = 0;
     tauriEvent.listen.mockClear();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: { invoke: tauriApi.invoke },
+    });
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: localStorageMock,
+    });
+    localStorageMock.clear();
   });
 
   it("passes a Tauri channel to the install update command", async () => {
@@ -273,6 +312,67 @@ describe("api prompt favorite commands", () => {
   });
 });
 
+describe("api prompt agent commands", () => {
+  beforeEach(() => {
+    tauriApi.invoke.mockReset();
+  });
+
+  it("starts a prompt agent session with snake_case request fields", async () => {
+    tauriApi.invoke.mockResolvedValueOnce({ session: {}, messages: [] });
+
+    await startPromptAgentSession({
+      prompt: "A quiet glass observatory",
+      configId: "llm-a",
+      conversationId: "conv-a",
+      projectId: "project-a",
+      sourceImagePaths: ["/tmp/ref.png"],
+    });
+
+    expect(tauriApi.invoke).toHaveBeenCalledWith("start_prompt_agent_session", {
+      request: {
+        prompt: "A quiet glass observatory",
+        config_id: "llm-a",
+        conversation_id: "conv-a",
+        project_id: "project-a",
+        source_image_paths: ["/tmp/ref.png"],
+      },
+    });
+  });
+
+  it("wraps prompt agent follow-up, accept, cancel, and history commands", async () => {
+    tauriApi.invoke.mockResolvedValue({});
+
+    await sendPromptAgentMessage({
+      sessionId: "session-a",
+      message: "Make it dusk",
+      configId: "llm-a",
+      sourceImagePaths: [],
+    });
+    await acceptPromptAgentDraft("session-a", "Final prompt");
+    await cancelPromptAgentSession("session-a");
+    await getPromptAgentSession("session-a");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "send_prompt_agent_message", {
+      request: {
+        session_id: "session-a",
+        message: "Make it dusk",
+        config_id: "llm-a",
+        source_image_paths: [],
+      },
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "accept_prompt_agent_draft", {
+      sessionId: "session-a",
+      acceptedPrompt: "Final prompt",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(3, "cancel_prompt_agent_session", {
+      sessionId: "session-a",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(4, "get_prompt_agent_session", {
+      sessionId: "session-a",
+    });
+  });
+});
+
 describe("api gallery search commands", () => {
   beforeEach(() => {
     tauriApi.invoke.mockReset();
@@ -379,11 +479,105 @@ describe("api project and conversation commands", () => {
       name: "Renamed project",
     });
   });
+
+  it("wraps canvas document IPC commands", async () => {
+    tauriApi.invoke.mockResolvedValue({
+      id: "canvas-1",
+      project_id: "project-1",
+      name: "Mood board",
+      document_path: "/tmp/canvas-1.json",
+      preview_path: "/tmp/canvas-1.png",
+      width: 1024,
+      height: 1024,
+      created_at: "2026-05-12T00:00:00Z",
+      updated_at: "2026-05-12T00:00:00Z",
+      deleted_at: null,
+    });
+
+    await createCanvasDocument("project-1", "Mood board");
+    await listCanvasDocuments("project-1");
+    await getCanvasDocument("canvas-1");
+    await saveCanvasDocument("canvas-1", {
+      version: 1,
+      viewport: { x: 0, y: 0, scale: 1 },
+      frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
+      layers: [],
+    });
+    await renameCanvasDocument("canvas-1", "Renamed canvas");
+    await deleteCanvasDocument("canvas-1");
+    await saveCanvasExport("canvas-1", "data:image/png;base64,Zm9v");
+
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "create_canvas_document", {
+      projectId: "project-1",
+      name: "Mood board",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "list_canvas_documents", {
+      projectId: "project-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(3, "get_canvas_document", {
+      id: "canvas-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(4, "save_canvas_document", {
+      id: "canvas-1",
+      content: {
+        version: 1,
+        viewport: { x: 0, y: 0, scale: 1 },
+        frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
+        layers: [],
+      },
+      previewPngBase64: null,
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(5, "rename_canvas_document", {
+      id: "canvas-1",
+      name: "Renamed canvas",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(6, "delete_canvas_document", {
+      id: "canvas-1",
+    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(7, "save_canvas_export", {
+      documentId: "canvas-1",
+      pngBase64: "data:image/png;base64,Zm9v",
+    });
+  });
+
+  it("falls back to browser storage for canvas documents without Tauri", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
+
+    const created = await createCanvasDocument("project-1", "Browser canvas");
+    const listed = await listCanvasDocuments("project-1");
+    const loaded = await getCanvasDocument(created.id);
+    const saved = await saveCanvasDocument(
+      created.id,
+      {
+        version: 1,
+        viewport: { x: 0, y: 0, scale: 1 },
+        frame: { x: 0, y: 0, width: 768, height: 512, aspect: "3:2" },
+        layers: [],
+      },
+      "data:image/png;base64,Zm9v",
+    );
+    const exported = await saveCanvasExport(created.id, "data:image/png;base64,Zm9v");
+
+    expect(created.name).toBe("Browser canvas");
+    expect(listed).toHaveLength(1);
+    expect(loaded.id).toBe(created.id);
+    expect(saved.preview_path).toBe("data:image/png;base64,Zm9v");
+    expect(saved.width).toBe(768);
+    expect(exported).toBe("data:image/png;base64,Zm9v");
+    expect(tauriApi.invoke).not.toHaveBeenCalled();
+  });
 });
 
 describe("asset URLs", () => {
   beforeEach(() => {
     tauriApi.convertFileSrc.mockClear();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: { invoke: tauriApi.invoke },
+    });
   });
 
   it("lets Tauri encode Windows file paths without rewriting separators", () => {

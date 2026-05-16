@@ -10,6 +10,10 @@ vi.mock("react-i18next", () => ({
         "generate.generationFailed": "Generation failed",
         "generate.retry": "Retry",
         "generate.editPrompt": "Edit prompt",
+        "generate.agent.finalPrompt": "Final prompt",
+        "generate.agent.acceptAndGenerate": "Accept and generate",
+        "generate.agent.continueRefining": "Continue refining",
+        "generate.agent.editManually": "Edit manually",
       })[key] ?? key,
   }),
 }));
@@ -78,9 +82,12 @@ describe("MessageBubble", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
 
     expect(onEditPrompt).toHaveBeenCalledWith(message);
+    expect(screen.getByText("A cinematic portrait of a fox astronaut").closest("[data-message-role='user']")).toHaveClass(
+      "justify-end",
+    );
     expect(
       screen.getByText("A cinematic portrait of a fox astronaut").closest("div"),
-    ).toHaveClass("rounded-[16px]", "rounded-br-[5px]");
+    ).toHaveClass("rounded-[999px]", "shadow-card");
   });
 
   it("shows a retry button for failed messages with retry data", () => {
@@ -145,8 +152,40 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} onImageClick={vi.fn()} />);
 
-    expect(screen.getByTestId("image-grid").parentElement).toHaveClass(
-      "rounded-[14px]",
+    expect(screen.getByTestId("image-grid").closest("[data-message-role='assistant']")).toHaveClass(
+      "justify-start",
     );
+    expect(screen.getByTestId("image-grid").parentElement).toHaveClass(
+      "rounded-[20px]",
+      "ring-1",
+    );
+  });
+
+  it("renders accept controls for ready prompt agent drafts", () => {
+    const onAccept = vi.fn();
+
+    render(
+      <MessageBubble
+        agentMessage={{
+          id: "agent-msg-1",
+          session_id: "agent-session-1",
+          role: "assistant",
+          content: "I have a final prompt ready.",
+          draft_prompt: "A cinematic glass observatory over a moonlit forest.",
+          selected_skill_ids: ["photography"],
+          suggested_params: {},
+          ready_to_generate: true,
+          created_at: "2026-05-16T00:00:00Z",
+        }}
+        onAcceptAgentDraft={onAccept}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept and generate" }));
+
+    expect(onAccept).toHaveBeenCalled();
+    expect(
+      screen.getByText("A cinematic glass observatory over a moonlit forest."),
+    ).toBeInTheDocument();
   });
 });

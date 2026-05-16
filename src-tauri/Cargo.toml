@@ -35,6 +35,8 @@ env_logger = "0.11"
 toml = "0.8"
 arboard = "3"
 rfd = "0.15"
+rig = { version = "=0.37.0", default-features = false, features = ["derive", "rustls"] }
+schemars = { version = "1", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

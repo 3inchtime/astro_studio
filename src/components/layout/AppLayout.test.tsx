@@ -17,6 +17,7 @@ vi.mock("react-i18next", async (importOriginal) => {
         ({
           "nav.generate": "Generate",
           "nav.extract": "Image Prompt Extract",
+          "nav.canvas": "Canvas",
           "nav.projects": "Projects",
           "nav.gallery": "Gallery",
           "nav.favorites": "Favorites",
@@ -130,6 +131,24 @@ describe("AppLayout", () => {
     });
   });
 
+  it("renders active rail destinations as elevated tool buttons", () => {
+    render(
+      <MemoryRouter initialEntries={["/generate"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/generate" element={<div>generate</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTitle("Generate")).toHaveClass(
+      "bg-surface",
+      "shadow-float",
+      "ring-1",
+    );
+  });
+
   it("uses the white preset as the default theme when nothing is stored", async () => {
     localStorage.clear();
 
@@ -237,6 +256,22 @@ describe("AppLayout", () => {
     expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
     expect(screen.getByText("extract")).toBeInTheDocument();
     expect(screen.getByTitle("Image Prompt Extract")).toBeInTheDocument();
+  });
+
+  it("shows the canvas nav item and collapses the conversation sidebar on canvas routes", () => {
+    render(
+      <MemoryRouter initialEntries={["/canvas"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/canvas" element={<div>canvas</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByText("canvas")).toBeInTheDocument();
+    expect(screen.getByTitle("Canvas")).toBeInTheDocument();
   });
 
   it("activates a passed conversation when entering generate from route state", async () => {

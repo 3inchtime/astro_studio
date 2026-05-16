@@ -32,6 +32,11 @@ import {
   normalizePromptFavorite,
 } from "../lib/generatePageHelpers";
 import { usePromptFavoritesQuery, useCreatePromptFavoriteMutation, useDeletePromptFavoriteMutation } from "../lib/queries/favorites";
+import {
+  useAcceptPromptAgentDraftMutation,
+  useSendPromptAgentMessageMutation,
+  useStartPromptAgentSessionMutation,
+} from "../lib/queries/promptAgent";
 import { useUIStore } from "../lib/store";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import ConfirmDialog from "../components/common/ConfirmDialog";
@@ -42,6 +47,7 @@ import FolderSelector from "../components/favorites/FolderSelector";
 import { getImageModelCatalogEntry } from "../lib/modelCatalog";
 import type {
   EditSourceImage,
+  ComposerMode,
   ImageBackground,
   ImageInputFidelity,
   ImageModeration,
@@ -51,6 +57,7 @@ import type {
   ImageSize,
   Message,
   MessageImage,
+  PromptAgentMessage,
   RetryGenerationRequest,
 } from "../types";
 import { useTranslation } from "react-i18next";
@@ -92,6 +99,10 @@ export default function GeneratePage() {
   );
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_IMAGE_MODEL);
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
+  const [composerMode, setComposerMode] = useState<ComposerMode>("direct");
+  const [promptAgentSessionId, setPromptAgentSessionId] = useState<string | null>(null);
+  const [promptAgentMessages, setPromptAgentMessages] = useState<PromptAgentMessage[]>([]);
+  const [selectedPromptAgentConfigId, setSelectedPromptAgentConfigId] = useState("");
   const [editingPromptMessageId, setEditingPromptMessageId] = useState<
     string | null
   >(null);
@@ -114,6 +125,9 @@ export default function GeneratePage() {
   >(null);
   const promptFavoriteCreate = useCreatePromptFavoriteMutation();
   const promptFavoriteDelete = useDeletePromptFavoriteMutation();
+  const startPromptAgentSessionMutation = useStartPromptAgentSessionMutation();
+  const sendPromptAgentMessageMutation = useSendPromptAgentMessageMutation();
+  const acceptPromptAgentDraftMutation = useAcceptPromptAgentDraftMutation();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -263,7 +277,7 @@ export default function GeneratePage() {
     if (autoScrollRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, promptAgentMessages]);
 
   useEffect(() => {
     const scrollElement = scrollRef.current;
@@ -497,6 +511,135 @@ export default function GeneratePage() {
     });
   }
 
+  const handleDeepThinkingSend = useCallback(async () => {
+    const trimmed = prompt.trim();
+    if (!trimmed || isGenerating) return;
+
+    if (!selectedPromptAgentConfigId) {
+      setPromptAgentMessages((current) => [
+        ...current,
+        {
+          id: `agent-error-${Date.now()}`,
+          session_id: promptAgentSessionId ?? "local",
+          role: "assistant",
+          content: t("generate.agent.selectLlm"),
+          draft_prompt: null,
+          selected_skill_ids: [],
+          suggested_params: {},
+          ready_to_generate: false,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+
+    const sourceImagePaths = editSources.map((source) => source.path);
+    const result = promptAgentSessionId
+      ? await sendPromptAgentMessageMutation.mutateAsync({
+          sessionId: promptAgentSessionId,
+          message: trimmed,
+          configId: selectedPromptAgentConfigId,
+          sourceImagePaths,
+        })
+      : await startPromptAgentSessionMutation.mutateAsync({
+          prompt: trimmed,
+          configId: selectedPromptAgentConfigId,
+          conversationId: activeConversationId,
+          projectId: activeProjectId,
+          sourceImagePaths,
+        });
+
+    setPromptAgentSessionId(result.session.id);
+    setPromptAgentMessages(result.messages);
+    setPrompt("");
+  }, [
+    activeConversationId,
+    activeProjectId,
+    editSources,
+    isGenerating,
+    prompt,
+    promptAgentSessionId,
+    selectedPromptAgentConfigId,
+    sendPromptAgentMessageMutation,
+    startPromptAgentSessionMutation,
+    t,
+  ]);
+
+  const handleAcceptAgentDraft = useCallback(
+    async (message: PromptAgentMessage) => {
+      const draft = message.draft_prompt?.trim();
+      if (!draft || !promptAgentSessionId) return;
+
+      const accepted = await acceptPromptAgentDraftMutation.mutateAsync({
+        sessionId: promptAgentSessionId,
+        acceptedPrompt: draft,
+      });
+      const acceptedPrompt = accepted.accepted_prompt ?? draft;
+      const nextModel = message.suggested_params.model ?? imageModel;
+      const nextSize = message.suggested_params.size ?? size;
+      const nextQuality = message.suggested_params.quality ?? quality;
+      const nextBackground = message.suggested_params.background ?? background;
+      const nextOutputFormat = message.suggested_params.output_format ?? outputFormat;
+      const nextModeration = message.suggested_params.moderation ?? moderation;
+      const nextImageCount = message.suggested_params.image_count ?? imageCount;
+
+      setPrompt(acceptedPrompt);
+      setActiveImageModel(nextModel);
+      setSize(nextSize);
+      setQuality(nextQuality);
+      setBackground(nextBackground);
+      setOutputFormat(nextOutputFormat);
+      setModeration(nextModeration);
+      setImageCount(nextImageCount);
+      setComposerMode("direct");
+      setPromptAgentMessages([]);
+      setPromptAgentSessionId(null);
+
+      await submitGenerationRequest({
+        prompt: acceptedPrompt,
+        model: nextModel,
+        size: nextSize,
+        quality: nextQuality,
+        background: nextBackground,
+        outputFormat: nextOutputFormat,
+        moderation: nextModeration,
+        inputFidelity,
+        imageCount: nextImageCount,
+        conversationId: activeConversationId,
+        projectId: activeProjectId,
+        editSources: editSources.map((source) => ({ ...source })),
+      });
+    },
+    [
+      acceptPromptAgentDraftMutation,
+      activeConversationId,
+      activeProjectId,
+      background,
+      editSources,
+      imageCount,
+      imageModel,
+      inputFidelity,
+      moderation,
+      outputFormat,
+      promptAgentSessionId,
+      quality,
+      setActiveImageModel,
+      size,
+      submitGenerationRequest,
+    ],
+  );
+
+  const handleContinueAgentDraft = useCallback((message: PromptAgentMessage) => {
+    setPrompt(message.draft_prompt ?? "");
+    textareaRef.current?.focus();
+  }, []);
+
+  const handleEditAgentDraft = useCallback((message: PromptAgentMessage) => {
+    setPrompt(message.draft_prompt ?? "");
+    setComposerMode("direct");
+    textareaRef.current?.focus();
+  }, []);
+
   const handleImageClick = useCallback(
     (images: MessageImage[], index: number) => {
       openLightbox(images, index);
@@ -620,6 +763,14 @@ export default function GeneratePage() {
           onFavoritePrompt={(value) => void handleTogglePromptFavorite(value)}
           onFavoriteClick={openFolderSelector}
           onRetry={(message) => void handleRetryMessage(message)}
+          agentMessages={promptAgentMessages}
+          isPromptAgentRunning={
+            startPromptAgentSessionMutation.isPending ||
+            sendPromptAgentMessageMutation.isPending
+          }
+          onAcceptAgentDraft={(message) => void handleAcceptAgentDraft(message)}
+          onContinueAgentDraft={handleContinueAgentDraft}
+          onEditAgentDraft={handleEditAgentDraft}
         />
       </div>
 
@@ -666,6 +817,14 @@ export default function GeneratePage() {
         onRemoveEditSource={handleRemoveEditSource}
         onCancelPromptEdit={handleCancelPromptEdit}
         onGenerate={() => void handleGenerate()}
+        composerMode={composerMode}
+        onComposerModeChange={setComposerMode}
+        onDeepThinkingSend={() => void handleDeepThinkingSend()}
+        onPromptAgentConfigChange={setSelectedPromptAgentConfigId}
+        isPromptAgentRunning={
+          startPromptAgentSessionMutation.isPending ||
+          sendPromptAgentMessageMutation.isPending
+        }
         isGenerating={isGenerating}
       />
 
