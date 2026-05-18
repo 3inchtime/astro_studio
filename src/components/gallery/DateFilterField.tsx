@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { CalendarDays, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
 
 interface DateFilterFieldProps {
@@ -22,6 +23,7 @@ export default function DateFilterField({
   value,
   onChange,
 }: DateFilterFieldProps) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `date-filter-${label.toLowerCase().replace(/\s+/g, "-")}`;
 
@@ -78,12 +80,12 @@ export default function DateFilterField({
           {value && (
             <button
               type="button"
-              aria-label="Clear date"
+              aria-label={t("gallery.clearDate")}
               onClick={(e) => {
                 e.stopPropagation();
                 onChange("");
               }}
-              className="-mr-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
+              className="relative z-20 -mr-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
             >
               <X size={12} strokeWidth={2} />
             </button>

@@ -1,9 +1,12 @@
 use crate::config::ApiConfig;
 use crate::image_engines::{gemini, openai, provider_for_model, ImageProvider};
 use crate::models::*;
+use reqwest::header;
 use reqwest::multipart::{Form, Part};
 use serde_json::Value;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub struct EngineImagesResult {
@@ -47,22 +50,41 @@ pub trait ImageEngine: Send + Sync {
 pub struct GptImageEngine {
     client: reqwest::Client,
     edit_client: reqwest::Client,
+    download_client: reqwest::Client,
     max_retries: u32,
     timeout_secs: Option<u64>,
 }
 
+struct SafeDownloadDnsResolver;
+
+impl reqwest::dns::Resolve for SafeDownloadDnsResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
+                .collect();
+            GptImageEngine::validate_resolved_download_addrs(&addrs)?;
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
 impl GptImageEngine {
-    pub fn new(config: &ApiConfig) -> Self {
+    pub fn new(config: &ApiConfig) -> Result<Self, String> {
         let timeout_secs = Self::normalize_timeout_secs(config.timeout_secs);
         let client = Self::build_client(timeout_secs);
         let edit_client = Self::build_client(None);
+        let download_client = Self::build_download_client()?;
 
-        Self {
+        Ok(Self {
             client,
             edit_client,
+            download_client,
             max_retries: config.max_retries,
             timeout_secs,
-        }
+        })
     }
 
     fn normalize_timeout_secs(timeout_secs: u64) -> Option<u64> {
@@ -89,6 +111,24 @@ impl GptImageEngine {
             );
             reqwest::Client::new()
         })
+    }
+
+    fn build_download_client() -> Result<reqwest::Client, String> {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .no_proxy()
+            .dns_resolver(Arc::new(SafeDownloadDnsResolver))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 3 {
+                    attempt.stop()
+                } else if GptImageEngine::validate_download_url(attempt.url().as_str()).is_err() {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()
+            .map_err(|e| format!("Failed to build safe image download HTTP client: {}", e))
     }
 }
 
@@ -233,7 +273,12 @@ impl ImageEngine for GptImageEngine {
 
                 if !status.is_success() {
                     let response_file = self.write_response_body(log_dir, &body_text);
-                    let error = format!("API error {} from {}: {}", status, url, body_text);
+                    let error = format!(
+                        "API error {} from {}: {}",
+                        status,
+                        url,
+                        Self::preview_text(&body_text, 500)
+                    );
                     log::error!(
                         "API error {} from {} — response preview: {}",
                         status,
@@ -499,7 +544,12 @@ impl ImageEngine for GptImageEngine {
 
                 if !status.is_success() {
                     let response_file = self.write_response_body(log_dir, &body_text);
-                    let error = format!("API error {} from {}: {}", status, url, body_text);
+                    let error = format!(
+                        "API error {} from {}: {}",
+                        status,
+                        url,
+                        Self::preview_text(&body_text, 500)
+                    );
                     log::error!(
                         "API error {} from {} — response preview: {}",
                         status,
@@ -723,7 +773,12 @@ impl GptImageEngine {
 
                 if !status.is_success() {
                     let response_file = self.write_response_body(log_dir, &body_text);
-                    let error = format!("API error {} from {}: {}", status, url, body_text);
+                    let error = format!(
+                        "API error {} from {}: {}",
+                        status,
+                        url,
+                        Self::preview_text(&body_text, 500)
+                    );
                     if let Some(db) = db {
                         let _ = db.insert_log(
                             "api_response",
@@ -886,9 +941,124 @@ impl GptImageEngine {
         }
     }
 
+    const MAX_DOWNLOAD_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+
+    fn validate_download_url(url: &str) -> Result<reqwest::Url, String> {
+        let parsed =
+            reqwest::Url::parse(url).map_err(|e| format!("Invalid image download URL: {}", e))?;
+
+        if parsed.scheme() != "https" {
+            return Err("Image download URL must use https".to_string());
+        }
+
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| "Image download URL must include a host".to_string())?;
+
+        if host.eq_ignore_ascii_case("localhost") {
+            return Err("Image download URL host is not allowed".to_string());
+        }
+
+        let ip_host = host.trim_start_matches('[').trim_end_matches(']');
+        if let Ok(ip) = ip_host.parse::<IpAddr>() {
+            if Self::is_blocked_ip(ip) {
+                return Err("Image download URL IP is not allowed".to_string());
+            }
+        }
+
+        Ok(parsed)
+    }
+
+    fn is_blocked_ip(ip: IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(ip) => {
+                ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_broadcast()
+                    || ip.is_multicast()
+                    || ip == Ipv4Addr::new(169, 254, 169, 254)
+            }
+            IpAddr::V6(ip) => {
+                ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_multicast()
+                    || Self::is_ipv6_unique_local(ip)
+                    || Self::is_ipv6_unicast_link_local(ip)
+            }
+        }
+    }
+
+    fn is_ipv6_unique_local(ip: Ipv6Addr) -> bool {
+        (ip.segments()[0] & 0xfe00) == 0xfc00
+    }
+
+    fn is_ipv6_unicast_link_local(ip: Ipv6Addr) -> bool {
+        (ip.segments()[0] & 0xffc0) == 0xfe80
+    }
+
+    fn validate_resolved_download_addrs(addrs: &[SocketAddr]) -> Result<(), String> {
+        if addrs.is_empty() {
+            return Err("Image download URL host did not resolve".to_string());
+        }
+
+        if addrs.iter().any(|addr| Self::is_blocked_ip(addr.ip())) {
+            return Err("Image download URL resolved to a blocked IP".to_string());
+        }
+
+        Ok(())
+    }
+
+    fn validate_downloaded_image(
+        bytes: &[u8],
+        content_type: Option<&str>,
+        reported_size: u64,
+    ) -> Result<(), String> {
+        if reported_size > Self::MAX_DOWNLOAD_IMAGE_BYTES
+            || bytes.len() as u64 > Self::MAX_DOWNLOAD_IMAGE_BYTES
+        {
+            return Err(format!(
+                "Downloaded image exceeds {} bytes",
+                Self::MAX_DOWNLOAD_IMAGE_BYTES
+            ));
+        }
+
+        let content_type = content_type
+            .and_then(|value| value.split(';').next())
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .ok_or_else(|| "Downloaded image response is missing Content-Type".to_string())?;
+
+        if !content_type.starts_with("image/") {
+            return Err(format!(
+                "Downloaded image response has unsupported Content-Type: {}",
+                content_type
+            ));
+        }
+
+        if !Self::has_image_magic(bytes) {
+            return Err(
+                "Downloaded image response did not contain recognizable image data".to_string(),
+            );
+        }
+
+        Ok(())
+    }
+
+    fn has_image_magic(bytes: &[u8]) -> bool {
+        bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+            || bytes.starts_with(b"\xff\xd8\xff")
+            || bytes.starts_with(b"GIF87a")
+            || bytes.starts_with(b"GIF89a")
+            || (bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP")
+            || (bytes.len() >= 12 && &bytes[4..12] == b"ftypavif")
+    }
+
     async fn download_image(&self, url: &str) -> Result<Vec<u8>, String> {
+        let url = Self::validate_download_url(url)?;
         let response = self
-            .client
+            .download_client
             .get(url)
             .send()
             .await
@@ -898,11 +1068,64 @@ impl GptImageEngine {
             return Err(format!("HTTP {}", response.status()));
         }
 
-        response
-            .bytes()
-            .await
-            .map(|bytes| bytes.to_vec())
-            .map_err(|e| e.to_string())
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+
+        if let Some(content_length) = response.content_length() {
+            if content_length > Self::MAX_DOWNLOAD_IMAGE_BYTES {
+                return Err(format!(
+                    "Downloaded image exceeds {} bytes",
+                    Self::MAX_DOWNLOAD_IMAGE_BYTES
+                ));
+            }
+        }
+
+        let mut bytes = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+            bytes.extend_from_slice(&chunk);
+            if bytes.len() as u64 > Self::MAX_DOWNLOAD_IMAGE_BYTES {
+                return Err(format!(
+                    "Downloaded image exceeds {} bytes",
+                    Self::MAX_DOWNLOAD_IMAGE_BYTES
+                ));
+            }
+        }
+
+        Self::validate_downloaded_image(&bytes, content_type.as_deref(), bytes.len() as u64)?;
+
+        Ok(bytes)
+    }
+
+    fn mark_recovery_response_ready(
+        db: &crate::db::Database,
+        generation_id: &str,
+        response_file: &str,
+    ) {
+        let Ok(conn) = db.conn.lock() else {
+            return;
+        };
+        let _ = conn.execute(
+            "UPDATE generation_recoveries SET request_state = 'response_ready', response_file = ?1, updated_at = ?2 WHERE generation_id = ?3",
+            rusqlite::params![response_file, crate::current_timestamp(), generation_id],
+        );
+    }
+
+    fn write_recoverable_response_body(
+        &self,
+        db: Option<&crate::db::Database>,
+        log_dir: Option<&std::path::Path>,
+        generation_id: Option<&str>,
+        body_text: &str,
+    ) -> Option<String> {
+        let response_file = self.write_response_body(log_dir, body_text)?;
+        if let (Some(db), Some(generation_id)) = (db, generation_id) {
+            Self::mark_recovery_response_ready(db, generation_id, &response_file);
+        }
+        Some(response_file)
     }
 
     fn log_response_body(
@@ -913,7 +1136,8 @@ impl GptImageEngine {
         status: u16,
         body_text: &str,
     ) -> Option<String> {
-        let response_file = self.write_response_body(log_dir, body_text);
+        let response_file =
+            self.write_recoverable_response_body(db, log_dir, generation_id, body_text);
         if let Some(db) = db {
             let resp_meta = serde_json::json!({
                 "status": status,
@@ -1062,5 +1286,95 @@ mod tests {
         assert_eq!(missing_image_count(2, 1), Some(1));
         assert_eq!(missing_image_count(2, 2), None);
         assert_eq!(missing_image_count(2, 3), None);
+    }
+
+    #[test]
+    fn download_url_validation_rejects_unsafe_literal_hosts() {
+        for url in [
+            "http://example.com/image.png",
+            "https://localhost/image.png",
+            "https://127.0.0.1/image.png",
+            "https://10.0.0.5/image.png",
+            "https://172.16.0.5/image.png",
+            "https://192.168.1.5/image.png",
+            "https://169.254.169.254/latest/meta-data",
+            "https://[::1]/image.png",
+            "https://[fc00::1]/image.png",
+            "https://[fe80::1]/image.png",
+        ] {
+            assert!(
+                GptImageEngine::validate_download_url(url).is_err(),
+                "{url} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn download_url_validation_allows_public_https_literal_hosts() {
+        assert!(GptImageEngine::validate_download_url("https://example.com/image.png").is_ok());
+        assert!(GptImageEngine::validate_download_url("https://93.184.216.34/image.png").is_ok());
+        assert!(GptImageEngine::validate_download_url(
+            "https://[2606:2800:220:1:248:1893:25c8:1946]/image.png"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn download_dns_validation_rejects_private_resolved_addresses() {
+        let addrs = [
+            SocketAddr::from(([127, 0, 0, 1], 443)),
+            SocketAddr::from(([192, 168, 1, 10], 443)),
+            SocketAddr::from(([169, 254, 169, 254], 443)),
+        ];
+
+        for addr in addrs {
+            assert!(
+                GptImageEngine::validate_resolved_download_addrs(&[addr]).is_err(),
+                "{addr} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn download_dns_validation_allows_public_resolved_addresses() {
+        let addrs = [SocketAddr::from(([93, 184, 216, 34], 443))];
+
+        assert!(GptImageEngine::validate_resolved_download_addrs(&addrs).is_ok());
+    }
+
+    #[test]
+    fn download_client_build_does_not_fall_back_to_default_client() {
+        assert!(GptImageEngine::build_download_client().is_ok());
+    }
+
+    #[test]
+    fn image_download_validation_rejects_size_type_and_magic_mismatches() {
+        let png = b"\x89PNG\r\n\x1a\nrest";
+
+        assert!(GptImageEngine::validate_downloaded_image(
+            png,
+            Some("image/png"),
+            GptImageEngine::MAX_DOWNLOAD_IMAGE_BYTES + 1
+        )
+        .is_err());
+
+        assert!(GptImageEngine::validate_downloaded_image(
+            png,
+            Some("application/json"),
+            png.len() as u64
+        )
+        .is_err());
+
+        assert!(
+            GptImageEngine::validate_downloaded_image(b"not an image", Some("image/png"), 12)
+                .is_err()
+        );
+
+        assert!(GptImageEngine::validate_downloaded_image(
+            png,
+            Some("image/png"),
+            png.len() as u64
+        )
+        .is_ok());
     }
 }

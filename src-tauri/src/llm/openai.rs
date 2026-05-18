@@ -85,10 +85,7 @@ impl OpenAiLlmClient {
         let response = self
             .client
             .post(url)
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.api_key),
-            )
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(body)
             .send()

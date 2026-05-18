@@ -191,8 +191,8 @@ mod tests {
 
     #[test]
     fn gpt_image_2_director_preserves_astro_generation_boundary() {
-        let skill = skill_by_id("gpt_image_2_director")
-            .expect("gpt_image_2_director skill should exist");
+        let skill =
+            skill_by_id("gpt_image_2_director").expect("gpt_image_2_director skill should exist");
         assert!(skill.system_hint.contains("Do not call image generation"));
         assert!(skill.system_hint.contains("draft prompt"));
     }

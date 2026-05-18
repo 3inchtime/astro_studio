@@ -1,9 +1,10 @@
+use crate::current_timestamp;
 use crate::db::Database;
 use crate::error::AppError;
 use crate::llm::{self, ImageData, MULTIMODAL_TIMEOUT_SECS};
 use crate::models::{LlmConfig, PromptExtraction, SETTING_LLM_CONFIGS};
-use crate::current_timestamp;
 use rusqlite::params;
+use std::path::PathBuf;
 use tauri::State;
 
 const MAX_ENABLED_TEXT_CONFIGS: usize = 1;
@@ -190,30 +191,27 @@ fn normalize_llm_enabled_state(configs: &[LlmConfig]) -> Vec<LlmConfig> {
         .collect()
 }
 
-fn load_images(paths: &[String]) -> Result<Vec<ImageData>, AppError> {
+fn load_registered_images(
+    app: &tauri::AppHandle,
+    db: &Database,
+    registry: &crate::commands::generation::SelectedImageRegistry,
+    paths: &[String],
+) -> Result<Vec<ImageData>, AppError> {
+    let paths = crate::commands::generation::resolve_source_image_paths(app, db, registry, paths)?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    load_images(&paths)
+}
+
+fn load_images(paths: &[PathBuf]) -> Result<Vec<ImageData>, AppError> {
     let mut images = Vec::new();
     for path in paths {
         let data = std::fs::read(path).map_err(|e| AppError::Validation {
-            message: format!("Failed to read image '{}': {}", path, e),
+            message: format!("Failed to read image '{}': {}", path.display(), e),
         })?;
-        let media_type = match path.rsplit('.').next().unwrap_or("") {
-            "jpg" | "jpeg" => "image/jpeg",
-            "png" => "image/png",
-            "webp" => "image/webp",
-            ext => {
-                return Err(AppError::Validation {
-                    message: format!(
-                        "Unsupported image format '{}'. Supported: jpg, png, webp",
-                        ext
-                    ),
-                })
-            }
-        };
-        if data.len() > 10 * 1024 * 1024 {
-            return Err(AppError::Validation {
-                message: format!("Image '{}' exceeds 10MB limit", path),
-            });
-        }
+        let media_type =
+            crate::commands::generation::validate_source_image_data(path.as_path(), &data)?;
         images.push(ImageData {
             data,
             media_type: media_type.to_string(),
@@ -222,16 +220,16 @@ fn load_images(paths: &[String]) -> Result<Vec<ImageData>, AppError> {
     Ok(images)
 }
 
-fn create_multimodal_llm_client(
-    config: &LlmConfig,
-) -> Result<Box<dyn llm::LlmClient>, AppError> {
+fn create_multimodal_llm_client(config: &LlmConfig) -> Result<Box<dyn llm::LlmClient>, AppError> {
     match config.protocol.as_str() {
         "openai" => {
-            let client = llm::openai::OpenAiLlmClient::with_timeout(config, MULTIMODAL_TIMEOUT_SECS)?;
+            let client =
+                llm::openai::OpenAiLlmClient::with_timeout(config, MULTIMODAL_TIMEOUT_SECS)?;
             Ok(Box::new(client))
         }
         "anthropic" => {
-            let client = llm::anthropic::AnthropicLlmClient::with_timeout(config, MULTIMODAL_TIMEOUT_SECS)?;
+            let client =
+                llm::anthropic::AnthropicLlmClient::with_timeout(config, MULTIMODAL_TIMEOUT_SECS)?;
             Ok(Box::new(client))
         }
         other => Err(AppError::Validation {
@@ -342,10 +340,7 @@ fn insert_prompt_extraction(
     })
 }
 
-fn list_prompt_extractions(
-    db: &Database,
-    limit: u32,
-) -> Result<Vec<PromptExtraction>, AppError> {
+fn list_prompt_extractions(db: &Database, limit: u32) -> Result<Vec<PromptExtraction>, AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -380,9 +375,7 @@ fn list_prompt_extractions(
 }
 
 #[tauri::command]
-pub(crate) fn get_llm_configs(
-    db: State<'_, Database>,
-) -> Result<Vec<LlmConfig>, AppError> {
+pub(crate) fn get_llm_configs(db: State<'_, Database>) -> Result<Vec<LlmConfig>, AppError> {
     read_llm_configs(db.inner())
 }
 
@@ -404,7 +397,9 @@ pub(crate) fn get_prompt_extractions(
 
 #[tauri::command]
 pub(crate) async fn optimize_prompt(
+    app: tauri::AppHandle,
     db: State<'_, Database>,
+    selected_images: State<'_, crate::commands::generation::SelectedImageRegistry>,
     prompt: String,
     config_id: String,
     image_paths: Option<Vec<String>>,
@@ -433,7 +428,7 @@ pub(crate) async fn optimize_prompt(
                 message: "Maximum 3 images supported for multimodal optimization".to_string(),
             });
         }
-        let images = load_images(&paths)?;
+        let images = load_registered_images(&app, db.inner(), selected_images.inner(), &paths)?;
         let client = create_multimodal_llm_client(config)?;
         let result = client
             .chat_with_images(OPTIMIZE_PROMPT_WITH_IMAGES_SYSTEM_PROMPT, &prompt, &images)
@@ -473,7 +468,9 @@ pub(crate) async fn optimize_prompt(
 
 #[tauri::command]
 pub(crate) async fn extract_prompt_from_image(
+    app: tauri::AppHandle,
     db: State<'_, Database>,
+    selected_images: State<'_, crate::commands::generation::SelectedImageRegistry>,
     image_path: String,
     config_id: String,
     language: String,
@@ -487,7 +484,12 @@ pub(crate) async fn extract_prompt_from_image(
 
     let configs = read_llm_configs(db.inner())?;
     let config = resolve_multimodal_config(&configs, &config_id)?;
-    let images = load_images(&[image_path.clone()])?;
+    let images = load_registered_images(
+        &app,
+        db.inner(),
+        selected_images.inner(),
+        &[image_path.clone()],
+    )?;
     let client = create_multimodal_llm_client(config)?;
 
     log::info!(
@@ -548,10 +550,7 @@ mod tests {
 
         validate_and_store_llm_configs(&db, Vec::<LlmConfig>::new()).unwrap();
 
-        assert_eq!(
-            read_llm_configs(&db).unwrap(),
-            Vec::<LlmConfig>::new()
-        );
+        assert_eq!(read_llm_configs(&db).unwrap(), Vec::<LlmConfig>::new());
 
         drop(db);
         remove_temp_test_db(db_path);
@@ -640,13 +639,9 @@ mod tests {
     fn stores_prompt_extraction_records() {
         let (db, db_path) = temp_test_db("astro-studio-prompt-extraction-test");
 
-        let record = insert_prompt_extraction(
-            &db,
-            "/tmp/reference.png",
-            "cinematic portrait",
-            "vision-1",
-        )
-        .unwrap();
+        let record =
+            insert_prompt_extraction(&db, "/tmp/reference.png", "cinematic portrait", "vision-1")
+                .unwrap();
 
         let conn = db.conn.lock().unwrap();
         let row = conn
@@ -676,21 +671,11 @@ mod tests {
     fn get_prompt_extractions_returns_newest_first() {
         let (db, db_path) = temp_test_db("astro-studio-prompt-extraction-history-test");
 
-        let older = insert_prompt_extraction(
-            &db,
-            "/tmp/older.png",
-            "older prompt",
-            "vision-1",
-        )
-        .unwrap();
+        let older =
+            insert_prompt_extraction(&db, "/tmp/older.png", "older prompt", "vision-1").unwrap();
         std::thread::sleep(std::time::Duration::from_secs(1));
-        let newer = insert_prompt_extraction(
-            &db,
-            "/tmp/newer.png",
-            "newer prompt",
-            "vision-1",
-        )
-        .unwrap();
+        let newer =
+            insert_prompt_extraction(&db, "/tmp/newer.png", "newer prompt", "vision-1").unwrap();
 
         let rows = list_prompt_extractions(&db, 20).unwrap();
 
@@ -702,5 +687,46 @@ mod tests {
 
         drop(db);
         remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn multimodal_image_loading_rejects_unregistered_local_paths() {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-studio-llm-image-boundary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let image_path = dir.join("reference.png");
+        std::fs::write(&image_path, b"\x89PNG\r\n\x1a\nrest").expect("write image");
+
+        let registry = crate::commands::generation::SelectedImageRegistry::default();
+        let result = registry.contains_path(&image_path);
+
+        assert_eq!(result.unwrap(), false);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn multimodal_image_loading_rejects_extension_spoofed_images() {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-studio-llm-image-magic-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let image_path = dir.join("reference.png");
+        std::fs::write(&image_path, b"not really a png").expect("write spoofed image");
+
+        let registry = crate::commands::generation::SelectedImageRegistry::default();
+        registry
+            .register_paths(&[image_path.clone()])
+            .expect("register selected image");
+        assert_eq!(registry.contains_path(&image_path).unwrap(), true);
+        let paths = vec![image_path.clone()];
+        let result = load_images(&paths);
+
+        assert!(matches!(result, Err(AppError::Validation { .. })));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

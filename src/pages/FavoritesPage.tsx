@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -59,6 +59,8 @@ export default function FavoritesPage() {
   const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
     null,
   );
+  const imageFavoritesRequestIdRef = useRef(0);
+  const promptFavoritesRequestIdRef = useRef(0);
   const {
     lightbox,
     openLightbox,
@@ -82,6 +84,7 @@ export default function FavoritesPage() {
       folderId?: string,
       mode: "replace" | "append" = "replace",
     ) => {
+      const requestId = ++imageFavoritesRequestIdRef.current;
       setIsLoadingImages(true);
       try {
         const result = await getFavoriteImages(
@@ -89,6 +92,7 @@ export default function FavoritesPage() {
           query?.trim() || imageQuery.trim() || undefined,
           page,
         );
+        if (requestId !== imageFavoritesRequestIdRef.current) return;
         setImageResults((current) =>
           mode === "append"
             ? [...current, ...result.generations]
@@ -101,7 +105,9 @@ export default function FavoritesPage() {
           setSelectedImage(null);
         }
       } finally {
-        setIsLoadingImages(false);
+        if (requestId === imageFavoritesRequestIdRef.current) {
+          setIsLoadingImages(false);
+        }
       }
     },
     [imageQuery, selectedImageFolderId],
@@ -109,10 +115,12 @@ export default function FavoritesPage() {
 
   const loadPromptFavorites = useCallback(
     async (query?: string, folderId?: string) => {
+      const requestId = ++promptFavoritesRequestIdRef.current;
       const favorites = await getPromptFavorites(
         query?.trim() || promptQuery.trim() || undefined,
         folderId || selectedPromptFolderId || undefined,
       );
+      if (requestId !== promptFavoritesRequestIdRef.current) return;
       setPromptFavorites(favorites);
     },
     [promptQuery, selectedPromptFolderId],

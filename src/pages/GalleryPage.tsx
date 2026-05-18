@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { deleteGeneration, searchGenerations } from "../lib/api";
@@ -44,6 +44,7 @@ export default function GalleryPage() {
   const [pageSize, setPageSize] = useState(20);
   const [isLoading, setIsLoading] = useState(false);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
+  const searchRequestIdRef = useRef(0);
   const [viewMode, setViewMode] = useStoredGalleryViewMode(
     "astro-gallery-view-mode",
   );
@@ -81,6 +82,7 @@ export default function GalleryPage() {
       nextFilters: GenerationSearchFilters,
       mode: "replace" | "append" = "replace",
     ) => {
+      const requestId = ++searchRequestIdRef.current;
       setIsLoading(true);
       try {
         const result = await searchGenerations(
@@ -90,6 +92,7 @@ export default function GalleryPage() {
           compactFilters(nextFilters),
           undefined,
         );
+        if (requestId !== searchRequestIdRef.current) return;
         setResults((current) =>
           mode === "append"
             ? [...current, ...result.generations]
@@ -102,7 +105,9 @@ export default function GalleryPage() {
           setSelected(null);
         }
       } finally {
-        setIsLoading(false);
+        if (requestId === searchRequestIdRef.current) {
+          setIsLoading(false);
+        }
       }
     },
     [],

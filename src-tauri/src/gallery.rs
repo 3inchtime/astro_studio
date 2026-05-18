@@ -254,13 +254,12 @@ pub(crate) fn search_generations(
     let only_deleted = only_deleted.unwrap_or(false);
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (where_sql, params_boxed) =
-        generation_filters_to_sql(
-            only_deleted,
-            query.as_deref(),
-            filters.as_ref(),
-            project_id.as_deref(),
-        );
+    let (where_sql, params_boxed) = generation_filters_to_sql(
+        only_deleted,
+        query.as_deref(),
+        filters.as_ref(),
+        project_id.as_deref(),
+    );
     let count_sql = format!("SELECT COUNT(*) FROM generations g {}", where_sql);
     let count: i32 = {
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =

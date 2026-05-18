@@ -370,10 +370,7 @@ pub(crate) fn move_conversation_to_project(
 }
 
 #[tauri::command]
-pub(crate) fn archive_conversation(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn archive_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -388,10 +385,7 @@ pub(crate) fn archive_conversation(
 }
 
 #[tauri::command]
-pub(crate) fn unarchive_conversation(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn unarchive_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -404,10 +398,7 @@ pub(crate) fn unarchive_conversation(
 }
 
 #[tauri::command]
-pub(crate) fn pin_conversation(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn pin_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -421,10 +412,7 @@ pub(crate) fn pin_conversation(
 }
 
 #[tauri::command]
-pub(crate) fn unpin_conversation(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn unpin_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -437,10 +425,7 @@ pub(crate) fn unpin_conversation(
 }
 
 #[tauri::command]
-pub(crate) fn delete_conversation(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn delete_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;

@@ -165,22 +165,22 @@ export default function ProjectsPage() {
     }
   }
 
-  async function handleTogglePin() {
-    if (!actionProject || actionPending) return;
+  async function handleTogglePin(project: ProjectWithImages | null = actionProject) {
+    if (!project || actionPending) return;
     setActionPending(true);
     try {
-      if (actionProject.pinned_at) {
-        await unpinProject(actionProject.id);
+      if (project.pinned_at) {
+        await unpinProject(project.id);
         setProjects((prev) =>
           prev.map((p) =>
-            p.id === actionProject.id ? { ...p, pinned_at: null } : p,
+            p.id === project.id ? { ...p, pinned_at: null } : p,
           ),
         );
       } else {
-        await pinProject(actionProject.id);
+        await pinProject(project.id);
         setProjects((prev) =>
           prev.map((p) =>
-            p.id === actionProject.id
+            p.id === project.id
               ? { ...p, pinned_at: new Date().toISOString() }
               : p,
           ),
@@ -194,12 +194,12 @@ export default function ProjectsPage() {
     }
   }
 
-  async function handleArchive() {
-    if (!actionProject || actionPending) return;
+  async function handleArchive(project: ProjectWithImages | null = actionProject) {
+    if (!project || actionPending) return;
     setActionPending(true);
     try {
-      await archiveProject(actionProject.id);
-      setProjects((prev) => prev.filter((p) => p.id !== actionProject.id));
+      await archiveProject(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
     } catch {
       // ignore
     } finally {
@@ -322,9 +322,9 @@ export default function ProjectsPage() {
                     setDeleteError(null);
                     setDeleteDialogOpen(true);
                   } else if (action === "pin") {
-                    handleTogglePin();
+                    void handleTogglePin(project);
                   } else if (action === "archive") {
-                    handleArchive();
+                    void handleArchive(project);
                   }
                 }}
                 t={t}

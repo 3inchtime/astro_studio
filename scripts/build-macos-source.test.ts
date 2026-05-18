@@ -19,7 +19,8 @@ describe("macOS source build script", () => {
     expect(script).toContain("Homebrew is required");
     expect(script).toContain("npm install");
     expect(script).toContain("cargo fetch --manifest-path src-tauri/Cargo.toml");
-    expect(script).toContain("npm run tauri build");
+    expect(script).toContain("npm run tauri:build:local");
+    expect(script).not.toContain("npm run tauri build");
     expect(script).toContain("src-tauri/target/release/bundle/macos");
     expect(script).toContain("src-tauri/target/release/bundle/dmg");
   });

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(resolve(process.cwd(), "src/styles/globals.css"), "utf8");
+const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
 
 describe("global Studio OS design utilities", () => {
   it("defines reusable control, panel, and focus utilities", () => {
@@ -17,5 +18,12 @@ describe("global Studio OS design utilities", () => {
   it("removes decorative motion for reduced-motion users", () => {
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
     expect(css).toContain("animation-duration: 0.01ms");
+  });
+
+  it("does not depend on external font CDNs that production CSP blocks", () => {
+    expect(html).not.toContain("cdn.jsdelivr.net");
+    expect(html).not.toContain("rel=\"preconnect\"");
+    expect(css).not.toContain("Geist Sans");
+    expect(css).not.toContain("Geist Mono");
   });
 });

@@ -17,10 +17,7 @@ pub enum AppError {
     },
 
     #[error("Request to {endpoint} failed: {reason}")]
-    Network {
-        endpoint: String,
-        reason: String,
-    },
+    Network { endpoint: String, reason: String },
 
     #[error("Database error: {message}")]
     Database { message: String },

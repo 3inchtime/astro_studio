@@ -1,10 +1,12 @@
+use crate::db::Database;
 use crate::error::AppError;
+use crate::file_manager::canonicalize_existing_managed_path;
+use crate::format_log_clear_cutoff;
 use crate::models::*;
 use crate::runtime_logs;
-use crate::db::Database;
-use crate::format_log_clear_cutoff;
 use chrono::Utc;
-use tauri::State;
+use std::path::Path;
+use tauri::{Manager, State};
 
 #[tauri::command]
 pub(crate) fn get_logs(
@@ -31,22 +33,63 @@ pub(crate) fn get_runtime_logs(limit: Option<usize>) -> Result<Vec<RuntimeLogEnt
 }
 
 #[tauri::command]
-pub(crate) fn get_log_detail(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<LogEntry, AppError> {
-    db.get_log(&id)?
-        .ok_or_else(|| AppError::Validation {
-            message: "Log not found".to_string(),
-        })
+pub(crate) fn get_log_detail(db: State<'_, Database>, id: String) -> Result<LogEntry, AppError> {
+    db.get_log(&id)?.ok_or_else(|| AppError::Validation {
+        message: "Log not found".to_string(),
+    })
 }
 
 #[tauri::command]
-pub(crate) fn read_log_response_file(path: String) -> Result<String, AppError> {
-    std::fs::read_to_string(&path)
+pub(crate) fn read_log_response_file(
+    app: tauri::AppHandle,
+    db: State<'_, Database>,
+    path: String,
+) -> Result<String, AppError> {
+    if !db.response_file_exists(&path)? {
+        return Err(AppError::Validation {
+            message: "Response file is not recorded.".to_string(),
+        });
+    }
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
         .map_err(|e| AppError::FileSystem {
-            message: format!("Read failed: {}", e),
-        })
+            message: format!("Get app data dir failed: {}", e),
+        })?;
+    let path = canonicalize_existing_managed_path(
+        Path::new(&path),
+        &[app_data_dir.join("logs").join("responses")],
+    )?;
+
+    std::fs::read_to_string(&path).map_err(|e| AppError::FileSystem {
+        message: format!("Read failed: {}", e),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_log_response_file_rejects_unrecorded_outside_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-studio-log-boundary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let outside_file = dir.join("outside-response.json");
+        std::fs::write(&outside_file, "{\"secret\":true}").expect("write outside file");
+
+        let result = canonicalize_existing_managed_path(
+            &outside_file,
+            &[dir.join("managed").join("logs").join("responses")],
+        );
+
+        assert!(matches!(result, Err(AppError::Validation { .. })));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[tauri::command]
@@ -82,10 +125,7 @@ pub(crate) fn save_log_settings(
     retention_days: u32,
 ) -> Result<(), AppError> {
     db.set_setting(SETTING_LOG_ENABLED, if enabled { "true" } else { "false" })?;
-    db.set_setting(
-        SETTING_LOG_RETENTION_DAYS,
-        &retention_days.to_string(),
-    )?;
+    db.set_setting(SETTING_LOG_RETENTION_DAYS, &retention_days.to_string())?;
     Ok(())
 }
 
@@ -103,10 +143,7 @@ pub(crate) fn save_trash_settings(
     retention_days: u32,
 ) -> Result<(), AppError> {
     let retention_days = retention_days.max(1);
-    db.set_setting(
-        SETTING_TRASH_RETENTION_DAYS,
-        &retention_days.to_string(),
-    )?;
+    db.set_setting(SETTING_TRASH_RETENTION_DAYS, &retention_days.to_string())?;
     let _ = crate::gallery::purge_trashed_generations(&app, db.inner(), retention_days);
     Ok(())
 }

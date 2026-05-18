@@ -228,10 +228,10 @@ export function LogsPanel({
           ) : (
             <>
               <div className="grid grid-cols-[140px_100px_70px_1fr] gap-2 border-b border-border-subtle px-4 py-2 text-[11px] font-medium text-muted/50">
-                <span>Time</span>
+                <span>{t("log.time")}</span>
                 <span>{t("log.filterType")}</span>
                 <span>{t("log.filterLevel")}</span>
-                <span>Message</span>
+                <span>{t("log.message")}</span>
               </div>
               <div className="max-h-[500px] overflow-y-auto">
                 {logs.map((log) => (
@@ -310,23 +310,23 @@ export function LogsPanel({
                 </div>
                 <div className="space-y-3 p-4">
                   <div className="grid grid-cols-[80px_1fr] gap-2 text-[12px]">
-                    <span className="text-muted/50">Time</span>
+                    <span className="text-muted/50">{t("log.time")}</span>
                     <span className="font-mono text-foreground">{selectedLog.timestamp}</span>
-                    <span className="text-muted/50">Type</span>
+                    <span className="text-muted/50">{t("log.type")}</span>
                     <span className="text-foreground">{selectedLog.log_type}</span>
-                    <span className="text-muted/50">Level</span>
+                    <span className="text-muted/50">{t("log.level")}</span>
                     <span>
                       <span className={`inline-block rounded-[4px] px-1.5 py-0.5 text-[10px] font-medium ${levelColors[selectedLog.level] || ""}`}>
                         {selectedLog.level.toUpperCase()}
                       </span>
                     </span>
-                    <span className="text-muted/50">Message</span>
+                    <span className="text-muted/50">{t("log.message")}</span>
                     <pre className="whitespace-pre-wrap break-words text-foreground">
                       {selectedLog.message}
                     </pre>
                     {selectedLog.generation_id && (
                       <>
-                        <span className="text-muted/50">Gen ID</span>
+                        <span className="text-muted/50">{t("log.generationId")}</span>
                         <span className="font-mono text-[11px] text-foreground">{selectedLog.generation_id}</span>
                       </>
                     )}

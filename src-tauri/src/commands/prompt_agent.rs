@@ -14,9 +14,7 @@ use rusqlite::params;
 use tauri::State;
 
 #[tauri::command]
-pub(crate) fn get_prompt_agent_health(
-    _db: State<'_, Database>,
-) -> Result<&'static str, AppError> {
+pub(crate) fn get_prompt_agent_health(_db: State<'_, Database>) -> Result<&'static str, AppError> {
     Ok("ok")
 }
 
@@ -123,7 +121,9 @@ fn load_messages(
     session_id: &str,
 ) -> Result<Vec<PromptAgentMessage>, AppError> {
     let mut stmt = conn
-        .prepare("SELECT * FROM prompt_agent_messages WHERE session_id = ?1 ORDER BY created_at ASC")
+        .prepare(
+            "SELECT * FROM prompt_agent_messages WHERE session_id = ?1 ORDER BY created_at ASC",
+        )
         .map_err(|e| AppError::Database {
             message: format!("Prepare prompt agent message query failed: {}", e),
         })?;
@@ -148,7 +148,12 @@ fn insert_user_message(
             id, session_id, role, content, draft_prompt, selected_skill_ids,
             suggested_params, ready_to_generate, created_at
         ) VALUES (?1, ?2, 'user', ?3, NULL, '[]', '{}', 0, ?4)",
-        params![uuid::Uuid::new_v4().to_string(), session_id, content, current_timestamp()],
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            session_id,
+            content,
+            current_timestamp()
+        ],
     )
     .map_err(|e| AppError::Database {
         message: format!("Insert prompt agent user message failed: {}", e),
@@ -411,7 +416,11 @@ pub(crate) fn cancel_prompt_agent_session(
     })?;
     conn.execute(
         "UPDATE prompt_agent_sessions SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        params![PROMPT_AGENT_STATUS_CANCELLED, current_timestamp(), session_id],
+        params![
+            PROMPT_AGENT_STATUS_CANCELLED,
+            current_timestamp(),
+            session_id
+        ],
     )
     .map_err(|e| AppError::Database {
         message: format!("Cancel prompt agent session failed: {}", e),

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 
@@ -32,6 +32,17 @@ export default function ProjectNameDialog({
   const [name, setName] = useState(initialName);
   const [validationError, setValidationError] = useState<string | null>(null);
   const wasOpenRef = useRef(open);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  if (
+    open &&
+    previousFocusRef.current === null &&
+    typeof document !== "undefined" &&
+    document.activeElement instanceof HTMLElement
+  ) {
+    previousFocusRef.current = document.activeElement;
+  }
 
   useEffect(() => {
     if (!wasOpenRef.current && open) {
@@ -40,6 +51,52 @@ export default function ProjectNameDialog({
     }
     wasOpenRef.current = open;
   }, [initialName, open]);
+
+  useEffect(() => {
+    if (!open) {
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    }
+  }, [open]);
+
+  function getFocusableElements() {
+    return Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => !element.hasAttribute("disabled"));
+  }
+
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      if (!loading) {
+        onCancel();
+      }
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusableElements = getFocusableElements();
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    } else if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+    }
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,12 +121,14 @@ export default function ProjectNameDialog({
           onClick={onCancel}
         >
           <motion.div
+            ref={dialogRef}
             initial={{ opacity: 0, y: 12, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="w-full max-w-sm rounded-[20px] border border-border-subtle bg-surface p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
             onClick={(event) => event.stopPropagation()}
+            onKeyDown={handleDialogKeyDown}
             role="dialog"
             aria-modal="true"
             aria-labelledby="project-name-dialog-title"

@@ -522,7 +522,12 @@
     "totalCount": "{{count}} entries",
     "prev": "Prev",
     "next": "Next",
-    "back": "Back"
+    "back": "Back",
+    "time": "Time",
+    "type": "Type",
+    "level": "Level",
+    "message": "Message",
+    "generationId": "Gen ID"
   },
   "update": {
     "title": "App Update",
@@ -541,5 +546,9 @@
     "currentVersion": "Current Version",
     "latestVersion": "Latest Version",
     "updateNotes": "Release Notes"
-  }
+  },
+  "canvas.assetCount": "{{count}} canvases",
+  "canvas.objectCount": "{{count}} objects",
+  "gallery.clearDate": "Clear date",
+  "canvas.defaultLayerName": "Layer {{number}}"
 }

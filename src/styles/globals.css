@@ -58,8 +58,8 @@
   --shadow-focus: 0 0 0 3px rgba(79, 106, 255, 0.16);
 
   /* Typography */
-  --font-sans: "Geist Sans", "SF Pro Text", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
-  --font-mono: "Geist Mono", "SF Mono", "Cascadia Code", ui-monospace, monospace;
+  --font-sans: "SF Pro Text", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "SF Mono", "Cascadia Code", ui-monospace, monospace;
 
   /* Easing */
   --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);

@@ -112,10 +112,7 @@ impl AnthropicLlmClient {
 #[async_trait]
 impl LlmClient for AnthropicLlmClient {
     async fn chat(&self, system_prompt: &str, user_message: &str) -> Result<String, AppError> {
-        let url = format!(
-            "{}/v1/messages",
-            self.config.base_url.trim_end_matches('/')
-        );
+        let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));
 
         let body = serde_json::json!({
             "model": self.config.model,
@@ -159,10 +156,7 @@ impl LlmClient for AnthropicLlmClient {
         user_message: &str,
         images: &[super::ImageData],
     ) -> Result<String, AppError> {
-        let url = format!(
-            "{}/v1/messages",
-            self.config.base_url.trim_end_matches('/')
-        );
+        let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));
 
         let mut content = vec![serde_json::json!({"type": "text", "text": user_message})];
         for img in images {

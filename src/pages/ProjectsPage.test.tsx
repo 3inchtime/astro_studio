@@ -1,11 +1,12 @@
 import { MemoryRouter } from "react-router-dom";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "./ProjectsPage";
 
 const getProjects = vi.fn();
 const createProject = vi.fn();
 const searchGenerations = vi.fn();
+const pinProject = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("react-i18next", () => {
@@ -19,7 +20,7 @@ vi.mock("../lib/api", () => {
     getProjects: (...args: unknown[]) => getProjects(...args),
     createProject: (...args: unknown[]) => createProject(...args),
     searchGenerations: (...args: unknown[]) => searchGenerations(...args),
-    pinProject: vi.fn(),
+    pinProject: (...args: unknown[]) => pinProject(...args),
     unpinProject: vi.fn(),
     archiveProject: vi.fn(),
     deleteProject: vi.fn(),
@@ -41,6 +42,7 @@ describe("ProjectsPage", () => {
     getProjects.mockReset();
     createProject.mockReset();
     searchGenerations.mockReset();
+    pinProject.mockReset();
     navigate.mockReset();
     searchGenerations.mockResolvedValue({
       generations: [],
@@ -222,5 +224,62 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     expect(screen.getByText("projects.pinned")).toBeInTheDocument();
+  });
+
+  it("pins the project selected from the current action menu, not the previous action target", async () => {
+    getProjects.mockResolvedValue([
+      {
+        id: "project-1",
+        name: "Brand Storyboards",
+        created_at: "",
+        updated_at: "2026-05-07T01:00:00Z",
+        archived_at: null,
+        pinned_at: null,
+        deleted_at: null,
+        conversation_count: 12,
+        image_count: 86,
+      },
+      {
+        id: "project-2",
+        name: "Campaign Finals",
+        created_at: "",
+        updated_at: "2026-05-08T01:00:00Z",
+        archived_at: null,
+        pinned_at: null,
+        deleted_at: null,
+        conversation_count: 3,
+        image_count: 9,
+      },
+    ]);
+    pinProject.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    const firstCard = (await screen.findByText("Brand Storyboards")).closest(".studio-card");
+    expect(firstCard).not.toBeNull();
+    const firstMenuButton = within(firstCard as HTMLElement)
+      .getAllByRole("button")
+      .find((button) => button.textContent === "");
+    expect(firstMenuButton).toBeDefined();
+    fireEvent.click(firstMenuButton!);
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.rename" }));
+
+    const secondCard = screen.getByText("Campaign Finals").closest(".studio-card");
+    expect(secondCard).not.toBeNull();
+    const secondMenuButton = within(secondCard as HTMLElement)
+      .getAllByRole("button")
+      .find((button) => button.textContent === "");
+    expect(secondMenuButton).toBeDefined();
+    fireEvent.click(secondMenuButton!);
+    fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));
+
+    await waitFor(() => {
+      expect(pinProject).toHaveBeenCalledWith("project-2");
+    });
+    expect(pinProject).not.toHaveBeenCalledWith("project-1");
   });
 });

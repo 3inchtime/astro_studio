@@ -1,9 +1,8 @@
 use crate::db::Database;
 use crate::error::AppError;
 use crate::model_registry::{
-    default_endpoint_settings_for_model, endpoint_value_or_default,
-    is_gemini_model, legacy_model_setting_ids, model_setting_key,
-    normalize_endpoint_mode, normalize_image_model,
+    default_endpoint_settings_for_model, endpoint_value_or_default, is_gemini_model,
+    legacy_model_setting_ids, model_setting_key, normalize_endpoint_mode, normalize_image_model,
 };
 use crate::models::*;
 use tauri::State;
@@ -100,7 +99,12 @@ fn get_model_setting(
     Ok(None)
 }
 
-fn set_model_setting(db: &Database, model: &str, suffix: &str, value: &str) -> Result<(), AppError> {
+fn set_model_setting(
+    db: &Database,
+    model: &str,
+    suffix: &str,
+    value: &str,
+) -> Result<(), AppError> {
     Ok(db.set_setting(&model_setting_key(model, suffix), value)?)
 }
 
@@ -119,9 +123,14 @@ fn read_legacy_model_endpoint_settings(
 
     Ok(EndpointSettings {
         mode: normalize_endpoint_mode(
-            get_model_setting(db, model, SETTING_ENDPOINT_MODE, Some(SETTING_ENDPOINT_MODE))?
-                .as_deref()
-                .unwrap_or(ENDPOINT_MODE_BASE_URL),
+            get_model_setting(
+                db,
+                model,
+                SETTING_ENDPOINT_MODE,
+                Some(SETTING_ENDPOINT_MODE),
+            )?
+            .as_deref()
+            .unwrap_or(ENDPOINT_MODE_BASE_URL),
         )
         .to_string(),
         base_url: endpoint_value_or_default(
@@ -129,7 +138,12 @@ fn read_legacy_model_endpoint_settings(
             &defaults.base_url,
         ),
         generation_url: endpoint_value_or_default(
-            get_model_setting(db, model, SETTING_GENERATION_URL, Some(SETTING_GENERATION_URL))?,
+            get_model_setting(
+                db,
+                model,
+                SETTING_GENERATION_URL,
+                Some(SETTING_GENERATION_URL),
+            )?,
             &defaults.generation_url,
         ),
         edit_url: endpoint_value_or_default(
@@ -236,13 +250,18 @@ pub(crate) fn save_model_provider_profiles_state(
 ) -> Result<ModelProviderProfilesState, AppError> {
     let normalized_model = normalize_image_model(model);
     let state = normalize_provider_profiles_state(normalized_model, state)?;
-    let profiles_json = serde_json::to_string(&state.profiles)
-        .map_err(|e| AppError::Database {
-            message: format!("Serialize provider profiles failed: {}", e),
-        })?;
+    let profiles_json = serde_json::to_string(&state.profiles).map_err(|e| AppError::Database {
+        message: format!("Serialize provider profiles failed: {}", e),
+    })?;
 
-    db.set_setting(&model_provider_profiles_key(normalized_model), &profiles_json)?;
-    db.set_setting(&model_active_provider_key(normalized_model), &state.active_provider_id)?;
+    db.set_setting(
+        &model_provider_profiles_key(normalized_model),
+        &profiles_json,
+    )?;
+    db.set_setting(
+        &model_active_provider_key(normalized_model),
+        &state.active_provider_id,
+    )?;
 
     Ok(state)
 }
@@ -284,10 +303,7 @@ pub(crate) fn read_model_endpoint_settings(
     Ok(active_provider_profile_for_model(db, model)?.endpoint_settings)
 }
 
-pub(crate) fn read_model_api_key(
-    db: &Database,
-    model: &str,
-) -> Result<Option<String>, AppError> {
+pub(crate) fn read_model_api_key(db: &Database, model: &str) -> Result<Option<String>, AppError> {
     let profile = active_provider_profile_for_model(db, model)?;
     Ok(Some(profile.api_key).filter(|key| !key.trim().is_empty()))
 }
@@ -345,15 +361,30 @@ pub(crate) fn save_model_endpoint_settings_value(
         db.set_setting(SETTING_BASE_URL, &endpoint_settings.base_url)?;
         db.set_setting(SETTING_GENERATION_URL, &endpoint_settings.generation_url)?;
         db.set_setting(SETTING_EDIT_URL, &endpoint_settings.edit_url)?;
-        set_model_setting(db, normalized_model, SETTING_ENDPOINT_MODE, &endpoint_settings.mode)?;
-        set_model_setting(db, normalized_model, SETTING_BASE_URL, &endpoint_settings.base_url)?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_ENDPOINT_MODE,
+            &endpoint_settings.mode,
+        )?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_BASE_URL,
+            &endpoint_settings.base_url,
+        )?;
         set_model_setting(
             db,
             normalized_model,
             SETTING_GENERATION_URL,
             &endpoint_settings.generation_url,
         )?;
-        set_model_setting(db, normalized_model, SETTING_EDIT_URL, &endpoint_settings.edit_url)?;
+        set_model_setting(
+            db,
+            normalized_model,
+            SETTING_EDIT_URL,
+            &endpoint_settings.edit_url,
+        )?;
     }
 
     Ok(())
@@ -409,8 +440,7 @@ pub(crate) fn save_endpoint_settings(
     let defaults = default_endpoint_settings_for_model(&model);
     let mode = normalize_endpoint_mode(&mode);
     let base_url = endpoint_value_or_default(Some(base_url), &defaults.base_url);
-    let generation_url =
-        endpoint_value_or_default(Some(generation_url), &defaults.generation_url);
+    let generation_url = endpoint_value_or_default(Some(generation_url), &defaults.generation_url);
     let edit_url = if is_gemini_model(&model) {
         generation_url.clone()
     } else {
@@ -461,7 +491,14 @@ pub(crate) fn save_model_endpoint_settings(
     generation_url: String,
     edit_url: String,
 ) -> Result<(), AppError> {
-    save_model_endpoint_settings_value(db.inner(), &model, &mode, &base_url, &generation_url, &edit_url)
+    save_model_endpoint_settings_value(
+        db.inner(),
+        &model,
+        &mode,
+        &base_url,
+        &generation_url,
+        &edit_url,
+    )
 }
 
 #[tauri::command]
@@ -563,10 +600,7 @@ pub(crate) fn get_font_size(db: State<'_, Database>) -> Result<String, AppError>
 
 #[tauri::command]
 pub(crate) fn save_font_size(db: State<'_, Database>, font_size: String) -> Result<(), AppError> {
-    Ok(db.set_setting(
-        SETTING_FONT_SIZE,
-        crate::normalize_font_size(&font_size),
-    )?)
+    Ok(db.set_setting(SETTING_FONT_SIZE, crate::normalize_font_size(&font_size))?)
 }
 
 #[tauri::command]
@@ -631,8 +665,7 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.run_migrations().unwrap();
 
-        save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, " Bearer sk-proj-valid-token\n")
-            .unwrap();
+        save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, " Bearer sk-proj-valid-token\n").unwrap();
 
         assert_eq!(
             read_legacy_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),

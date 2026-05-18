@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import GeneratePage from "./GeneratePage";
@@ -35,6 +35,7 @@ const cancelPromptAgentSession = vi.fn();
 const getPromptAgentSession = vi.fn();
 const consumePendingPrompt = vi.fn();
 const useLocation = vi.fn<() => { state: unknown }>(() => ({ state: null }));
+let activeConversationId = "conversation-1";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -170,7 +171,7 @@ vi.mock("react-router-dom", async () => {
 vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({
     activeProjectId: "project-1",
-    activeConversationId: "conversation-1",
+    activeConversationId,
     setActiveConversationId: vi.fn(),
     refreshConversations: vi.fn(),
   }),
@@ -275,6 +276,7 @@ describe("GeneratePage", () => {
     consumePendingPrompt.mockReset();
     useLocation.mockReset();
     useLocation.mockReturnValue({ state: null });
+    activeConversationId = "conversation-1";
 
     getConversationGenerations.mockResolvedValue([
       {
@@ -679,6 +681,70 @@ describe("GeneratePage", () => {
     await waitFor(() => {
       expect(screen.getByText("/tmp/generated-nano-banana.png")).toBeInTheDocument();
     });
+  });
+
+  it("ignores a stale conversation load that resolves after the active conversation changes", async () => {
+    const firstLoad = createDeferred<unknown[]>();
+    getConversationGenerations
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockResolvedValueOnce([
+        {
+          generation: {
+            id: "generation-current",
+            prompt: "Current conversation prompt",
+            created_at: "2026-04-26T00:00:00Z",
+            status: "completed",
+            source_image_paths: [],
+          },
+          images: [
+            {
+              id: "image-current",
+              generation_id: "generation-current",
+              file_path: "/tmp/current-conversation.png",
+              thumbnail_path: "/tmp/current-conversation-thumb.png",
+            },
+          ],
+        },
+      ]);
+
+    const { rerender } = render(<GeneratePage />, { wrapper: TestWrapper });
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
+    });
+
+    activeConversationId = "conversation-2";
+    rerender(<GeneratePage />);
+
+    await waitFor(() => {
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-2");
+    });
+    expect(await screen.findByText("/tmp/current-conversation.png")).toBeInTheDocument();
+
+    await act(async () => {
+      firstLoad.resolve([
+        {
+          generation: {
+            id: "generation-stale",
+            prompt: "Stale conversation prompt",
+            created_at: "2026-04-26T00:00:00Z",
+            status: "completed",
+            source_image_paths: [],
+          },
+          images: [
+            {
+              id: "image-stale",
+              generation_id: "generation-stale",
+              file_path: "/tmp/stale-conversation.png",
+              thumbnail_path: "/tmp/stale-conversation-thumb.png",
+            },
+          ],
+        },
+      ]);
+    });
+
+    expect(screen.getByText("/tmp/current-conversation.png")).toBeInTheDocument();
+    expect(screen.queryByText("/tmp/stale-conversation.png")).not.toBeInTheDocument();
   });
 
   it("reloads the active conversation when a generation completion event arrives", async () => {

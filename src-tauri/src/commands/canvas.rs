@@ -34,16 +34,15 @@ fn resolve_project_id(
     ensure_default_project(conn)?;
 
     if let Some(project_id) = project_id.map(str::trim).filter(|id| !id.is_empty()) {
-        let exists = conn
-            .query_row(
+        let exists =
+            conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND deleted_at IS NULL)",
                 params![project_id],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(|e| AppError::Database {
                 message: format!("Resolve canvas project failed: {}", e),
-            })?
-            != 0;
+            })? != 0;
 
         if exists {
             return Ok(project_id.to_string());
@@ -94,9 +93,12 @@ fn default_canvas_content() -> CanvasDocumentContent {
 }
 
 fn canvas_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::FileSystem {
-        message: format!("Get app data dir failed: {}", e),
-    })?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Get app data dir failed: {}", e),
+        })?;
     Ok(app_data_dir.join("canvas"))
 }
 
@@ -141,10 +143,17 @@ fn decode_base64_bytes(value: &str) -> Result<Vec<u8>, AppError> {
         })
 }
 
-fn read_canvas_document(
-    conn: &rusqlite::Connection,
-    id: &str,
-) -> Result<CanvasDocument, AppError> {
+fn validate_canvas_document_id_component(document_id: &str) -> Result<String, AppError> {
+    let document_id = document_id.trim();
+    if uuid::Uuid::parse_str(document_id).is_err() {
+        return Err(AppError::Validation {
+            message: "Invalid canvas document id.".to_string(),
+        });
+    }
+    Ok(document_id.to_string())
+}
+
+fn read_canvas_document(conn: &rusqlite::Connection, id: &str) -> Result<CanvasDocument, AppError> {
     conn.query_row(
         "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at
          FROM canvas_documents WHERE id = ?1 AND deleted_at IS NULL",
@@ -246,11 +255,10 @@ pub(crate) fn get_canvas_document(
     let raw = fs::read_to_string(&document.document_path).map_err(|e| AppError::FileSystem {
         message: format!("Read canvas document file failed: {}", e),
     })?;
-    let content = serde_json::from_str::<CanvasDocumentContent>(&raw).map_err(|e| {
-        AppError::Database {
+    let content =
+        serde_json::from_str::<CanvasDocumentContent>(&raw).map_err(|e| AppError::Database {
             message: format!("Parse canvas document file failed: {}", e),
-        }
-    })?;
+        })?;
 
     Ok(CanvasDocumentWithContent { document, content })
 }
@@ -342,10 +350,7 @@ pub(crate) fn rename_canvas_document(
 }
 
 #[tauri::command]
-pub(crate) fn delete_canvas_document(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn delete_canvas_document(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let timestamp = current_timestamp();
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
@@ -367,7 +372,18 @@ pub(crate) fn save_canvas_export(
     png_base64: String,
 ) -> Result<String, AppError> {
     let (_, _, exports_dir) = ensure_canvas_dirs(&app)?;
+    let exports_dir = exports_dir
+        .canonicalize()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Resolve canvas exports dir failed: {}", e),
+        })?;
+    let document_id = validate_canvas_document_id_component(&document_id)?;
     let document_dir = exports_dir.join(&document_id);
+    if !document_dir.starts_with(&exports_dir) {
+        return Err(AppError::Validation {
+            message: "Canvas export path is outside managed storage.".to_string(),
+        });
+    }
     fs::create_dir_all(&document_dir).map_err(|e| AppError::FileSystem {
         message: format!("Create canvas export dir failed: {}", e),
     })?;
@@ -550,5 +566,12 @@ mod tests {
         assert_eq!(std::fs::read(&file_path).unwrap(), bytes);
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_canvas_export_rejects_document_id_path_traversal() {
+        let result = validate_canvas_document_id_component("../escaped-export");
+
+        assert!(matches!(result, Err(AppError::Validation { .. })));
     }
 }

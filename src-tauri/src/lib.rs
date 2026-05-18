@@ -115,7 +115,8 @@ fn repair_mismatched_image_extensions(db: &Database) -> Result<usize, AppError> 
             Err(e) => {
                 log::warn!(
                     "Failed to read image for extension repair: {} ({})",
-                    file_path, e
+                    file_path,
+                    e
                 );
                 continue;
             }
@@ -172,9 +173,11 @@ fn set_generation_failed(
     error_message: &str,
     clear_recovery: bool,
 ) -> Result<(), AppError> {
-    let tx = conn.unchecked_transaction().map_err(|e| AppError::Database {
-        message: format!("Begin transaction failed: {}", e),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Database {
+            message: format!("Begin transaction failed: {}", e),
+        })?;
     tx.execute(
         "UPDATE generations SET status = 'failed', error_message = ?1 WHERE id = ?2",
         params![error_message, generation_id],
@@ -204,16 +207,21 @@ fn save_generation_images_for_recovery(
     output_format: &str,
     images_data: &[Vec<u8>],
 ) -> Result<Vec<GeneratedImage>, AppError> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::FileSystem {
-        message: format!("Get app data dir failed: {}", e),
-    })?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Get app data dir failed: {}", e),
+        })?;
     let fm = file_manager::FileManager::new(app_data_dir);
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
-    let tx = conn.unchecked_transaction().map_err(|e| AppError::Database {
-        message: format!("Begin transaction failed: {}", e),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Database {
+            message: format!("Begin transaction failed: {}", e),
+        })?;
 
     tx.execute(
         "DELETE FROM images WHERE generation_id = ?1",
@@ -383,8 +391,12 @@ async fn recover_interrupted_generations(
             };
 
             match save_generation_images_for_recovery(
-                app, db, &recovery.generation_id, &recovery.created_at,
-                &recovery.output_format, &decoded_images,
+                app,
+                db,
+                &recovery.generation_id,
+                &recovery.created_at,
+                &recovery.output_format,
+                &decoded_images,
             ) {
                 Ok(saved_images) => {
                     log::info!(
@@ -393,7 +405,8 @@ async fn recover_interrupted_generations(
                         saved_images.len()
                     );
                     let _ = db.insert_log(
-                        "generation", "info",
+                        "generation",
+                        "info",
                         &format!(
                             "Recovered after restart — {} image(s) saved",
                             saved_images.len()
@@ -406,7 +419,8 @@ async fn recover_interrupted_generations(
                 Err(error) => {
                     log::error!(
                         "[{}] Failed to recover saved API response: {}",
-                        recovery.generation_id, error
+                        recovery.generation_id,
+                        error
                     );
                 }
             }
@@ -471,7 +485,8 @@ pub fn run() {
     let database = Database::open(&db_path).expect("Failed to open database");
     database.run_migrations().expect("Failed to run migrations");
 
-    let engine = api_gateway::GptImageEngine::new(&app_config.api);
+    let engine =
+        api_gateway::GptImageEngine::new(&app_config.api).expect("Failed to build image engine");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -480,6 +495,7 @@ pub fn run() {
         .manage(app_config)
         .manage(database)
         .manage(engine)
+        .manage(commands::generation::SelectedImageRegistry::default())
         .manage(updater::PendingUpdate(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             commands::settings::save_api_key,

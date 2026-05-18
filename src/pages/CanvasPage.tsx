@@ -266,8 +266,9 @@ export default function CanvasPage() {
   }
 
   function handleAddLayer() {
+    const layerNumber = content.layers.length + 1;
     const layer = createCanvasLayer({
-      name: `Layer ${content.layers.length + 1}`,
+      name: t("canvas.defaultLayerName", { number: layerNumber }),
     });
     updateContent({
       ...cloneCanvasDocumentContent(content),
@@ -312,7 +313,7 @@ export default function CanvasPage() {
     <div className="h-full min-h-0 overflow-x-auto bg-background">
       <div
         aria-label={t("canvas.workspaceLabel")}
-        className="grid h-full min-w-[964px] min-h-0 grid-cols-[264px_minmax(360px,1fr)_340px] gap-0 bg-[linear-gradient(180deg,_rgba(255,255,255,0.72),_rgba(248,247,244,0.94))]"
+        className="grid h-full min-w-[836px] min-h-0 grid-cols-[220px_minmax(276px,1fr)_300px] gap-0 bg-[linear-gradient(180deg,_rgba(255,255,255,0.72),_rgba(248,247,244,0.94))]"
       >
         <CanvasAssetSidebar
           documents={documents}

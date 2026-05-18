@@ -11,12 +11,159 @@ use crate::model_registry::{
 };
 use crate::models::*;
 use rusqlite::params;
+use std::collections::HashSet;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
 const RECOVERY_STATE_RESPONSE_READY: &str = "response_ready";
 const RECOVERY_KIND_GENERATE: &str = "generate";
 const RECOVERY_KIND_EDIT: &str = "edit";
+pub(crate) const MAX_SOURCE_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+
+#[derive(Default)]
+pub(crate) struct SelectedImageRegistry {
+    paths: Mutex<HashSet<PathBuf>>,
+}
+
+impl SelectedImageRegistry {
+    pub(crate) fn register_paths(&self, paths: &[PathBuf]) -> Result<Vec<String>, AppError> {
+        let mut canonical_paths = Vec::with_capacity(paths.len());
+        for path in paths {
+            canonical_paths.push(canonicalize_source_image_path(path)?);
+        }
+
+        let mut selected = self.paths.lock().map_err(|e| AppError::Validation {
+            message: format!("Lock selected image registry failed: {}", e),
+        })?;
+        for path in &canonical_paths {
+            selected.insert(path.clone());
+        }
+
+        Ok(canonical_paths
+            .into_iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect())
+    }
+
+    pub(crate) fn contains_path(&self, path: &Path) -> Result<bool, AppError> {
+        let canonical_path = canonicalize_source_image_path(path)?;
+        let selected = self.paths.lock().map_err(|e| AppError::Validation {
+            message: format!("Lock selected image registry failed: {}", e),
+        })?;
+        Ok(selected.contains(&canonical_path))
+    }
+}
+
+fn canonicalize_source_image_path(path: &Path) -> Result<PathBuf, AppError> {
+    let canonical_path = path.canonicalize().map_err(|e| AppError::Validation {
+        message: format!("Resolve selected image failed: {}", e),
+    })?;
+
+    if !canonical_path.is_file() {
+        return Err(AppError::Validation {
+            message: "Selected image path is not a file.".to_string(),
+        });
+    }
+
+    source_image_media_type_for_path(&canonical_path)?;
+    Ok(canonical_path)
+}
+
+pub(crate) fn source_image_media_type_for_path(path: &Path) -> Result<&'static str, AppError> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => Ok("image/jpeg"),
+        Some("png") => Ok("image/png"),
+        Some("webp") => Ok("image/webp"),
+        Some(extension) => Err(AppError::Validation {
+            message: format!(
+                "Unsupported image format '{}'. Supported: jpg, png, webp",
+                extension
+            ),
+        }),
+        None => Err(AppError::Validation {
+            message: "Selected image has no file extension.".to_string(),
+        }),
+    }
+}
+
+pub(crate) fn validate_source_image_data(
+    path: &Path,
+    data: &[u8],
+) -> Result<&'static str, AppError> {
+    let media_type = source_image_media_type_for_path(path)?;
+    if data.len() as u64 > MAX_SOURCE_IMAGE_BYTES {
+        return Err(AppError::Validation {
+            message: format!("Image '{}' exceeds 10MB limit", path.display()),
+        });
+    }
+
+    let has_expected_magic = match media_type {
+        "image/jpeg" => data.starts_with(b"\xff\xd8\xff"),
+        "image/png" => data.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/webp" => data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP",
+        _ => false,
+    };
+
+    if !has_expected_magic {
+        return Err(AppError::Validation {
+            message: format!("Image '{}' has invalid image data", path.display()),
+        });
+    }
+
+    Ok(media_type)
+}
+
+fn validate_source_image_file(path: &Path) -> Result<(), AppError> {
+    let metadata = std::fs::metadata(path).map_err(|e| AppError::Validation {
+        message: format!("Read selected image metadata failed: {}", e),
+    })?;
+    if metadata.len() > MAX_SOURCE_IMAGE_BYTES {
+        return Err(AppError::Validation {
+            message: format!("Image '{}' exceeds 10MB limit", path.display()),
+        });
+    }
+
+    let mut file = std::fs::File::open(path).map_err(|e| AppError::Validation {
+        message: format!("Open selected image failed: {}", e),
+    })?;
+    let mut header = [0u8; 16];
+    let bytes_read = file.read(&mut header).map_err(|e| AppError::Validation {
+        message: format!("Read selected image header failed: {}", e),
+    })?;
+    validate_source_image_data(path, &header[..bytes_read]).map(|_| ())
+}
+
+pub(crate) fn resolve_source_image_paths(
+    app: &tauri::AppHandle,
+    db: &Database,
+    registry: &SelectedImageRegistry,
+    paths: &[String],
+) -> Result<Vec<String>, AppError> {
+    let mut resolved_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let resolved_path = if db.image_file_exists(path)? {
+            validate_managed_image_path(app, db, path)?
+        } else if registry.contains_path(Path::new(path))? {
+            canonicalize_source_image_path(Path::new(path))?
+        } else {
+            return Err(AppError::Validation {
+                message: "Image file was not selected from Astro Studio.".to_string(),
+            });
+        };
+        validate_source_image_file(&resolved_path)?;
+        resolved_paths.push(resolved_path.to_string_lossy().to_string());
+    }
+
+    Ok(resolved_paths)
+}
 
 fn resolve_image_endpoint_url_for_model(
     db: &Database,
@@ -24,7 +171,9 @@ fn resolve_image_endpoint_url_for_model(
     kind: ImageEndpointKind,
 ) -> Result<String, AppError> {
     let settings = settings::read_model_endpoint_settings(db, model)?;
-    Ok(image_endpoint_url_for_model_settings(model, &settings, kind))
+    Ok(image_endpoint_url_for_model_settings(
+        model, &settings, kind,
+    ))
 }
 
 fn normalize_image_moderation(moderation: &str) -> &'static str {
@@ -75,10 +224,9 @@ fn image_request_options(
 }
 
 fn source_image_paths_json(source_image_paths: &[String]) -> Result<String, AppError> {
-    serde_json::to_string(source_image_paths)
-        .map_err(|e| AppError::Database {
-            message: format!("Serialize source image paths failed: {}", e),
-        })
+    serde_json::to_string(source_image_paths).map_err(|e| AppError::Database {
+        message: format!("Serialize source image paths failed: {}", e),
+    })
 }
 
 fn generation_request_metadata_json(
@@ -103,7 +251,6 @@ fn generation_request_metadata_json(
         "partial_images": options.partial_images,
         "image_count": options.image_count,
         "source_image_count": source_image_paths.len(),
-        "source_image_paths": source_image_paths,
     }))
     .map_err(|e| AppError::Database {
         message: format!("Serialize generation metadata failed: {}", e),
@@ -129,9 +276,11 @@ fn create_processing_generation(
         options,
         source_image_paths,
     )?;
-    let tx = conn.unchecked_transaction().map_err(|e| AppError::Database {
-        message: format!("Begin transaction failed: {}", e),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Database {
+            message: format!("Begin transaction failed: {}", e),
+        })?;
     tx.execute(
         "INSERT INTO generations (
             id, prompt, engine, request_kind, size, quality, background, output_format,
@@ -209,9 +358,11 @@ fn set_generation_failed(
     error_message: &str,
     clear_recovery: bool,
 ) -> Result<(), AppError> {
-    let tx = conn.unchecked_transaction().map_err(|e| AppError::Database {
-        message: format!("Begin transaction failed: {}", e),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Database {
+            message: format!("Begin transaction failed: {}", e),
+        })?;
     tx.execute(
         "UPDATE generations SET status = 'failed', error_message = ?1 WHERE id = ?2",
         params![error_message, generation_id],
@@ -241,16 +392,21 @@ fn save_generation_images(
     output_format: &str,
     images_data: &[Vec<u8>],
 ) -> Result<Vec<GeneratedImage>, AppError> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::FileSystem {
-        message: format!("Get app data dir failed: {}", e),
-    })?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Get app data dir failed: {}", e),
+        })?;
     let fm = file_manager::FileManager::new(app_data_dir);
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
-    let tx = conn.unchecked_transaction().map_err(|e| AppError::Database {
-        message: format!("Begin transaction failed: {}", e),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Database {
+            message: format!("Begin transaction failed: {}", e),
+        })?;
 
     tx.execute(
         "DELETE FROM images WHERE generation_id = ?1",
@@ -263,7 +419,8 @@ fn save_generation_images(
     let mut saved_images = Vec::with_capacity(images_data.len());
     for (i, data) in images_data.iter().enumerate() {
         let img_id = format!("{}_{}", generation_id, i);
-        let saved = fm.save_image_at(&img_id, data, output_format, Some(created_at))
+        let saved = fm
+            .save_image_at(&img_id, data, output_format, Some(created_at))
             .map_err(|e| AppError::FileSystem { message: e })?;
 
         tx.execute(
@@ -325,7 +482,14 @@ pub(crate) async fn generate_image(
     project_id: Option<String>,
 ) -> Result<GenerateResult, AppError> {
     let mut options = image_request_options(
-        size, quality, background, output_format, output_compression, moderation, None, image_count,
+        size,
+        quality,
+        background,
+        output_format,
+        output_compression,
+        moderation,
+        None,
+        image_count,
     );
     let generation_id = uuid::Uuid::new_v4().to_string();
     let created_at = current_timestamp();
@@ -335,7 +499,10 @@ pub(crate) async fn generate_image(
             message: format!("Lock failed: {}", e),
         })?;
         crate::commands::conversations::resolve_conversation_id_for_generation(
-            &conn, conversation_id.as_deref(), project_id.as_deref(), &prompt,
+            &conn,
+            conversation_id.as_deref(),
+            project_id.as_deref(),
+            &prompt,
         )?
     };
     let model = normalize_image_model(
@@ -348,20 +515,28 @@ pub(crate) async fn generate_image(
     options = sanitize_request_options_for_model(&model, options);
 
     let _ = db.insert_log(
-        "generation", "info",
+        "generation",
+        "info",
         &format!(
-            "Started — prompt: {:?}, size: {}, quality: {}, background: {}, output_format: {}, image_count: {}",
-            prompt, options.size, options.quality, options.background, options.output_format, options.image_count
+            "Started — size: {}, quality: {}, background: {}, output_format: {}, image_count: {}",
+            options.size,
+            options.quality,
+            options.background,
+            options.output_format,
+            options.image_count
         ),
         Some(&generation_id),
-        Some(&serde_json::json!({
-            "model": &model, "prompt": prompt,
-            "size": &options.size, "quality": &options.quality,
-            "background": &options.background, "output_format": &options.output_format,
-            "output_compression": options.output_compression, "moderation": &options.moderation,
-            "stream": options.stream, "partial_images": options.partial_images,
-            "image_count": options.image_count, "conversation_id": conversation_id
-        }).to_string()),
+        Some(
+            &serde_json::json!({
+                "model": &model,
+                "size": &options.size, "quality": &options.quality,
+                "background": &options.background, "output_format": &options.output_format,
+                "output_compression": options.output_compression, "moderation": &options.moderation,
+                "stream": options.stream, "partial_images": options.partial_images,
+                "image_count": options.image_count, "conversation_id": conversation_id
+            })
+            .to_string(),
+        ),
         None,
     )?;
     let api_key = settings::read_model_api_key(db.inner(), &model)?.ok_or_else(|| {
@@ -371,17 +546,27 @@ pub(crate) async fn generate_image(
     })?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Generate)?;
-    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::FileSystem {
-        message: format!("Get app data dir failed: {}", e),
-    })?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Get app data dir failed: {}", e),
+        })?;
 
     {
         let conn = db.conn.lock().map_err(|e| AppError::Database {
             message: format!("Lock failed: {}", e),
         })?;
         create_processing_generation(
-            &conn, &generation_id, &prompt, &model, &options,
-            &conversation_id, &created_at, RECOVERY_KIND_GENERATE, &[],
+            &conn,
+            &generation_id,
+            &prompt,
+            &model,
+            &options,
+            &conversation_id,
+            &created_at,
+            RECOVERY_KIND_GENERATE,
+            &[],
         )?;
     }
 
@@ -392,8 +577,14 @@ pub(crate) async fn generate_image(
 
     let result = engine_state
         .generate(
-            &generation_id, &model, &api_key, &endpoint_url, &prompt, &options,
-            Some(&db), Some(&app_data_dir),
+            &generation_id,
+            &model,
+            &api_key,
+            &endpoint_url,
+            &prompt,
+            &options,
+            Some(&db),
+            Some(&app_data_dir),
         )
         .await;
 
@@ -407,12 +598,17 @@ pub(crate) async fn generate_image(
             }
 
             let saved_images = save_generation_images(
-                &app, db.inner(), &generation_id, &created_at,
-                &options.output_format, &engine_response.images,
+                &app,
+                db.inner(),
+                &generation_id,
+                &created_at,
+                &options.output_format,
+                &engine_response.images,
             )?;
 
             let _ = db.insert_log(
-                "generation", "info",
+                "generation",
+                "info",
                 &format!("Completed — {} image(s) saved", saved_images.len()),
                 Some(&generation_id),
                 Some(&serde_json::json!({"image_count": saved_images.len()}).to_string()),
@@ -424,12 +620,20 @@ pub(crate) async fn generate_image(
                 serde_json::json!({ "generation_id": generation_id, "status": "completed" }),
             );
 
-            Ok(GenerateResult { generation_id, conversation_id, images: saved_images })
+            Ok(GenerateResult {
+                generation_id,
+                conversation_id,
+                images: saved_images,
+            })
         }
         Err(e) => {
             let _ = db.insert_log(
-                "generation", "error",
-                &format!("Failed: {}", &e), Some(&generation_id), None, None,
+                "generation",
+                "error",
+                &format!("Failed: {}", &e),
+                Some(&generation_id),
+                None,
+                None,
             );
 
             let conn = db.conn.lock().map_err(|e| AppError::Database {
@@ -452,6 +656,7 @@ pub(crate) async fn edit_image(
     app: tauri::AppHandle,
     db: State<'_, Database>,
     engine_state: State<'_, api_gateway::GptImageEngine>,
+    selected_images: State<'_, SelectedImageRegistry>,
     prompt: String,
     model: Option<String>,
     source_image_paths: Vec<String>,
@@ -471,9 +676,21 @@ pub(crate) async fn edit_image(
             message: "Please select at least one source image.".to_string(),
         });
     }
+    let source_image_paths = resolve_source_image_paths(
+        &app,
+        db.inner(),
+        selected_images.inner(),
+        &source_image_paths,
+    )?;
 
     let mut options = image_request_options(
-        size, quality, background, output_format, output_compression, moderation, input_fidelity,
+        size,
+        quality,
+        background,
+        output_format,
+        output_compression,
+        moderation,
+        input_fidelity,
         image_count,
     );
     let generation_id = uuid::Uuid::new_v4().to_string();
@@ -484,7 +701,10 @@ pub(crate) async fn edit_image(
             message: format!("Lock failed: {}", e),
         })?;
         crate::commands::conversations::resolve_conversation_id_for_generation(
-            &conn, conversation_id.as_deref(), project_id.as_deref(), &prompt,
+            &conn,
+            conversation_id.as_deref(),
+            project_id.as_deref(),
+            &prompt,
         )?
     };
     let model = normalize_image_model(
@@ -503,17 +723,27 @@ pub(crate) async fn edit_image(
     })?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db.inner(), &model, ImageEndpointKind::Edit)?;
-    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::FileSystem {
-        message: format!("Get app data dir failed: {}", e),
-    })?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Get app data dir failed: {}", e),
+        })?;
 
     {
         let conn = db.conn.lock().map_err(|e| AppError::Database {
             message: format!("Lock failed: {}", e),
         })?;
         create_processing_generation(
-            &conn, &generation_id, &prompt, &model, &options,
-            &conversation_id, &created_at, RECOVERY_KIND_EDIT, &source_image_paths,
+            &conn,
+            &generation_id,
+            &prompt,
+            &model,
+            &options,
+            &conversation_id,
+            &created_at,
+            RECOVERY_KIND_EDIT,
+            &source_image_paths,
         )?;
     }
 
@@ -524,8 +754,15 @@ pub(crate) async fn edit_image(
 
     let result = engine_state
         .edit(
-            &generation_id, &model, &api_key, &endpoint_url, &prompt,
-            &source_image_paths, &options, Some(&db), Some(&app_data_dir),
+            &generation_id,
+            &model,
+            &api_key,
+            &endpoint_url,
+            &prompt,
+            &source_image_paths,
+            &options,
+            Some(&db),
+            Some(&app_data_dir),
         )
         .await;
 
@@ -539,12 +776,17 @@ pub(crate) async fn edit_image(
             }
 
             let saved_images = save_generation_images(
-                &app, db.inner(), &generation_id, &created_at,
-                &options.output_format, &engine_response.images,
+                &app,
+                db.inner(),
+                &generation_id,
+                &created_at,
+                &options.output_format,
+                &engine_response.images,
             )?;
 
             let _ = db.insert_log(
-                "generation", "info",
+                "generation",
+                "info",
                 &format!("Edit completed — {} image(s) saved", saved_images.len()),
                 Some(&generation_id),
                 Some(&serde_json::json!({"image_count": saved_images.len()}).to_string()),
@@ -556,12 +798,20 @@ pub(crate) async fn edit_image(
                 serde_json::json!({ "generation_id": generation_id, "status": "completed" }),
             );
 
-            Ok(GenerateResult { generation_id, conversation_id, images: saved_images })
+            Ok(GenerateResult {
+                generation_id,
+                conversation_id,
+                images: saved_images,
+            })
         }
         Err(e) => {
             let _ = db.insert_log(
-                "generation", "error",
-                &format!("Edit failed: {}", &e), Some(&generation_id), None, None,
+                "generation",
+                "error",
+                &format!("Edit failed: {}", &e),
+                Some(&generation_id),
+                None,
+                None,
             );
 
             let conn = db.conn.lock().map_err(|e| AppError::Database {
@@ -581,8 +831,48 @@ pub(crate) async fn edit_image(
 
 // ── Lightbox commands ────────────────────────────────────────────────────────
 
+fn managed_image_roots(app: &tauri::AppHandle) -> Result<Vec<PathBuf>, AppError> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::FileSystem {
+            message: format!("Get app data dir failed: {}", e),
+        })?;
+    Ok(vec![
+        app_data_dir.join("images"),
+        app_data_dir.join("thumbnails"),
+    ])
+}
+
+fn validate_managed_image_path(
+    app: &tauri::AppHandle,
+    db: &Database,
+    image_path: &str,
+) -> Result<PathBuf, AppError> {
+    validate_recorded_managed_image_path(db, image_path, &managed_image_roots(app)?)
+}
+
+fn validate_recorded_managed_image_path(
+    db: &Database,
+    image_path: &str,
+    allowed_roots: &[PathBuf],
+) -> Result<PathBuf, AppError> {
+    if !db.image_file_exists(image_path)? {
+        return Err(AppError::Validation {
+            message: "Image file is not recorded.".to_string(),
+        });
+    }
+
+    file_manager::canonicalize_existing_managed_path(Path::new(image_path), allowed_roots)
+}
+
 #[tauri::command]
-pub(crate) fn copy_image_to_clipboard(image_path: String) -> Result<(), AppError> {
+pub(crate) fn copy_image_to_clipboard(
+    app: tauri::AppHandle,
+    db: State<'_, Database>,
+    image_path: String,
+) -> Result<(), AppError> {
+    let image_path = validate_managed_image_path(&app, db.inner(), &image_path)?;
     let data = std::fs::read(&image_path).map_err(|e| AppError::FileSystem {
         message: format!("Read image failed: {}", e),
     })?;
@@ -609,8 +899,13 @@ pub(crate) fn copy_image_to_clipboard(image_path: String) -> Result<(), AppError
 }
 
 #[tauri::command]
-pub(crate) async fn save_image_to_file(image_path: String) -> Result<(), AppError> {
-    let file_name = std::path::Path::new(&image_path)
+pub(crate) async fn save_image_to_file(
+    app: tauri::AppHandle,
+    db: State<'_, Database>,
+    image_path: String,
+) -> Result<(), AppError> {
+    let image_path = validate_managed_image_path(&app, db.inner(), &image_path)?;
+    let file_name = image_path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("image.png");
@@ -639,7 +934,9 @@ pub(crate) async fn save_image_to_file(image_path: String) -> Result<(), AppErro
 }
 
 #[tauri::command]
-pub(crate) async fn pick_source_images() -> Result<Vec<String>, AppError> {
+pub(crate) async fn pick_source_images(
+    selected_images: State<'_, SelectedImageRegistry>,
+) -> Result<Vec<String>, AppError> {
     let files = rfd::AsyncFileDialog::new()
         .add_filter("Image", &["png", "jpg", "jpeg", "webp"])
         .pick_files()
@@ -649,8 +946,99 @@ pub(crate) async fn pick_source_images() -> Result<Vec<String>, AppError> {
         return Ok(vec![]);
     };
 
-    Ok(files
+    let paths: Vec<PathBuf> = files
         .into_iter()
-        .map(|file| file.path().to_string_lossy().to_string())
-        .collect())
+        .map(|file| file.path().to_path_buf())
+        .collect();
+    selected_images.register_paths(&paths)
+}
+
+#[cfg(test)]
+mod path_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn copy_image_to_clipboard_rejects_outside_path_before_reading() {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-studio-image-boundary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let outside_file = dir.join("outside.txt");
+        std::fs::write(&outside_file, "not an allowed image").expect("write outside file");
+
+        let result = file_manager::canonicalize_existing_managed_path(
+            &outside_file,
+            &[
+                dir.join("app-data").join("images"),
+                dir.join("app-data").join("thumbnails"),
+            ],
+        );
+
+        assert!(matches!(result, Err(AppError::Validation { .. })));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn generation_request_metadata_omits_source_image_paths() {
+        let options = image_request_options(None, None, None, None, None, None, None, Some(1));
+
+        let metadata = generation_request_metadata_json(
+            RECOVERY_KIND_EDIT,
+            "conversation-1",
+            "gpt-image-1",
+            &options,
+            &["/Users/example/private.png".to_string()],
+        )
+        .expect("serialize metadata");
+
+        assert!(metadata.contains("\"source_image_count\":1"));
+        assert!(!metadata.contains("private.png"));
+        assert!(!metadata.contains("source_image_paths"));
+    }
+
+    #[test]
+    fn recorded_managed_image_paths_are_valid_source_images_without_picker_registration() {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-studio-managed-source-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let db_path = dir.join("astro_studio.db");
+        let image_dir = dir.join("app-data").join("images").join("2026");
+        std::fs::create_dir_all(&image_dir).expect("create image dir");
+        let image_path = image_dir.join("generated.png");
+        std::fs::write(&image_path, b"\x89PNG\r\n\x1a\nrest").expect("write image");
+
+        let db = Database::open(&db_path).expect("open db");
+        db.run_migrations().expect("run migrations");
+        {
+            let conn = db.conn.lock().expect("lock db");
+            conn.execute(
+                "INSERT INTO generations (id, prompt) VALUES (?1, ?2)",
+                rusqlite::params!["generation-1", "prompt"],
+            )
+            .expect("insert generation");
+            conn.execute(
+                "INSERT INTO images (id, generation_id, file_path) VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    "image-1",
+                    "generation-1",
+                    image_path.to_string_lossy().to_string()
+                ],
+            )
+            .expect("insert image");
+        }
+
+        let result = validate_recorded_managed_image_path(
+            &db,
+            &image_path.to_string_lossy(),
+            &[dir.join("app-data").join("images")],
+        );
+
+        assert_eq!(result.unwrap(), image_path.canonicalize().unwrap());
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

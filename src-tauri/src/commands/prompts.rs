@@ -58,9 +58,11 @@ pub(crate) fn create_prompt_favorite(
     }
 
     let id = uuid::Uuid::new_v4().to_string();
-    let tx = conn.unchecked_transaction().map_err(|e| AppError::Database {
-        message: format!("Begin transaction failed: {}", e),
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Database {
+            message: format!("Begin transaction failed: {}", e),
+        })?;
     tx.execute(
         "INSERT INTO prompt_favorites (id, prompt, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
         params![&id, &prompt, &timestamp],
@@ -189,10 +191,7 @@ pub(crate) fn get_prompt_favorites(
 }
 
 #[tauri::command]
-pub(crate) fn delete_prompt_favorite(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn delete_prompt_favorite(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -265,10 +264,7 @@ pub(crate) fn rename_prompt_folder(
 }
 
 #[tauri::command]
-pub(crate) fn delete_prompt_folder(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), AppError> {
+pub(crate) fn delete_prompt_folder(db: State<'_, Database>, id: String) -> Result<(), AppError> {
     if id == "default" {
         return Err(AppError::Validation {
             message: "Default folder cannot be deleted".to_string(),
@@ -277,13 +273,10 @@ pub(crate) fn delete_prompt_folder(
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
-    conn.execute(
-        "DELETE FROM prompt_folders WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| AppError::Database {
-        message: format!("Delete prompt folder failed: {}", e),
-    })?;
+    conn.execute("DELETE FROM prompt_folders WHERE id = ?1", params![id])
+        .map_err(|e| AppError::Database {
+            message: format!("Delete prompt folder failed: {}", e),
+        })?;
     Ok(())
 }
 

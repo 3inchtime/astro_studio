@@ -100,7 +100,38 @@ function getNestedValue(
   }, resources);
 }
 
+function flattenKeys(
+  resources: Record<string, unknown>,
+  prefix = "",
+): string[] {
+  return Object.entries(resources).flatMap(([key, value]) => {
+    const keyPath = prefix ? `${prefix}.${key}` : key;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return flattenKeys(value as Record<string, unknown>, keyPath);
+    }
+
+    return keyPath;
+  });
+}
+
 describe("i18n resources", () => {
+  it("keeps every locale in parity with the English and Simplified Chinese resource keys", () => {
+    const requiredKeys = new Set([
+      ...flattenKeys(en),
+      ...flattenKeys(zhCN),
+    ]);
+
+    for (const [locale, resources] of Object.entries(localeResources)) {
+      const localeKeys = new Set(flattenKeys(resources));
+      const missingKeys = [...requiredKeys].filter((key) => !localeKeys.has(key));
+
+      expect(
+        missingKeys,
+        `${locale} is missing locale keys`,
+      ).toEqual([]);
+    }
+  });
+
   it("defines every provider settings key used by the model settings panel", () => {
     for (const [locale, resources] of Object.entries(localeResources)) {
       for (const key of providerSettingsKeys) {

@@ -1,6 +1,6 @@
-use std::sync::Mutex;
-use serde::Serialize;
 use reqwest::{ClientBuilder, StatusCode, Url};
+use serde::Serialize;
+use std::sync::Mutex;
 use tauri::{ipc::Channel, AppHandle, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -183,7 +183,9 @@ mod tests {
     fn treats_missing_manifest_as_no_update() {
         assert!(super::is_missing_update_manifest(StatusCode::NOT_FOUND));
         assert!(!super::is_missing_update_manifest(StatusCode::OK));
-        assert!(!super::is_missing_update_manifest(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!super::is_missing_update_manifest(
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
     }
 
     #[test]

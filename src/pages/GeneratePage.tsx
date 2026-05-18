@@ -136,6 +136,8 @@ export default function GeneratePage() {
   const didUserSelectModelRef = useRef(false);
   const hasComposerDraftRef = useRef(false);
   const activeConversationIdRef = useRef(activeConversationId);
+  const conversationLoadRequestIdRef = useRef(0);
+  const messagesVersionRef = useRef(0);
   const navigationPendingPrompt = useMemo(() => {
     const state = location.state as { pendingPrompt?: string } | null;
     return typeof state?.pendingPrompt === "string" ? state.pendingPrompt : null;
@@ -215,7 +217,17 @@ export default function GeneratePage() {
   }, []);
 
   const loadConversationMessages = useCallback(async (conversationId: string) => {
+    const requestId = ++conversationLoadRequestIdRef.current;
+    const messagesVersionAtStart = messagesVersionRef.current;
     const generations = await getConversationGenerations(conversationId);
+    if (
+      requestId !== conversationLoadRequestIdRef.current ||
+      activeConversationIdRef.current !== conversationId ||
+      messagesVersionRef.current !== messagesVersionAtStart
+    ) {
+      return;
+    }
+    messagesVersionRef.current += 1;
     setMessages(generationsToMessages(generations));
   }, []);
 
@@ -239,6 +251,8 @@ export default function GeneratePage() {
 
   useEffect(() => {
     if (!activeConversationId) {
+      conversationLoadRequestIdRef.current += 1;
+      messagesVersionRef.current += 1;
       setMessages([]);
       return;
     }
@@ -465,6 +479,7 @@ export default function GeneratePage() {
         retryRequest: normalizedRequest,
         createdAt: new Date().toISOString(),
       };
+      messagesVersionRef.current += 1;
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       autoScrollRef.current = true;
 
@@ -473,12 +488,14 @@ export default function GeneratePage() {
           normalizedRequest.editSources.length > 0
             ? await editImage(buildEditParams(normalizedRequest))
             : await generateImage(buildGenerationParams(normalizedRequest));
+        messagesVersionRef.current += 1;
         setMessages((prev) =>
           completeGenerationMessage(prev, tempId, result),
         );
         setActiveConversationId(result.conversation_id);
         refreshConversations();
       } catch (e) {
+        messagesVersionRef.current += 1;
         setMessages((prev) =>
           failGenerationMessage(prev, tempId, e, normalizedRequest),
         );
@@ -652,6 +669,7 @@ export default function GeneratePage() {
       setIsDeletingGeneration(true);
       try {
         await deleteGeneration(generationId);
+        messagesVersionRef.current += 1;
         setMessages((prev) =>
           prev.filter(
             (m) =>

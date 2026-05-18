@@ -130,6 +130,44 @@ describe("ProjectNameDialog", () => {
     expect(defaultProps.onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("calls onCancel when Escape is pressed", () => {
+    render(<ProjectNameDialog {...defaultProps} />);
+
+    fireEvent.keyDown(screen.getByRole("dialog"), {
+      key: "Escape",
+      code: "Escape",
+    });
+
+    expect(defaultProps.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("traps Tab focus inside the dialog", () => {
+    render(<ProjectNameDialog {...defaultProps} />);
+
+    const closeButton = screen.getByRole("button", { name: "Close dialog" });
+    const submitButton = screen.getByRole("button", { name: "Create" });
+
+    submitButton.focus();
+    fireEvent.keyDown(screen.getByRole("dialog"), {
+      key: "Tab",
+      code: "Tab",
+    });
+
+    expect(document.activeElement).toBe(closeButton);
+  });
+
+  it("restores focus to the trigger when the dialog closes", () => {
+    render(<button type="button">Open project dialog</button>);
+    const trigger = screen.getByRole("button", { name: "Open project dialog" });
+    trigger.focus();
+
+    const { rerender } = render(<ProjectNameDialog {...defaultProps} />);
+
+    rerender(<ProjectNameDialog {...defaultProps} open={false} />);
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("disables input and buttons while loading", () => {
     render(<ProjectNameDialog {...defaultProps} loading />);
 

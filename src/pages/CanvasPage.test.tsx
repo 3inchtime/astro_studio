@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CanvasPage from "./CanvasPage";
@@ -40,6 +40,8 @@ vi.mock("react-i18next", () => ({
         "canvas.importImage": "Import Image",
         "canvas.layersTitle": "Layers",
         "canvas.frameAspect": "Frame",
+        "canvas.newLayer": "New Layer",
+        "canvas.defaultLayerName": `Canvas Layer ${options?.number ?? 1}`,
         "canvas.tool.select": "Select",
         "canvas.tool.brush": "Brush",
         "canvas.tool.eraser": "Eraser",
@@ -297,13 +299,29 @@ describe("CanvasPage", () => {
     render(<CanvasPage />, { wrapper: TestWrapper });
 
     expect(await screen.findByLabelText("Canvas workspace")).toHaveClass(
-      "grid-cols-[264px_minmax(360px,1fr)_340px]",
+      "min-w-[836px]",
+      "grid-cols-[220px_minmax(276px,1fr)_300px]",
     );
     await screen.findByText("Canvas stage");
     expect(screen.getByText("1 canvas")).toBeInTheDocument();
     expect(screen.getByText("0 objects")).toBeInTheDocument();
     expect(screen.getByLabelText("Generation and layers")).toBeInTheDocument();
     expect(screen.getByTestId("canvas-floating-toolbar")).toBeInTheDocument();
+  });
+
+  it("localizes the default name when adding a new layer", async () => {
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    await screen.findByText("Mood board");
+    vi.useFakeTimers();
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "New Layer" }));
+    });
+
+    expect(screen.getByText("Canvas Layer 2")).toBeInTheDocument();
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it("imports an image into the canvas document", async () => {

@@ -162,6 +162,17 @@ function triggerIntersection(isIntersecting = true) {
   );
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 function buildResult(id = "1"): GenerationResult {
   const imageIdPrefix = id === "1" ? "image" : `image-${id}`;
   const fullPrefix = id === "1" ? "/tmp/full" : `/tmp/full-${id}`;
@@ -365,6 +376,73 @@ describe("GalleryPage", () => {
       expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
     });
     expect(searchInput).toHaveValue("");
+  });
+
+  it("keeps the latest manual search results when an older search resolves last", async () => {
+    const firstSearch = createDeferred<{
+      generations: GenerationResult[];
+      total: number;
+      page: number;
+      page_size: number;
+    }>();
+    const secondSearch = createDeferred<{
+      generations: GenerationResult[];
+      total: number;
+      page: number;
+      page_size: number;
+    }>();
+    searchGenerations
+      .mockResolvedValueOnce({
+        generations: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+      })
+      .mockReturnValueOnce(firstSearch.promise)
+      .mockReturnValueOnce(secondSearch.promise);
+
+    render(<GalleryPage />);
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, undefined);
+    });
+
+    const searchInput = screen.getByPlaceholderText("gallery.search");
+    fireEvent.change(searchInput, { target: { value: "old query" } });
+    fireEvent.click(screen.getByRole("button", { name: "gallery.applyFilters" }));
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith("old query", 1, false, {}, undefined);
+    });
+
+    fireEvent.change(searchInput, { target: { value: "new query" } });
+    fireEvent.click(screen.getByRole("button", { name: "gallery.applyFilters" }));
+
+    await waitFor(() => {
+      expect(searchGenerations).toHaveBeenLastCalledWith("new query", 1, false, {}, undefined);
+    });
+
+    await act(async () => {
+      secondSearch.resolve({
+        generations: [buildResult("new")],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      });
+    });
+    expect(screen.getByRole("button", { name: "Open preview generation-new" })).toBeInTheDocument();
+
+    await act(async () => {
+      firstSearch.resolve({
+        generations: [buildResult("old")],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      });
+    });
+
+    expect(screen.getByRole("button", { name: "Open preview generation-new" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open preview generation-old" })).not.toBeInTheDocument();
   });
 
   it("opens the shared lightbox from a gallery image with all result images", async () => {

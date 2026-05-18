@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use image::{GenericImageView, ImageFormat};
 use std::fs::File;
 use std::io::Write;
@@ -62,6 +63,27 @@ fn write_original_image_bytes(data: &[u8], path: &Path) -> Result<i64, String> {
     Ok(file_size)
 }
 
+pub(crate) fn canonicalize_existing_managed_path(
+    path: &Path,
+    allowed_roots: &[PathBuf],
+) -> Result<PathBuf, AppError> {
+    let canonical_path = path.canonicalize().map_err(|e| AppError::FileSystem {
+        message: format!("Resolve path failed: {}", e),
+    })?;
+
+    for root in allowed_roots {
+        if let Ok(canonical_root) = root.canonicalize() {
+            if canonical_path.starts_with(&canonical_root) {
+                return Ok(canonical_path);
+            }
+        }
+    }
+
+    Err(AppError::Validation {
+        message: "File path is outside managed storage.".to_string(),
+    })
+}
+
 impl FileManager {
     pub fn new(base_dir: PathBuf) -> Self {
         Self { base_dir }
@@ -96,8 +118,8 @@ impl FileManager {
         let img =
             image::load_from_memory(data).map_err(|e| format!("Decode image failed: {}", e))?;
         let (width, height) = img.dimensions();
-        let extension =
-            detected_image_extension(data).unwrap_or_else(|| extension_for_output_format(output_format));
+        let extension = detected_image_extension(data)
+            .unwrap_or_else(|| extension_for_output_format(output_format));
         let filename = format!("{}.{}", generation_id, extension);
 
         let image_dir = self.base_dir.join("images").join(&date_path);
@@ -138,8 +160,16 @@ impl FileManager {
     }
 
     pub fn delete_image(&self, file_path: &str, thumbnail_path: &str) -> Result<(), String> {
-        let _ = std::fs::remove_file(file_path);
-        let _ = std::fs::remove_file(thumbnail_path);
+        let roots = [
+            self.base_dir.join("images"),
+            self.base_dir.join("thumbnails"),
+        ];
+        if let Ok(path) = canonicalize_existing_managed_path(Path::new(file_path), &roots) {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Ok(path) = canonicalize_existing_managed_path(Path::new(thumbnail_path), &roots) {
+            let _ = std::fs::remove_file(path);
+        }
         Ok(())
     }
 }

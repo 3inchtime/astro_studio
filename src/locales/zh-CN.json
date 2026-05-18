@@ -520,7 +520,12 @@
     "totalCount": "共 {{count}} 条",
     "prev": "上一页",
     "next": "下一页",
-    "back": "返回"
+    "back": "返回",
+    "time": "时间",
+    "type": "类型",
+    "level": "级别",
+    "message": "消息",
+    "generationId": "生成 ID"
   },
   "update": {
     "title": "应用更新",
@@ -539,5 +544,11 @@
     "currentVersion": "当前版本",
     "latestVersion": "最新版本",
     "updateNotes": "更新日志"
-  }
+  },
+  "canvas.assetCount_one": "{{count}} 个画布",
+  "canvas.assetCount_other": "{{count}} 个画布",
+  "canvas.objectCount_one": "{{count}} 个对象",
+  "canvas.objectCount_other": "{{count}} 个对象",
+  "gallery.clearDate": "清除日期",
+  "canvas.defaultLayerName": "图层 {{number}}"
 }

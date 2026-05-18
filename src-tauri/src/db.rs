@@ -141,10 +141,26 @@ mod tests {
 
         {
             let conn = database.conn.lock().expect("lock db");
-            assert!(table_has_column(&conn, "prompt_agent_sessions", "conversation_id"));
-            assert!(table_has_column(&conn, "prompt_agent_sessions", "suggested_params"));
-            assert!(table_has_column(&conn, "prompt_agent_messages", "session_id"));
-            assert!(table_has_column(&conn, "prompt_agent_messages", "ready_to_generate"));
+            assert!(table_has_column(
+                &conn,
+                "prompt_agent_sessions",
+                "conversation_id"
+            ));
+            assert!(table_has_column(
+                &conn,
+                "prompt_agent_sessions",
+                "suggested_params"
+            ));
+            assert!(table_has_column(
+                &conn,
+                "prompt_agent_messages",
+                "session_id"
+            ));
+            assert!(table_has_column(
+                &conn,
+                "prompt_agent_messages",
+                "ready_to_generate"
+            ));
             assert!(migration_version_exists(&conn, 15));
         }
 
@@ -728,6 +744,44 @@ impl Database {
                 })
             })
             .ok())
+    }
+
+    pub fn response_file_exists(&self, path: &str) -> Result<bool, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Database {
+            message: format!("Lock failed: {}", e),
+        })?;
+        let exists =
+            conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM logs WHERE response_file = ?1
+                    UNION
+                    SELECT 1 FROM generation_recoveries WHERE response_file = ?1
+                )",
+                params![path],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| AppError::Database {
+                message: format!("response_file_exists: {}", e),
+            })? != 0;
+        Ok(exists)
+    }
+
+    pub fn image_file_exists(&self, path: &str) -> Result<bool, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Database {
+            message: format!("Lock failed: {}", e),
+        })?;
+        let exists =
+            conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM images WHERE file_path = ?1 OR thumbnail_path = ?1
+                )",
+                params![path],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| AppError::Database {
+                message: format!("image_file_exists: {}", e),
+            })? != 0;
+        Ok(exists)
     }
 
     pub fn clear_logs_before(&self, before_timestamp: &str) -> Result<u64, AppError> {

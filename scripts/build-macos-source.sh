@@ -47,7 +47,7 @@ echo "Fetching Rust dependencies..."
 cargo fetch --manifest-path src-tauri/Cargo.toml
 
 echo "Building Astro Studio for macOS..."
-npm run tauri build
+npm run tauri:build:local
 
 echo "Build finished."
 echo "macOS app bundle:"
