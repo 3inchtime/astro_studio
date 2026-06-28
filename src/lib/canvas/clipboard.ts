@@ -63,12 +63,14 @@ export function pasteCanvasObjects(
   const fallbackEntries: CanvasClipboardEntry[] = [];
 
   clipboard.entries.forEach((entry) => {
-    const originalLayer = clonedContent.layers.find(
-      (layer) => layer.id === entry.layerId && isCanvasLayerSelectable(layer),
-    );
+    const originalLayer = clonedContent.layers.find((layer) => layer.id === entry.layerId);
 
     if (!originalLayer) {
       fallbackEntries.push(entry);
+      return;
+    }
+
+    if (!isCanvasLayerSelectable(originalLayer)) {
       return;
     }
 

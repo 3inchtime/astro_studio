@@ -176,20 +176,24 @@ export function updateImageObject(
   objectId: string,
   updates: Partial<Pick<CanvasImageObject, "x" | "y" | "width" | "height" | "rotation">>,
 ): CanvasDocumentContent {
+  const clonedContent = cloneCanvasDocumentContent(content);
+
   return {
-    ...cloneCanvasDocumentContent(content),
-    layers: content.layers.map((layer) => ({
+    ...clonedContent,
+    layers: clonedContent.layers.map((layer) => ({
       ...layer,
-      objects: layer.objects.map((object) =>
-        object.type === "image" && object.id === objectId
-          ? {
-              ...object,
-              ...updates,
-              width: Math.max(8, updates.width ?? object.width),
-              height: Math.max(8, updates.height ?? object.height),
-            }
-          : object,
-      ),
+      objects: isCanvasLayerSelectable(layer)
+        ? layer.objects.map((object) =>
+            object.type === "image" && object.id === objectId
+              ? {
+                  ...object,
+                  ...updates,
+                  width: Math.max(8, updates.width ?? object.width),
+                  height: Math.max(8, updates.height ?? object.height),
+                }
+              : object,
+          )
+        : layer.objects,
     })),
   };
 }
@@ -218,6 +222,10 @@ export function resetImageObjectAspect(
 ): CanvasDocumentContent {
   let target: CanvasImageObject | null = null;
   for (const layer of content.layers) {
+    if (!isCanvasLayerSelectable(layer)) {
+      continue;
+    }
+
     const object = layer.objects.find(
       (entry): entry is CanvasImageObject => entry.type === "image" && entry.id === objectId,
     );

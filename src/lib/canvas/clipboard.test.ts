@@ -132,6 +132,104 @@ describe("canvas clipboard helpers", () => {
     });
   });
 
+  it("skips copied entries whose original layer now exists but is locked", () => {
+    const sourceContent = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "source",
+          name: "Source",
+          visible: true,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "source-image",
+              image_path: "/tmp/source.png",
+              width: 100,
+              height: 100,
+            }),
+          ],
+        },
+        {
+          id: "active",
+          name: "Active",
+          visible: true,
+          locked: false,
+          objects: [],
+        },
+      ],
+    });
+    const clipboard = copyCanvasObjects(sourceContent, ["source-image"]);
+    const lockedSourceContent = {
+      ...sourceContent,
+      layers: [
+        {
+          ...sourceContent.layers[0],
+          locked: true,
+        },
+        sourceContent.layers[1],
+      ],
+    };
+
+    const { content: updated, pastedObjectIds } = pasteCanvasObjects(
+      lockedSourceContent,
+      clipboard,
+      "active",
+    );
+
+    expect(pastedObjectIds).toEqual([]);
+    expect(updated.layers[0].objects.map((object) => object.id)).toEqual(["source-image"]);
+    expect(updated.layers[1].objects).toEqual([]);
+  });
+
+  it("skips copied entries whose original layer now exists but is hidden", () => {
+    const sourceContent = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "source",
+          name: "Source",
+          visible: true,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "source-image",
+              image_path: "/tmp/source.png",
+              width: 100,
+              height: 100,
+            }),
+          ],
+        },
+        {
+          id: "active",
+          name: "Active",
+          visible: true,
+          locked: false,
+          objects: [],
+        },
+      ],
+    });
+    const clipboard = copyCanvasObjects(sourceContent, ["source-image"]);
+    const hiddenSourceContent = {
+      ...sourceContent,
+      layers: [
+        {
+          ...sourceContent.layers[0],
+          visible: false,
+        },
+        sourceContent.layers[1],
+      ],
+    };
+
+    const { content: updated, pastedObjectIds } = pasteCanvasObjects(
+      hiddenSourceContent,
+      clipboard,
+      "active",
+    );
+
+    expect(pastedObjectIds).toEqual([]);
+    expect(updated.layers[0].objects.map((object) => object.id)).toEqual(["source-image"]);
+    expect(updated.layers[1].objects).toEqual([]);
+  });
+
   it("returns cloned content and no pasted ids when clipboard is missing", () => {
     const content = createClipboardContent();
 

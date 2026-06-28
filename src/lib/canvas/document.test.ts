@@ -108,6 +108,122 @@ describe("canvas document helpers", () => {
     });
   });
 
+  it("ignores stale image ids from locked or hidden layers when updating image objects", () => {
+    const content = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "locked",
+          name: "Locked",
+          visible: true,
+          locked: true,
+          objects: [
+            createImageObject({
+              id: "locked-image",
+              image_path: "/tmp/locked.png",
+              x: 10,
+              y: 20,
+              width: 200,
+              height: 100,
+            }),
+          ],
+        },
+        {
+          id: "hidden",
+          name: "Hidden",
+          visible: false,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "hidden-image",
+              image_path: "/tmp/hidden.png",
+              x: 30,
+              y: 40,
+              width: 240,
+              height: 120,
+            }),
+          ],
+        },
+      ],
+    });
+
+    const updatedLocked = updateImageObject(content, "locked-image", {
+      x: 100,
+      y: 120,
+      width: 80,
+      height: 90,
+    });
+    const updatedHidden = updateImageObject(content, "hidden-image", {
+      x: 140,
+      y: 160,
+      width: 80,
+      height: 90,
+    });
+
+    expect(updatedLocked.layers[0].objects[0]).toMatchObject({
+      x: 10,
+      y: 20,
+      width: 200,
+      height: 100,
+    });
+    expect(updatedHidden.layers[1].objects[0]).toMatchObject({
+      x: 30,
+      y: 40,
+      width: 240,
+      height: 120,
+    });
+  });
+
+  it("ignores stale image ids from locked or hidden layers when resetting image aspect", () => {
+    const content = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "locked",
+          name: "Locked",
+          visible: true,
+          locked: true,
+          objects: [
+            createImageObject({
+              id: "locked-image",
+              image_path: "/tmp/locked.png",
+              width: 400,
+              height: 400,
+              original_width: 300,
+              original_height: 150,
+            }),
+          ],
+        },
+        {
+          id: "hidden",
+          name: "Hidden",
+          visible: false,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "hidden-image",
+              image_path: "/tmp/hidden.png",
+              width: 500,
+              height: 500,
+              original_width: 250,
+              original_height: 100,
+            }),
+          ],
+        },
+      ],
+    });
+
+    const resetLocked = resetImageObjectAspect(content, "locked-image");
+    const resetHidden = resetImageObjectAspect(content, "hidden-image");
+
+    expect(resetLocked.layers[0].objects[0]).toMatchObject({
+      width: 400,
+      height: 400,
+    });
+    expect(resetHidden.layers[1].objects[0]).toMatchObject({
+      width: 500,
+      height: 500,
+    });
+  });
+
   it("removes selected objects across all layers without changing other layers or objects", () => {
     const content = createCanvasDocumentContent({
       layers: [
