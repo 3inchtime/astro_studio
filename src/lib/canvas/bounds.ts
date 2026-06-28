@@ -1,13 +1,17 @@
 import type { CanvasDocumentContent, CanvasObject, CanvasViewport } from "../../types";
 
-export interface CanvasRect {
+interface CanvasRectShape {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export interface CanvasScreenRect extends CanvasRect {
+export interface CanvasRect extends CanvasRectShape {
+  readonly __space?: "canvas";
+}
+
+export interface CanvasScreenRect extends CanvasRectShape {
   readonly __space: "screen";
 }
 

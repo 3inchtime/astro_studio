@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { canvasRectToScreenRect } from "./bounds";
 import { createCanvasDocumentContent, createImageObject, createStrokeObject } from "./document";
 import {
   getSelectableCanvasObjects,
@@ -156,5 +157,23 @@ describe("canvas selection helpers", () => {
         "hidden-image",
       ]),
     ).toEqual(["image-top"]);
+    expect(
+      reconcileSelectedObjectIds(content, [
+        "image-top",
+        "image-top",
+        "missing",
+        "image-bottom",
+      ]),
+    ).toEqual(["image-top", "image-bottom"]);
+  });
+
+  it("rejects screen-space rectangles for canvas-space selection at compile time", () => {
+    const screenRect = canvasRectToScreenRect(
+      { x: 0, y: 0, width: 10, height: 10 },
+      { x: 0, y: 0, scale: 1 },
+    );
+
+    // @ts-expect-error screen-space rectangles must not be accepted for canvas-space selection.
+    expect(selectCanvasObjectsInRect(content, screenRect)).toEqual([]);
   });
 });

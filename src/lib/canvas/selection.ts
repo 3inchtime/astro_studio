@@ -61,5 +61,14 @@ export function reconcileSelectedObjectIds(
   selectedObjectIds: string[],
 ): string[] {
   const selectableIds = new Set(getSelectableCanvasObjects(content).map(({ object }) => object.id));
-  return selectedObjectIds.filter((objectId) => selectableIds.has(objectId));
+  const reconciledIds: string[] = [];
+  const seenIds = new Set<string>();
+
+  selectedObjectIds.forEach((objectId) => {
+    if (!selectableIds.has(objectId) || seenIds.has(objectId)) return;
+    seenIds.add(objectId);
+    reconciledIds.push(objectId);
+  });
+
+  return reconciledIds;
 }
