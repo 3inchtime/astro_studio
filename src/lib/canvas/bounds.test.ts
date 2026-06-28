@@ -26,6 +26,25 @@ describe("canvas bounds helpers", () => {
     });
   });
 
+  it("computes rotated image visual bounds around the image origin", () => {
+    const image = createImageObject({
+      id: "image-rotated",
+      image_path: "/tmp/rotated.png",
+      x: 10,
+      y: 20,
+      width: 100,
+      height: 50,
+      rotation: 90,
+    });
+
+    expect(getCanvasObjectBounds(image)).toEqual({
+      x: -40,
+      y: 20,
+      width: 50,
+      height: 100,
+    });
+  });
+
   it("computes stroke bounds with stroke size padding", () => {
     const stroke = createStrokeObject({
       id: "stroke-1",

@@ -7,13 +7,47 @@ export interface CanvasRect {
   height: number;
 }
 
+export type CanvasScreenRect = CanvasRect;
+
 export function getCanvasObjectBounds(object: CanvasObject): CanvasRect | null {
   if (object.type === "image") {
+    if (object.rotation === 0) {
+      return {
+        x: object.x,
+        y: object.y,
+        width: object.width,
+        height: object.height,
+      };
+    }
+
+    const radians = (object.rotation * Math.PI) / 180;
+    const cos = normalizeFloatingPoint(Math.cos(radians));
+    const sin = normalizeFloatingPoint(Math.sin(radians));
+    const corners = [
+      { x: object.x, y: object.y },
+      rotateImageCorner(object.x + object.width, object.y, object.x, object.y, cos, sin),
+      rotateImageCorner(
+        object.x + object.width,
+        object.y + object.height,
+        object.x,
+        object.y,
+        cos,
+        sin,
+      ),
+      rotateImageCorner(object.x, object.y + object.height, object.x, object.y, cos, sin),
+    ];
+    const xs = corners.map((corner) => corner.x);
+    const ys = corners.map((corner) => corner.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+
     return {
-      x: object.x,
-      y: object.y,
-      width: object.width,
-      height: object.height,
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
     };
   }
 
@@ -85,11 +119,35 @@ export function rectsIntersect(first: CanvasRect, second: CanvasRect): boolean {
   );
 }
 
-export function canvasRectToScreenRect(rect: CanvasRect, viewport: CanvasViewport): CanvasRect {
+export function canvasRectToScreenRect(
+  rect: CanvasRect,
+  viewport: CanvasViewport,
+): CanvasScreenRect {
   return {
     x: rect.x * viewport.scale + viewport.x,
     y: rect.y * viewport.scale + viewport.y,
     width: rect.width * viewport.scale,
     height: rect.height * viewport.scale,
   };
+}
+
+function rotateImageCorner(
+  x: number,
+  y: number,
+  originX: number,
+  originY: number,
+  cos: number,
+  sin: number,
+): Pick<CanvasRect, "x" | "y"> {
+  const dx = x - originX;
+  const dy = y - originY;
+
+  return {
+    x: originX + dx * cos - dy * sin,
+    y: originY + dx * sin + dy * cos,
+  };
+}
+
+function normalizeFloatingPoint(value: number): number {
+  return Math.abs(value) < Number.EPSILON ? 0 : value;
 }
