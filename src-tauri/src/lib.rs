@@ -5,6 +5,7 @@ mod db;
 mod error;
 mod file_manager;
 mod gallery;
+mod generation_lifecycle;
 mod image_engines;
 mod llm;
 mod model_registry;
