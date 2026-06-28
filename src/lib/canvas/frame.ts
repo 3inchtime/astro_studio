@@ -1,11 +1,5 @@
 import type { CanvasFrame, CanvasViewport } from "../../types";
-
-export interface CanvasScreenRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+import type { CanvasScreenRect } from "./bounds";
 
 export function frameToScreenRect(
   frame: CanvasFrame,
@@ -16,6 +10,7 @@ export function frameToScreenRect(
     y: frame.y * viewport.scale + viewport.y,
     width: frame.width * viewport.scale,
     height: frame.height * viewport.scale,
+    __space: "screen",
   };
 }
 

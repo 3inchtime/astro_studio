@@ -21,6 +21,7 @@ describe("canvas frame helpers", () => {
       y: 65,
       width: 200,
       height: 160,
+      __space: "screen",
     });
   });
 
