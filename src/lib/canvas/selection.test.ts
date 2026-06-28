@@ -63,6 +63,51 @@ const content = createCanvasDocumentContent({
         }),
       ],
     },
+    {
+      id: "hidden",
+      name: "Hidden",
+      visible: false,
+      locked: false,
+      objects: [
+        createImageObject({
+          id: "hidden-image",
+          image_path: "/tmp/hidden.png",
+          x: 520,
+          y: 520,
+          width: 100,
+          height: 100,
+        }),
+      ],
+    },
+  ],
+});
+
+const sameLayerContent = createCanvasDocumentContent({
+  layers: [
+    {
+      id: "overlap",
+      name: "Overlap",
+      visible: true,
+      locked: false,
+      objects: [
+        createImageObject({
+          id: "same-layer-earlier",
+          image_path: "/tmp/earlier.png",
+          x: 10,
+          y: 10,
+          width: 100,
+          height: 100,
+        }),
+        createImageObject({
+          id: "same-layer-later",
+          image_path: "/tmp/later.png",
+          x: 40,
+          y: 40,
+          width: 100,
+          height: 100,
+        }),
+      ],
+    },
   ],
 });
 
@@ -78,13 +123,21 @@ describe("canvas selection helpers", () => {
   it("hit-tests in reverse visual order", () => {
     expect(hitTestCanvasObjectId(content, { x: 40, y: 40 })).toBe("image-top");
     expect(hitTestCanvasObjectId(content, { x: 285, y: 280 })).toBe("stroke-1");
+    expect(hitTestCanvasObjectId(content, { x: 540, y: 540 })).toBeNull();
     expect(hitTestCanvasObjectId(content, { x: 480, y: 480 })).toBeNull();
+  });
+
+  it("prioritizes later objects within the same layer when hit-testing", () => {
+    expect(hitTestCanvasObjectId(sameLayerContent, { x: 50, y: 50 })).toBe("same-layer-later");
   });
 
   it("selects objects whose bounds intersect a marquee rectangle", () => {
     expect(
       selectCanvasObjectsInRect(content, { x: 15, y: 15, width: 150, height: 120 }),
     ).toEqual(["image-top", "image-bottom"]);
+    expect(
+      selectCanvasObjectsInRect(content, { x: 515, y: 515, width: 120, height: 120 }),
+    ).toEqual([]);
   });
 
   it("toggles and reconciles selected ids", () => {
@@ -95,8 +148,13 @@ describe("canvas selection helpers", () => {
     expect(toggleSelectedObjectId(["image-top", "image-bottom"], "image-top")).toEqual([
       "image-bottom",
     ]);
-    expect(reconcileSelectedObjectIds(content, ["image-top", "missing", "locked-image"])).toEqual([
-      "image-top",
-    ]);
+    expect(
+      reconcileSelectedObjectIds(content, [
+        "image-top",
+        "missing",
+        "locked-image",
+        "hidden-image",
+      ]),
+    ).toEqual(["image-top"]);
   });
 });
