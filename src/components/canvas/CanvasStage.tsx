@@ -19,6 +19,7 @@ import {
   screenPointToCanvasPoint,
   zoomViewportAtScreenPoint,
 } from "../../lib/canvas/frame";
+import { getCanvasLayersBackToFront } from "../../lib/canvas/document";
 import type {
   CanvasDocumentContent,
   CanvasLayer,
@@ -124,6 +125,10 @@ export default function CanvasStage({
   }, [imagePaths, loadedImages]);
 
   const frameRect = frameToScreenRect(content.frame, content.viewport);
+  const renderedLayers = useMemo(
+    () => getCanvasLayersBackToFront(content.layers),
+    [content.layers],
+  );
   const selectedImageObject = useMemo(() => {
     for (const layer of content.layers) {
       const object = layer.objects.find(
@@ -358,7 +363,7 @@ export default function CanvasStage({
         </Layer>
 
         <Layer>
-          {content.layers.map((layer) => (
+          {renderedLayers.map((layer) => (
             <Group key={layer.id} visible={layer.visible}>
               {layer.objects.map((object) =>
                 renderCanvasObject(

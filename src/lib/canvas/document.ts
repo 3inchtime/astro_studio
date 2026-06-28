@@ -61,6 +61,10 @@ export function createCanvasDocumentContent(
   };
 }
 
+export function getCanvasLayersBackToFront(layers: CanvasLayer[]): CanvasLayer[] {
+  return [...layers].reverse();
+}
+
 export function createStrokeObject(params: {
   color?: string;
   size?: number;

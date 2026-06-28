@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createCanvasDocumentContent,
   createImageObject,
+  getCanvasLayersBackToFront,
   resetImageObjectAspect,
   createStrokeObject,
   getActiveLayer,
@@ -111,6 +112,20 @@ describe("canvas document helpers", () => {
 
     expect(getActiveLayer(content, "missing")?.id).toBe(content.layers[0].id);
   });
+
+  it("returns layers back-to-front without mutating the document order", () => {
+    const layers = [
+      createCanvasLayerForOrder("top"),
+      createCanvasLayerForOrder("middle"),
+      createCanvasLayerForOrder("bottom"),
+    ];
+
+    const orderedLayers = getCanvasLayersBackToFront(layers);
+
+    expect(orderedLayers.map((layer) => layer.id)).toEqual(["bottom", "middle", "top"]);
+    expect(layers.map((layer) => layer.id)).toEqual(["top", "middle", "bottom"]);
+    expect(orderedLayers[0]).toBe(layers[2]);
+  });
 });
 
 function createCanvasLayerWithImage(image: {
@@ -135,5 +150,15 @@ function createCanvasLayerWithImage(image: {
         original_height: image.original_height,
       }),
     ],
+  };
+}
+
+function createCanvasLayerForOrder(id: string) {
+  return {
+    id,
+    name: id,
+    visible: true,
+    locked: false,
+    objects: [],
   };
 }
