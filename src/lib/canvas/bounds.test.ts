@@ -4,6 +4,7 @@ import {
   canvasRectToScreenRect,
   getCanvasObjectBounds,
   getCombinedCanvasBounds,
+  normalizeCanvasRect,
   rectsIntersect,
 } from "./bounds";
 
@@ -101,6 +102,7 @@ describe("canvas bounds helpers", () => {
       { x: 10, y: 20, width: 30, height: 40 },
       { x: 100, y: 200, scale: 2 },
     );
+    const normalizedRect = normalizeCanvasRect({ x: 150, y: 135, width: -135, height: -120 });
 
     expect(
       rectsIntersect(
@@ -114,6 +116,13 @@ describe("canvas bounds helpers", () => {
         { x: 120, y: 120, width: 20, height: 20 },
       ),
     ).toBe(false);
+    expect(
+      rectsIntersect(
+        { x: 150, y: 15, width: -135, height: 120 },
+        { x: 20, y: 20, width: 120, height: 80 },
+      ),
+    ).toBe(true);
+    expect(normalizedRect).toEqual({ x: 15, y: 15, width: 135, height: 120 });
     expect(screenRect).toMatchObject({ x: 120, y: 240, width: 60, height: 80 });
     expect(screenRect.__space).toBe("screen");
   });

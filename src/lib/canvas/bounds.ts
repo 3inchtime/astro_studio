@@ -116,12 +116,27 @@ export function combineCanvasRects(rects: CanvasRect[]): CanvasRect | null {
   };
 }
 
+export function normalizeCanvasRect(rect: CanvasRect): CanvasRect {
+  const x = rect.width < 0 ? rect.x + rect.width : rect.x;
+  const y = rect.height < 0 ? rect.y + rect.height : rect.y;
+
+  return {
+    x,
+    y,
+    width: Math.abs(rect.width),
+    height: Math.abs(rect.height),
+  };
+}
+
 export function rectsIntersect(first: CanvasRect, second: CanvasRect): boolean {
+  const normalizedFirst = normalizeCanvasRect(first);
+  const normalizedSecond = normalizeCanvasRect(second);
+
   return (
-    first.x <= second.x + second.width &&
-    first.x + first.width >= second.x &&
-    first.y <= second.y + second.height &&
-    first.y + first.height >= second.y
+    normalizedFirst.x <= normalizedSecond.x + normalizedSecond.width &&
+    normalizedFirst.x + normalizedFirst.width >= normalizedSecond.x &&
+    normalizedFirst.y <= normalizedSecond.y + normalizedSecond.height &&
+    normalizedFirst.y + normalizedFirst.height >= normalizedSecond.y
   );
 }
 

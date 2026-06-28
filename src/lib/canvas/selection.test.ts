@@ -137,6 +137,9 @@ describe("canvas selection helpers", () => {
       selectCanvasObjectsInRect(content, { x: 15, y: 15, width: 150, height: 120 }),
     ).toEqual(["image-top", "image-bottom"]);
     expect(
+      selectCanvasObjectsInRect(content, { x: 150, y: 15, width: -135, height: 120 }),
+    ).toEqual(["image-top", "image-bottom"]);
+    expect(
       selectCanvasObjectsInRect(content, { x: 515, y: 515, width: 120, height: 120 }),
     ).toEqual([]);
   });
