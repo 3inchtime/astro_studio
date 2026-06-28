@@ -30,6 +30,44 @@ describe("canvas ordering helpers", () => {
     expect(getObjectIds(updated, "top")).toEqual(["b", "d", "a", "c", "e"]);
     expect(getObjectIds(updated, "bottom")).toEqual(["g", "f", "h"]);
   });
+
+  it("ignores stale selected ids from locked or hidden layers when reordering objects", () => {
+    const content = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "editable",
+          name: "Editable",
+          visible: true,
+          locked: false,
+          objects: ["a", "b", "c"].map(createObject),
+        },
+        {
+          id: "locked",
+          name: "Locked",
+          visible: true,
+          locked: true,
+          objects: ["locked-a", "locked-b", "locked-c"].map(createObject),
+        },
+        {
+          id: "hidden",
+          name: "Hidden",
+          visible: false,
+          locked: false,
+          objects: ["hidden-a", "hidden-b", "hidden-c"].map(createObject),
+        },
+      ],
+    });
+
+    const updated = reorderCanvasObjects(
+      content,
+      ["b", "locked-a", "locked-b", "hidden-a", "hidden-b"],
+      "front",
+    );
+
+    expect(getObjectIds(updated, "editable")).toEqual(["a", "c", "b"]);
+    expect(getObjectIds(updated, "locked")).toEqual(["locked-a", "locked-b", "locked-c"]);
+    expect(getObjectIds(updated, "hidden")).toEqual(["hidden-a", "hidden-b", "hidden-c"]);
+  });
 });
 
 function createOrderingContent() {

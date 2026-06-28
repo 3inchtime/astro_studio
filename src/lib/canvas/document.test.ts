@@ -155,6 +155,44 @@ describe("canvas document helpers", () => {
     ]);
   });
 
+  it("ignores stale selected ids from locked or hidden layers when removing objects", () => {
+    const content = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "editable",
+          name: "Editable",
+          visible: true,
+          locked: false,
+          objects: [createStrokeObject({ id: "editable-stroke", points: [0, 0, 10, 10] })],
+        },
+        {
+          id: "locked",
+          name: "Locked",
+          visible: true,
+          locked: true,
+          objects: [createStrokeObject({ id: "locked-stroke", points: [20, 20, 30, 30] })],
+        },
+        {
+          id: "hidden",
+          name: "Hidden",
+          visible: false,
+          locked: false,
+          objects: [createStrokeObject({ id: "hidden-stroke", points: [40, 40, 50, 50] })],
+        },
+      ],
+    });
+
+    const updated = removeCanvasObjects(content, [
+      "editable-stroke",
+      "locked-stroke",
+      "hidden-stroke",
+    ]);
+
+    expect(updated.layers[0].objects.map((object) => object.id)).toEqual([]);
+    expect(updated.layers[1].objects.map((object) => object.id)).toEqual(["locked-stroke"]);
+    expect(updated.layers[2].objects.map((object) => object.id)).toEqual(["hidden-stroke"]);
+  });
+
   it("falls back to the first layer when the requested one is missing", () => {
     const content = createCanvasDocumentContent();
 

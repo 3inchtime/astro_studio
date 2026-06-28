@@ -60,4 +60,65 @@ describe("canvas transform helpers", () => {
     expect(updated.layers[1].objects[1]).toMatchObject({ points: [5, 6, 7, 8] });
     expect(content.layers[1].objects[0]).toMatchObject({ points: [0, 10, 20, 30, 40, 50] });
   });
+
+  it("ignores stale selected ids from locked or hidden layers when translating objects", () => {
+    const content = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "editable",
+          name: "Editable",
+          visible: true,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "editable-image",
+              image_path: "/tmp/editable.png",
+              x: 10,
+              y: 20,
+              width: 100,
+              height: 100,
+            }),
+          ],
+        },
+        {
+          id: "locked",
+          name: "Locked",
+          visible: true,
+          locked: true,
+          objects: [
+            createImageObject({
+              id: "locked-image",
+              image_path: "/tmp/locked.png",
+              x: 30,
+              y: 40,
+              width: 100,
+              height: 100,
+            }),
+          ],
+        },
+        {
+          id: "hidden",
+          name: "Hidden",
+          visible: false,
+          locked: false,
+          objects: [
+            createStrokeObject({
+              id: "hidden-stroke",
+              points: [5, 6, 7, 8],
+            }),
+          ],
+        },
+      ],
+    });
+
+    const updated = translateCanvasObjects(
+      content,
+      ["editable-image", "locked-image", "hidden-stroke"],
+      { dx: 10, dy: 12 },
+    );
+
+    expect(updated.layers[0].objects[0]).toMatchObject({ x: 20, y: 32 });
+    expect(updated.layers[1].objects[0]).toMatchObject({ x: 30, y: 40 });
+    expect(updated.layers[2].objects[0]).toMatchObject({ points: [5, 6, 7, 8] });
+  });
 });

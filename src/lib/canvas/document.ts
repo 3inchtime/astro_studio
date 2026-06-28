@@ -65,6 +65,10 @@ export function getCanvasLayersBackToFront(layers: CanvasLayer[]): CanvasLayer[]
   return [...layers].reverse();
 }
 
+export function isCanvasLayerSelectable(layer: Pick<CanvasLayer, "visible" | "locked">): boolean {
+  return layer.visible && !layer.locked;
+}
+
 export function createStrokeObject(params: {
   color?: string;
   size?: number;
@@ -201,7 +205,9 @@ export function removeCanvasObjects(
     ...clonedContent,
     layers: clonedContent.layers.map((layer) => ({
       ...layer,
-      objects: layer.objects.filter((object) => !selectedIds.has(object.id)),
+      objects: isCanvasLayerSelectable(layer)
+        ? layer.objects.filter((object) => !selectedIds.has(object.id))
+        : layer.objects,
     })),
   };
 }

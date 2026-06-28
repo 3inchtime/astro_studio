@@ -1,5 +1,5 @@
 import type { CanvasDocumentContent, CanvasObject } from "../../types";
-import { cloneCanvasDocumentContent } from "./document";
+import { cloneCanvasDocumentContent, isCanvasLayerSelectable } from "./document";
 
 export type CanvasOrderDirection = "forward" | "backward" | "front" | "back";
 
@@ -15,7 +15,9 @@ export function reorderCanvasObjects(
     ...clonedContent,
     layers: clonedContent.layers.map((layer) => ({
       ...layer,
-      objects: reorderLayerObjects(layer.objects, selectedIds, direction),
+      objects: isCanvasLayerSelectable(layer)
+        ? reorderLayerObjects(layer.objects, selectedIds, direction)
+        : layer.objects,
     })),
   };
 }
