@@ -97,6 +97,11 @@ describe("canvas bounds helpers", () => {
   });
 
   it("checks rectangle intersection and projects to screen space", () => {
+    const screenRect = canvasRectToScreenRect(
+      { x: 10, y: 20, width: 30, height: 40 },
+      { x: 100, y: 200, scale: 2 },
+    );
+
     expect(
       rectsIntersect(
         { x: 0, y: 0, width: 100, height: 100 },
@@ -109,11 +114,7 @@ describe("canvas bounds helpers", () => {
         { x: 120, y: 120, width: 20, height: 20 },
       ),
     ).toBe(false);
-    expect(
-      canvasRectToScreenRect(
-        { x: 10, y: 20, width: 30, height: 40 },
-        { x: 100, y: 200, scale: 2 },
-      ),
-    ).toEqual({ x: 120, y: 240, width: 60, height: 80 });
+    expect(screenRect).toMatchObject({ x: 120, y: 240, width: 60, height: 80 });
+    expect(screenRect.__space).toBe("screen");
   });
 });

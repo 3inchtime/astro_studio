@@ -7,7 +7,9 @@ export interface CanvasRect {
   height: number;
 }
 
-export type CanvasScreenRect = CanvasRect;
+export interface CanvasScreenRect extends CanvasRect {
+  readonly __space: "screen";
+}
 
 export function getCanvasObjectBounds(object: CanvasObject): CanvasRect | null {
   if (object.type === "image") {
@@ -128,6 +130,7 @@ export function canvasRectToScreenRect(
     y: rect.y * viewport.scale + viewport.y,
     width: rect.width * viewport.scale,
     height: rect.height * viewport.scale,
+    __space: "screen",
   };
 }
 
