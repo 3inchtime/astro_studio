@@ -3,6 +3,7 @@ import {
   createCanvasDocumentContent,
   createImageObject,
   getCanvasLayersBackToFront,
+  removeCanvasObjects,
   resetImageObjectAspect,
   createStrokeObject,
   getActiveLayer,
@@ -105,6 +106,53 @@ describe("canvas document helpers", () => {
       width: 180,
       height: 220,
     });
+  });
+
+  it("removes selected objects across all layers without changing other layers or objects", () => {
+    const content = createCanvasDocumentContent({
+      layers: [
+        {
+          id: "top",
+          name: "Top",
+          visible: true,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "image-top",
+              image_path: "/tmp/top.png",
+              width: 120,
+              height: 80,
+            }),
+            createStrokeObject({ id: "stroke-top", points: [0, 0, 20, 20] }),
+          ],
+        },
+        {
+          id: "bottom",
+          name: "Bottom",
+          visible: true,
+          locked: false,
+          objects: [
+            createImageObject({
+              id: "image-bottom",
+              image_path: "/tmp/bottom.png",
+              width: 200,
+              height: 100,
+            }),
+            createStrokeObject({ id: "stroke-bottom", points: [10, 10, 40, 40] }),
+          ],
+        },
+      ],
+    });
+
+    const updated = removeCanvasObjects(content, ["stroke-top", "image-bottom", "missing"]);
+
+    expect(updated.layers.map((layer) => layer.id)).toEqual(["top", "bottom"]);
+    expect(updated.layers[0].objects.map((object) => object.id)).toEqual(["image-top"]);
+    expect(updated.layers[1].objects.map((object) => object.id)).toEqual(["stroke-bottom"]);
+    expect(content.layers[0].objects.map((object) => object.id)).toEqual([
+      "image-top",
+      "stroke-top",
+    ]);
   });
 
   it("falls back to the first layer when the requested one is missing", () => {

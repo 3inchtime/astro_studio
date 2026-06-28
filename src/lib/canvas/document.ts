@@ -190,6 +190,22 @@ export function updateImageObject(
   };
 }
 
+export function removeCanvasObjects(
+  content: CanvasDocumentContent,
+  objectIds: string[],
+): CanvasDocumentContent {
+  const selectedIds = new Set(objectIds);
+  const clonedContent = cloneCanvasDocumentContent(content);
+
+  return {
+    ...clonedContent,
+    layers: clonedContent.layers.map((layer) => ({
+      ...layer,
+      objects: layer.objects.filter((object) => !selectedIds.has(object.id)),
+    })),
+  };
+}
+
 export function resetImageObjectAspect(
   content: CanvasDocumentContent,
   objectId: string,
