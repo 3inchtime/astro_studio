@@ -1195,6 +1195,15 @@ it("reconciles selection when its layer becomes locked", async () => {
 });
 ```
 
+Also add deferred-promise regressions for document lifecycle safety:
+
+- Start loading A, select B, resolve B first, then A; assert the late A result
+  never replaces B content.
+- Copy on loaded A, switch to unresolved B, issue paste, advance the autosave
+  debounce, and assert no A-derived content is written to B before B loads.
+- Resolve an older A save after B becomes dirty and assert the A completion does
+  not clear B's dirty/saving state.
+
 Before appending the tests above, add this local factory near the existing mock setup:
 
 ```ts
@@ -1407,7 +1416,13 @@ Add state:
 const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
 const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null);
 const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
+const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
 ```
+
+Use a monotonically increasing load-request token and selected-ID ref. Set
+`loadedDocumentId` to null and clear selection immediately on a switch; apply a
+load result/finally block only when its token and selected ID are still current.
+The stage/editor is ready only when `loadedDocumentId === selectedDocumentId`.
 
 Reconcile stale selection whenever document content changes (document switch,
 undo/redo, layer visibility/lock, delete, or external load):
@@ -1466,6 +1481,14 @@ function handleFitSelection() {
   handleViewportChange(fitViewportToCanvasRect(bounds, stageSize));
 }
 ```
+
+Gate editor mutations, keyboard commands, and autosave while the selected
+document is not the loaded document. Change persistence to
+`persistDocument(documentId, snapshot)` so the write target is captured, not
+read from a later render. Use a save-operation token plus current document and
+snapshot refs so an older save cannot clear dirty/saving state for a newer
+document or snapshot. When a user switches away with a pending dirty snapshot,
+flush it to the old loaded document ID without delaying the switch.
 
 Add keyboard effect:
 
@@ -1542,6 +1565,11 @@ npx vitest run src/pages/CanvasPage.test.tsx
 ```
 
 Expected: PASS after import/type issues are fixed.
+
+Mock `exportCanvasFrame` and `readImageSize` at the module boundary in the page
+tests. For debounce cases, enable fake timers only after initial loading,
+advance 500 ms inside async `act`, flush promises, and restore real timers in
+teardown. Task 5 tests must not add jsdom `getContext` or React `act` warnings.
 
 - [ ] **Step 8: Run page typecheck and commit Task 5**
 
