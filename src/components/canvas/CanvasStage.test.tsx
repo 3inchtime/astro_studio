@@ -802,6 +802,22 @@ describe("CanvasStage", () => {
     expect(callbacks.onSelectionChange).not.toHaveBeenCalled();
   });
 
+  it("cancels a draft stroke when content changes before release", () => {
+    const content = createContent();
+    const props = baseProps({ content, activeTool: "brush" });
+    const view = render(<CanvasStage {...props} />);
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+    expect(lineNodeWithPoints([30, 30, 50, 45])).toBeInTheDocument();
+
+    view.rerender(<CanvasStage {...props} content={{ ...content }} />);
+
+    expect(lineNodeWithPoints([30, 30, 50, 45])).toBeUndefined();
+    act(() => pointerUp());
+    expect(callbacks.onAddStroke).not.toHaveBeenCalled();
+  });
+
   it("cancels a draft stroke on blur without adding it on release", () => {
     renderStage({ activeTool: "brush" });
 
