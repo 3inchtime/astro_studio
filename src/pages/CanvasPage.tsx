@@ -62,6 +62,10 @@ export default function CanvasPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [hasSaveError, setHasSaveError] = useState(false);
+  const [hasLoadError, setHasLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [activeTool, setActiveTool] = useState<CanvasTool>("brush");
   const [strokeColor, setStrokeColor] = useState("#1f2937");
   const [strokeSize, setStrokeSize] = useState(6);
@@ -81,11 +85,17 @@ export default function CanvasPage() {
   const loadedDocumentIdRef = useRef<string | null>(loadedDocumentId);
   const historyPresentRef = useRef(history.present);
   const isDirtyRef = useRef(isDirty);
+  const isTransitioningRef = useRef(isTransitioning);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const activeSaveRef = useRef<{
     documentId: string;
     snapshot: CanvasDocumentContent;
     token: number;
     promise: Promise<void>;
+  } | null>(null);
+  const activeTransitionRef = useRef<{
+    targetDocumentId: string | null;
+    promise: Promise<boolean>;
   } | null>(null);
   const { data: documents = [], refetch } = useCanvasDocumentsQuery(activeProjectId);
 
@@ -93,6 +103,7 @@ export default function CanvasPage() {
   loadedDocumentIdRef.current = loadedDocumentId;
   historyPresentRef.current = history.present;
   isDirtyRef.current = isDirty;
+  isTransitioningRef.current = isTransitioning;
 
   useEffect(() => {
     getImageModel()
@@ -101,16 +112,16 @@ export default function CanvasPage() {
   }, []);
 
   useEffect(() => {
-    if (!documents.length) {
-      setSelectedDocumentId(null);
-      return;
-    }
+    const currentDocumentId = selectedDocumentIdRef.current;
+    const nextDocumentId =
+      currentDocumentId &&
+      documents.some((document) => document.id === currentDocumentId)
+        ? currentDocumentId
+        : documents[0]?.id ?? null;
 
-    setSelectedDocumentId((current) =>
-      current && documents.some((document) => document.id === current)
-        ? current
-        : documents[0].id,
-    );
+    if (nextDocumentId !== currentDocumentId) {
+      void transitionToDocument(nextDocumentId).catch(() => {});
+    }
   }, [documents]);
 
   useEffect(() => {
@@ -122,6 +133,8 @@ export default function CanvasPage() {
     setActiveLayerId(null);
     setDirtyState(false);
     setIsSaving(false);
+    setHasSaveError(false);
+    setHasLoadError(false);
 
     if (!selectedDocumentId) {
       return;
@@ -147,9 +160,18 @@ export default function CanvasPage() {
         setSelectedObjectIds([]);
         setIsDirty(false);
         setIsSaving(false);
+        setHasSaveError(false);
+        setHasLoadError(false);
       })
-      .catch(() => {});
-  }, [selectedDocumentId]);
+      .catch(() => {
+        if (
+          loadRequestTokenRef.current === requestToken &&
+          selectedDocumentIdRef.current === requestedDocumentId
+        ) {
+          setHasLoadError(true);
+        }
+      });
+  }, [loadAttempt, selectedDocumentId]);
 
   useEffect(() => {
     if (
@@ -172,18 +194,18 @@ export default function CanvasPage() {
         historyPresentRef.current === snapshot &&
         isDirtyRef.current
       ) {
-        void persistDocument(documentId, snapshot);
+        void persistDocument(documentId, snapshot).catch(() => {});
       }
     }, 500);
 
     return clearSaveTimer;
   }, [history.present, isDirty, loadedDocumentId, selectedDocumentId]);
 
-  const selectedDocument =
-    documents.find((document) => document.id === selectedDocumentId) ?? null;
   const content = history.present;
   const isEditorReady = Boolean(
-    selectedDocumentId && loadedDocumentId === selectedDocumentId,
+    selectedDocumentId &&
+      loadedDocumentId === selectedDocumentId &&
+      !isTransitioning,
   );
   const activeLayer = getActiveLayer(content, activeLayerId);
   const frame = content.frame;
@@ -199,6 +221,9 @@ export default function CanvasPage() {
   }, [content]);
 
   const saveStatusLabel = useMemo(() => {
+    if (hasSaveError) {
+      return t("canvas.saveStatus.error");
+    }
     if (isSaving) {
       return t("canvas.saveStatus.saving");
     }
@@ -206,7 +231,7 @@ export default function CanvasPage() {
       return t("canvas.saveStatus.dirty");
     }
     return t("canvas.saveStatus.saved");
-  }, [isDirty, isSaving, t]);
+  }, [hasSaveError, isDirty, isSaving, t]);
 
   function clearSaveTimer() {
     if (saveTimerRef.current !== null) {
@@ -220,38 +245,93 @@ export default function CanvasPage() {
     setIsDirty(nextIsDirty);
   }
 
+  function setTransitionState(nextIsTransitioning: boolean) {
+    isTransitioningRef.current = nextIsTransitioning;
+    setIsTransitioning(nextIsTransitioning);
+  }
+
   function isDocumentReady(documentId: string | null): documentId is string {
     return Boolean(
       documentId &&
         selectedDocumentIdRef.current === documentId &&
-        loadedDocumentIdRef.current === documentId,
+        loadedDocumentIdRef.current === documentId &&
+        !isTransitioningRef.current,
     );
   }
 
-  function handleSelectDocument(documentId: string) {
-    if (selectedDocumentIdRef.current === documentId) {
-      return;
+  function transitionToDocument(targetDocumentId: string | null): Promise<boolean> {
+    const activeTransition = activeTransitionRef.current;
+    if (activeTransition) {
+      if (activeTransition.targetDocumentId === targetDocumentId) {
+        return activeTransition.promise;
+      }
+
+      return activeTransition.promise.then(
+        (didTransition) =>
+          didTransition ? transitionToDocument(targetDocumentId) : false,
+        () => false,
+      );
     }
 
-    const previousDocumentId = loadedDocumentIdRef.current;
+    if (selectedDocumentIdRef.current === targetDocumentId) {
+      return Promise.resolve(true);
+    }
+
+    const promise = performDocumentTransition(targetDocumentId);
+    activeTransitionRef.current = { targetDocumentId, promise };
+    void promise.then(
+      () => {
+        if (activeTransitionRef.current?.promise === promise) {
+          activeTransitionRef.current = null;
+        }
+      },
+      () => {
+        if (activeTransitionRef.current?.promise === promise) {
+          activeTransitionRef.current = null;
+        }
+      },
+    );
+    return promise;
+  }
+
+  async function performDocumentTransition(
+    targetDocumentId: string | null,
+  ): Promise<boolean> {
+    const previousSelectedDocumentId = selectedDocumentIdRef.current;
+    const previousLoadedDocumentId = loadedDocumentIdRef.current;
     const previousSnapshot = historyPresentRef.current;
     clearSaveTimer();
+    setTransitionState(true);
+    setSelectedObjectIds([]);
+
     if (
-      previousDocumentId &&
-      previousDocumentId === selectedDocumentIdRef.current &&
+      previousLoadedDocumentId &&
+      previousLoadedDocumentId === previousSelectedDocumentId &&
       isDirtyRef.current
     ) {
-      void persistDocument(previousDocumentId, previousSnapshot);
+      try {
+        await persistDocument(previousLoadedDocumentId, previousSnapshot);
+      } catch {
+        setTransitionState(false);
+        return false;
+      }
     }
 
-    selectedDocumentIdRef.current = documentId;
+    selectedDocumentIdRef.current = targetDocumentId;
     loadedDocumentIdRef.current = null;
     setLoadedDocumentId(null);
     setActiveLayerId(null);
-    setSelectedObjectIds([]);
     setDirtyState(false);
     setIsSaving(false);
-    setSelectedDocumentId(documentId);
+    setHasSaveError(false);
+    setHasLoadError(false);
+    setSelectedDocumentId(targetDocumentId);
+    setTransitionState(false);
+    return true;
+  }
+
+  function handleSelectDocument(documentId: string) {
+    void transitionToDocument(documentId).catch(() => {});
   }
 
   function updateContent(
@@ -362,16 +442,25 @@ export default function CanvasPage() {
 
     if (isCurrentSnapshot()) {
       setIsSaving(true);
+      setHasSaveError(false);
     }
 
     const promise = (async () => {
       try {
+        await saveQueueRef.current.catch(() => {});
         const previewPngBase64 = await exportCanvasFrame(snapshot);
         await saveCanvasDocument(documentId, snapshot, previewPngBase64);
         await refetch();
         if (isCurrentSnapshot()) {
           setDirtyState(false);
+          setHasSaveError(false);
         }
+      } catch (error) {
+        if (isCurrentSnapshot()) {
+          setDirtyState(true);
+          setHasSaveError(true);
+        }
+        throw error;
       } finally {
         if (activeSaveRef.current?.token === saveToken) {
           activeSaveRef.current = null;
@@ -382,6 +471,7 @@ export default function CanvasPage() {
       }
     })();
 
+    saveQueueRef.current = promise.catch(() => {});
     activeSaveRef.current = {
       documentId,
       snapshot,
@@ -391,16 +481,39 @@ export default function CanvasPage() {
     return promise;
   }
 
+  function handleRetrySave() {
+    const documentId = loadedDocumentIdRef.current;
+    const snapshot = historyPresentRef.current;
+    if (
+      !documentId ||
+      selectedDocumentIdRef.current !== documentId ||
+      !isDirtyRef.current
+    ) {
+      return;
+    }
+
+    void persistDocument(documentId, snapshot).catch(() => {});
+  }
+
+  function handleRetryLoad() {
+    if (!selectedDocumentIdRef.current) {
+      return;
+    }
+
+    setHasLoadError(false);
+    setLoadAttempt((current) => current + 1);
+  }
+
   async function handleCreateDocument() {
     const created = await createCanvasDocument(activeProjectId, null);
     await refetch();
-    handleSelectDocument(created.id);
+    await transitionToDocument(created.id);
   }
 
   async function handleGenerate() {
+    const documentId = selectedDocumentId;
     if (
-      !selectedDocument ||
-      !isDocumentReady(selectedDocument.id) ||
+      !isDocumentReady(documentId) ||
       !prompt.trim() ||
       isGenerating ||
       !isDesktopRuntime
@@ -409,7 +522,7 @@ export default function CanvasPage() {
     setIsGenerating(true);
     try {
       const pngBase64 = await exportCanvasFrame(content);
-      const exportedPath = await saveCanvasExport(selectedDocument.id, pngBase64);
+      const exportedPath = await saveCanvasExport(documentId, pngBase64);
 
       await editImage({
         prompt: prompt.trim(),
@@ -495,7 +608,7 @@ export default function CanvasPage() {
       return;
     }
     setActiveTool("select");
-    await persistDocument(documentId, nextContent);
+    await persistDocument(documentId, nextContent).catch(() => {});
   }
 
   function handleAddLayer() {
@@ -669,7 +782,7 @@ export default function CanvasPage() {
         />
 
         <section className="min-h-0 bg-background">
-          {selectedDocument ? (
+          {selectedDocumentId ? (
             isEditorReady ? (
               <div className="relative h-full min-h-0 overflow-hidden border-x border-border-subtle bg-canvas">
                 <CanvasStage
@@ -688,8 +801,20 @@ export default function CanvasPage() {
                   onStageSizeChange={setStageSize}
                   onExport={() => exportCanvasFrame(content)}
                 />
-                <div className="absolute right-5 top-5 z-10 rounded-[10px] border border-border-subtle bg-surface/88 px-3 py-2 text-[12px] font-medium text-muted shadow-card backdrop-blur-xl">
-                  {saveStatusLabel}
+                <div
+                  role={hasSaveError ? "alert" : undefined}
+                  className="absolute right-5 top-5 z-10 flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface/88 px-3 py-2 text-[12px] font-medium text-muted shadow-card backdrop-blur-xl"
+                >
+                  <span>{saveStatusLabel}</span>
+                  {hasSaveError ? (
+                    <button
+                      type="button"
+                      className="focus-ring cursor-pointer rounded-[7px] bg-primary/10 px-2 py-1 font-semibold text-primary hover:bg-primary/15"
+                      onClick={handleRetrySave}
+                    >
+                      {t("canvas.retrySave")}
+                    </button>
+                  ) : null}
                 </div>
                 <div
                   data-testid="canvas-floating-toolbar"
@@ -719,6 +844,24 @@ export default function CanvasPage() {
                     onFitFrame={handleFitFrame}
                     onFitSelection={handleFitSelection}
                   />
+                </div>
+              </div>
+            ) : hasLoadError && !isTransitioning ? (
+              <div className="flex h-full min-h-0 items-center justify-center border-x border-border-subtle px-6">
+                <div
+                  role="alert"
+                  className="rounded-[14px] border border-border-subtle bg-surface/92 px-6 py-5 text-center shadow-card"
+                >
+                  <p className="text-[13px] font-medium text-foreground">
+                    {t("canvas.loadError")}
+                  </p>
+                  <button
+                    type="button"
+                    className="studio-control-primary focus-ring mt-3 cursor-pointer rounded-[9px] px-3 py-2 text-[12px] font-semibold"
+                    onClick={handleRetryLoad}
+                  >
+                    {t("canvas.retryLoad")}
+                  </button>
                 </div>
               </div>
             ) : (
@@ -765,7 +908,7 @@ export default function CanvasPage() {
               onGenerate={() => void handleGenerate()}
             />
 
-            {selectedDocument && isEditorReady ? (
+            {selectedDocumentId && isEditorReady ? (
               <CanvasLayersPanel
                 layers={content.layers}
                 activeLayerId={activeLayerId}
