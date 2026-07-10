@@ -269,6 +269,7 @@ type StageHandlerName =
   | "onTouchStart"
   | "onTouchMove"
   | "onTouchEnd"
+  | "onTouchCancel"
   | "onWheel";
 
 const callbacks = {
@@ -433,6 +434,22 @@ function ControlledStage({
   );
 }
 
+function ViewportControlledStage() {
+  const [content, setContent] = useState(() =>
+    createContent({ viewport: { x: 10, y: 20, scale: 1 } }),
+  );
+
+  return (
+    <CanvasStage
+      {...baseProps({ content })}
+      onViewportChange={(nextViewport) => {
+        callbacks.onViewportChange(nextViewport);
+        setContent((current) => ({ ...current, viewport: nextViewport }));
+      }}
+    />
+  );
+}
+
 function renderStage(overrides: Partial<CanvasStageProps> = {}) {
   return render(<ControlledStage {...baseProps(overrides)} />);
 }
@@ -487,6 +504,14 @@ function pointerUp() {
   getStageHandler("onMouseup")();
 }
 
+function pointerCancel() {
+  getStageHandler("onTouchCancel")();
+}
+
+function clearPointer() {
+  konva.pointer = null;
+}
+
 function konvaNodeByName(name: string) {
   return document.querySelector<HTMLElement>(`[data-name="${name}"]`);
 }
@@ -495,6 +520,12 @@ function objectNode(id: string) {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing rendered canvas object ${id}`);
   return node;
+}
+
+function lineNodeWithPoints(points: number[]) {
+  return [...document.querySelectorAll<HTMLElement>('[data-konva-kind="line"]')].find(
+    (node) => node.dataset.points === JSON.stringify(points),
+  );
 }
 
 function dispatchSpace(target: EventTarget, type: "keydown" | "keyup" = "keydown") {
@@ -663,6 +694,128 @@ describe("CanvasStage", () => {
     expect(callbacks.onTransformImage).not.toHaveBeenCalled();
   });
 
+  it("commits the synchronous preview delta when a batched release loses its pointer", () => {
+    renderStage({ selectedObjectIds: ["image-top", "stroke-1"] });
+
+    act(() => {
+      pointerDown(30, 30);
+      pointerMove(50, 45);
+      clearPointer();
+      pointerUp();
+    });
+
+    expect(callbacks.onMoveSelection).toHaveBeenCalledTimes(1);
+    expect(callbacks.onMoveSelection).toHaveBeenCalledWith({ dx: 20, dy: 15 });
+  });
+
+  it("cancels a group drag on window blur without committing its preview", () => {
+    renderStage({ selectedObjectIds: ["image-top", "stroke-1"] });
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "40");
+
+    act(() => window.dispatchEvent(new Event("blur")));
+
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "20");
+    act(() => pointerUp());
+    expect(callbacks.onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("cancels a group drag on touch cancel without committing its preview", () => {
+    renderStage({ selectedObjectIds: ["image-top", "stroke-1"] });
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "40");
+
+    act(() => pointerCancel());
+
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "20");
+    act(() => pointerUp());
+    expect(callbacks.onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("cancels a drag when the external selection changes before release", () => {
+    const content = createContent();
+    const props = baseProps({
+      content,
+      selectedObjectIds: ["image-top", "stroke-1"],
+    });
+    const view = render(<CanvasStage {...props} />);
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "40");
+
+    view.rerender(<CanvasStage {...props} selectedObjectIds={["image-second"]} />);
+
+    expect(objectNode("image-second")).toHaveAttribute("data-x", "140");
+    act(() => pointerUp());
+    expect(callbacks.onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("cancels a drag when content identity changes before release", () => {
+    const content = createContent();
+    const props = baseProps({
+      content,
+      selectedObjectIds: ["image-top", "stroke-1"],
+    });
+    const view = render(<CanvasStage {...props} />);
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "40");
+
+    view.rerender(<CanvasStage {...props} content={{ ...content }} />);
+
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "20");
+    act(() => pointerUp());
+    expect(callbacks.onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not self-cancel when pointer-down selects the object being dragged", () => {
+    renderStage({ selectedObjectIds: ["stroke-1"] });
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "40");
+    act(() => pointerUp());
+    expect(callbacks.onMoveSelection).toHaveBeenCalledWith({ dx: 20, dy: 15 });
+  });
+
+  it("cancels marquee state when content changes before release", () => {
+    const content = createContent();
+    const props = baseProps({ content });
+    const view = render(<CanvasStage {...props} />);
+
+    act(() => pointerDown(300, 300));
+    act(() => pointerMove(400, 400));
+    expect(konvaNodeByName("canvas-marquee")).toBeInTheDocument();
+    callbacks.onSelectionChange.mockClear();
+
+    view.rerender(<CanvasStage {...props} content={{ ...content }} />);
+
+    expect(konvaNodeByName("canvas-marquee")).toBeNull();
+    act(() => pointerUp());
+    expect(callbacks.onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  it("cancels a draft stroke on blur without adding it on release", () => {
+    renderStage({ activeTool: "brush" });
+
+    act(() => pointerDown(30, 30));
+    act(() => pointerMove(50, 45));
+    expect(lineNodeWithPoints([30, 30, 50, 45])).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event("blur")));
+
+    expect(lineNodeWithPoints([30, 30, 50, 45])).toBeUndefined();
+    act(() => pointerUp());
+    expect(callbacks.onAddStroke).not.toHaveBeenCalled();
+  });
+
   it("gates temporary Space pan for typing targets and resets it on keyup and blur", () => {
     renderStage({
       content: createContent({ viewport: { x: 10, y: 20, scale: 1 } }),
@@ -720,6 +873,34 @@ describe("CanvasStage", () => {
       pointerUp();
     });
     expect(callbacks.onViewportChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an anchored pan active across its own viewport content rerenders", () => {
+    render(<ViewportControlledStage />);
+
+    act(() => dispatchSpace(window));
+    act(() => {
+      pointerDown(100, 100);
+      pointerMove(110, 120);
+    });
+    expect(callbacks.onViewportChange).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 40,
+      scale: 1,
+    });
+
+    act(() => pointerMove(120, 130));
+    expect(callbacks.onViewportChange).toHaveBeenLastCalledWith({
+      x: 30,
+      y: 50,
+      scale: 1,
+    });
+    expect(callbacks.onViewportChange).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      pointerUp();
+      dispatchSpace(window, "keyup");
+    });
   });
 
   it("attaches one external image to Transformer and preserves image controls", async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import {
   Group,
@@ -65,6 +65,7 @@ interface LoadedImageMap {
 }
 
 const CANVAS_WORLD_SIZE = 6000;
+const ZERO_SELECTION_DELTA = { dx: 0, dy: 0 };
 
 export default function CanvasStage({
   content,
@@ -87,6 +88,7 @@ export default function CanvasStage({
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const imageNodeRefs = useRef<Record<string, Konva.Image | null>>({});
   const draftStrokeRef = useRef<CanvasStrokeObject | null>(null);
+  const draftContentRef = useRef<CanvasDocumentContent | null>(null);
   const isPointerDrawingRef = useRef(false);
   const panAnchorRef = useRef<{
     pointer: { x: number; y: number };
@@ -95,20 +97,49 @@ export default function CanvasStage({
   } | null>(null);
   const selectionDragRef = useRef<{
     canvasPoint: { x: number; y: number };
+    content: CanvasDocumentContent;
+    selectionKey: string;
   } | null>(null);
-  const marqueeAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeAnchorRef = useRef<{
+    x: number;
+    y: number;
+    content: CanvasDocumentContent;
+  } | null>(null);
   const marqueeRectRef = useRef<CanvasRect | null>(null);
+  const selectionPreviewDeltaRef = useRef(ZERO_SELECTION_DELTA);
   const spacePanActiveRef = useRef(false);
   const onSelectionChangeRef = useRef(onSelectionChange);
   const onStageSizeChangeRef = useRef(onStageSizeChange);
   const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
   const [loadedImages, setLoadedImages] = useState<LoadedImageMap>({});
   const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
-  const [selectionPreviewDelta, setSelectionPreviewDelta] = useState({ dx: 0, dy: 0 });
+  const [selectionPreviewDelta, setSelectionPreviewDelta] = useState(ZERO_SELECTION_DELTA);
   const [, rerenderTick] = useState(0);
 
   onSelectionChangeRef.current = onSelectionChange;
   onStageSizeChangeRef.current = onStageSizeChange;
+
+  const resetSelectionPreview = useCallback(() => {
+    selectionPreviewDeltaRef.current = ZERO_SELECTION_DELTA;
+    setSelectionPreviewDelta(ZERO_SELECTION_DELTA);
+  }, []);
+
+  const cancelActiveGestures = useCallback(() => {
+    const hadDraft = isPointerDrawingRef.current || draftStrokeRef.current !== null;
+    panAnchorRef.current = null;
+    selectionDragRef.current = null;
+    marqueeAnchorRef.current = null;
+    marqueeRectRef.current = null;
+    selectionPreviewDeltaRef.current = ZERO_SELECTION_DELTA;
+    isPointerDrawingRef.current = false;
+    draftStrokeRef.current = null;
+    draftContentRef.current = null;
+    setMarqueeRect(null);
+    setSelectionPreviewDelta(ZERO_SELECTION_DELTA);
+    if (hadDraft) {
+      rerenderTick((value) => value + 1);
+    }
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -171,6 +202,7 @@ export default function CanvasStage({
     () => new Set(effectiveSelectedObjectIds),
     [effectiveSelectedObjectIds],
   );
+  const effectiveSelectionKey = getSelectionKey(effectiveSelectedObjectIds);
   const selectedImageObject = useMemo(() => {
     if (effectiveSelectedObjectIds.length !== 1) {
       return null;
@@ -247,8 +279,7 @@ export default function CanvasStage({
       if (!pointer) {
         return;
       }
-      isPointerDrawingRef.current = false;
-      draftStrokeRef.current = null;
+      cancelActiveGestures();
       panAnchorRef.current = {
         pointer,
         viewport: content.viewport,
@@ -266,7 +297,7 @@ export default function CanvasStage({
       if (hitObjectId) {
         if (event.evt.shiftKey) {
           selectionDragRef.current = null;
-          setSelectionPreviewDelta({ dx: 0, dy: 0 });
+          resetSelectionPreview();
           onSelectionChange(
             toggleSelectedObjectId(effectiveSelectedObjectIds, hitObjectId),
           );
@@ -278,16 +309,20 @@ export default function CanvasStage({
           effectiveSelectedObjectIdSet.has(hitObjectId)
             ? effectiveSelectedObjectIds
             : [hitObjectId];
+        selectionDragRef.current = {
+          canvasPoint: point,
+          content,
+          selectionKey: getSelectionKey(nextSelection),
+        };
+        resetSelectionPreview();
         onSelectionChange(nextSelection);
-        selectionDragRef.current = { canvasPoint: point };
-        setSelectionPreviewDelta({ dx: 0, dy: 0 });
         return;
       }
 
       onSelectionChange([]);
       selectionDragRef.current = null;
-      setSelectionPreviewDelta({ dx: 0, dy: 0 });
-      marqueeAnchorRef.current = point;
+      resetSelectionPreview();
+      marqueeAnchorRef.current = { ...point, content };
       const nextMarqueeRect = { x: point.x, y: point.y, width: 0, height: 0 };
       marqueeRectRef.current = nextMarqueeRect;
       setMarqueeRect(nextMarqueeRect);
@@ -309,6 +344,7 @@ export default function CanvasStage({
     }
 
     isPointerDrawingRef.current = true;
+    draftContentRef.current = content;
     draftStrokeRef.current = {
       type: "stroke",
       id: crypto.randomUUID(),
@@ -340,10 +376,12 @@ export default function CanvasStage({
     if (selectionDragRef.current) {
       const point = getCanvasPoint();
       if (!point) return;
-      setSelectionPreviewDelta({
+      const nextSelectionPreviewDelta = {
         dx: point.x - selectionDragRef.current.canvasPoint.x,
         dy: point.y - selectionDragRef.current.canvasPoint.y,
-      });
+      };
+      selectionPreviewDeltaRef.current = nextSelectionPreviewDelta;
+      setSelectionPreviewDelta(nextSelectionPreviewDelta);
       return;
     }
 
@@ -387,12 +425,12 @@ export default function CanvasStage({
             dx: point.x - selectionDragRef.current.canvasPoint.x,
             dy: point.y - selectionDragRef.current.canvasPoint.y,
           }
-        : selectionPreviewDelta;
+        : selectionPreviewDeltaRef.current;
+      selectionDragRef.current = null;
+      resetSelectionPreview();
       if (totalDelta.dx !== 0 || totalDelta.dy !== 0) {
         onMoveSelection(totalDelta);
       }
-      selectionDragRef.current = null;
-      setSelectionPreviewDelta({ dx: 0, dy: 0 });
       return;
     }
 
@@ -412,6 +450,7 @@ export default function CanvasStage({
     }
 
     isPointerDrawingRef.current = false;
+    draftContentRef.current = null;
     if (draftStrokeRef.current.points.length >= 4) {
       onAddStroke(draftStrokeRef.current);
     }
@@ -446,15 +485,27 @@ export default function CanvasStage({
   }, [content.layers, loadedImages, selectedImageObject]);
 
   useEffect(() => {
-    if (activeTool !== "select") {
-      onSelectionChangeRef.current([]);
-      selectionDragRef.current = null;
-      marqueeAnchorRef.current = null;
-      marqueeRectRef.current = null;
-      setMarqueeRect(null);
-      setSelectionPreviewDelta({ dx: 0, dy: 0 });
+    const activeSelectionDrag = selectionDragRef.current;
+    const selectionDragIsStale =
+      activeSelectionDrag !== null &&
+      (activeSelectionDrag.content !== content ||
+        activeSelectionDrag.selectionKey !== effectiveSelectionKey);
+    const marqueeIsStale =
+      marqueeAnchorRef.current !== null && marqueeAnchorRef.current.content !== content;
+    const draftIsStale =
+      draftContentRef.current !== null && draftContentRef.current !== content;
+
+    if (selectionDragIsStale || marqueeIsStale || draftIsStale) {
+      cancelActiveGestures();
     }
-  }, [activeTool]);
+  }, [cancelActiveGestures, content, effectiveSelectionKey]);
+
+  useEffect(() => {
+    if (activeTool !== "select") {
+      cancelActiveGestures();
+      onSelectionChangeRef.current([]);
+    }
+  }, [activeTool, cancelActiveGestures]);
 
   useEffect(() => {
     function isTypingTarget(target: EventTarget | null) {
@@ -485,7 +536,7 @@ export default function CanvasStage({
 
     function handleWindowBlur() {
       spacePanActiveRef.current = false;
-      panAnchorRef.current = null;
+      cancelActiveGestures();
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -496,7 +547,7 @@ export default function CanvasStage({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, []);
+  }, [cancelActiveGestures]);
 
   return (
     <div
@@ -520,6 +571,7 @@ export default function CanvasStage({
         onTouchStart={handlePointerDown}
         onTouchMove={handlePointerMove}
         onTouchEnd={handlePointerUp}
+        onTouchCancel={cancelActiveGestures}
         onWheel={handleWheel}
         className="relative z-0"
       >
@@ -773,4 +825,8 @@ function projectStrokePoints(
     projected.push((points[index + 1] + delta.dy) * viewport.scale + viewport.y);
   }
   return projected;
+}
+
+function getSelectionKey(objectIds: string[]) {
+  return JSON.stringify(objectIds);
 }
