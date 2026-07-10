@@ -336,9 +336,14 @@ another conversation. All job events update shared caches; only a matching
 active terminal event reloads the visible conversation.
 
 An IPC failure with no acknowledgement uses retry-enqueue: resend the identical
-payload and identical client request ID to discover the idempotent result. A
-known retryable terminal job uses terminal-job retry: send the parent job ID
-and a new client request ID to create a child. Cancel/retry pending state is
+payload and identical client request ID to discover the idempotent result, then
+reconcile the existing optimistic pair without appending a duplicate. If that
+replay reports an already-completed job, reload the active matching conversation
+because the acknowledgement does not carry images. A known retryable terminal
+job uses terminal-job retry: send the parent job ID and a new client request ID
+to create a child, then immediately render exactly one queued child pair (or
+reload the matching active conversation) rather than waiting for a terminal
+event. Cancel/retry pending state is
 tracked per job; a persisted cancellation timestamp disables duplicate cancel,
 and mutation failure restores the action. The composer lock covers only the
 enqueue IPC and clears on every rejection while preserving unrelated prompt and

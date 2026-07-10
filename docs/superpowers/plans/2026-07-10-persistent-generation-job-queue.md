@@ -1060,6 +1060,11 @@ Also add tests for:
 - enqueue rejection always releases the composer IPC lock; each cancel/retry
   mutation has per-job pending state, disables only that job's action, restores
   it after failure, and `cancel_requested_at` prevents duplicate Cancel clicks.
+- retry-enqueue reuses the existing optimistic user/assistant pair and does not
+  increase message count; if an idempotent replay returns `completed`, the
+  active matching conversation reloads immediately to hydrate persisted images;
+  terminal-job retry success renders exactly one queued child pair tied to the
+  returned child job/generation without waiting for a terminal event.
 
 - [ ] **Step 2: Run page tests and verify RED**
 
@@ -1088,9 +1093,15 @@ reuses it. Apply the enqueue-ack helper rather than the completion helper.
 
 Keep two retry paths explicit. A retry-enqueue after an IPC failure with no
 acknowledged job resends the identical payload and identical client request ID
-to discover/complete the idempotent enqueue. A terminal-job retry is available
+to discover/complete the idempotent enqueue and reconciles the existing
+optimistic pair rather than appending another. Because the ack has no image
+payload, an already-completed replay reloads the active matching conversation
+to hydrate its persisted images. A terminal-job retry is available
 only with a known retryable parent job and calls the backend retry command with
 that parent ID plus a new client request ID; it never resubmits as a root job.
+On success, reconcile one new queued child pair immediately (or reload the
+matching active conversation once) so the child is visible before any terminal
+job event. Navigation epoch rules still prevent stale-view mutation.
 
 Capture the active conversation/view epoch before awaiting enqueue. If the
 acknowledgement is stale, invalidate durable data only; do not mutate the new
