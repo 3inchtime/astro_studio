@@ -66,6 +66,7 @@ export default function CanvasPage() {
   const [strokeColor, setStrokeColor] = useState("#1f2937");
   const [strokeSize, setStrokeSize] = useState(6);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+  const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null);
   const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
@@ -74,8 +75,24 @@ export default function CanvasPage() {
     createHistory<CanvasDocumentContent>(createCanvasDocumentContent()),
   );
   const saveTimerRef = useRef<number | null>(null);
-  const loadingDocumentIdRef = useRef<string | null>(null);
+  const loadRequestTokenRef = useRef(0);
+  const saveOperationTokenRef = useRef(0);
+  const selectedDocumentIdRef = useRef<string | null>(selectedDocumentId);
+  const loadedDocumentIdRef = useRef<string | null>(loadedDocumentId);
+  const historyPresentRef = useRef(history.present);
+  const isDirtyRef = useRef(isDirty);
+  const activeSaveRef = useRef<{
+    documentId: string;
+    snapshot: CanvasDocumentContent;
+    token: number;
+    promise: Promise<void>;
+  } | null>(null);
   const { data: documents = [], refetch } = useCanvasDocumentsQuery(activeProjectId);
+
+  selectedDocumentIdRef.current = selectedDocumentId;
+  loadedDocumentIdRef.current = loadedDocumentId;
+  historyPresentRef.current = history.present;
+  isDirtyRef.current = isDirty;
 
   useEffect(() => {
     getImageModel()
@@ -97,54 +114,77 @@ export default function CanvasPage() {
   }, [documents]);
 
   useEffect(() => {
+    const requestToken = ++loadRequestTokenRef.current;
+    clearSaveTimer();
     setSelectedObjectIds((current) => (current.length ? [] : current));
+    loadedDocumentIdRef.current = null;
+    setLoadedDocumentId(null);
+    setActiveLayerId(null);
+    setDirtyState(false);
+    setIsSaving(false);
 
     if (!selectedDocumentId) {
       return;
     }
 
-    if (loadingDocumentIdRef.current === selectedDocumentId) {
-      return;
-    }
-
-    loadingDocumentIdRef.current = selectedDocumentId;
-    getCanvasDocument(selectedDocumentId)
+    const requestedDocumentId = selectedDocumentId;
+    getCanvasDocument(requestedDocumentId)
       .then((document) => {
+        if (
+          loadRequestTokenRef.current !== requestToken ||
+          selectedDocumentIdRef.current !== requestedDocumentId
+        ) {
+          return;
+        }
+
         const nextContent = sanitizeCanvasDocumentContent(document.content);
+        historyPresentRef.current = nextContent;
+        loadedDocumentIdRef.current = requestedDocumentId;
+        isDirtyRef.current = false;
         setHistory(createHistory(nextContent));
         setActiveLayerId(nextContent.layers[0]?.id ?? null);
+        setLoadedDocumentId(requestedDocumentId);
         setSelectedObjectIds([]);
         setIsDirty(false);
+        setIsSaving(false);
       })
-      .catch(() => {})
-      .finally(() => {
-        loadingDocumentIdRef.current = null;
-      });
+      .catch(() => {});
   }, [selectedDocumentId]);
 
   useEffect(() => {
-    if (!selectedDocumentId || !isDirty) {
+    if (
+      !selectedDocumentId ||
+      loadedDocumentId !== selectedDocumentId ||
+      !isDirty
+    ) {
       return;
     }
 
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-    }
+    const documentId = loadedDocumentId;
+    const snapshot = history.present;
+    clearSaveTimer();
 
     saveTimerRef.current = window.setTimeout(() => {
-      void persistDocument(history.present);
+      saveTimerRef.current = null;
+      if (
+        selectedDocumentIdRef.current === documentId &&
+        loadedDocumentIdRef.current === documentId &&
+        historyPresentRef.current === snapshot &&
+        isDirtyRef.current
+      ) {
+        void persistDocument(documentId, snapshot);
+      }
     }, 500);
 
-    return () => {
-      if (saveTimerRef.current) {
-        window.clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [history.present, isDirty, selectedDocumentId]);
+    return clearSaveTimer;
+  }, [history.present, isDirty, loadedDocumentId, selectedDocumentId]);
 
   const selectedDocument =
     documents.find((document) => document.id === selectedDocumentId) ?? null;
   const content = history.present;
+  const isEditorReady = Boolean(
+    selectedDocumentId && loadedDocumentId === selectedDocumentId,
+  );
   const activeLayer = getActiveLayer(content, activeLayerId);
   const frame = content.frame;
 
@@ -168,42 +208,110 @@ export default function CanvasPage() {
     return t("canvas.saveStatus.saved");
   }, [isDirty, isSaving, t]);
 
-  function updateContent(nextContent: CanvasDocumentContent, options?: { replace?: boolean }) {
+  function clearSaveTimer() {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }
+
+  function setDirtyState(nextIsDirty: boolean) {
+    isDirtyRef.current = nextIsDirty;
+    setIsDirty(nextIsDirty);
+  }
+
+  function isDocumentReady(documentId: string | null): documentId is string {
+    return Boolean(
+      documentId &&
+        selectedDocumentIdRef.current === documentId &&
+        loadedDocumentIdRef.current === documentId,
+    );
+  }
+
+  function handleSelectDocument(documentId: string) {
+    if (selectedDocumentIdRef.current === documentId) {
+      return;
+    }
+
+    const previousDocumentId = loadedDocumentIdRef.current;
+    const previousSnapshot = historyPresentRef.current;
+    clearSaveTimer();
+    if (
+      previousDocumentId &&
+      previousDocumentId === selectedDocumentIdRef.current &&
+      isDirtyRef.current
+    ) {
+      void persistDocument(previousDocumentId, previousSnapshot);
+    }
+
+    selectedDocumentIdRef.current = documentId;
+    loadedDocumentIdRef.current = null;
+    setLoadedDocumentId(null);
+    setActiveLayerId(null);
+    setSelectedObjectIds([]);
+    setDirtyState(false);
+    setIsSaving(false);
+    setSelectedDocumentId(documentId);
+  }
+
+  function updateContent(
+    nextContent: CanvasDocumentContent,
+    options?: { replace?: boolean },
+    documentId = selectedDocumentId,
+  ): boolean {
+    if (!isDocumentReady(documentId)) {
+      return false;
+    }
+
+    historyPresentRef.current = nextContent;
     setHistory((current) =>
       options?.replace ? replaceHistory(current, nextContent) : pushHistory(current, nextContent),
     );
-    setIsDirty(true);
+    setDirtyState(true);
+    return true;
   }
 
   function updateSelection(candidateIds: string[]) {
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
     setSelectedObjectIds(reconcileSelectedObjectIds(content, candidateIds));
   }
 
   function handleDeleteSelection() {
-    if (!selectedObjectIds.length) {
+    if (!isDocumentReady(selectedDocumentId) || !selectedObjectIds.length) {
       return;
     }
 
-    updateContent(removeCanvasObjects(content, selectedObjectIds));
-    setSelectedObjectIds([]);
+    if (updateContent(removeCanvasObjects(content, selectedObjectIds))) {
+      setSelectedObjectIds([]);
+    }
   }
 
   function handleCopySelection() {
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
     setClipboard(copyCanvasObjects(content, selectedObjectIds));
   }
 
   function handlePasteSelection() {
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
+
     const result = pasteCanvasObjects(content, clipboard, activeLayer?.id ?? null);
     if (!result.pastedObjectIds.length) {
       return;
     }
 
-    updateContent(result.content);
-    setSelectedObjectIds(result.pastedObjectIds);
+    if (updateContent(result.content)) {
+      setSelectedObjectIds(result.pastedObjectIds);
+    }
   }
 
   function handleMoveSelection(delta: { dx: number; dy: number }) {
-    if (!selectedObjectIds.length) {
+    if (!isDocumentReady(selectedDocumentId) || !selectedObjectIds.length) {
       return;
     }
 
@@ -211,7 +319,7 @@ export default function CanvasPage() {
   }
 
   function handleReorderSelection(direction: CanvasOrderDirection) {
-    if (!selectedObjectIds.length) {
+    if (!isDocumentReady(selectedDocumentId) || !selectedObjectIds.length) {
       return;
     }
 
@@ -219,38 +327,84 @@ export default function CanvasPage() {
   }
 
   function handleFitFrame() {
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
     handleViewportChange(fitViewportToCanvasRect(content.frame, stageSize));
   }
 
   function handleFitSelection() {
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
     const bounds = getCombinedCanvasBounds(content, selectedObjectIds) ?? content.frame;
     handleViewportChange(fitViewportToCanvasRect(bounds, stageSize));
   }
 
-  async function persistDocument(nextContent: CanvasDocumentContent) {
-    if (!selectedDocumentId) {
-      return;
+  function persistDocument(
+    documentId: string,
+    snapshot: CanvasDocumentContent,
+  ): Promise<void> {
+    const activeSave = activeSaveRef.current;
+    if (
+      activeSave?.documentId === documentId &&
+      activeSave.snapshot === snapshot
+    ) {
+      return activeSave.promise;
     }
 
-    setIsSaving(true);
-    try {
-      const previewPngBase64 = await exportCanvasFrame(nextContent);
-      await saveCanvasDocument(selectedDocumentId, nextContent, previewPngBase64);
-      await refetch();
-      setIsDirty(false);
-    } finally {
-      setIsSaving(false);
+    const saveToken = ++saveOperationTokenRef.current;
+    const isCurrentSnapshot = () =>
+      saveOperationTokenRef.current === saveToken &&
+      selectedDocumentIdRef.current === documentId &&
+      loadedDocumentIdRef.current === documentId &&
+      historyPresentRef.current === snapshot;
+
+    if (isCurrentSnapshot()) {
+      setIsSaving(true);
     }
+
+    const promise = (async () => {
+      try {
+        const previewPngBase64 = await exportCanvasFrame(snapshot);
+        await saveCanvasDocument(documentId, snapshot, previewPngBase64);
+        await refetch();
+        if (isCurrentSnapshot()) {
+          setDirtyState(false);
+        }
+      } finally {
+        if (activeSaveRef.current?.token === saveToken) {
+          activeSaveRef.current = null;
+        }
+        if (isCurrentSnapshot()) {
+          setIsSaving(false);
+        }
+      }
+    })();
+
+    activeSaveRef.current = {
+      documentId,
+      snapshot,
+      token: saveToken,
+      promise,
+    };
+    return promise;
   }
 
   async function handleCreateDocument() {
     const created = await createCanvasDocument(activeProjectId, null);
     await refetch();
-    setSelectedDocumentId(created.id);
+    handleSelectDocument(created.id);
   }
 
   async function handleGenerate() {
-    if (!selectedDocument || !prompt.trim() || isGenerating || !isDesktopRuntime) return;
+    if (
+      !selectedDocument ||
+      !isDocumentReady(selectedDocument.id) ||
+      !prompt.trim() ||
+      isGenerating ||
+      !isDesktopRuntime
+    ) return;
 
     setIsGenerating(true);
     try {
@@ -302,7 +456,8 @@ export default function CanvasPage() {
   }
 
   async function handleImportImage() {
-    if (!selectedDocumentId || !activeLayer) {
+    const documentId = selectedDocumentId;
+    if (!isDocumentReady(documentId) || !activeLayer) {
       return;
     }
 
@@ -336,9 +491,11 @@ export default function CanvasPage() {
       };
     }
 
-    updateContent(nextContent);
+    if (!isDocumentReady(documentId) || !updateContent(nextContent, undefined, documentId)) {
+      return;
+    }
     setActiveTool("select");
-    await persistDocument(nextContent);
+    await persistDocument(documentId, nextContent);
   }
 
   function handleAddLayer() {
@@ -346,11 +503,13 @@ export default function CanvasPage() {
     const layer = createCanvasLayer({
       name: t("canvas.defaultLayerName", { number: layerNumber }),
     });
-    updateContent({
+    const didUpdate = updateContent({
       ...cloneCanvasDocumentContent(content),
       layers: [layer, ...content.layers],
     });
-    setActiveLayerId(layer.id);
+    if (didUpdate) {
+      setActiveLayerId(layer.id);
+    }
   }
 
   function handleToggleLayerVisibility(layerId: string) {
@@ -368,13 +527,27 @@ export default function CanvasPage() {
   }
 
   function handleUndo() {
-    setHistory((current) => undoHistory(current));
-    setIsDirty(true);
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
+    setHistory((current) => {
+      const nextHistory = undoHistory(current);
+      historyPresentRef.current = nextHistory.present;
+      return nextHistory;
+    });
+    setDirtyState(true);
   }
 
   function handleRedo() {
-    setHistory((current) => redoHistory(current));
-    setIsDirty(true);
+    if (!isDocumentReady(selectedDocumentId)) {
+      return;
+    }
+    setHistory((current) => {
+      const nextHistory = redoHistory(current);
+      historyPresentRef.current = nextHistory.present;
+      return nextHistory;
+    });
+    setDirtyState(true);
   }
 
   function handleZoom(direction: "in" | "out") {
@@ -398,10 +571,12 @@ export default function CanvasPage() {
 
       const key = event.key.toLowerCase();
       const hasCommandModifier = event.metaKey || event.ctrlKey;
+      const canEdit = isDocumentReady(selectedDocumentId);
 
       if (hasCommandModifier) {
         if (key === "z") {
           event.preventDefault();
+          if (!canEdit) return;
           if (event.shiftKey) {
             if (history.future.length) handleRedo();
           } else if (history.past.length) {
@@ -412,18 +587,21 @@ export default function CanvasPage() {
 
         if (key === "y") {
           event.preventDefault();
+          if (!canEdit) return;
           if (history.future.length) handleRedo();
           return;
         }
 
         if (key === "c") {
           event.preventDefault();
+          if (!canEdit) return;
           handleCopySelection();
           return;
         }
 
         if (key === "v") {
           event.preventDefault();
+          if (!canEdit) return;
           handlePasteSelection();
           return;
         }
@@ -433,6 +611,7 @@ export default function CanvasPage() {
 
       if (key === "delete" || key === "backspace") {
         event.preventDefault();
+        if (!canEdit) return;
         handleDeleteSelection();
         return;
       }
@@ -467,6 +646,8 @@ export default function CanvasPage() {
     content,
     history.future.length,
     history.past.length,
+    loadedDocumentId,
+    selectedDocumentId,
     selectedObjectIds,
   ]);
 
@@ -479,13 +660,14 @@ export default function CanvasPage() {
         <CanvasAssetSidebar
           documents={documents}
           selectedDocumentId={selectedDocumentId}
-          onSelectDocument={setSelectedDocumentId}
+          onSelectDocument={handleSelectDocument}
           onCreateDocument={() => void handleCreateDocument()}
         />
 
         <section className="min-h-0 bg-background">
           {selectedDocument ? (
-            <div className="relative h-full min-h-0 overflow-hidden border-x border-border-subtle bg-canvas">
+            isEditorReady ? (
+              <div className="relative h-full min-h-0 overflow-hidden border-x border-border-subtle bg-canvas">
                 <CanvasStage
                   content={content}
                   activeLayerId={activeLayerId}
@@ -535,20 +717,27 @@ export default function CanvasPage() {
                   />
                 </div>
               </div>
-          ) : (
+            ) : (
               <div className="flex h-full min-h-0 items-center justify-center border-x border-border-subtle px-6">
-                <div
-                  data-testid="canvas-empty-state-card"
-                  className="w-[min(360px,calc(100%-48px))] max-w-full rounded-[18px] border border-border-subtle bg-surface/92 px-8 py-10 text-center shadow-float"
-                >
-                  <h1 className="text-[22px] font-semibold text-foreground">
-                    {t("canvas.title")}
-                  </h1>
-                  <p className="mt-3 text-[14px] leading-6 text-muted">
-                    {t("canvas.noDocumentSelected")}
-                  </p>
+                <div role="status" className="text-[13px] font-medium text-muted">
+                  {t("canvas.loading")}
                 </div>
               </div>
+            )
+          ) : (
+            <div className="flex h-full min-h-0 items-center justify-center border-x border-border-subtle px-6">
+              <div
+                data-testid="canvas-empty-state-card"
+                className="w-[min(360px,calc(100%-48px))] max-w-full rounded-[18px] border border-border-subtle bg-surface/92 px-8 py-10 text-center shadow-float"
+              >
+                <h1 className="text-[22px] font-semibold text-foreground">
+                  {t("canvas.title")}
+                </h1>
+                <p className="mt-3 text-[14px] leading-6 text-muted">
+                  {t("canvas.noDocumentSelected")}
+                </p>
+              </div>
+            </div>
           )}
         </section>
 
@@ -561,7 +750,9 @@ export default function CanvasPage() {
               prompt={prompt}
               imageModel={imageModel}
               frame={frame}
-              disabled={!selectedDocument || !prompt.trim() || isGenerating || !isDesktopRuntime}
+              disabled={
+                !isEditorReady || !prompt.trim() || isGenerating || !isDesktopRuntime
+              }
               isGenerating={isGenerating}
               environmentHint={
                 isDesktopRuntime ? null : t("canvas.generationUnavailableBrowser")
@@ -570,7 +761,7 @@ export default function CanvasPage() {
               onGenerate={() => void handleGenerate()}
             />
 
-            {selectedDocument ? (
+            {selectedDocument && isEditorReady ? (
               <CanvasLayersPanel
                 layers={content.layers}
                 activeLayerId={activeLayerId}
