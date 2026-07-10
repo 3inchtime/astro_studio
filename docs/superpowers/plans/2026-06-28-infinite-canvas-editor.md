@@ -991,6 +991,7 @@ Expected: PASS.
 - Modify: `src/pages/CanvasPage.tsx`
 - Modify: `src/pages/CanvasPage.test.tsx`
 - Modify: `src/components/canvas/CanvasToolbar.tsx`
+- Modify: `src/components/canvas/CanvasStage.tsx` (props contract only; interaction remains Task 6)
 - Modify: `src/locales/en.json`
 - Modify: `src/locales/de.json`
 - Modify: `src/locales/es.json`
@@ -1522,7 +1523,11 @@ useEffect(() => {
 }, [content, selectedObjectIds, clipboard, activeLayer?.id]);
 ```
 
-Wire `selectedObjectIds`, `onSelectionChange`, `onMoveSelection`, and
+Before wiring the page, extend `CanvasStageProps` with
+`selectedObjectIds`, `onSelectionChange`, `onMoveSelection`, and
+`onStageSizeChange` so the production component accepts the new page contract.
+Do not consume those props or change stage interaction in Task 5; Task 6 owns
+that behavior. Then wire `selectedObjectIds`, `onSelectionChange`, `onMoveSelection`, and
 `onStageSizeChange` into `CanvasStage`. Wire every command plus
 `selectedObjectCount={selectedObjectIds.length}`,
 `zoomPercent={Math.round(content.viewport.scale * 100)}`, and
@@ -1545,7 +1550,7 @@ Run:
 ```bash
 npx tsc --noEmit --pretty false
 git diff --check
-git add src/pages/CanvasPage.tsx src/pages/CanvasPage.test.tsx src/components/canvas/CanvasToolbar.tsx src/locales
+git add src/pages/CanvasPage.tsx src/pages/CanvasPage.test.tsx src/components/canvas/CanvasToolbar.tsx src/components/canvas/CanvasStage.tsx src/locales
 git commit -m "feat: wire canvas editor commands"
 ```
 
