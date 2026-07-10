@@ -11,6 +11,47 @@ pub struct Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::ErrorCode;
+
+    struct TestDatabaseDirectory(std::path::PathBuf);
+
+    impl Drop for TestDatabaseDirectory {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    struct MigratedTestDatabase {
+        database: Database,
+        _directory: TestDatabaseDirectory,
+    }
+
+    impl MigratedTestDatabase {
+        fn new(prefix: &str) -> Self {
+            let db_path = test_db_path(prefix);
+            let directory = TestDatabaseDirectory(
+                db_path
+                    .parent()
+                    .expect("test database parent")
+                    .to_path_buf(),
+            );
+            let database = Database::open(&db_path).expect("open test db");
+            database.run_migrations().expect("run migrations");
+
+            {
+                let conn = database.conn.lock().expect("lock db");
+                let foreign_keys = conn
+                    .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                    .expect("query foreign_keys pragma");
+                assert_eq!(foreign_keys, 1, "foreign key enforcement must be enabled");
+            }
+
+            Self {
+                database,
+                _directory: directory,
+            }
+        }
+    }
 
     fn test_db_path(prefix: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
@@ -48,6 +89,90 @@ mod tests {
         )
         .expect("query index")
             != 0
+    }
+
+    fn index_columns(conn: &Connection, index: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA index_info({index})"))
+            .expect("prepare index info");
+        let mut columns = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i32>(0)?, row.get::<_, String>(2)?))
+            })
+            .expect("query index info")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("read index info");
+        columns.sort_by_key(|(position, _)| *position);
+        columns.into_iter().map(|(_, name)| name).collect()
+    }
+
+    fn insert_generation_jobs_context(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO projects (id, name) VALUES (?1, ?2)",
+            params!["generation-jobs-project", "Generation Jobs Project"],
+        )
+        .expect("insert project fixture");
+        conn.execute(
+            "INSERT INTO conversations (id, title, project_id) VALUES (?1, ?2, ?3)",
+            params![
+                "generation-jobs-conversation",
+                "Generation Jobs Conversation",
+                "generation-jobs-project"
+            ],
+        )
+        .expect("insert conversation fixture");
+    }
+
+    fn insert_generation_fixture(conn: &Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO generations (id, prompt, conversation_id) VALUES (?1, ?2, ?3)",
+            params![
+                id,
+                format!("prompt for {id}"),
+                "generation-jobs-conversation"
+            ],
+        )
+        .expect("insert generation fixture");
+    }
+
+    fn insert_generation_job_fixture(
+        conn: &Connection,
+        id: &str,
+        client_request_id: &str,
+        generation_id: &str,
+        parent_job_id: Option<&str>,
+    ) -> rusqlite::Result<usize> {
+        conn.execute(
+            "INSERT INTO generation_jobs (
+                id,
+                client_request_id,
+                generation_id,
+                parent_job_id,
+                source_kind,
+                status,
+                request_json,
+                provider_kind,
+                provider_profile_id,
+                endpoint_snapshot,
+                queued_at
+            ) VALUES (?1, ?2, ?3, ?4, 'generate', 'queued', '{}', 'openai', 'default',
+                'https://api.example.com/v1/images/generations', '2026-07-10T00:00:00Z')",
+            params![id, client_request_id, generation_id, parent_job_id],
+        )
+    }
+
+    fn assert_constraint_violation(error: rusqlite::Error, expected_message: &str) {
+        match error {
+            rusqlite::Error::SqliteFailure(code, message) => {
+                assert_eq!(code.code, ErrorCode::ConstraintViolation);
+                let message = message.expect("constraint violation message");
+                assert!(
+                    message.contains(expected_message),
+                    "expected constraint message containing {expected_message:?}, got {message:?}"
+                );
+            }
+            other => panic!("expected SQLite constraint violation, got {other:?}"),
+        }
     }
 
     fn create_legacy_database_with_recorded_v7_but_missing_conversation_columns(db_path: &Path) {
@@ -179,13 +304,10 @@ mod tests {
 
     #[test]
     fn fresh_database_migrations_create_generation_jobs_table() {
-        let db_path = test_db_path("astro-studio-generation-jobs-migration-test");
-        let database = Database::open(&db_path).expect("open test db");
-
-        database.run_migrations().expect("run migrations");
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-jobs-migration-test");
 
         {
-            let conn = database.conn.lock().expect("lock db");
+            let conn = fixture.database.conn.lock().expect("lock db");
             for column in [
                 "id",
                 "client_request_id",
@@ -220,8 +342,145 @@ mod tests {
             assert!(index_exists(&conn, "idx_generation_jobs_source"));
             assert!(migration_version_exists(&conn, 16));
         }
+    }
 
-        std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
+    #[test]
+    fn generation_jobs_reject_duplicate_client_request_id() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-jobs-client-request-unique-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+        insert_generation_jobs_context(&conn);
+        insert_generation_fixture(&conn, "generation-1");
+        insert_generation_fixture(&conn, "generation-2");
+        insert_generation_job_fixture(&conn, "job-1", "request-1", "generation-1", None)
+            .expect("insert first job");
+
+        let error =
+            insert_generation_job_fixture(&conn, "job-2", "request-1", "generation-2", None)
+                .expect_err("duplicate client_request_id must fail");
+        assert_constraint_violation(error, "generation_jobs.client_request_id");
+    }
+
+    #[test]
+    fn generation_jobs_reject_duplicate_generation_id() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-jobs-generation-unique-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+        insert_generation_jobs_context(&conn);
+        insert_generation_fixture(&conn, "generation-1");
+        insert_generation_job_fixture(&conn, "job-1", "request-1", "generation-1", None)
+            .expect("insert first job");
+
+        let error =
+            insert_generation_job_fixture(&conn, "job-2", "request-2", "generation-1", None)
+                .expect_err("duplicate generation_id must fail");
+        assert_constraint_violation(error, "generation_jobs.generation_id");
+    }
+
+    #[test]
+    fn generation_jobs_reject_nonexistent_generation_id() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-jobs-generation-foreign-key-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+        insert_generation_jobs_context(&conn);
+
+        let error =
+            insert_generation_job_fixture(&conn, "job-1", "request-1", "missing-generation", None)
+                .expect_err("nonexistent generation_id must fail");
+        assert_constraint_violation(error, "FOREIGN KEY constraint failed");
+    }
+
+    #[test]
+    fn generation_jobs_reject_nonexistent_parent_job_id() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-jobs-parent-foreign-key-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+        insert_generation_jobs_context(&conn);
+        insert_generation_fixture(&conn, "generation-1");
+
+        let error = insert_generation_job_fixture(
+            &conn,
+            "job-1",
+            "request-1",
+            "generation-1",
+            Some("missing-parent"),
+        )
+        .expect_err("nonexistent parent_job_id must fail");
+        assert_constraint_violation(error, "FOREIGN KEY constraint failed");
+    }
+
+    #[test]
+    fn deleting_parent_generation_job_clears_child_parent_id() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-jobs-parent-set-null-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+        insert_generation_jobs_context(&conn);
+        insert_generation_fixture(&conn, "generation-1");
+        insert_generation_fixture(&conn, "generation-2");
+        insert_generation_job_fixture(&conn, "job-1", "request-1", "generation-1", None)
+            .expect("insert parent job");
+        insert_generation_job_fixture(&conn, "job-2", "request-2", "generation-2", Some("job-1"))
+            .expect("insert child job");
+
+        conn.execute(
+            "DELETE FROM generation_jobs WHERE id = ?1",
+            params!["job-1"],
+        )
+        .expect("delete parent job");
+
+        let parent_job_id = conn
+            .query_row(
+                "SELECT parent_job_id FROM generation_jobs WHERE id = ?1",
+                params!["job-2"],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .expect("query child job");
+        assert_eq!(parent_job_id, None);
+    }
+
+    #[test]
+    fn deleting_generation_cascades_to_generation_job() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-jobs-generation-cascade-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+        insert_generation_jobs_context(&conn);
+        insert_generation_fixture(&conn, "generation-1");
+        insert_generation_job_fixture(&conn, "job-1", "request-1", "generation-1", None)
+            .expect("insert job");
+
+        conn.execute(
+            "DELETE FROM generations WHERE id = ?1",
+            params!["generation-1"],
+        )
+        .expect("delete generation");
+
+        let job_count = conn
+            .query_row(
+                "SELECT COUNT(*) FROM generation_jobs WHERE id = ?1",
+                params!["job-1"],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count generation jobs");
+        assert_eq!(job_count, 0);
+    }
+
+    #[test]
+    fn generation_job_indexes_use_expected_columns_in_order() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-jobs-index-columns-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+
+        assert_eq!(
+            index_columns(&conn, "idx_generation_jobs_status_queued"),
+            ["status", "queued_at"]
+        );
+        assert_eq!(
+            index_columns(&conn, "idx_generation_jobs_parent"),
+            ["parent_job_id"]
+        );
+        assert_eq!(
+            index_columns(&conn, "idx_generation_jobs_source"),
+            ["source_kind"]
+        );
     }
 }
 
