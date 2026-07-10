@@ -1099,13 +1099,14 @@ it("deletes the selected canvas object with the keyboard", async () => {
 it("ignores canvas shortcuts while typing in the generation prompt", async () => {
   render(<CanvasPage />, { wrapper: TestWrapper });
 
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
   const promptEditor = await screen.findByPlaceholderText(
     "Describe how to develop this framed sketch...",
   );
   promptEditor.focus();
   fireEvent.keyDown(promptEditor, { key: "b" });
 
-  expect(screen.getByText("Active tool: brush")).toBeInTheDocument();
+  expect(screen.getByText("Active tool: select")).toBeInTheDocument();
 });
 
 it("copies and pastes selected objects with toolbar commands", async () => {
@@ -1142,6 +1143,54 @@ it("moves selected objects from the stage callback", async () => {
   await waitFor(() => {
     expect(saveCanvasDocument).toHaveBeenCalled();
   });
+});
+
+it("fits the selected object using the reported stage size", async () => {
+  getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+
+  fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+  fireEvent.click(screen.getByRole("button", { name: "resize stage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fit Selection" }));
+
+  expect(await screen.findByText("1 selected")).toBeInTheDocument();
+  expect(screen.getByText(/%$/)).toBeInTheDocument();
+  await waitFor(() => {
+    expect(saveCanvasDocument).toHaveBeenCalledWith(
+      "canvas-1",
+      expect.objectContaining({
+        viewport: expect.objectContaining({ scale: 4 }),
+      }),
+      expect.any(String),
+    );
+  });
+});
+
+it("brings a selected object to the front", async () => {
+  getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithTwoImages());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+
+  fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bring to Front" }));
+
+  await waitFor(() => {
+    const savedContent = saveCanvasDocument.mock.calls.at(-1)?.[1];
+    expect(savedContent.layers[0].objects.map((object: { id: string }) => object.id)).toEqual([
+      "image-2",
+      "image-1",
+    ]);
+  });
+});
+
+it("reconciles selection when its layer becomes locked", async () => {
+  getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+
+  fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+  expect(screen.getByText("Selected objects: image-1")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Lock Layer" }));
+
+  expect(await screen.findByText("Selected objects: none")).toBeInTheDocument();
 });
 ```
 
@@ -1190,6 +1239,24 @@ function canvasDocumentWithImage() {
     },
   };
 }
+
+function canvasDocumentWithTwoImages() {
+  const document = canvasDocumentWithImage();
+  const firstImage = document.content.layers[0].objects[0];
+  return {
+    ...document,
+    content: {
+      ...document.content,
+      layers: [{
+        ...document.content.layers[0],
+        objects: [
+          firstImage,
+          { ...firstImage, id: "image-2", x: 200 },
+        ],
+      }],
+    },
+  };
+}
 ```
 
 Use it in tests with:
@@ -1214,6 +1281,7 @@ Modify `CanvasToolbarProps` in `src/components/canvas/CanvasToolbar.tsx`:
 
 ```ts
 selectedObjectCount: number;
+zoomPercent: number;
 canPaste: boolean;
 onDeleteSelection: () => void;
 onCopySelection: () => void;
@@ -1227,6 +1295,8 @@ Import additional icons:
 
 ```ts
 import {
+  ArrowDown,
+  ArrowUp,
   BringToFront,
   Brush,
   Clipboard,
@@ -1259,9 +1329,15 @@ Add icon buttons after import image:
   <Trash2 size={16} strokeWidth={1.8} />
 </button>
 <button type="button" aria-label={t("canvas.bringForward")} title={t("canvas.bringForward")} onClick={() => onReorderSelection("forward")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
-  <BringToFront size={16} strokeWidth={1.8} />
+  <ArrowUp size={16} strokeWidth={1.8} />
 </button>
 <button type="button" aria-label={t("canvas.sendBackward")} title={t("canvas.sendBackward")} onClick={() => onReorderSelection("backward")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
+  <ArrowDown size={16} strokeWidth={1.8} />
+</button>
+<button type="button" aria-label={t("canvas.bringToFront")} title={t("canvas.bringToFront")} onClick={() => onReorderSelection("front")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
+  <BringToFront size={16} strokeWidth={1.8} />
+</button>
+<button type="button" aria-label={t("canvas.sendToBack")} title={t("canvas.sendToBack")} onClick={() => onReorderSelection("back")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
   <SendToBack size={16} strokeWidth={1.8} />
 </button>
 <button type="button" aria-label={t("canvas.fitFrame")} title={t("canvas.fitFrame")} onClick={onFitFrame} className={TOOL_BUTTON_CLASS}>
@@ -1270,6 +1346,8 @@ Add icon buttons after import image:
 <button type="button" aria-label={t("canvas.fitSelection")} title={t("canvas.fitSelection")} onClick={onFitSelection} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
   <MousePointer2 size={16} strokeWidth={1.8} />
 </button>
+<span>{t("canvas.selectionCount", { count: selectedObjectCount })}</span>
+<span>{t("canvas.zoomStatus", { zoom: zoomPercent })}</span>
 ```
 
 - [ ] **Step 5: Add English locale keys first**
@@ -1330,6 +1408,20 @@ const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null);
 const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
 ```
 
+Reconcile stale selection whenever document content changes (document switch,
+undo/redo, layer visibility/lock, delete, or external load):
+
+```ts
+useEffect(() => {
+  setSelectedObjectIds((current) => {
+    const next = reconcileSelectedObjectIds(content, current);
+    return next.length === current.length && next.every((id, index) => id === current[index])
+      ? current
+      : next;
+  });
+}, [content]);
+```
+
 Add handlers:
 
 ```ts
@@ -1379,7 +1471,9 @@ Add keyboard effect:
 ```ts
 useEffect(() => {
   function isTypingTarget(target: EventTarget | null) {
-    return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+    return target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || (target instanceof HTMLElement && target.isContentEditable);
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -1428,7 +1522,11 @@ useEffect(() => {
 }, [content, selectedObjectIds, clipboard, activeLayer?.id]);
 ```
 
-Wire props into `CanvasStage` and `CanvasToolbar`.
+Wire `selectedObjectIds`, `onSelectionChange`, `onMoveSelection`, and
+`onStageSizeChange` into `CanvasStage`. Wire every command plus
+`selectedObjectCount={selectedObjectIds.length}`,
+`zoomPercent={Math.round(content.viewport.scale * 100)}`, and
+`canPaste={Boolean(clipboard?.entries.length)}` into `CanvasToolbar`.
 
 - [ ] **Step 7: Run page tests and fix compile failures**
 
@@ -1439,6 +1537,19 @@ npx vitest run src/pages/CanvasPage.test.tsx
 ```
 
 Expected: PASS after import/type issues are fixed.
+
+- [ ] **Step 8: Run page typecheck and commit Task 5**
+
+Run:
+
+```bash
+npx tsc --noEmit --pretty false
+git diff --check
+git add src/pages/CanvasPage.tsx src/pages/CanvasPage.test.tsx src/components/canvas/CanvasToolbar.tsx src/locales
+git commit -m "feat: wire canvas editor commands"
+```
+
+Expected: typecheck and diff check pass; commit contains only Task 5 files.
 
 ---
 
