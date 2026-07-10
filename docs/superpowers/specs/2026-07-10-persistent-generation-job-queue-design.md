@@ -136,6 +136,12 @@ snapshot values use the documented `unresolved` identity sentinel and empty
 endpoint, with a sanitized nonretryable configuration error; no worker may
 claim these terminal rows.
 
+Before claim, the repository compares the queued job to its linked generation
+and requesting recovery across identity, request, normalized fields, source
+paths, metadata, and status. Corrupt cross-table state is never advanced to
+running. Queued cancellation removes its unused requesting recovery row in the
+same transaction.
+
 ## Secret Handling
 
 `request_json`, job events, runtime logs, and errors must never contain an API
@@ -152,7 +158,12 @@ free-form caller JSON object. Source references accept only documented identity
 fields. Endpoint snapshots are parsed URLs with no userinfo or decoded
 sensitive query keys. Terminal user text comes from a fixed message table keyed
 by stable error code, not raw provider/database messages. Credential-like
-tokens in any persisted public string are rejected as defense in depth.
+tokens in any persisted public string are rejected as defense in depth. The
+canonical request stores the resolved conversation's actual project and rewrites
+that identity into generate/edit/canvas source references. Its option fields are
+presence-aware: capability-filtered omissions remain absent through enqueue,
+reload, and retry even though generation columns store normalized display
+defaults.
 
 At execution time, the worker resolves the API key by profile ID and passes it
 only through a non-serializable, redacted execution context. It must never

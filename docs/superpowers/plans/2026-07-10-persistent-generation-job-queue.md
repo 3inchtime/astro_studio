@@ -199,6 +199,7 @@ git commit -m "feat: add generation job schema"
 
 **Files:**
 - Create: `src-tauri/src/generation_jobs.rs`
+- Create: `src-tauri/src/generation_jobs_tests.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/error.rs`
@@ -341,6 +342,12 @@ missing contracts used above before implementing SQL:
   after conversation resolution; it never persists an arbitrary caller JSON
   object. Row decoding validates against the same DTO before exposing the wire
   `serde_json::Value`.
+  Caller-controlled option fields are optional/presence-aware so model
+  capability filtering survives persistence; only present fields serialize.
+  `PreparedGenerationJob` carries this typed request-options value separately
+  from the concrete normalized columns/metadata used by the gallery. Every
+  present option must match its normalized concrete counterpart, and manual
+  retry copies the exact optional shape.
 - Typed/validated `GenerationJobSourceRef` permits only documented identity
   fields for generate/edit and the planned canvas document/round/revision IDs;
   unknown or sensitive keys are rejected so future source metadata cannot turn
@@ -395,7 +402,9 @@ occur while the database mutex/transaction is held.
 preflight, but
 `insert_job_in_transaction` must repeat that lookup before any write, then call
 the existing `resolve_conversation_id_for_generation` through the transaction.
-Insert the resolved ID into the canonical request and return value before
+Query that resolved conversation's actual nondeleted project ID, then overwrite
+conversation/project identity in the canonical request and every generate,
+edit, or canvas source reference before
 committing. This protects both ambiguous client retries and concurrent callers:
 conversation create/update, generation, recovery, and job changes either all
 commit once or all roll back.
@@ -417,6 +426,16 @@ fixed sanitized message table keyed by stable error code; never persist a raw
 provider/database message. Tests cover nested `apiKey`/`x-api-key`/
 `authorization`, encoded query keys, URL userinfo, token-like text, and safe
 ordinary prompts/endpoints.
+Apply credential-token detection to every persisted public string, including
+prompt/model/profile IDs, source paths, request IDs, and source-reference IDs.
+Reject real bearer/prefix/JWT patterns without rejecting ordinary prose such as
+"bearer of light" or words beginning with "sk".
+
+Before claim changes either row, load the linked generation plus requesting
+recovery and compare conversation/project, prompt/model/kind, normalized
+columns, source paths, canonical metadata, and queued status to the job request.
+Any mismatch is corrupt persisted data and leaves both rows untouched. Queued
+cancel deletes its never-used requesting recovery row in the same transaction.
 
 Manual retry permits only failed/interrupted rows with `retryable=true` and
 source kind generate/edit. It copies canonical request, resolved conversation,
@@ -438,7 +457,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 2**
 
 ```bash
-git add src-tauri/src/generation_jobs.rs src-tauri/src/lib.rs src-tauri/src/models.rs src-tauri/src/error.rs
+git add src-tauri/src/generation_jobs.rs src-tauri/src/generation_jobs_tests.rs src-tauri/src/lib.rs src-tauri/src/models.rs src-tauri/src/error.rs
 git commit -m "feat: add generation job repository"
 ```
 
@@ -621,7 +640,9 @@ Tauri `AppHandle`; production wrappers construct them from the app data path.
 
 Add explicit conversion between `GenerationJobOptions` and
 `GptImageRequestOptions`; do not make the runtime options struct the persisted
-DTO. Change `ImageEngine::generate` and `ImageEngine::edit` to return
+DTO. The persisted DTO retains `None` for capability-filtered omissions;
+execution applies provider/model defaults and sanitization without writing those
+omitted fields back into the canonical snapshot. Change `ImageEngine::generate` and `ImageEngine::edit` to return
 `Result<ProviderAttemptResponse, EngineCallError>`. Each call performs one
 provider HTTP submission and exposes
 429 `Retry-After`, explicitly retryable 5xx, known connection-before-response,
