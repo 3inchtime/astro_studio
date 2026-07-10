@@ -1,5 +1,5 @@
 import type { CanvasFrame, CanvasViewport } from "../../types";
-import type { CanvasScreenRect } from "./bounds";
+import type { CanvasRect, CanvasScreenRect } from "./bounds";
 
 export function frameToScreenRect(
   frame: CanvasFrame,
@@ -29,7 +29,7 @@ export function clampZoom(nextScale: number): number {
 }
 
 export function fitViewportToCanvasRect(
-  rect: CanvasScreenRect,
+  rect: CanvasRect,
   stageSize: { width: number; height: number },
   padding = 64,
 ): CanvasViewport {

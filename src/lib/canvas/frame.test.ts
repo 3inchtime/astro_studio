@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { CanvasRect } from "./bounds";
 import {
   clampZoom,
   fitViewportToCanvasRect,
@@ -107,5 +108,14 @@ describe("canvas frame helpers", () => {
         40,
       ).scale,
     ).toBe(4);
+  });
+
+  it("fits a canvas-space rect with a nonzero origin", () => {
+    const rect: CanvasRect = { x: 100, y: 50, width: 200, height: 100 };
+    expect(fitViewportToCanvasRect(rect, { width: 600, height: 400 }, 40)).toEqual({
+      x: -220,
+      y: -60,
+      scale: 2.6,
+    });
   });
 });
