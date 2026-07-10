@@ -905,6 +905,7 @@ Append to `src/lib/canvas/frame.test.ts`:
 
 ```ts
 import { fitViewportToCanvasRect } from "./frame";
+import type { CanvasRect } from "./bounds";
 
 it("fits a canvas rect into a stage with padding", () => {
   expect(
@@ -929,6 +930,15 @@ it("keeps fit camera scale within zoom limits", () => {
     ).scale,
   ).toBe(4);
 });
+
+it("fits a canvas-space rect with a nonzero origin", () => {
+  const rect: CanvasRect = { x: 100, y: 50, width: 200, height: 100 };
+  expect(fitViewportToCanvasRect(rect, { width: 600, height: 400 }, 40)).toEqual({
+    x: -220,
+    y: -60,
+    scale: 2.6,
+  });
+});
 ```
 
 - [ ] **Step 2: Run frame tests and verify RED**
@@ -947,7 +957,7 @@ Add to `src/lib/canvas/frame.ts`:
 
 ```ts
 export function fitViewportToCanvasRect(
-  rect: CanvasScreenRect,
+  rect: CanvasRect,
   stageSize: { width: number; height: number },
   padding = 64,
 ): CanvasViewport {
