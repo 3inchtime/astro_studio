@@ -28,6 +28,24 @@ export function clampZoom(nextScale: number): number {
   return Math.min(4, Math.max(0.2, nextScale));
 }
 
+export function fitViewportToCanvasRect(
+  rect: CanvasScreenRect,
+  stageSize: { width: number; height: number },
+  padding = 64,
+): CanvasViewport {
+  const availableWidth = Math.max(1, stageSize.width - padding * 2);
+  const availableHeight = Math.max(1, stageSize.height - padding * 2);
+  const scale = clampZoom(
+    Math.min(availableWidth / rect.width, availableHeight / rect.height),
+  );
+
+  return {
+    scale,
+    x: (stageSize.width - rect.width * scale) / 2 - rect.x * scale,
+    y: (stageSize.height - rect.height * scale) / 2 - rect.y * scale,
+  };
+}
+
 export function panViewportFromPointerDelta(
   viewport: CanvasViewport,
   startPointer: { x: number; y: number },

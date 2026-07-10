@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampZoom,
+  fitViewportToCanvasRect,
   frameToScreenRect,
   isSecondaryButtonPan,
   panViewportFromPointerDelta,
@@ -82,5 +83,29 @@ describe("canvas frame helpers", () => {
       y: -120,
       scale: 2,
     });
+  });
+
+  it("fits a canvas rect into a stage with padding", () => {
+    expect(
+      fitViewportToCanvasRect(
+        { x: 0, y: 0, width: 1024, height: 512 },
+        { width: 600, height: 400 },
+        40,
+      ),
+    ).toEqual({
+      x: 40,
+      y: 70,
+      scale: 0.5078125,
+    });
+  });
+
+  it("keeps fit camera scale within zoom limits", () => {
+    expect(
+      fitViewportToCanvasRect(
+        { x: 0, y: 0, width: 10, height: 10 },
+        { width: 1000, height: 1000 },
+        40,
+      ).scale,
+    ).toBe(4);
   });
 });
