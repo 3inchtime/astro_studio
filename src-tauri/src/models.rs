@@ -43,6 +43,8 @@ pub const DEFAULT_IMAGE_STREAM: bool = false;
 pub const DEFAULT_PARTIAL_IMAGES: u8 = 0;
 pub const DEFAULT_IMAGE_COUNT: u8 = 1;
 pub const DEFAULT_PAGE_SIZE: i32 = 20;
+pub const DEFAULT_GENERATION_JOB_PAGE_LIMIT: i32 = 50;
+pub const MAX_GENERATION_JOB_PAGE_LIMIT: i32 = 100;
 pub const SETTING_LOG_ENABLED: &str = "log_enabled";
 pub const SETTING_LOG_RETENTION_DAYS: &str = "log_retention_days";
 pub const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -202,7 +204,8 @@ pub enum GenerationJobStatus {
     Interrupted,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub struct GenerationJob {
     pub id: String,
     pub client_request_id: String,
@@ -229,11 +232,38 @@ pub struct GenerationJob {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct EnqueueGenerationResult {
     pub job_id: String,
     pub generation_id: String,
     pub conversation_id: String,
     pub status: GenerationJobStatus,
+    pub retryable: bool,
+    pub cancel_requested_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub queued_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJobFilter {
+    pub statuses: Option<Vec<GenerationJobStatus>>,
+    pub source_kind: Option<String>,
+    pub source_ref_id: Option<String>,
+    pub generation_id: Option<String>,
+    pub limit: Option<i32>,
+    /// Short-lived pagination token. It is invalidated by rowid-changing maintenance such as VACUUM.
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJobPage {
+    pub items: Vec<GenerationJob>,
+    /// Short-lived pagination token. It is not a durable job or database identifier.
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -429,6 +459,12 @@ mod tests {
             generation_id: "generation-1".to_string(),
             conversation_id: "conversation-1".to_string(),
             status: GenerationJobStatus::Queued,
+            retryable: false,
+            cancel_requested_at: None,
+            error_code: None,
+            error_message: None,
+            queued_at: "2026-07-10T00:00:00Z".to_string(),
+            finished_at: None,
         };
         let value = serde_json::to_value(result).expect("serialize enqueue result");
         assert_eq!(value["status"], json!("queued"));
