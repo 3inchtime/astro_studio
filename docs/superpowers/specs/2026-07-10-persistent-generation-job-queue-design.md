@@ -135,6 +135,9 @@ inserted atomically as already-failed generation/job pairs. Missing public
 snapshot values use the documented `unresolved` identity sentinel and empty
 endpoint, with a sanitized nonretryable configuration error; no worker may
 claim these terminal rows.
+An initial failed snapshot is either fully unresolved (both identity sentinels
+plus empty endpoint) or fully public and executable (known identities plus a
+nonempty validated endpoint); mixed forms are corrupt.
 
 Before claim, the repository compares the queued job to its linked generation
 and requesting recovery across identity, request, normalized fields, source
@@ -163,7 +166,10 @@ canonical request stores the resolved conversation's actual project and rewrites
 that identity into generate/edit/canvas source references. Its option fields are
 presence-aware: capability-filtered omissions remain absent through enqueue,
 reload, and retry even though generation columns store normalized display
-defaults.
+defaults. It also retains original requested conversation/project IDs solely as
+typed idempotency identity, distinct from the resolved execution destination.
+Get/list/enqueue-result/claim all use one linked projection validator so a
+contradictory job, generation, or recovery row is never returned as healthy.
 
 At execution time, the worker resolves the API key by profile ID and passes it
 only through a non-serializable, redacted execution context. It must never

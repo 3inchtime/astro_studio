@@ -348,6 +348,10 @@ missing contracts used above before implementing SQL:
   from the concrete normalized columns/metadata used by the gallery. Every
   present option must match its normalized concrete counterpart, and manual
   retry copies the exact optional shape.
+  The typed request also stores original requested conversation/project IDs
+  separately from resolved IDs. They participate in root-enqueue idempotency so
+  reusing a client ID for another requested destination conflicts, while an
+  ambiguous replay with the same original IDs returns the existing job.
 - Typed/validated `GenerationJobSourceRef` permits only documented identity
   fields for generate/edit and the planned canvas document/round/revision IDs;
   unknown or sensitive keys are rejected so future source metadata cannot turn
@@ -373,6 +377,10 @@ stable error fields, and `retryable=false`; do not insert queued and patch it in
 a second transaction. When configuration fields are unavailable, use the
 documented secret-free sentinels `unresolved` for provider/profile identity and
 an empty endpoint snapshot. Workers never claim these terminal rows.
+Initial failed rows use exactly one of two public snapshot shapes: both
+provider/profile identities are `unresolved` with an empty endpoint, or both
+identities are known nonempty values with a valid nonempty public endpoint.
+Mixed known-identity/empty-endpoint states are invalid.
 Reject invalid mixed states before writing: queued jobs cannot carry terminal
 timestamps/errors or unresolved provider sentinels, while initial failed jobs
 must carry a finished timestamp plus stable sanitized error fields and must not
@@ -436,6 +444,9 @@ recovery and compare conversation/project, prompt/model/kind, normalized
 columns, source paths, canonical metadata, and queued status to the job request.
 Any mismatch is corrupt persisted data and leaves both rows untouched. Queued
 cancel deletes its never-used requesting recovery row in the same transaction.
+Use the same linked-state validator for get, list, enqueue-result, and
+idempotency projections so contradictory job/generation/recovery rows are never
+returned as healthy simply because no claim occurs.
 
 Manual retry permits only failed/interrupted rows with `retryable=true` and
 source kind generate/edit. It copies canonical request, resolved conversation,
