@@ -1490,6 +1490,11 @@ snapshot refs so an older save cannot clear dirty/saving state for a newer
 document or snapshot. When a user switches away with a pending dirty snapshot,
 flush it to the old loaded document ID without delaying the switch.
 
+The readiness gate applies to every keyboard-owned editor mutation, including
+Escape selection clearing and `v`/`b`/`e`/`h` tool changes. Add a deferred-load
+test that presses a tool shortcut while B is unresolved and proves the tool is
+unchanged after B loads.
+
 Add keyboard effect:
 
 ```ts
