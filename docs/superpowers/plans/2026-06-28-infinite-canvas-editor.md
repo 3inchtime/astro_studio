@@ -1617,227 +1617,136 @@ Expected: typecheck and diff check pass; commit contains only Task 5 files.
 
 **Files:**
 - Modify: `src/components/canvas/CanvasStage.tsx`
+- Create: `src/components/canvas/CanvasStage.test.tsx`
 
-- [ ] **Step 1: Extend `CanvasStageProps`**
+- [ ] **Step 1: Build a failing Konva façade test harness**
 
-Add props:
+Mock `react-konva` locally in `CanvasStage.test.tsx`:
 
-```ts
-selectedObjectIds: string[];
-onSelectionChange: (objectIds: string[]) => void;
-onMoveSelection: (delta: { dx: number; dy: number }) => void;
-onStageSizeChange: (size: { width: number; height: number }) => void;
-```
+- `Stage` uses `forwardRef`, captures its pointer handlers, and exposes a
+  controlled `getPointerPosition()` result.
+- `Transformer` exposes `nodes()` and `getLayer().batchDraw()` spies.
+- `Image` exposes a stable imperative node with position/scale/rotation methods.
+- `Rect`, `Line`, and `Group` render filtered DOM elements with geometry in
+  `data-*` attributes. Production nodes use stable Konva `id`/`name` props for
+  object, selection outline, marquee, and generation frame identification.
+- A local controllable `ResizeObserver` exposes `triggerResize(width, height)`.
+- A controlled wrapper writes `onSelectionChange` back into
+  `selectedObjectIds`. Mock `window.Image` so image `onload` is deterministic.
 
-- [ ] **Step 2: Add stage refs for marquee and group drag**
+Add RED tests for:
 
-Add refs/state near existing refs:
+1. Resize `799.6 x 280.2` reports/renders `{ width: 800, height: 320 }`.
+2. Click selects the topmost visible/unlocked object; empty click clears.
+3. Shift-click adds/removes exact IDs and never arms a drag for that toggle.
+4. Down/move/up in one `act` marquee-selects intersecting visible/unlocked
+   image and stroke IDs, proving pointer-up does not read stale React state.
+5. Marquee chrome uses projected screen geometry while moving and disappears
+   at completion.
+6. Group drag previews every selected object locally, calls
+   `onMoveSelection` zero times during movement and exactly once on pointer-up
+   with total delta, and never calls `onTransformImage`.
+7. Space from textarea/contenteditable does nothing. Space outside typing
+   controls prevents default, pans from the original viewport anchor, and
+   keyup/window blur disables temporary pan.
+8. One external image attaches exactly its node to `Transformer` and shows
+   Reset Aspect. One stroke and multi-selection show bounds chrome without a
+   transformer. Hidden/locked/stale IDs show neither.
+9. A transformer-anchor pointer-down does not start selection movement.
 
-```ts
-const selectionDragRef = useRef<{
-  pointer: { x: number; y: number };
-  canvasPoint: { x: number; y: number };
-} | null>(null);
-const marqueeAnchorRef = useRef<{ x: number; y: number } | null>(null);
-const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
-const [spacePanActive, setSpacePanActive] = useState(false);
-```
-
-Import helpers:
-
-```ts
-import type { CanvasRect } from "../../lib/canvas/bounds";
-import { canvasRectToScreenRect, getCombinedCanvasBounds } from "../../lib/canvas/bounds";
-import { hitTestCanvasObjectId, selectCanvasObjectsInRect, toggleSelectedObjectId } from "../../lib/canvas/selection";
-```
-
-- [ ] **Step 3: Report stage size to the page**
-
-Inside the `ResizeObserver` callback, after `setStageSize(nextSize)`, call:
-
-```ts
-onStageSizeChange(nextSize);
-```
-
-- [ ] **Step 4: Add spacebar temporary pan**
-
-Add an effect in `CanvasStage.tsx`:
-
-```ts
-useEffect(() => {
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.code === "Space") setSpacePanActive(true);
-  }
-
-  function handleKeyUp(event: KeyboardEvent) {
-    if (event.code === "Space") setSpacePanActive(false);
-  }
-
-  window.addEventListener("keydown", handleKeyDown);
-  window.addEventListener("keyup", handleKeyUp);
-  return () => {
-    window.removeEventListener("keydown", handleKeyDown);
-    window.removeEventListener("keyup", handleKeyUp);
-  };
-}, []);
-```
-
-- [ ] **Step 5: Update pointer down behavior**
-
-In `handlePointerDown`:
-
-```ts
-const shouldPan = activeTool === "pan" || spacePanActive;
-if (shouldPan || ("button" in event.evt && isSecondaryButtonPan(event.evt.button))) {
-  // existing pan-anchor setup
-  return;
-}
-
-if (activeTool === "select") {
-  const point = getCanvasPoint();
-  if (!point) return;
-  const hitId = hitTestCanvasObjectId(content, point);
-
-  if (hitId) {
-    const nextSelection = event.evt.shiftKey
-      ? toggleSelectedObjectId(selectedObjectIds, hitId)
-      : selectedObjectIds.includes(hitId)
-        ? selectedObjectIds
-        : [hitId];
-    onSelectionChange(nextSelection);
-    selectionDragRef.current = {
-      pointer: stageRef.current?.getPointerPosition() ?? { x: 0, y: 0 },
-      canvasPoint: point,
-    };
-    return;
-  }
-
-  onSelectionChange([]);
-  marqueeAnchorRef.current = point;
-  setMarqueeRect({ x: point.x, y: point.y, width: 0, height: 0 });
-  return;
-}
-```
-
-- [ ] **Step 6: Update pointer move behavior**
-
-Before drawing logic in `handlePointerMove`:
-
-```ts
-if (selectionDragRef.current && selectedObjectIds.length) {
-  const point = getCanvasPoint();
-  if (!point) return;
-  const dx = point.x - selectionDragRef.current.canvasPoint.x;
-  const dy = point.y - selectionDragRef.current.canvasPoint.y;
-  if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
-    onMoveSelection({ dx, dy });
-    selectionDragRef.current = {
-      pointer: stageRef.current?.getPointerPosition() ?? selectionDragRef.current.pointer,
-      canvasPoint: point,
-    };
-  }
-  return;
-}
-
-if (marqueeAnchorRef.current) {
-  const point = getCanvasPoint();
-  if (!point) return;
-  setMarqueeRect(normalizeCanvasRect(marqueeAnchorRef.current, point));
-  return;
-}
-```
-
-Add helper at bottom:
-
-```ts
-function normalizeCanvasRect(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-): CanvasRect {
-  return {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.abs(end.x - start.x),
-    height: Math.abs(end.y - start.y),
-  };
-}
-```
-
-- [ ] **Step 7: Update pointer up behavior**
-
-At the start of `handlePointerUp`:
-
-```ts
-selectionDragRef.current = null;
-if (marqueeAnchorRef.current && marqueeRect) {
-  onSelectionChange(selectCanvasObjectsInRect(content, marqueeRect));
-}
-marqueeAnchorRef.current = null;
-setMarqueeRect(null);
-```
-
-- [ ] **Step 8: Render selection chrome**
-
-Compute:
-
-```ts
-const combinedSelectionBounds = getCombinedCanvasBounds(content, selectedObjectIds);
-const combinedSelectionRect = combinedSelectionBounds
-  ? canvasRectToScreenRect(combinedSelectionBounds, content.viewport)
-  : null;
-const marqueeScreenRect = marqueeRect ? canvasRectToScreenRect(marqueeRect, content.viewport) : null;
-```
-
-Render after objects and before `Transformer`:
-
-```tsx
-{combinedSelectionRect && selectedObjectIds.length > 1 ? (
-  <Rect
-    x={combinedSelectionRect.x}
-    y={combinedSelectionRect.y}
-    width={combinedSelectionRect.width}
-    height={combinedSelectionRect.height}
-    stroke="#4f6aff"
-    strokeWidth={1.5}
-    dash={[8, 5]}
-    listening={false}
-  />
-) : null}
-
-{marqueeScreenRect ? (
-  <Rect
-    x={marqueeScreenRect.x}
-    y={marqueeScreenRect.y}
-    width={marqueeScreenRect.width}
-    height={marqueeScreenRect.height}
-    fill="rgba(79,106,255,0.08)"
-    stroke="rgba(79,106,255,0.78)"
-    strokeWidth={1}
-    dash={[6, 4]}
-    listening={false}
-  />
-) : null}
-```
-
-- [ ] **Step 9: Use external selected ids for image selection**
-
-Replace local `selectedObjectId` with `selectedObjectIds[0]` for single-image transformer behavior. Keep `Transformer` active only when exactly one selected image exists:
-
-```ts
-const selectedObjectId = selectedObjectIds.length === 1 ? selectedObjectIds[0] : null;
-```
-
-Remove local `useState<string | null>` selection ownership from `CanvasStage`.
-
-- [ ] **Step 10: Run canvas page tests**
-
-Run:
+- [ ] **Step 2: Run stage tests and verify RED**
 
 ```bash
-npx vitest run src/pages/CanvasPage.test.tsx
+npx vitest run src/components/canvas/CanvasStage.test.tsx
 ```
 
-Expected: PASS.
+Expected: FAIL because external selection, marquee, group preview, resize
+reporting, and temporary pan are not implemented.
+
+- [ ] **Step 3: Consume the external selection contract**
+
+Destructure the four Task 5 props. Remove local selection state. Derive
+effective IDs with `reconcileSelectedObjectIds(content, selectedObjectIds)` so
+hidden, locked, missing, and duplicate IDs cannot render chrome or attach a
+transformer. A selected image is transformable only when it is the sole
+effective selection on a visible/unlocked layer.
+
+Add refs/state:
+
+```ts
+const selectionDragRef = useRef<{ canvasPoint: { x: number; y: number } } | null>(null);
+const marqueeAnchorRef = useRef<{ x: number; y: number } | null>(null);
+const marqueeRectRef = useRef<CanvasRect | null>(null);
+const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
+const [selectionPreviewDelta, setSelectionPreviewDelta] = useState({ dx: 0, dy: 0 });
+const spacePanActiveRef = useRef(false);
+```
+
+Import and reuse `normalizeCanvasRect` from `bounds.ts`; do not add a duplicate
+normalizer.
+
+- [ ] **Step 4: Report size and implement safe temporary pan**
+
+Inside `ResizeObserver`, compute the clamped/rounded `nextSize`, then call both
+`setStageSize(nextSize)` and `onStageSizeChange(nextSize)`.
+
+Space handlers must ignore input, textarea, and contenteditable targets,
+prevent default for accepted Space events, update the ref synchronously, reset
+on keyup and window blur, and clean up all listeners. Space/right-click/pan-tool
+pointer-down creates the existing pan anchor without clearing external
+selection.
+
+- [ ] **Step 5: Implement click, Shift toggle, and synchronous marquee**
+
+Before generic hit testing, ignore events whose target parent class is
+`Transformer`. In select mode use `hitTestCanvasObjectId` and the effective
+selection:
+
+- Normal click selects one object, while clicking any member of an existing
+  multi-selection preserves the group.
+- Shift-click uses `toggleSelectedObjectId`; it never arms group movement.
+- Empty click clears and starts marquee.
+- Pointer move writes the normalized rectangle to both `marqueeRectRef` and
+  state. Pointer-up reads the ref, calls `selectCanvasObjectsInRect`, then
+  clears anchor/ref/state. This remains correct when down/move/up are batched.
+
+- [ ] **Step 6: Preview group movement and commit once**
+
+On non-Shift pointer-down for a selected/hit object, store the starting canvas
+point. Pointer move computes the total delta from that fixed origin and updates
+only `selectionPreviewDelta`. Apply the delta while rendering every effective
+selected image/stroke and the combined bounds. Disable/remove native Konva
+image dragging and `onDragEnd` so movement cannot apply twice. Pointer-up calls
+`onMoveSelection` once when total delta is non-zero, then clears the preview.
+
+- [ ] **Step 7: Render external selection chrome and transformer**
+
+Use stable names `canvas-selection-outline` and `canvas-marquee`. Render the
+combined outline for multi-selection and for a single non-image object; a sole
+image uses the existing Transformer. Include `loadedImages` in transformer
+attachment dependencies so late image loading attaches the node. One hidden,
+locked, or stale ID attaches no node. Preserve image transform/reset-aspect
+behavior and the existing blue-violet, dashed, non-listening visual language.
+
+- [ ] **Step 8: Run focused integration checks GREEN**
+
+```bash
+npx vitest run src/components/canvas/CanvasStage.test.tsx src/pages/CanvasPage.test.tsx
+npx tsc --noEmit --pretty false
+git diff --check
+```
+
+Expected: Stage tests and all 26 CanvasPage tests pass with no canvas/act
+warnings; typecheck/diff check pass.
+
+- [ ] **Step 9: Commit Task 6**
+
+```bash
+git add src/components/canvas/CanvasStage.tsx src/components/canvas/CanvasStage.test.tsx
+git commit -m "feat: add canvas stage multi-selection"
+```
+
+Expected: commit contains only the Stage implementation and focused test file.
 
 ---
 
