@@ -182,7 +182,9 @@ so a reloaded conversation can recover job metadata for cancel/retry actions.
 
 Existing synchronous commands remain as compatibility adapters until all
 first-party frontend callers migrate. They must not become an independent
-second execution path.
+second execution path. Each adapter creates and claims a real durable job with
+a generated client request ID, runs exactly one classified provider attempt,
+and uses the same atomic terminal finalizers; `job_id` is never optional.
 
 ## Worker Architecture
 
@@ -270,6 +272,15 @@ recovery row is marked response-ready. The job table supplies the missing
 execution state. Startup reconciliation replaces the old blocking recovery
 loop: setup performs only short database reconciliation, then one managed
 worker resumes local recovery asynchronously without a second provider call.
+
+The engine's paid-call method returns a verified raw-response artifact after
+one HTTP submission; it does not decode images or update recovery rows. The
+lifecycle commits `response_ready`, then uses a separate local decode/download
+seam. Provider errors and all local errors return to worker policy without
+terminal mutation. The worker decides retry exhaustion and invokes the atomic
+generation/job failure finalizer. A short successful response completes with
+only the returned candidates and records requested versus actual count; it is
+never replayed to fill the shortfall.
 
 ## Structured Errors
 
@@ -363,7 +374,9 @@ C2 adds:
 - State transitions compare the expected prior state.
 - Completion updates job, generation, images, and recovery state consistently.
 - Long-running network and file work happens outside the DB mutex.
-- Response and image files are staged before final DB references are committed.
+- Response artifacts are atomically written and verified before response-ready
+  state. Images/thumbnails are decoded and staged before final DB references are
+  committed; the terminal transaction performs database work only.
 - Failed transactions clean staged files without deleting previously committed
   user data.
 

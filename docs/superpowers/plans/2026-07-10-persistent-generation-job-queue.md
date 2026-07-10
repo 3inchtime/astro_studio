@@ -428,6 +428,7 @@ git commit -m "feat: add generation job repository"
 - Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/generation_lifecycle.rs`
 - Modify: `src-tauri/src/generation_jobs.rs`
+- Modify: `src-tauri/src/file_manager.rs`
 - Modify: `src-tauri/src/commands/generation.rs`
 - Test: `src-tauri/src/api_gateway.rs`
 - Test: `src-tauri/src/generation_lifecycle.rs`
@@ -474,6 +475,14 @@ that successful/final failures update generation and job in one transaction.
 Prove execution never inserts another generation/conversation/recovery row and
 does not resolve a different active provider profile.
 
+Also prove: the synchronous compatibility adapter atomically creates and claims
+a real job before executing; a successful provider response is atomically
+written/verified and marked response-ready before decode/download; gateway code
+does not mutate recovery rows; filesystem image staging happens outside the DB
+mutex and cleans up on injected final-transaction failure; a short response
+completes after one HTTP submission, persists only returned images, and records
+requested versus actual count without worker replay.
+
 - [ ] **Step 2: Run lifecycle tests and verify RED**
 
 ```bash
@@ -488,6 +497,13 @@ structured engine errors are missing.
 Introduce:
 
 ```rust
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum GenerationLifecycleKind {
+    Generate,
+    Edit,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct GenerationJobOptions {
     pub size: String,
@@ -522,6 +538,12 @@ pub(crate) struct EngineCallError {
     pub outcome_ambiguous: bool,
 }
 
+pub(crate) struct ProviderAttemptResponse {
+    pub body_text: String,
+    pub response_file: String,
+    pub requested_image_count: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GenerationExecutionError {
     Engine(EngineCallError),
@@ -545,6 +567,11 @@ pub(crate) struct ProviderExecutionCredentials {
     api_key: String,
 }
 
+impl ProviderExecutionCredentials {
+    pub(crate) fn new(api_key: String) -> Self;
+    pub(crate) fn expose_for_engine(&self) -> &str;
+}
+
 pub(crate) async fn execute_generation_lifecycle(
     app: &tauri::AppHandle,
     db: &Database,
@@ -566,26 +593,52 @@ adapter is the only layer that converts it back to `AppError`.
 Add explicit conversion between `GenerationJobOptions` and
 `GptImageRequestOptions`; do not make the runtime options struct the persisted
 DTO. Change `ImageEngine::generate` and `ImageEngine::edit` to return
-`EngineCallError`. Each engine call performs one provider attempt and exposes
+`Result<ProviderAttemptResponse, EngineCallError>`. Each call performs one
+provider HTTP submission and exposes
 429 `Retry-After`, explicitly retryable 5xx, known connection-before-response,
 and ambiguous post-send failures without logging or returning secrets. A
 provider returning fewer images does not trigger hidden follow-up paid calls;
-the attempt returns its partial result and persisted accounting remains exact.
+the response proceeds to completion with only the returned candidates, while
+request metadata records requested and actual counts.
+
+On a successful HTTP response, atomically write (`temp -> fsync/close -> rename`)
+and verify the raw response artifact before returning it. Gateway code must not
+mutate `generation_recoveries`. Expose a separate fakeable decode/download
+operation over `ProviderAttemptResponse`; it performs no provider generation
+submission. Lifecycle first commits `response_ready` with the verified path,
+then decodes/downloads so a crash can resume locally without a paid replay.
+Raw body/artifact types are internal and never derive `Serialize` or expose body
+content through `Debug`/errors/events.
+
 Move bounded backoff/jitter ownership to the job worker so every automatic attempt
 can be persisted. Remove the gateway-owned `max_retries` loop; the synchronous
 compatibility adapter performs one classified attempt while first-party callers
 move to the queue.
 
-Move provider invocation, response recovery, image saving, and completion into
-`execute_generation_lifecycle`. It must update the supplied generation ID and
-must not create a generation row. A retryable or ambiguous engine error returns
-a structured outcome without first marking generation or job terminal. On
-success, image/recovery/generation updates and the `completed` job transition
-share one transaction through `finish_job_in_transaction`; on a final failure,
-generation and job terminal fields also share one transaction. Emit terminal
-events only after that transaction commits and the database lock is released.
-Retain `run_generation_lifecycle` temporarily as a compatibility adapter that
-prepares and executes synchronously through the same internal functions.
+Move provider invocation, response-ready marking, local decode/download, staged
+image saving, and success completion into `execute_generation_lifecycle`. It
+must update the supplied generation ID and must not create a generation row.
+Every error returns a structured outcome without terminal generation/job
+mutation; only worker policy knows whether automatic attempts are exhausted.
+After policy decides, it calls an explicit
+`finalize_generation_failure_in_transaction` that updates generation and job
+together.
+
+For success, decode and stage/validate image plus thumbnail files before taking
+the database mutex. Move staged files into their final generation-owned names,
+then use one short transaction for image rows, recovery deletion, generation
+completion/requested-vs-actual metadata, and `completed` job transition. If the
+transaction fails, remove only files created by this attempt; never delete
+previously committed user files. No decode, download, image encoding, file write,
+or rename occurs while the DB transaction is open.
+
+Retain `run_generation_lifecycle` as a compatibility adapter, but it is not a
+jobless path: generate a unique client request ID, atomically create a real
+durable job/generation through the repository, claim it, execute exactly one
+classified attempt synchronously, and call the same success/failure finalizers.
+Do not make `job_id` optional. The managed worker owns
+`generation-job:updated`; only this compatibility adapter translates committed
+outcomes into legacy `generation:*` events.
 
 For edits, enqueue persists canonical authorized paths. Execution revalidates
 those paths for existence, header, and type after restart without consulting
@@ -605,7 +658,7 @@ Expected: PASS with no duplicate generation rows.
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/commands/generation.rs
+git add src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/file_manager.rs src-tauri/src/commands/generation.rs
 git commit -m "refactor: execute precreated generations"
 ```
 
