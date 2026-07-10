@@ -8,6 +8,10 @@
 
 **Tech Stack:** React 19, TypeScript, Vitest, React Testing Library, react-konva/Konva, lucide-react, Tailwind CSS v4, Tauri IPC wrappers.
 
+**2026-07-10 execution checkpoint:** Tasks 1-3 are implemented and reviewed in
+commits through `4d60b51`. Resume at Task 4. Do not repeat or rewrite the helper
+foundation unless a failing integration test proves a defect.
+
 ---
 
 ## File Structure
