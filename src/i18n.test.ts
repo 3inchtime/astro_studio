@@ -29,6 +29,29 @@ const providerSettingsKeys = [
   "settings.addOptimizationService",
 ] as const;
 
+const canvasEditorKeys = [
+  "canvas.copySelection",
+  "canvas.pasteSelection",
+  "canvas.deleteSelection",
+  "canvas.bringForward",
+  "canvas.sendBackward",
+  "canvas.bringToFront",
+  "canvas.sendToBack",
+  "canvas.fitFrame",
+  "canvas.fitSelection",
+  "canvas.selectionCount",
+  "canvas.zoomStatus",
+] as const;
+
+const canvasEditorLocalizedKeys = canvasEditorKeys.filter(
+  (key) => key !== "canvas.zoomStatus",
+);
+
+const canvasEditorPlaceholders = {
+  "canvas.selectionCount": "{{count}}",
+  "canvas.zoomStatus": "{{zoom}}",
+} as const;
+
 const noEnglishFallbackKeys = [
   "sidebar.projects",
   "sidebar.allProjects",
@@ -136,6 +159,39 @@ describe("i18n resources", () => {
     for (const [locale, resources] of Object.entries(localeResources)) {
       for (const key of providerSettingsKeys) {
         expect(resources, `${locale} should define ${key}`).toHaveProperty(key);
+      }
+    }
+  });
+
+  it("defines every canvas editor key and preserves its interpolation placeholders", () => {
+    for (const [locale, resources] of Object.entries(localeResources)) {
+      for (const key of canvasEditorKeys) {
+        const value = getNestedValue(resources, key);
+
+        expect(value, `${locale} should define ${key}`).toBeTypeOf("string");
+        expect(value, `${locale} should not leave ${key} empty`).not.toBe("");
+      }
+
+      for (const [key, placeholder] of Object.entries(canvasEditorPlaceholders)) {
+        expect(
+          getNestedValue(resources, key),
+          `${locale} should preserve ${placeholder} in ${key}`,
+        ).toContain(placeholder);
+      }
+    }
+  });
+
+  it("localizes canvas editor labels in every non-English locale", () => {
+    const nonEnglishLocales = Object.entries(localeResources).filter(
+      ([locale]) => locale !== "en",
+    );
+
+    for (const [locale, resources] of nonEnglishLocales) {
+      for (const key of canvasEditorLocalizedKeys) {
+        expect(
+          getNestedValue(resources, key),
+          `${locale} should translate ${key} instead of reusing English`,
+        ).not.toBe(getNestedValue(en, key));
       }
     }
   });
