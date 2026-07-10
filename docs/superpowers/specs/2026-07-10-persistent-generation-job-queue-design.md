@@ -95,6 +95,7 @@ Add `generation_jobs`:
 | `source_kind` | `generate`, `edit`, or `canvas` |
 | `source_ref_json` | Conversation/project/canvas-round references |
 | `status` | Durable state enum |
+| `stage` | Durable worker stage used by recovery and events |
 | `request_json` | Canonical public request snapshot |
 | `provider_kind` | OpenAI or Gemini routing snapshot |
 | `provider_profile_id` | Stable profile identity selected at enqueue |
@@ -110,6 +111,10 @@ Add `generation_jobs`:
 | `error_code` | Stable machine-readable error code |
 | `error_message` | Sanitized user-facing detail |
 | `retryable` | Whether manual retry is allowed |
+
+Add a singleton `generation_worker_lease` table in v17 with owner and
+acquired/heartbeat/expiry timestamps. The database lease enforces one active
+worker across app processes; an in-process started flag alone is insufficient.
 
 Indexes support status/queue order, generation lookup, parent chain, and source
 lookup. Because application timestamps have one-second precision, FIFO queries
@@ -206,6 +211,13 @@ updates generation and job together. Events are built from the committed row,
 emitted only after releasing the database lock, and never describe a state that
 can still roll back.
 
+The queue owns a started guard, shutdown signal, joined task handle, and unique
+lease owner. It drains claims until empty after every wake, uses the
+register-notify/recheck/select pattern to avoid lost/coalesced wakes, renews the
+lease and job heartbeat on an injected interval, and observes durable
+cancellation so another process can cancel its work. Lease loss stops new work
+and prevents terminal writes by the former owner.
+
 An in-process wake signal notifies the worker after enqueue. A bounded fallback
 poll ensures jobs are still discovered after a lost wake signal.
 
@@ -228,6 +240,12 @@ request so valid output is not discarded.
 The worker registers its token immediately after claim and then re-reads the
 durable cancellation timestamp. This closes the race where cancellation is
 persisted after claim but before the token enters the in-memory registry.
+
+Only the provider HTTP future is drop-cancel-safe. Local decode/download and
+file staging use cooperative probes plus an RAII staging guard; blocking work is
+awaited through cleanup rather than abandoned. Success conditionally commits
+only while the job is running and `cancel_requested_at` is NULL. Cancel-first
+cleans staged files and confirms cancelled; completion-first remains completed.
 
 ## Retry Policy
 
@@ -253,6 +271,15 @@ retryable failed/interrupted generate/edit jobs, and never mutates its parent.
 Reusing a client request ID is idempotent only for the same parent and logical
 retry; using it for another parent is a stable idempotency conflict.
 
+`auto_attempt` counts automatic retry reservations after the initial provider
+call, so total submissions never exceed `1 + max_auto_attempts`. Backoff is
+saturating exponential with injected jitter. Retry-After accepts seconds and
+HTTP-date; a value above the safe automatic-wait cap ends auto retry as manually
+retryable rather than calling early. Increment occurs conditionally after a
+cancellable wait and final cancellation/lease check, immediately before the
+retry submission; crash-after-reservation is reconciled conservatively without
+automatic replay.
+
 ## Startup Reconciliation And Recovery
 
 On startup:
@@ -265,6 +292,9 @@ On startup:
   or recovery artifact can exist; otherwise they become interrupted.
 - Recovery failures end in a visible failed or interrupted state rather than
   remaining processing forever.
+- Pre-v16 processing generations without jobs are converted transactionally to
+  synthetic secret-free jobs; response-ready rows enter local-only recovery and
+  unknown requesting rows become interrupted.
 
 Existing generation recovery artifacts remain the source of truth for
 response-ready recovery. Artifact writes must be atomic and verified before a
@@ -272,6 +302,12 @@ recovery row is marked response-ready. The job table supplies the missing
 execution state. Startup reconciliation replaces the old blocking recovery
 loop: setup performs only short database reconciliation, then one managed
 worker resumes local recovery asynchronously without a second provider call.
+
+Candidate validation happens outside setup and the DB mutex: canonical path
+under the app-owned response directory, regular file, bounded size, and
+parseable supported response. Missing/tampered/escaping artifacts never call a
+provider. The old blocking startup recovery path is removed rather than run in
+parallel.
 
 The engine's paid-call method returns a verified raw-response artifact after
 one HTTP submission; it does not decode images or update recovery rows. The
@@ -329,6 +365,11 @@ Payload fields:
 
 Existing generation progress/complete/failed events may be emitted during the
 migration, but first-party UI state must converge on the job event contract.
+The event is a committed projection joining job state to the generation's
+conversation ID; it never guesses identity from request/source JSON. Stage is
+persisted in the job row. Claim, retry, startup, cancel acknowledgement, and
+terminal transitions emit after commit/unlock; heartbeat does not emit, and a
+sink failure never rolls back or stops the worker.
 
 ## Frontend Experience
 

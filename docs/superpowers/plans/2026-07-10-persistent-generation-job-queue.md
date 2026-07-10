@@ -12,7 +12,8 @@
 
 ## File Structure
 
-- Modify `src-tauri/src/db.rs`: v16 migration and migration assertions.
+- Modify `src-tauri/src/db.rs`: v16 job migration plus v17 stage/worker-lease
+  migration and invariant assertions.
 - Modify `src-tauri/src/models.rs`: serializable job, filter, enqueue, and event models.
 - Modify `src-tauri/src/api_gateway.rs`: structured single-attempt provider errors, retry metadata, and fake-engine seams.
 - Create `src-tauri/src/generation_jobs.rs`: job persistence, state transitions, idempotent enqueue, list/get/cancel/retry operations.
@@ -572,14 +573,33 @@ impl ProviderExecutionCredentials {
     pub(crate) fn expose_for_engine(&self) -> &str;
 }
 
-pub(crate) async fn execute_generation_lifecycle(
-    app: &tauri::AppHandle,
-    db: &Database,
+pub(crate) async fn perform_provider_attempt(
     engine: &dyn ImageEngine,
     context: &GenerationExecutionContext,
     credentials: &ProviderExecutionCredentials,
     request: &GenerationJobRequest,
-) -> Result<GenerateResult, GenerationExecutionError>;
+) -> Result<ProviderAttemptResponse, EngineCallError>;
+
+pub(crate) async fn resume_verified_response(
+    engine: &dyn ImageEngine,
+    file_store: &dyn GenerationFileStore,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+    cancellation: &CancellationProbe,
+) -> Result<StagedGenerationFiles, GenerationExecutionError>;
+
+pub(crate) fn commit_generation_success(
+    conn: &mut rusqlite::Connection,
+    context: &GenerationExecutionContext,
+    request: &GenerationJobRequest,
+    staged: &mut StagedGenerationFiles,
+) -> Result<GenerateResult, AppError>;
+
+pub(crate) fn finalize_generation_failure_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    context: &GenerationExecutionContext,
+    error: &GenerationExecutionError,
+) -> Result<(), AppError>;
 ```
 
 `ProviderExecutionCredentials` is ephemeral: do not derive `Serialize`, do not
@@ -589,6 +609,9 @@ this value while preserving the stored endpoint/model snapshots.
 `GenerationExecutionError` preserves retry/ambiguity metadata for worker policy
 while classifying local decode/save/database failures separately. The legacy
 adapter is the only layer that converts it back to `AppError`.
+`GenerationFileStore`, `CancellationProbe`, and the RAII
+`StagedGenerationFiles` guard are `Send + Sync` test seams that do not require a
+Tauri `AppHandle`; production wrappers construct them from the app data path.
 
 Add explicit conversion between `GenerationJobOptions` and
 `GptImageRequestOptions`; do not make the runtime options struct the persisted
@@ -615,12 +638,10 @@ can be persisted. Remove the gateway-owned `max_retries` loop; the synchronous
 compatibility adapter performs one classified attempt while first-party callers
 move to the queue.
 
-Move provider invocation, response-ready marking, local decode/download, staged
-image saving, and success completion into `execute_generation_lifecycle`. It
-must update the supplied generation ID and must not create a generation row.
-Every error returns a structured outcome without terminal generation/job
-mutation; only worker policy knows whether automatic attempts are exhausted.
-After policy decides, it calls an explicit
+Split execution into the four explicit phases above. No phase may create a
+generation row. Every error returns a structured outcome without terminal
+generation/job mutation; only worker policy knows whether automatic attempts
+are exhausted. After policy decides, it calls an explicit
 `finalize_generation_failure_in_transaction` that updates generation and job
 together.
 
@@ -631,6 +652,14 @@ completion/requested-vs-actual metadata, and `completed` job transition. If the
 transaction fails, remove only files created by this attempt; never delete
 previously committed user files. No decode, download, image encoding, file write,
 or rename occurs while the DB transaction is open.
+
+Only the provider HTTP future is drop-cancel-safe. Decode/download and file
+staging poll `CancellationProbe`; if blocking work has started, wait for it to
+finish and let the RAII guard clean up instead of dropping its join handle.
+`commit_generation_success` conditionally updates a running job only when
+`cancel_requested_at IS NULL`. If cancellation committed first, clean staged
+files and atomically acknowledge cancelled; if completion committed first,
+later cancellation cannot overwrite it.
 
 Retain `run_generation_lifecycle` as a compatibility adapter, but it is not a
 jobless path: generate a unique client request ID, atomically create a real
@@ -666,7 +695,9 @@ git commit -m "refactor: execute precreated generations"
 
 **Files:**
 - Create: `src-tauri/src/generation_job_worker.rs`
+- Modify: `src-tauri/src/db.rs`
 - Modify: `src-tauri/src/lib.rs`
+- Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/generation_jobs.rs`
 
 - [ ] **Step 1: Write failing worker-policy tests**
@@ -706,6 +737,28 @@ loop; a response-ready artifact resumes local work without another engine call;
 and an event sink sees only already-committed rows after the database lock is
 released.
 
+Cover these policies with injected clocks/sleepers and real SQLite state:
+
+- provider future, local decode/download, and blocking staging cancellation,
+  including no leaked temporary/final files and cancel-first/completion-first
+  transaction races;
+- token registration before/during/after durable cancellation, terminal stale
+  sender behavior, registry cleanup on every return/panic path, and no DB lock
+  while holding the cancellation-map lock;
+- exact retry boundaries (`max_auto_attempts=0/1/2`), calls <= `1 + max`, wait
+  cancellation without increment, overflow/huge Retry-After, HTTP-date parsing,
+  and crash after an attempt reservation;
+- fixed-cadence heartbeat with a fake clock, stop after terminal/cancel, and a
+  heartbeat write failure that does not kill the worker;
+- notify-before-await, coalesced notifications draining all queued rows,
+  fallback discovery without a notify, and no empty-queue busy loop;
+- double start, database lease exclusion/takeover, shutdown while idle/backoff/
+  provider/local staging, and durable cancellation observed from another queue
+  instance;
+- missing, tampered, oversized, non-regular, or app-directory-escaping recovery
+  artifacts, repeated crash, and pre-v16 processing generations without jobs;
+  none of these recovery paths may call the provider.
+
 - [ ] **Step 2: Run worker tests and verify RED**
 
 ```bash
@@ -716,41 +769,126 @@ Expected: FAIL because the worker module is missing.
 
 - [ ] **Step 3: Implement queue state and worker loop**
 
-Create a managed state with an in-process wake signal and cooperative cancellation registry:
+Add v17 migration coverage for persisted `generation_jobs.stage` plus a
+singleton `generation_worker_lease` row (`owner_id`, acquired/heartbeat/expiry
+timestamps). This database lease, not process-local state alone, enforces one
+worker across multiple app processes and supports expiry takeover.
+
+Create managed state with wake, cooperative cancellation, lifecycle guard, and
+task ownership:
 
 ```rust
 #[derive(Clone)]
 pub(crate) struct GenerationJobQueue {
-    wake: std::sync::Arc<tokio::sync::Notify>,
-    cancellations: std::sync::Arc<tokio::sync::Mutex<
+    inner: std::sync::Arc<GenerationJobQueueInner>,
+}
+
+struct GenerationJobQueueInner {
+    wake: tokio::sync::Notify,
+    cancellations: tokio::sync::Mutex<
         std::collections::HashMap<String, tokio::sync::watch::Sender<bool>>,
-    >>,
+    >,
+    started: std::sync::atomic::AtomicBool,
+    shutdown: tokio::sync::watch::Sender<bool>,
+    task: tokio::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    owner_id: String,
 }
 
 impl GenerationJobQueue {
-    pub(crate) fn wake(&self) { self.wake.notify_one(); }
+    pub(crate) fn wake(&self) { self.inner.wake.notify_one(); }
+    pub(crate) async fn start(&self, deps: WorkerDeps) -> Result<(), AppError>;
     pub(crate) async fn cancel(&self, job_id: &str) -> bool;
+    pub(crate) async fn shutdown(&self);
 }
 ```
 
 The worker must:
 
-1. Reconcile startup states before accepting work.
-2. Claim one FIFO queued job with an atomic queued-to-running update.
-3. Register cancellation immediately after claim, then re-read durable
+1. Acquire/renew the database lease before reconciliation or claim. A second
+   in-process `start()` fails deterministically; another process remains passive
+   until lease expiry/takeover.
+2. Reconcile startup states in one short transaction before accepting work.
+3. Claim one FIFO queued job with an atomic queued-to-running update that also
+   sets persisted stage and heartbeat.
+4. Register cancellation by creating sender/receiver, inserting the sender,
+   releasing the map lock, then re-reading durable
    `cancel_requested_at` to close the claim/registration race.
-4. Resolve the profile secret by stored profile ID without changing endpoint/model snapshots.
-5. Use `tokio::select!` between execution and the watch cancellation signal so dropping the provider future cancels the HTTP request.
-6. For `safe_to_retry` errors only, persist the incremented `auto_attempt`, wait with bounded exponential backoff plus injected/testable jitter while still selecting on cancellation, honor a longer `Retry-After`, and call the engine again on the same job.
-7. Convert ambiguous outcomes to `interrupted` with `provider_outcome_unknown`; never replay them automatically.
-8. Persist generation/job terminal state in one transaction, release the
+5. Resolve the profile secret by stored profile ID without changing endpoint/model snapshots.
+6. Drop-cancel only the provider HTTP future. Local decode/download/staging
+   observes a cancellation probe; once blocking work starts, await completion
+   and RAII cleanup. Never abandon a blocking file task.
+7. For `safe_to_retry` errors only, wait cancellably, recheck cancellation and
+   lease, reserve the next automatic attempt with a conditional transaction,
+   then call the engine again on the same job.
+8. Convert ambiguous outcomes to `interrupted` with `provider_outcome_unknown`; never replay them automatically.
+9. Persist generation/job terminal state in one transaction, release the
    database lock, then emit one structured event built from the committed row.
-9. Wait on `Notify` with a bounded fallback poll when no work exists; a single
-   job failure must never stop the loop.
+10. Update `last_heartbeat_at` and renew the lease on an injected interval while
+    provider/backoff/recovery/local staging is active. Conditional heartbeat
+    failures are logged and do not emit UI events or kill the loop.
+11. Drain claims until no queued rows remain. Before sleeping, create/enable a
+    `Notify::notified()` future, recheck the DB, then select wake, bounded poll,
+    lease timing, or shutdown so wake coalescing cannot strand work.
+12. Stop new claims on shutdown, signal the active stage, await safe local
+    cleanup, release the lease if still owner, remove the cancellation sender,
+    and join the owned task. A single job/event/heartbeat error never stops the
+    loop.
 
-Extract a fakeable worker core below Tauri setup. Inject the engine, event sink,
-clock, sleeper, jitter source, and response decoder/recovery seam so tests use a
-real temporary SQLite database but no live provider or wall-clock sleeps.
+`auto_attempt` is the number of automatic retries reserved/started after the
+initial call; `max_auto_attempts` is the maximum such retries, so total provider
+submissions are at most `1 + max_auto_attempts`. Cancellation during backoff
+does not increment it. Immediately before a retry, a conditional transaction
+increments `n -> n+1`; a crash after reservation is conservatively reconciled
+as interrupted rather than replayed. Use saturating exponential backoff with
+injected jitter, parse Retry-After seconds and HTTP-date, and if Retry-After
+exceeds the configured safe cap, stop auto retry and leave the terminal job
+manually retryable instead of calling early.
+
+Every worker-owned claim, stage, retry reservation, heartbeat, success, or
+failure transaction verifies the same unexpired lease owner inside that
+transaction. Losing the lease prevents further durable worker transitions; the
+old owner cleans local staging and exits while the new owner reconciles the
+still-durable state.
+
+Cancellation uses `send_replace(true)`. A scope guard unregisters the sender on
+all exits. Never hold the cancellation-map mutex while acquiring the database
+mutex. Success SQL requires running status and `cancel_requested_at IS NULL`;
+zero rows trigger a re-read and cancel acknowledgement. Cancel-first cleans
+staged files and commits cancelled; completion-first remains completed.
+
+Extract a fakeable worker core below Tauri setup. `WorkerDeps` owns
+`Arc<dyn Trait + Send + Sync>` engine, file store/decoder, event sink, clock,
+sleeper, jitter, and diagnostics seams. Async traits return `Send` futures and
+the event sink is object-safe over a concrete DTO. Production wrappers own the
+`AppHandle`; core traits do not. Every repository call returns owned values and
+releases the `std::sync::Mutex<Connection>` guard in a lexical scope before an
+await. Add compile-time Send/Sync/static and `tokio::spawn(worker.run())` tests.
+
+Define `reconcile_startup` as a short repository transaction returning owned
+`RecoveryCandidate` values with job/request/recovery metadata. Queued stays
+queued. Running with response-ready metadata remains running and becomes a
+local recovery candidate; running with a cancellation request but no possible
+response becomes cancelled; other unknown running becomes interrupted. Convert
+pre-v16 `processing` generations without jobs into synthetic secret-free jobs
+in the same transaction: response-ready rows become candidates, while unknown
+requesting rows become interrupted. Synthetic jobs use reconstructed canonical
+generation fields plus `unresolved` provider sentinels and never call a provider.
+
+Validate candidate files asynchronously before decode: canonical app-owned
+response directory, regular file, bounded size, and parseable supported provider
+response. Missing/tampered/escaping files terminalize visibly without engine
+calls. A response-ready candidate with cancellation still follows
+completion-versus-cancel rules based on whether verified local completion can
+commit; do not blindly replay or discard a known provider result. Repeated
+crashes leave enough durable metadata for the same local-only recovery.
+
+Move the concrete `GenerationJobEvent`, persisted `stage`, committed
+job+generation conversation projection, and object-safe `JobEventSink` into
+Task 4. Claim, retry ordinal, startup transition, cancel acknowledgement, and
+terminal transactions update stage and produce the projection; emit only after
+commit/unlock. Sink failure is diagnostic only. Heartbeat does not change stage
+or emit. This makes Task 4 independently compilable before command wrappers in
+Task 5.
 
 - [ ] **Step 4: Start the worker from Tauri setup**
 
@@ -762,6 +900,13 @@ response-ready artifacts are resumed asynchronously by the managed worker;
 other unknown running jobs become interrupted without a provider replay. Do
 not block setup on recovery, network, filesystem downloads, or the long-running
 loop.
+
+Delete the old startup recovery implementation and its setup `block_on` path.
+On Tauri exit, schedule queue shutdown without holding app/database state locks.
+The database lease is renewed by the active worker and released only by its
+owner; a passive process can take over after expiry. Durable cancellation and
+heartbeat polling make cancellation work even when the command is issued from a
+different process whose in-memory registry has no sender.
 
 - [ ] **Step 5: Run worker and lifecycle tests GREEN**
 
@@ -776,7 +921,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Task 4**
 
 ```bash
-git add src-tauri/src/generation_job_worker.rs src-tauri/src/generation_jobs.rs src-tauri/src/lib.rs
+git add src-tauri/src/generation_job_worker.rs src-tauri/src/db.rs src-tauri/src/generation_jobs.rs src-tauri/src/models.rs src-tauri/src/lib.rs
 git commit -m "feat: run persistent generation worker"
 ```
 
@@ -920,7 +1065,7 @@ failed acknowledgement is renderable without a second lookup.
 
 - [ ] **Step 4: Emit a single typed job event**
 
-Use `generation-job:updated` and a serialized `GenerationJobEvent` containing
+Reuse the Task 4 `generation-job:updated` DTO/projection and verify it contains
 `job_id`, `generation_id`, `conversation_id`, `source_kind`, `source_ref`,
 `status`, `stage`, optional `queue_position`, `chain_attempt`, `auto_attempt`,
 `max_auto_attempts`, `cancel_requested_at`, `error_code`, sanitized
