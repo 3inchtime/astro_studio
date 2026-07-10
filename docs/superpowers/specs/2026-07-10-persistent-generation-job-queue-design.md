@@ -112,8 +112,12 @@ Add `generation_jobs`:
 | `retryable` | Whether manual retry is allowed |
 
 Indexes support status/queue order, generation lookup, parent chain, and source
-lookup. A unique constraint on `client_request_id` makes a repeated enqueue
-return the original job instead of creating a duplicate paid request.
+lookup. Because application timestamps have one-second precision, FIFO queries
+must order by `queued_at` and then SQLite `rowid`; `queued_at` alone is not a
+stable insertion order. A unique constraint on `client_request_id` makes a
+repeated enqueue return the original job instead of creating a duplicate paid
+request. Migration tests must exercise both unique constraints, both foreign
+key delete actions, and exact index columns rather than checking names alone.
 
 The generation record is created in the same transaction and begins in
 `queued`. Existing generation status consumers must be updated to recognize
@@ -129,9 +133,17 @@ key. The enqueue transaction snapshots:
 - Endpoint and non-secret public profile options.
 - Generation/edit parameters and source references.
 
-At execution time, the worker resolves the API key by profile ID. A missing or
-deleted profile produces `provider_profile_missing`, marks the job failed, and
-does not silently select another profile.
+At execution time, the worker resolves the API key by profile ID and passes it
+only through a non-serializable, redacted execution context. It must never
+re-resolve an active profile or replace the snapshotted endpoint/model. A
+missing or deleted profile produces `provider_profile_missing`, marks the job
+failed, and does not silently select another profile.
+
+Edit requests persist canonical source paths after enqueue-time authorization.
+Execution after restart revalidates those persisted paths for existence and
+supported file type; it does not depend on the in-memory selected-image
+registry. Invalidated paths produce `source_image_invalid` without a provider
+call.
 
 System keychain storage is a separate security project. C1 does not make the
 current profile storage problem worse and establishes a secret-free job
@@ -153,8 +165,12 @@ and initial status. It does not await provider completion.
 
 Every enqueue request includes a caller-generated `client_request_id`. If the
 same ID is submitted again, the command returns the previously persisted
-result. Syntactically valid requests that fail provider configuration
+result before creating a conversation, generation, log, or recovery side
+effect. Syntactically valid requests that fail provider configuration
 resolution are persisted as failed jobs so the failure remains visible.
+
+Job list filters support `generation_id` in addition to status/source filters,
+so a reloaded conversation can recover job metadata for cancel/retry actions.
 
 Existing synchronous commands remain as compatibility adapters until all
 first-party frontend callers migrate. They must not become an independent
@@ -173,7 +189,12 @@ The managed worker starts with the Tauri application and owns:
 7. Emission of structured events.
 
 The worker must not hold the SQLite mutex while awaiting network or filesystem
-operations. Claim and each durable transition use short transactions.
+operations. Claim and each durable transition use short transactions. A
+successful terminal transaction inserts images and updates recovery,
+generation, and job state together. A terminal failure transaction likewise
+updates generation and job together. Events are built from the committed row,
+emitted only after releasing the database lock, and never describe a state that
+can still roll back.
 
 An in-process wake signal notifies the worker after enqueue. A bounded fallback
 poll ensures jobs are still discovered after a lost wake signal.
@@ -193,6 +214,10 @@ The UI displays "Cancelling" from `cancel_requested_at`, but the durable status
 remains running until the worker acknowledges cancellation. If a provider has
 already completed and local save succeeds, completion wins over a late cancel
 request so valid output is not discarded.
+
+The worker registers its token immediately after claim and then re-reads the
+durable cancellation timestamp. This closes the race where cancellation is
+persisted after claim but before the token enters the in-memory registry.
 
 ## Retry Policy
 
@@ -227,7 +252,11 @@ On startup:
   remaining processing forever.
 
 Existing generation recovery artifacts remain the source of truth for
-response-ready recovery. The job table supplies the missing execution state.
+response-ready recovery. Artifact writes must be atomic and verified before a
+recovery row is marked response-ready. The job table supplies the missing
+execution state. Startup reconciliation replaces the old blocking recovery
+loop: setup performs only short database reconciliation, then one managed
+worker resumes local recovery asynchronously without a second provider call.
 
 ## Structured Errors
 
@@ -260,6 +289,7 @@ Payload fields:
 
 - `job_id`
 - `generation_id`
+- `conversation_id`
 - `source_kind`
 - `source_ref`
 - `status`
@@ -267,7 +297,7 @@ Payload fields:
 - `queue_position` when queued
 - `chain_attempt`
 - `auto_attempt`
-- `cancel_requested`
+- `cancel_requested_at`
 - `error_code`
 - `error_message`
 - `retryable`
@@ -282,6 +312,15 @@ C1 provides reusable query and mutation hooks plus minimal status integration
 in existing generation messages. Submitting no longer disables generation for
 the duration of provider execution; it creates a queued message and allows the
 user to navigate away.
+
+The enqueue acknowledgement has its own message transition: it keeps the
+assistant message processing, records `job_id` plus the raw job status, and
+replaces optimistic IDs with the persisted generation identity. Raw job status,
+retryability, and cancellation timestamp remain available separately from the
+coarse message status. Acknowledgements and terminal events are guarded by the
+conversation/view epoch so a late result cannot navigate back to or overwrite
+another conversation. All job events update shared caches; only a matching
+active terminal event reloads the visible conversation.
 
 C2 adds:
 

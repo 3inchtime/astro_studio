@@ -65,6 +65,14 @@ fn fresh_database_migrations_create_generation_jobs_table() {
 }
 ```
 
+Do not stop at name existence. Against the migrated real database, insert the
+minimum valid generation/job fixtures and prove both UNIQUE constraints reject
+duplicates, missing generation/parent references are rejected, deleting a
+parent job sets a child's `parent_job_id` to NULL, deleting a generation
+cascades its job, and `PRAGMA index_info` reports the exact planned columns for
+all three indexes. These assertions prevent a broken queue invariant from
+passing merely because a column or index name exists.
+
 - [ ] **Step 2: Run the migration test and verify RED**
 
 Run:
@@ -185,6 +193,7 @@ git commit -m "feat: add generation job schema"
 **Files:**
 - Create: `src-tauri/src/generation_jobs.rs`
 - Modify: `src-tauri/src/lib.rs`
+- Modify: `src-tauri/src/models.rs`
 
 - [ ] **Step 1: Write failing repository tests**
 
@@ -232,6 +241,11 @@ fn transaction_composable_enqueue_rolls_back_with_outer_scope() {
 }
 ```
 
+Also cover two jobs with the same second-level `queued_at`: claim/list order is
+stable by `queued_at ASC, rowid ASC`. Verify an idempotent
+`client_request_id` lookup occurs before any conversation, generation, log, or
+recovery side effect, not merely before the second job insert.
+
 The fixture must use a real temporary SQLite database and v16 migration, not a mocked repository.
 
 - [ ] **Step 2: Run repository tests and verify RED**
@@ -267,7 +281,7 @@ pub(crate) fn list_jobs(
     filter: &GenerationJobFilter,
 ) -> Result<GenerationJobPage, AppError>;
 pub(crate) fn claim_next_job(
-    conn: &rusqlite::Connection,
+    conn: &mut rusqlite::Connection,
 ) -> Result<Option<GenerationJob>, AppError>;
 pub(crate) fn request_cancel(
     conn: &rusqlite::Connection,
@@ -290,6 +304,22 @@ pub(crate) fn insert_retry_job_in_transaction(
 ) -> Result<EnqueueGenerationResult, AppError>;
 ```
 
+Task 1 intentionally defined only the wire-level job/result models. Define the
+missing contracts used above before implementing SQL:
+
+- Internal `PreparedGenerationJob` owns the already-normalized, secret-free
+  generation fields, conversation ID, canonical request snapshot, profile and
+  endpoint snapshot, source reference, IDs, and timestamps needed to insert
+  both `generations` and `generation_jobs` in one transaction.
+- Public `GenerationJobFilter` includes statuses, source kind/reference,
+  `generation_id`, bounded limit, and cursor.
+- Public `GenerationJobPage` contains items plus an opaque next cursor encoding
+  the same `(queued_at, rowid)` order.
+- Internal `GenerationJobTerminalUpdate` carries expected prior status and the
+  sanitized terminal fields. Add `finish_job_in_transaction` so lifecycle
+  finalization can update generation/recovery/images and job state inside one
+  outer transaction.
+
 Every transition must use an expected prior status in SQL. `enqueue_job` and
 `create_retry_job` open and commit their own transaction, delegating the actual
 generation/job inserts to the matching `*_in_transaction` primitive. The
@@ -301,6 +331,11 @@ function may serialize an API key. Generic retry accepts only `generate` and
 they cannot create orphan jobs. The public wrapper passes no source-reference
 override; a future source-aware transaction may pass a new reference while
 preserving the parent request/profile snapshot.
+
+`claim_next_job` must select and update inside one transaction using
+`ORDER BY queued_at ASC, rowid ASC`, then return only the row whose
+`queued -> running` update succeeded. No network, filesystem, event emission,
+or await may occur while the database mutex/transaction is held.
 
 - [ ] **Step 4: Register the module and run tests GREEN**
 
@@ -315,7 +350,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 2**
 
 ```bash
-git add src-tauri/src/generation_jobs.rs src-tauri/src/lib.rs
+git add src-tauri/src/generation_jobs.rs src-tauri/src/lib.rs src-tauri/src/models.rs
 git commit -m "feat: add generation job repository"
 ```
 
@@ -325,6 +360,7 @@ git commit -m "feat: add generation job repository"
 - Modify: `src-tauri/src/api_gateway.rs`
 - Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/generation_lifecycle.rs`
+- Modify: `src-tauri/src/generation_jobs.rs`
 - Modify: `src-tauri/src/commands/generation.rs`
 - Test: `src-tauri/src/api_gateway.rs`
 - Test: `src-tauri/src/generation_lifecycle.rs`
@@ -363,6 +399,13 @@ fn provider_errors_preserve_safe_retry_and_ambiguity() {
     assert!(unknown.outcome_ambiguous);
 }
 ```
+
+Add tests that one engine method invocation performs exactly one provider HTTP
+submission (including a short provider response), that retryable provider
+errors do not terminalize the generation/job before worker policy decides, and
+that successful/final failures update generation and job in one transaction.
+Prove execution never inserts another generation/conversation/recovery row and
+does not resolve a different active provider profile.
 
 - [ ] **Step 2: Run lifecycle tests and verify RED**
 
@@ -412,6 +455,16 @@ pub(crate) struct EngineCallError {
     pub outcome_ambiguous: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GenerationExecutionError {
+    Engine(EngineCallError),
+    Local {
+        code: String,
+        sanitized_message: String,
+        stage: String,
+    },
+}
+
 pub(crate) struct GenerationExecutionContext {
     pub generation_id: String,
     pub job_id: String,
@@ -421,31 +474,56 @@ pub(crate) struct GenerationExecutionContext {
     pub provider_profile_id: String,
 }
 
+pub(crate) struct ProviderExecutionCredentials {
+    api_key: String,
+}
+
 pub(crate) async fn execute_generation_lifecycle(
     app: &tauri::AppHandle,
     db: &Database,
     engine: &dyn ImageEngine,
     context: &GenerationExecutionContext,
+    credentials: &ProviderExecutionCredentials,
     request: &GenerationJobRequest,
-) -> Result<GenerateResult, AppError>;
+) -> Result<GenerateResult, GenerationExecutionError>;
 ```
+
+`ProviderExecutionCredentials` is ephemeral: do not derive `Serialize`, do not
+expose the key through `Debug`, events, logs, errors, or snapshots. The worker
+resolves exactly the stored profile ID and passes its current secret through
+this value while preserving the stored endpoint/model snapshots.
+`GenerationExecutionError` preserves retry/ambiguity metadata for worker policy
+while classifying local decode/save/database failures separately. The legacy
+adapter is the only layer that converts it back to `AppError`.
 
 Add explicit conversion between `GenerationJobOptions` and
 `GptImageRequestOptions`; do not make the runtime options struct the persisted
 DTO. Change `ImageEngine::generate` and `ImageEngine::edit` to return
 `EngineCallError`. Each engine call performs one provider attempt and exposes
 429 `Retry-After`, explicitly retryable 5xx, known connection-before-response,
-and ambiguous post-send failures without logging or returning secrets. Move
-bounded backoff/jitter ownership to the job worker so every automatic attempt
+and ambiguous post-send failures without logging or returning secrets. A
+provider returning fewer images does not trigger hidden follow-up paid calls;
+the attempt returns its partial result and persisted accounting remains exact.
+Move bounded backoff/jitter ownership to the job worker so every automatic attempt
 can be persisted. Remove the gateway-owned `max_retries` loop; the synchronous
 compatibility adapter performs one classified attempt while first-party callers
 move to the queue.
 
-Move provider invocation, response recovery, image saving, completion, and
-failure emission into `execute_generation_lifecycle`. It must update the
-supplied generation ID and must not create a generation row. Retain
-`run_generation_lifecycle` temporarily as a compatibility adapter that
+Move provider invocation, response recovery, image saving, and completion into
+`execute_generation_lifecycle`. It must update the supplied generation ID and
+must not create a generation row. A retryable or ambiguous engine error returns
+a structured outcome without first marking generation or job terminal. On
+success, image/recovery/generation updates and the `completed` job transition
+share one transaction through `finish_job_in_transaction`; on a final failure,
+generation and job terminal fields also share one transaction. Emit terminal
+events only after that transaction commits and the database lock is released.
+Retain `run_generation_lifecycle` temporarily as a compatibility adapter that
 prepares and executes synchronously through the same internal functions.
+
+For edits, enqueue persists canonical authorized paths. Execution revalidates
+those paths for existence, header, and type after restart without consulting
+`SelectedImageRegistry`; invalid paths fail as `source_image_invalid` before an
+engine call.
 
 - [ ] **Step 4: Run lifecycle and command tests GREEN**
 
@@ -460,7 +538,7 @@ Expected: PASS with no duplicate generation rows.
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/commands/generation.rs
+git add src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/commands/generation.rs
 git commit -m "refactor: execute precreated generations"
 ```
 
@@ -501,6 +579,13 @@ fn automatic_retry_policy_retries_only_known_safe_failures() {
 }
 ```
 
+Add race and recovery tests: cancellation persisted between claim and token
+registration is observed after registration; a late cancel cannot overwrite a
+successfully committed completion; one worker error does not terminate the
+loop; a response-ready artifact resumes local work without another engine call;
+and an event sink sees only already-committed rows after the database lock is
+released.
+
 - [ ] **Step 2: Run worker tests and verify RED**
 
 ```bash
@@ -532,16 +617,31 @@ The worker must:
 
 1. Reconcile startup states before accepting work.
 2. Claim one FIFO queued job with an atomic queued-to-running update.
-3. Resolve the profile secret by stored profile ID without changing endpoint/model snapshots.
-4. Use `tokio::select!` between execution and the watch cancellation signal so dropping the provider future cancels the HTTP request.
-5. For `safe_to_retry` errors only, persist the incremented `auto_attempt`, wait with bounded exponential backoff plus injected/testable jitter while still selecting on cancellation, honor a longer `Retry-After`, and call the engine again on the same job.
-6. Convert ambiguous outcomes to `interrupted` with `provider_outcome_unknown`; never replay them automatically.
-7. Persist terminal job status and emit one structured event.
-8. Wait on `Notify` with a bounded fallback poll when no work exists.
+3. Register cancellation immediately after claim, then re-read durable
+   `cancel_requested_at` to close the claim/registration race.
+4. Resolve the profile secret by stored profile ID without changing endpoint/model snapshots.
+5. Use `tokio::select!` between execution and the watch cancellation signal so dropping the provider future cancels the HTTP request.
+6. For `safe_to_retry` errors only, persist the incremented `auto_attempt`, wait with bounded exponential backoff plus injected/testable jitter while still selecting on cancellation, honor a longer `Retry-After`, and call the engine again on the same job.
+7. Convert ambiguous outcomes to `interrupted` with `provider_outcome_unknown`; never replay them automatically.
+8. Persist generation/job terminal state in one transaction, release the
+   database lock, then emit one structured event built from the committed row.
+9. Wait on `Notify` with a bounded fallback poll when no work exists; a single
+   job failure must never stop the loop.
+
+Extract a fakeable worker core below Tauri setup. Inject the engine, event sink,
+clock, sleeper, jitter source, and response decoder/recovery seam so tests use a
+real temporary SQLite database but no live provider or wall-clock sleeps.
 
 - [ ] **Step 4: Start the worker from Tauri setup**
 
-Manage `GenerationJobQueue`, reconcile before spawning, and use `tauri::async_runtime::spawn` after the application handle and managed states are available. Do not block setup on the long-running loop.
+Manage exactly one `GenerationJobQueue`, perform only short database
+reconciliation during setup, and use `tauri::async_runtime::spawn` after the
+application handle and managed states are available. Replace the old blocking
+startup generation-recovery loop instead of running both systems. Verified
+response-ready artifacts are resumed asynchronously by the managed worker;
+other unknown running jobs become interrupted without a provider replay. Do
+not block setup on recovery, network, filesystem downloads, or the long-running
+loop.
 
 - [ ] **Step 5: Run worker and lifecycle tests GREEN**
 
@@ -604,6 +704,13 @@ fn retry_rejects_non_retryable_completed_job() {
     assert_eq!(fixture.job_count(), 1);
 }
 ```
+
+Also test that a repeated `client_request_id` returns before conversation/log/
+recovery side effects, edit enqueue persists canonical source paths that remain
+usable after clearing `SelectedImageRegistry`, `generation_id` filtering finds
+the matching job, and every command emits/wakes only after its transaction has
+committed. Serialize the full event DTO and prove endpoint/API-key/body-preview
+secrets cannot appear.
 
 Implement `JobCommandFixture` inside the command test module with a temporary
 v16 SQLite database, a profile containing the literal API key `secret-key`, and
@@ -671,14 +778,30 @@ pub fn retry_generation_job(
 `EnqueueGenerationRequest` mirrors all current `generate_image` generation
 parameters plus `client_request_id`. `EnqueueEditRequest` mirrors all current
 `edit_image` parameters plus `client_request_id`. `GenerationJobFilter`
-contains optional `statuses`, `source_kind`, `source_ref_id`, `limit`, and
-`cursor`; `GenerationJobPage` contains `items` and `next_cursor`.
+contains optional `statuses`, `source_kind`, `source_ref_id`, `generation_id`,
+`limit`, and `cursor`; `GenerationJobPage` contains `items` and `next_cursor`.
+The canonical nested request preserves capability filtering from the existing
+caller: parameters omitted because the selected model does not support them
+remain omitted instead of being reintroduced as frontend defaults.
+
+Resolve and authorize edit paths at enqueue, persist their canonical values,
+and revalidate them at execution. The worker must not depend on
+`SelectedImageRegistry`, which is intentionally process-local. Check
+`client_request_id` before resolving/creating a conversation or writing logs.
 
 Provider configuration errors after syntactic acceptance must create a visible failed job. Validation errors that make the request unserializable may reject before enqueue.
 
 - [ ] **Step 4: Emit a single typed job event**
 
-Use `generation-job:updated` and a serialized `GenerationJobEvent` containing job/generation/source/status/stage/queue-position/attempts/cancel/error/retry/timestamps. Ensure tests serialize the complete shape and assert no secret fields.
+Use `generation-job:updated` and a serialized `GenerationJobEvent` containing
+`job_id`, `generation_id`, `conversation_id`, `source_kind`, `source_ref`,
+`status`, `stage`, optional `queue_position`, `chain_attempt`, `auto_attempt`,
+`max_auto_attempts`, `cancel_requested_at`, `error_code`, sanitized
+`error_message`, `retryable`, `queued_at`, `started_at`, and `finished_at`.
+Ensure tests serialize the complete shape and assert no secret fields. Build the
+event from the committed row, release the database lock, then emit; legacy
+generation events must not describe terminal success/failure before the job
+transaction commits.
 
 - [ ] **Step 5: Run command tests GREEN**
 
@@ -723,6 +846,13 @@ expect(generationStatusToMessageStatus("cancelled")).toBe("failed");
 expect(generationStatusToMessageStatus("interrupted")).toBe("failed");
 ```
 
+Add exact tests for the complete Rust event shape (including
+`conversation_id`, `cancel_requested_at`, source, attempts, retryability, and
+timestamps), lookup by `generation_id`, and an enqueue acknowledgement helper.
+The helper keeps the assistant message processing, stores `jobId`, raw
+`jobStatus`, retryability/cancellation metadata, and replaces optimistic user,
+assistant, and source-image generation IDs with the persisted generation ID.
+
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
@@ -733,7 +863,10 @@ Expected: FAIL because job APIs/types do not exist.
 
 - [ ] **Step 3: Add exact frontend types and wrappers**
 
-Define status and job types mirroring Rust, add `enqueueGeneration`, `enqueueEdit`, list/get/cancel/retry wrappers, and add:
+Define status and job types mirroring Rust. Extend `Message` with optional
+`jobId`, `jobStatus`, `jobRetryable`, `jobCancelRequestedAt`, and
+`clientRequestId`; the coarse message status is not sufficient for actions.
+Add `enqueueGeneration`, `enqueueEdit`, list/get/cancel/retry wrappers, and add:
 
 ```ts
 export function onGenerationJobUpdated(
@@ -743,7 +876,22 @@ export function onGenerationJobUpdated(
 }
 ```
 
-Create TanStack Query hooks with query keys rooted at `generation-jobs`, and invalidate both job and generation/conversation queries on events and mutations.
+Create a stable `generationJobKeys` factory rooted at `generation-jobs`, with
+cursor-aware list, detail, and by-generation keys. Hooks must support a
+`generation_id` lookup so reloaded conversation messages regain job metadata.
+Invalidate both job and generation/conversation query roots on events and
+mutations.
+
+Expose one shared event-bridge binding that updates job caches for every event
+and can be hosted once by the current page, then moved to `AppLayout` for C2.
+Do not create per-message/per-row listeners or a second event family. React
+Query invalidation does not replace the active page's manual conversation
+reload; Task 7 handles that separately.
+
+Add a dedicated enqueue-ack message helper rather than reusing
+`completeGenerationMessage`, which assumes images already exist. Status mapping
+is exhaustive: queued/running -> processing; completed -> complete;
+failed/cancelled/interrupted -> failed, while raw job state remains available.
 
 - [ ] **Step 4: Run API and state tests GREEN**
 
@@ -766,6 +914,9 @@ git commit -m "feat: add generation queue client"
 - Modify: `src/pages/GeneratePage.tsx`
 - Modify: `src/pages/GeneratePage.test.tsx`
 - Modify: `src/components/generate/GenerationComposer.tsx`
+- Modify: `src/components/generate/MessageBubble.tsx`
+- Modify: `src/locales/*.json`
+- Modify: `src/i18n.test.ts`
 
 - [ ] **Step 1: Add failing page tests**
 
@@ -802,6 +953,21 @@ Add `renderGeneratePage` and `renderGeneratePageWithJobEvents` to the existing
 test fixture layer so these tests drive the real composer and subscription
 effect while mocking only the API/event boundary.
 
+Also add tests for:
+
+- capability-filtered omitted parameters stay omitted in the nested queue
+  request;
+- an ambiguous enqueue retry reuses the original `client_request_id`;
+- a late enqueue acknowledgement after navigation updates caches only and does
+  not replace messages, increment the new view epoch, or navigate back;
+- matching terminal events reload the active conversation and refresh the
+  conversation list, while nonmatching/nonterminal events only update caches;
+- queued/running jobs expose Cancel, the persisted cancellation timestamp shows
+  Cancelling, and only retryable failed/interrupted jobs expose Retry;
+- retry calls `retryGenerationJob(parentJobId, newClientRequestId)` and creates
+  a child job instead of resubmitting the original client request;
+- a reloaded conversation recovers job metadata by `generation_id`.
+
 - [ ] **Step 2: Run page tests and verify RED**
 
 ```bash
@@ -816,9 +982,29 @@ Generate a `clientRequestId` before optimistic messages, call enqueue
 generate/edit, replace the temporary generation ID with the persisted ID,
 render queued/running states, and allow navigation immediately. Subscribe to
 `generation-job:updated`; refresh only the affected active conversation and
-shared job queries. Remove the existing lifecycle-wide `isGenerating` submit
+shared job queries, and refresh the conversation list for matching terminal
+events. Replace the two legacy first-party lifecycle subscriptions with this
+single shared bridge. Remove the existing lifecycle-wide `isGenerating` submit
 lock: the composer may be disabled only while its enqueue IPC is pending, not
 while any persisted job is queued or running.
+
+Build the existing capability-filtered generate/edit payload first, then wrap
+it in the queue request; do not re-add unsupported fields. Store the generated
+`clientRequestId` on optimistic state so an ambiguous enqueue failure/retry
+reuses it. Apply the enqueue-ack helper rather than the completion helper.
+
+Capture the active conversation/view epoch before awaiting enqueue. If the
+acknowledgement is stale, invalidate durable data only; do not mutate the new
+conversation's messages/version or navigate back. Job-event cache updates are
+global, but direct conversation reload is limited to a matching active terminal
+event.
+
+Hydrate `jobId`/raw state for persisted messages through generation-ID lookup.
+Cancel persists first and then shows Cancelling; Retry is a backend child-job
+operation and is offered only when `retryable` is true. Add localized queued,
+running, cancelling, cancelled, interrupted, cancel, and retry labels with
+eight-locale parity. `MessageBubble` must expose these states instead of hiding
+all processing jobs behind the generic loading scene.
 
 Do not create a parallel local queue. SQLite is the source of truth.
 
@@ -833,7 +1019,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 7**
 
 ```bash
-git add src/pages/GeneratePage.tsx src/pages/GeneratePage.test.tsx src/components/generate/GenerationComposer.tsx
+git add src/pages/GeneratePage.tsx src/pages/GeneratePage.test.tsx src/components/generate/GenerationComposer.tsx src/components/generate/MessageBubble.tsx src/locales src/i18n.test.ts
 git commit -m "feat: enqueue image generation requests"
 ```
 
@@ -854,6 +1040,15 @@ queued cancel, cancellation during provider/download/save stages,
 response-ready restart recovery, unknown running restart interruption,
 image-save failure, and missing profile at execution. Assert every path reaches
 a durable terminal/recoverable state and no event/snapshot contains a secret.
+
+Also cover same-second FIFO ordering, the claim/token-registration cancellation
+race, late-cancel completion precedence, generation/job terminal transaction
+rollback injection, a short provider response without hidden extra submissions,
+worker continuation after one job fails, event-after-commit ordering, canonical
+edit paths after clearing the in-memory registry, missing/changed source files,
+and startup replacement of the old blocking recovery path. Track exact fake
+engine call counts so no ambiguous or response-ready path can replay a paid
+request.
 
 - [ ] **Step 2: Run integration tests and verify RED for uncovered behavior**
 
@@ -893,6 +1088,9 @@ Expected: all commands exit 0. Known baseline warnings must not increase.
 git add src src-tauri
 git commit -m "test: harden generation queue lifecycle"
 ```
+
+Commit only if the injected-failure work changed tests or production files; do
+not create an empty aggregate commit after earlier focused commits.
 
 ## Milestone Gate Before C2
 
