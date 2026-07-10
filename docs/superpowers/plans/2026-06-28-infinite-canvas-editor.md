@@ -1786,23 +1786,28 @@ Expected: PASS if all new keys exist in every locale; otherwise FAIL listing mis
 
 - [ ] **Step 2: Add missing locale keys**
 
-For every locale, ensure the `canvas` object includes:
+For every locale, preserve the repository's flat resource schema and ensure it
+includes these `canvas.*` keys:
 
 ```json
-"copySelection": "Copy",
-"pasteSelection": "Paste",
-"deleteSelection": "Delete",
-"bringForward": "Bring Forward",
-"sendBackward": "Send Backward",
-"bringToFront": "Bring to Front",
-"sendToBack": "Send to Back",
-"fitFrame": "Fit Frame",
-"fitSelection": "Fit Selection",
-"selectionCount": "{{count}} selected",
-"zoomStatus": "{{zoom}}%"
+"canvas.copySelection": "Copy",
+"canvas.pasteSelection": "Paste",
+"canvas.deleteSelection": "Delete",
+"canvas.bringForward": "Bring Forward",
+"canvas.sendBackward": "Send Backward",
+"canvas.bringToFront": "Bring to Front",
+"canvas.sendToBack": "Send to Back",
+"canvas.fitFrame": "Fit Frame",
+"canvas.fitSelection": "Fit Selection",
+"canvas.selectionCount": "{{count}} selected",
+"canvas.zoomStatus": "{{zoom}}%"
 ```
 
-Use localized equivalents where practical. The key requirement is that all eight locale files have identical key coverage.
+Use localized equivalents where practical. The key requirement is that all
+eight locale files have identical key coverage. Extend `i18n.test.ts` so
+non-English locales cannot silently reuse the English labels for the ten
+translatable command/status strings, and so every locale retains the
+`{{count}}` and `{{zoom}}` interpolation variables.
 
 - [ ] **Step 3: Run i18n tests and verify GREEN**
 
@@ -1816,7 +1821,7 @@ Expected: PASS.
 
 ---
 
-## Task 8: Full Verification And Commit
+## Task 8: Full Verification And Acceptance
 
 **Files:**
 - All files touched by Tasks 1-7
@@ -1826,7 +1831,7 @@ Expected: PASS.
 Run:
 
 ```bash
-npx vitest run src/lib/canvas/bounds.test.ts src/lib/canvas/selection.test.ts src/lib/canvas/transforms.test.ts src/lib/canvas/clipboard.test.ts src/lib/canvas/ordering.test.ts src/lib/canvas/document.test.ts src/lib/canvas/frame.test.ts src/pages/CanvasPage.test.tsx src/i18n.test.ts
+npx vitest run src/lib/canvas/bounds.test.ts src/lib/canvas/selection.test.ts src/lib/canvas/transforms.test.ts src/lib/canvas/clipboard.test.ts src/lib/canvas/ordering.test.ts src/lib/canvas/document.test.ts src/lib/canvas/frame.test.ts src/components/canvas/CanvasStage.test.tsx src/pages/CanvasPage.test.tsx src/i18n.test.ts
 ```
 
 Expected: PASS.
@@ -1862,16 +1867,17 @@ git diff -- src/lib/canvas src/components/canvas src/pages/CanvasPage.tsx src/pa
 
 Expected: no whitespace errors; diff shows only the infinite canvas editor changes.
 
-- [ ] **Step 5: Commit implementation**
+- [ ] **Step 5: Confirm the reviewed implementation history**
 
 Run:
 
 ```bash
-git add src/lib/canvas src/components/canvas src/pages/CanvasPage.tsx src/pages/CanvasPage.test.tsx src/locales src/i18n.test.ts
-git commit -m "feat: improve infinite canvas editor controls"
+git status --short
+git log --oneline --decorate -20
 ```
 
-Expected: commit succeeds.
+Expected: the worktree is clean and every Task 1-7 change is already captured
+by its focused, reviewed commit. Do not create an empty aggregate commit.
 
 ---
 
