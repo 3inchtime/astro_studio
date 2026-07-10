@@ -43,6 +43,8 @@ const canvasEditorKeys = [
   "canvas.zoomStatus",
 ] as const;
 
+type CanvasEditorKey = (typeof canvasEditorKeys)[number];
+
 const canvasEditorLocalizedKeys = canvasEditorKeys.filter(
   (key) => key !== "canvas.zoomStatus",
 );
@@ -123,6 +125,18 @@ function getNestedValue(
   }, resources);
 }
 
+function getOwnCanvasEditorValue(
+  resources: Record<string, unknown>,
+  key: CanvasEditorKey,
+): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(resources, key)) {
+    return undefined;
+  }
+
+  const value = resources[key];
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
 function flattenKeys(
   resources: Record<string, unknown>,
   prefix = "",
@@ -166,15 +180,21 @@ describe("i18n resources", () => {
   it("defines every canvas editor key and preserves its interpolation placeholders", () => {
     for (const [locale, resources] of Object.entries(localeResources)) {
       for (const key of canvasEditorKeys) {
-        const value = getNestedValue(resources, key);
+        const value = getOwnCanvasEditorValue(resources, key);
 
-        expect(value, `${locale} should define ${key}`).toBeTypeOf("string");
+        expect(
+          value,
+          `${locale} should define ${key} as a top-level flat key`,
+        ).toBeTypeOf("string");
         expect(value, `${locale} should not leave ${key} empty`).not.toBe("");
       }
 
-      for (const [key, placeholder] of Object.entries(canvasEditorPlaceholders)) {
+      for (const key of Object.keys(canvasEditorPlaceholders) as Array<
+        keyof typeof canvasEditorPlaceholders
+      >) {
+        const placeholder = canvasEditorPlaceholders[key];
         expect(
-          getNestedValue(resources, key),
+          getOwnCanvasEditorValue(resources, key),
           `${locale} should preserve ${placeholder} in ${key}`,
         ).toContain(placeholder);
       }
@@ -189,9 +209,9 @@ describe("i18n resources", () => {
     for (const [locale, resources] of nonEnglishLocales) {
       for (const key of canvasEditorLocalizedKeys) {
         expect(
-          getNestedValue(resources, key),
+          getOwnCanvasEditorValue(resources, key),
           `${locale} should translate ${key} instead of reusing English`,
-        ).not.toBe(getNestedValue(en, key));
+        ).not.toBe(getOwnCanvasEditorValue(en, key));
       }
     }
   });
