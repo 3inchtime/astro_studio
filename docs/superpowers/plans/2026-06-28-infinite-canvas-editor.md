@@ -1653,6 +1653,11 @@ Add RED tests for:
    Reset Aspect. One stroke and multi-selection show bounds chrome without a
    transformer. Hidden/locked/stale IDs show neither.
 9. A transformer-anchor pointer-down does not start selection movement.
+10. A batched down/move/up sequence whose pointer is unavailable on pointer-up
+    still commits the latest group delta from a synchronous ref.
+11. Window blur, touch cancel, an external selection change during group drag,
+    and an external content change during marquee or draft drawing cancel the
+    active gesture without committing stale edits.
 
 - [ ] **Step 2: Run stage tests and verify RED**
 
@@ -1679,6 +1684,7 @@ const marqueeAnchorRef = useRef<{ x: number; y: number } | null>(null);
 const marqueeRectRef = useRef<CanvasRect | null>(null);
 const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
 const [selectionPreviewDelta, setSelectionPreviewDelta] = useState({ dx: 0, dy: 0 });
+const selectionPreviewDeltaRef = useRef({ dx: 0, dy: 0 });
 const spacePanActiveRef = useRef(false);
 ```
 
@@ -1692,9 +1698,10 @@ Inside `ResizeObserver`, compute the clamped/rounded `nextSize`, then call both
 
 Space handlers must ignore input, textarea, and contenteditable targets,
 prevent default for accepted Space events, update the ref synchronously, reset
-on keyup and window blur, and clean up all listeners. Space/right-click/pan-tool
-pointer-down creates the existing pan anchor without clearing external
-selection.
+on keyup, and clean up all listeners. Window blur invokes the centralized
+gesture cancellation path rather than only clearing temporary pan state.
+Space/right-click/pan-tool pointer-down creates the existing pan anchor without
+clearing external selection.
 
 - [ ] **Step 5: Implement click, Shift toggle, and synchronous marquee**
 
@@ -1713,11 +1720,22 @@ selection:
 - [ ] **Step 6: Preview group movement and commit once**
 
 On non-Shift pointer-down for a selected/hit object, store the starting canvas
-point. Pointer move computes the total delta from that fixed origin and updates
-only `selectionPreviewDelta`. Apply the delta while rendering every effective
-selected image/stroke and the combined bounds. Disable/remove native Konva
-image dragging and `onDragEnd` so movement cannot apply twice. Pointer-up calls
-`onMoveSelection` once when total delta is non-zero, then clears the preview.
+point plus the current content identity and exact effective-selection identity.
+Pointer move computes the total delta from that fixed origin and updates both
+`selectionPreviewDeltaRef` and `selectionPreviewDelta`. Apply the delta while
+rendering every effective selected image/stroke and the combined bounds.
+Disable/remove native Konva image dragging and `onDragEnd` so movement cannot
+apply twice. Pointer-up uses the current pointer when available and otherwise
+falls back to `selectionPreviewDeltaRef`; it calls `onMoveSelection` once when
+the total delta is non-zero, then clears the preview.
+
+Add one centralized cancellation routine that clears pan, group drag, marquee,
+selection preview, and draft gesture refs/state without invoking parent commit
+callbacks. Invoke it from window blur and Stage `onTouchCancel`. If content or
+the exact effective-selection identity changes during a group drag, cancel that
+drag. If content changes during marquee or draft drawing, cancel those gestures.
+Do not cancel temporary pan merely because its own viewport update produced a
+new content object.
 
 - [ ] **Step 7: Render external selection chrome and transformer**
 
