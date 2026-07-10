@@ -1,15 +1,24 @@
 import {
+  ArrowDown,
+  ArrowUp,
+  BringToFront,
   Brush,
+  Clipboard,
+  ClipboardCopy,
   Eraser,
   Hand,
   ImagePlus,
+  Maximize2,
   Minus,
   MousePointer2,
   Plus,
   Redo2,
+  SendToBack,
+  Trash2,
   Undo2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { CanvasOrderDirection } from "../../lib/canvas/ordering";
 import type { CanvasTool } from "../../types";
 
 interface CanvasToolbarProps {
@@ -18,6 +27,9 @@ interface CanvasToolbarProps {
   strokeSize: number;
   canUndo: boolean;
   canRedo: boolean;
+  selectedObjectCount: number;
+  zoomPercent: number;
+  canPaste: boolean;
   onToolChange: (tool: CanvasTool) => void;
   onColorChange: (color: string) => void;
   onSizeChange: (size: number) => void;
@@ -26,6 +38,12 @@ interface CanvasToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onImportImage: () => void;
+  onDeleteSelection: () => void;
+  onCopySelection: () => void;
+  onPasteSelection: () => void;
+  onReorderSelection: (direction: CanvasOrderDirection) => void;
+  onFitFrame: () => void;
+  onFitSelection: () => void;
 }
 
 const TOOL_BUTTON_CLASS =
@@ -37,6 +55,9 @@ export default function CanvasToolbar({
   strokeSize,
   canUndo,
   canRedo,
+  selectedObjectCount,
+  zoomPercent,
+  canPaste,
   onToolChange,
   onColorChange,
   onSizeChange,
@@ -45,8 +66,15 @@ export default function CanvasToolbar({
   onZoomIn,
   onZoomOut,
   onImportImage,
+  onDeleteSelection,
+  onCopySelection,
+  onPasteSelection,
+  onReorderSelection,
+  onFitFrame,
+  onFitSelection,
 }: CanvasToolbarProps) {
   const { t } = useTranslation();
+  const hasSelection = selectedObjectCount > 0;
 
   const tools: Array<{
     key: CanvasTool;
@@ -86,6 +114,104 @@ export default function CanvasToolbar({
             className={TOOL_BUTTON_CLASS}
           >
             <ImagePlus size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            aria-label={t("canvas.copySelection")}
+            title={t("canvas.copySelection")}
+            onClick={onCopySelection}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <ClipboardCopy size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            aria-label={t("canvas.pasteSelection")}
+            title={t("canvas.pasteSelection")}
+            onClick={onPasteSelection}
+            disabled={!canPaste}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <Clipboard size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            aria-label={t("canvas.deleteSelection")}
+            title={t("canvas.deleteSelection")}
+            onClick={onDeleteSelection}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <Trash2 size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            aria-label={t("canvas.bringForward")}
+            title={t("canvas.bringForward")}
+            onClick={() => onReorderSelection("forward")}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <ArrowUp size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            aria-label={t("canvas.sendBackward")}
+            title={t("canvas.sendBackward")}
+            onClick={() => onReorderSelection("backward")}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <ArrowDown size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            aria-label={t("canvas.bringToFront")}
+            title={t("canvas.bringToFront")}
+            onClick={() => onReorderSelection("front")}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <BringToFront size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            aria-label={t("canvas.sendToBack")}
+            title={t("canvas.sendToBack")}
+            onClick={() => onReorderSelection("back")}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <SendToBack size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            aria-label={t("canvas.fitFrame")}
+            title={t("canvas.fitFrame")}
+            onClick={onFitFrame}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <Maximize2 size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            aria-label={t("canvas.fitSelection")}
+            title={t("canvas.fitSelection")}
+            onClick={onFitSelection}
+            disabled={!hasSelection}
+            className={TOOL_BUTTON_CLASS}
+          >
+            <MousePointer2 size={16} strokeWidth={1.8} />
           </button>
         </div>
 
@@ -152,6 +278,12 @@ export default function CanvasToolbar({
             >
               <Plus size={16} strokeWidth={1.8} />
             </button>
+          </div>
+
+          <div className="flex h-10 items-center gap-2 whitespace-nowrap rounded-[10px] border border-border-subtle bg-surface px-3 text-[11px] font-medium text-muted">
+            <span>{t("canvas.selectionCount", { count: selectedObjectCount })}</span>
+            <span aria-hidden="true">·</span>
+            <span>{t("canvas.zoomStatus", { zoom: zoomPercent })}</span>
           </div>
         </div>
       </div>

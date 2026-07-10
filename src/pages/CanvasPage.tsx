@@ -16,18 +16,22 @@ import CanvasGenerationPanel from "../components/canvas/CanvasGenerationPanel";
 import CanvasLayersPanel from "../components/canvas/CanvasLayersPanel";
 import CanvasStage from "../components/canvas/CanvasStage";
 import CanvasToolbar from "../components/canvas/CanvasToolbar";
+import { copyCanvasObjects, pasteCanvasObjects } from "../lib/canvas/clipboard";
+import type { CanvasClipboard } from "../lib/canvas/clipboard";
+import { getCombinedCanvasBounds } from "../lib/canvas/bounds";
 import {
   cloneCanvasDocumentContent,
   createCanvasDocumentContent,
   createCanvasLayer,
   createImageObject,
   getActiveLayer,
+  removeCanvasObjects,
   resetImageObjectAspect,
   sanitizeCanvasDocumentContent,
   updateImageObject,
 } from "../lib/canvas/document";
 import { exportCanvasFrame, readImageSize } from "../lib/canvas/export";
-import { clampZoom } from "../lib/canvas/frame";
+import { clampZoom, fitViewportToCanvasRect } from "../lib/canvas/frame";
 import {
   createHistory,
   pushHistory,
@@ -35,6 +39,10 @@ import {
   replaceHistory,
   undoHistory,
 } from "../lib/canvas/history";
+import { reorderCanvasObjects } from "../lib/canvas/ordering";
+import type { CanvasOrderDirection } from "../lib/canvas/ordering";
+import { reconcileSelectedObjectIds } from "../lib/canvas/selection";
+import { translateCanvasObjects } from "../lib/canvas/transforms";
 import { useCanvasDocumentsQuery } from "../lib/queries/canvasDocuments";
 import type {
   CanvasDocumentContent,
@@ -58,6 +66,9 @@ export default function CanvasPage() {
   const [strokeColor, setStrokeColor] = useState("#1f2937");
   const [strokeSize, setStrokeSize] = useState(6);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
+  const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null);
+  const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
   const isDesktopRuntime = hasTauriRuntime();
   const [history, setHistory] = useState(() =>
     createHistory<CanvasDocumentContent>(createCanvasDocumentContent()),
@@ -86,6 +97,8 @@ export default function CanvasPage() {
   }, [documents]);
 
   useEffect(() => {
+    setSelectedObjectIds((current) => (current.length ? [] : current));
+
     if (!selectedDocumentId) {
       return;
     }
@@ -100,6 +113,7 @@ export default function CanvasPage() {
         const nextContent = sanitizeCanvasDocumentContent(document.content);
         setHistory(createHistory(nextContent));
         setActiveLayerId(nextContent.layers[0]?.id ?? null);
+        setSelectedObjectIds([]);
         setIsDirty(false);
       })
       .catch(() => {})
@@ -134,6 +148,16 @@ export default function CanvasPage() {
   const activeLayer = getActiveLayer(content, activeLayerId);
   const frame = content.frame;
 
+  useEffect(() => {
+    setSelectedObjectIds((current) => {
+      const reconciled = reconcileSelectedObjectIds(content, current);
+      const isUnchanged =
+        reconciled.length === current.length &&
+        reconciled.every((objectId, index) => objectId === current[index]);
+      return isUnchanged ? current : reconciled;
+    });
+  }, [content]);
+
   const saveStatusLabel = useMemo(() => {
     if (isSaving) {
       return t("canvas.saveStatus.saving");
@@ -149,6 +173,58 @@ export default function CanvasPage() {
       options?.replace ? replaceHistory(current, nextContent) : pushHistory(current, nextContent),
     );
     setIsDirty(true);
+  }
+
+  function updateSelection(candidateIds: string[]) {
+    setSelectedObjectIds(reconcileSelectedObjectIds(content, candidateIds));
+  }
+
+  function handleDeleteSelection() {
+    if (!selectedObjectIds.length) {
+      return;
+    }
+
+    updateContent(removeCanvasObjects(content, selectedObjectIds));
+    setSelectedObjectIds([]);
+  }
+
+  function handleCopySelection() {
+    setClipboard(copyCanvasObjects(content, selectedObjectIds));
+  }
+
+  function handlePasteSelection() {
+    const result = pasteCanvasObjects(content, clipboard, activeLayer?.id ?? null);
+    if (!result.pastedObjectIds.length) {
+      return;
+    }
+
+    updateContent(result.content);
+    setSelectedObjectIds(result.pastedObjectIds);
+  }
+
+  function handleMoveSelection(delta: { dx: number; dy: number }) {
+    if (!selectedObjectIds.length) {
+      return;
+    }
+
+    updateContent(translateCanvasObjects(content, selectedObjectIds, delta));
+  }
+
+  function handleReorderSelection(direction: CanvasOrderDirection) {
+    if (!selectedObjectIds.length) {
+      return;
+    }
+
+    updateContent(reorderCanvasObjects(content, selectedObjectIds, direction));
+  }
+
+  function handleFitFrame() {
+    handleViewportChange(fitViewportToCanvasRect(content.frame, stageSize));
+  }
+
+  function handleFitSelection() {
+    const bounds = getCombinedCanvasBounds(content, selectedObjectIds) ?? content.frame;
+    handleViewportChange(fitViewportToCanvasRect(bounds, stageSize));
   }
 
   async function persistDocument(nextContent: CanvasDocumentContent) {
@@ -309,6 +385,91 @@ export default function CanvasPage() {
     });
   }
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const hasCommandModifier = event.metaKey || event.ctrlKey;
+
+      if (hasCommandModifier) {
+        if (key === "z") {
+          event.preventDefault();
+          if (event.shiftKey) {
+            if (history.future.length) handleRedo();
+          } else if (history.past.length) {
+            handleUndo();
+          }
+          return;
+        }
+
+        if (key === "y") {
+          event.preventDefault();
+          if (history.future.length) handleRedo();
+          return;
+        }
+
+        if (key === "c") {
+          event.preventDefault();
+          handleCopySelection();
+          return;
+        }
+
+        if (key === "v") {
+          event.preventDefault();
+          handlePasteSelection();
+          return;
+        }
+
+        return;
+      }
+
+      if (key === "delete" || key === "backspace") {
+        event.preventDefault();
+        handleDeleteSelection();
+        return;
+      }
+
+      if (key === "escape") {
+        event.preventDefault();
+        setSelectedObjectIds([]);
+        return;
+      }
+
+      const tool =
+        key === "v"
+          ? "select"
+          : key === "b"
+            ? "brush"
+            : key === "e"
+              ? "eraser"
+              : key === "h"
+                ? "pan"
+                : null;
+      if (tool) {
+        event.preventDefault();
+        setActiveTool(tool);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    activeLayer?.id,
+    clipboard,
+    content,
+    history.future.length,
+    history.past.length,
+    selectedObjectIds,
+  ]);
+
   return (
     <div className="h-full min-h-0 overflow-x-auto bg-background">
       <div
@@ -329,12 +490,16 @@ export default function CanvasPage() {
                   content={content}
                   activeLayerId={activeLayerId}
                   activeTool={activeTool}
+                  selectedObjectIds={selectedObjectIds}
                   strokeColor={strokeColor}
                   strokeSize={strokeSize}
                   onViewportChange={handleViewportChange}
                   onAddStroke={handleAddStroke}
                   onTransformImage={handleTransformImage}
                   onResetImageAspect={handleResetImageAspect}
+                  onSelectionChange={updateSelection}
+                  onMoveSelection={handleMoveSelection}
+                  onStageSizeChange={setStageSize}
                   onExport={() => exportCanvasFrame(content)}
                 />
                 <div className="absolute right-5 top-5 z-10 rounded-[10px] border border-border-subtle bg-surface/88 px-3 py-2 text-[12px] font-medium text-muted shadow-card backdrop-blur-xl">
@@ -350,6 +515,9 @@ export default function CanvasPage() {
                     strokeSize={strokeSize}
                     canUndo={history.past.length > 0}
                     canRedo={history.future.length > 0}
+                    selectedObjectCount={selectedObjectIds.length}
+                    zoomPercent={Math.round(content.viewport.scale * 100)}
+                    canPaste={Boolean(clipboard?.entries.length)}
                     onToolChange={setActiveTool}
                     onColorChange={setStrokeColor}
                     onSizeChange={setStrokeSize}
@@ -358,6 +526,12 @@ export default function CanvasPage() {
                     onZoomIn={() => handleZoom("in")}
                     onZoomOut={() => handleZoom("out")}
                     onImportImage={() => void handleImportImage()}
+                    onDeleteSelection={handleDeleteSelection}
+                    onCopySelection={handleCopySelection}
+                    onPasteSelection={handlePasteSelection}
+                    onReorderSelection={handleReorderSelection}
+                    onFitFrame={handleFitFrame}
+                    onFitSelection={handleFitSelection}
                   />
                 </div>
               </div>

@@ -26,7 +26,7 @@ const pickSourceImages = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { count?: number }) =>
+    t: (key: string, options?: { count?: number; number?: number; zoom?: number }) =>
       ({
         "canvas.title": "Infinite Canvas",
         "canvas.assetsTitle": "Canvas Assets",
@@ -38,9 +38,24 @@ vi.mock("react-i18next", () => ({
         "canvas.toolbarPlaceholder": "Canvas tools will live here",
         "canvas.newCanvas": "New Canvas",
         "canvas.importImage": "Import Image",
+        "canvas.copySelection": "Copy",
+        "canvas.pasteSelection": "Paste",
+        "canvas.deleteSelection": "Delete",
+        "canvas.bringForward": "Bring Forward",
+        "canvas.sendBackward": "Send Backward",
+        "canvas.bringToFront": "Bring to Front",
+        "canvas.sendToBack": "Send to Back",
+        "canvas.fitFrame": "Fit Frame",
+        "canvas.fitSelection": "Fit Selection",
+        "canvas.selectionCount": `${options?.count ?? 0} selected`,
+        "canvas.zoomStatus": `${options?.zoom ?? 0}%`,
         "canvas.layersTitle": "Layers",
         "canvas.frameAspect": "Frame",
         "canvas.newLayer": "New Layer",
+        "canvas.lockLayer": "Lock Layer",
+        "canvas.unlockLayer": "Unlock Layer",
+        "canvas.hideLayer": "Hide Layer",
+        "canvas.showLayer": "Show Layer",
         "canvas.defaultLayerName": `Canvas Layer ${options?.number ?? 1}`,
         "canvas.tool.select": "Select",
         "canvas.tool.brush": "Brush",
@@ -101,20 +116,117 @@ vi.mock("../components/layout/AppLayout", () => ({
 vi.mock("../components/canvas/CanvasStage", () => ({
   default: ({
     activeTool,
+    selectedObjectIds,
+    onSelectionChange,
+    onMoveSelection,
+    onStageSizeChange,
     onExport,
   }: {
     activeTool: string;
+    selectedObjectIds: string[];
+    onSelectionChange: (ids: string[]) => void;
+    onMoveSelection: (delta: { dx: number; dy: number }) => void;
+    onStageSizeChange: (size: { width: number; height: number }) => void;
     onExport: () => Promise<string>;
   }) => (
     <div>
       <div>Canvas stage</div>
       <div>Active tool: {activeTool}</div>
+      <div>Selected objects: {selectedObjectIds.join(",") || "none"}</div>
+      <button type="button" onClick={() => onSelectionChange(["image-1"])}>
+        select image
+      </button>
+      <button type="button" onClick={() => onMoveSelection({ dx: 12, dy: 8 })}>
+        move selection
+      </button>
+      <button
+        type="button"
+        onClick={() => onStageSizeChange({ width: 800, height: 600 })}
+      >
+        resize stage
+      </button>
       <button type="button" onClick={() => void onExport()}>
         export stage
       </button>
     </div>
   ),
 }));
+
+function canvasDocumentWithImage() {
+  return {
+    id: "canvas-1",
+    project_id: "project-1",
+    name: "Mood board",
+    document_path: "/tmp/canvas-1.json",
+    preview_path: null,
+    width: 1024,
+    height: 1024,
+    created_at: "2026-05-12T00:00:00Z",
+    updated_at: "2026-05-12T00:00:00Z",
+    deleted_at: null,
+    content: {
+      version: 1,
+      viewport: { x: 0, y: 0, scale: 1 },
+      frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
+      layers: [
+        {
+          id: "layer-1",
+          name: "Sketch",
+          visible: true,
+          locked: false,
+          objects: [
+            {
+              type: "image" as const,
+              id: "image-1",
+              image_path: "/tmp/image-1.png",
+              x: 100,
+              y: 50,
+              width: 100,
+              height: 100,
+              original_width: 100,
+              original_height: 100,
+              rotation: 0,
+              opacity: 1,
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function canvasDocumentWithTwoImages() {
+  const document = canvasDocumentWithImage();
+  const layer = document.content.layers[0];
+
+  return {
+    ...document,
+    content: {
+      ...document.content,
+      layers: [
+        {
+          ...layer,
+          objects: [
+            ...layer.objects,
+            {
+              type: "image" as const,
+              id: "image-2",
+              image_path: "/tmp/image-2.png",
+              x: 300,
+              y: 200,
+              width: 100,
+              height: 100,
+              original_width: 100,
+              original_height: 100,
+              rotation: 0,
+              opacity: 1,
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
 
 describe("CanvasPage", () => {
   beforeEach(() => {
@@ -357,5 +469,191 @@ describe("CanvasPage", () => {
     });
 
     expect(screen.getByText("Active tool: select")).toBeInTheDocument();
+  });
+
+  it("deletes the selected image with the Delete shortcut and autosaves", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("1 object")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    expect(await screen.findByText("Selected objects: image-1")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Delete", code: "Delete" });
+
+    await waitFor(
+      () => {
+        expect(saveCanvasDocument).toHaveBeenCalledWith(
+          "canvas-1",
+          expect.objectContaining({
+            layers: [expect.objectContaining({ objects: [] })],
+          }),
+          expect.any(String),
+        );
+      },
+      { timeout: 2_000 },
+    );
+  });
+
+  it("supports tool shortcuts but ignores them while typing in the prompt", async () => {
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    await screen.findByText("Mood board");
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    expect(screen.getByText("Active tool: select")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "b", code: "KeyB" });
+    expect(screen.getByText("Active tool: brush")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    const promptEditor = screen.getByLabelText("Generation prompt");
+    promptEditor.focus();
+    fireEvent.keyDown(promptEditor, { key: "b", code: "KeyB" });
+
+    expect(screen.getByText("Active tool: select")).toBeInTheDocument();
+  });
+
+  it("copies and pastes the selected image and autosaves both objects", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("1 object")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+
+    await waitFor(
+      () => {
+        expect(saveCanvasDocument).toHaveBeenCalled();
+        const savedContent = saveCanvasDocument.mock.calls.at(-1)?.[1];
+        expect(savedContent.layers[0].objects).toHaveLength(2);
+        expect(savedContent.layers[0].objects[0].id).toBe("image-1");
+        expect(savedContent.layers[0].objects[1]).toMatchObject({
+          type: "image",
+          image_path: "/tmp/image-1.png",
+        });
+        expect(savedContent.layers[0].objects[1].id).not.toBe("image-1");
+      },
+      { timeout: 2_000 },
+    );
+  });
+
+  it("moves the selected image by the stage delta and autosaves", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("1 object")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+
+    await waitFor(
+      () => {
+        expect(saveCanvasDocument).toHaveBeenCalled();
+        const savedContent = saveCanvasDocument.mock.calls.at(-1)?.[1];
+        expect(savedContent.layers[0].objects[0]).toMatchObject({ x: 112, y: 58 });
+      },
+      { timeout: 2_000 },
+    );
+  });
+
+  it("fits the selected image to the reported stage size", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("1 object")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "resize stage" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit Selection" }));
+
+    expect(await screen.findByText("400%")).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(saveCanvasDocument).toHaveBeenCalledWith(
+          "canvas-1",
+          expect.objectContaining({
+            viewport: { x: -200, y: -100, scale: 4 },
+          }),
+          expect.any(String),
+        );
+      },
+      { timeout: 2_000 },
+    );
+  });
+
+  it("brings the selected image to the front and autosaves the object order", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithTwoImages());
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("2 objects")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bring to Front" }));
+
+    await waitFor(
+      () => {
+        expect(saveCanvasDocument).toHaveBeenCalled();
+        const savedContent = saveCanvasDocument.mock.calls.at(-1)?.[1];
+        expect(savedContent.layers[0].objects.map((object: { id: string }) => object.id)).toEqual([
+          "image-2",
+          "image-1",
+        ]);
+      },
+      { timeout: 2_000 },
+    );
+  });
+
+  it("clears selection immediately when switching canvas documents", async () => {
+    const firstDocument = canvasDocumentWithImage();
+    const secondDocument = {
+      ...canvasDocumentWithImage(),
+      id: "canvas-2",
+      name: "Second canvas",
+      document_path: "/tmp/canvas-2.json",
+    };
+    let resolveSecondDocument: (document: typeof secondDocument) => void = () => {};
+
+    listCanvasDocuments.mockResolvedValueOnce([firstDocument, secondDocument]);
+    getCanvasDocument.mockResolvedValueOnce(firstDocument);
+    getCanvasDocument.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecondDocument = resolve;
+        }),
+    );
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("1 object")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    expect(await screen.findByText("Selected objects: image-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
+
+    expect(await screen.findByText("Selected objects: none")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSecondDocument(secondDocument);
+    });
+  });
+
+  it("clears external selection when its layer becomes locked", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("1 object")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    expect(await screen.findByText("Selected objects: image-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Lock Layer" }));
+
+    expect(await screen.findByText("Selected objects: none")).toBeInTheDocument();
   });
 });

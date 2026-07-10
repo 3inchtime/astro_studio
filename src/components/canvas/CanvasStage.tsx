@@ -33,6 +33,7 @@ interface CanvasStageProps {
   content: CanvasDocumentContent;
   activeLayerId: string | null;
   activeTool: CanvasTool;
+  selectedObjectIds: string[];
   strokeColor: string;
   strokeSize: number;
   onViewportChange: (viewport: CanvasViewport) => void;
@@ -42,6 +43,9 @@ interface CanvasStageProps {
     transform: { x: number; y: number; width: number; height: number; rotation?: number },
   ) => void;
   onResetImageAspect: (objectId: string) => void;
+  onSelectionChange: (ids: string[]) => void;
+  onMoveSelection: (delta: { dx: number; dy: number }) => void;
+  onStageSizeChange: (size: { width: number; height: number }) => void;
   onExport: () => Promise<string>;
 }
 
