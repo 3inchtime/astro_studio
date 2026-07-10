@@ -12,8 +12,9 @@
 
 ## File Structure
 
-- Modify `src-tauri/src/db.rs`: v16 job migration plus v17 stage/worker-lease
-  migration and invariant assertions.
+- Modify `src-tauri/src/db.rs`: v16 job migration plus v17 stage,
+  recovery-artifact metadata, and fenced worker-lease migration with invariant
+  assertions.
 - Modify `src-tauri/src/models.rs`: serializable job, filter, enqueue, and event models.
 - Modify `src-tauri/src/api_gateway.rs`: structured single-attempt provider errors, retry metadata, and fake-engine seams.
 - Create `src-tauri/src/generation_jobs.rs`: job persistence, state transitions, idempotent enqueue, list/get/cancel/retry operations.
@@ -475,6 +476,7 @@ git commit -m "feat: add generation job repository"
 ## Task 3: Pre-Created Generation Execution Context
 
 **Files:**
+- Modify: `src-tauri/Cargo.toml`
 - Modify: `src-tauri/src/api_gateway.rs`
 - Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/generation_lifecycle.rs`
@@ -509,7 +511,7 @@ fn job_request_snapshot_round_trips_without_api_key() {
 fn provider_errors_preserve_safe_retry_and_ambiguity() {
     let rate_limited = EngineCallError::from_http_status(429, Some(3));
     assert_eq!(rate_limited.code, "rate_limited");
-    assert_eq!(rate_limited.retry_after_seconds, Some(3));
+    assert_eq!(rate_limited.retry_after, Some(RetryAfterHint::DelaySeconds(3)));
     assert!(rate_limited.safe_to_retry);
 
     let unknown = EngineCallError::provider_outcome_unknown("connection reset");
@@ -570,14 +572,22 @@ impl From<GenerationJobRequestKind> for GenerationLifecycleKind {
 pub(crate) struct EngineCallError {
     pub code: String,
     pub sanitized_message: String,
-    pub retry_after_seconds: Option<u64>,
+    pub retry_after: Option<RetryAfterHint>,
     pub safe_to_retry: bool,
     pub outcome_ambiguous: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RetryAfterHint {
+    DelaySeconds(u64),
+    HttpDate(chrono::DateTime<chrono::Utc>),
 }
 
 pub(crate) struct ProviderAttemptResponse {
     pub body_text: String,
     pub response_file: String,
+    pub response_size: u64,
+    pub response_sha256: String,
     pub requested_image_count: u8,
 }
 
@@ -662,12 +672,18 @@ provider returning fewer images does not trigger hidden follow-up paid calls;
 the response proceeds to completion with only the returned candidates, while
 request metadata records requested and actual counts.
 
-On a successful HTTP response, atomically write (`temp -> fsync/close -> rename`)
-and verify the raw response artifact before returning it. Gateway code must not
-mutate `generation_recoveries`. Expose a separate fakeable decode/download
-operation over `ProviderAttemptResponse`; it performs no provider generation
-submission. Lifecycle first commits `response_ready` with the verified path,
-then decodes/downloads so a crash can resume locally without a paid replay.
+Derive the final response path deterministically from generation/job ID. On a
+successful HTTP response, write one self-describing envelope containing body,
+byte size, and SHA-256 using `temp -> fsync/close -> rename -> directory fsync`,
+then reread and verify it before returning. Gateway code must not mutate
+`generation_recoveries`; lifecycle atomically promotes the row to
+response-ready after verification. Task 4 adds a distinct persisted
+`expected_response_file` before the paid call, plus size/hash columns, to close
+the remaining rename-before-promotion crash window without making a requesting
+row look response-ready. Expose a separate fakeable decode/download operation
+over `ProviderAttemptResponse`; it performs no provider generation submission.
+Lifecycle first commits `response_ready` with the verified path, then
+decodes/downloads so a crash can resume locally without a paid replay.
 Raw body/artifact types are internal and never derive `Serialize` or expose body
 content through `Debug`/errors/events.
 
@@ -707,6 +723,11 @@ Do not make `job_id` optional. The managed worker owns
 `generation-job:updated`; only this compatibility adapter translates committed
 outcomes into legacy `generation:*` events.
 
+This direct execution exists only during the Task 3 intermediate commit, before
+a worker is available. Task 4 must rewire compatibility commands to enqueue,
+wake, and await that durable job while the leased worker remains the sole
+provider/lifecycle executor; no direct adapter execution survives C1.
+
 For edits, enqueue persists canonical authorized paths. Execution revalidates
 those paths for existence, header, and type after restart without consulting
 `SelectedImageRegistry`; invalid paths fail as `source_image_invalid` before an
@@ -725,7 +746,7 @@ Expected: PASS with no duplicate generation rows.
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/file_manager.rs src-tauri/src/commands/generation.rs
+git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/file_manager.rs src-tauri/src/commands/generation.rs
 git commit -m "refactor: execute precreated generations"
 ```
 
@@ -737,6 +758,9 @@ git commit -m "refactor: execute precreated generations"
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/generation_jobs.rs`
+- Modify: `src-tauri/src/generation_lifecycle.rs`
+- Modify: `src-tauri/src/commands/generation.rs`
+- Modify: `src-tauri/src/updater.rs`
 
 - [ ] **Step 1: Write failing worker-policy tests**
 
@@ -784,8 +808,8 @@ Cover these policies with injected clocks/sleepers and real SQLite state:
   sender behavior, registry cleanup on every return/panic path, and no DB lock
   while holding the cancellation-map lock;
 - exact retry boundaries (`max_auto_attempts=0/1/2`), calls <= `1 + max`, wait
-  cancellation without increment, overflow/huge Retry-After, HTTP-date parsing,
-  and crash after an attempt reservation;
+  cancellation without increment, seconds/past/future HTTP-date,
+  overflow/huge Retry-After, and crash after an attempt reservation;
 - fixed-cadence heartbeat with a fake clock, stop after terminal/cancel, and a
   heartbeat write failure that does not kill the worker;
 - notify-before-await, coalesced notifications draining all queued rows,
@@ -793,9 +817,23 @@ Cover these policies with injected clocks/sleepers and real SQLite state:
 - double start, database lease exclusion/takeover, shutdown while idle/backoff/
   provider/local staging, and durable cancellation observed from another queue
   instance;
+- lease fencing after takeover: the expired owner's heartbeat, retry,
+  response-ready promotion, success, and failure writes are rejected while the
+  new owner can recover and commit the only terminal result;
+- legacy compatibility command plus an ordinary queued job never exceeds one
+  concurrent fake-engine call, and cancelling a running legacy request reaches
+  the same worker token and durable terminal state;
+- repeated normal Tauri exit requests schedule shutdown once and stay blocked
+  until worker join; normal exit and updater restart both perform staging
+  cleanup and release the lease before the process exits/restarts, whether idle,
+  backing off, awaiting provider I/O, or staging locally;
 - missing, tampered, oversized, non-regular, or app-directory-escaping recovery
-  artifacts, repeated crash, and pre-v16 processing generations without jobs;
-  none of these recovery paths may call the provider.
+  artifacts, truncated envelopes, leftover temp files, declared metadata/body
+  tampering, repeated crash, rename-before-response-ready-commit,
+  response-ready-after-commit crash, and pre-v16 processing generations without
+  jobs; a complete deterministic requesting artifact is promoted and recovered
+  with zero engine calls, and none of the recovery-only synthetic paths may call
+  the provider.
 
 - [ ] **Step 2: Run worker tests and verify RED**
 
@@ -807,10 +845,14 @@ Expected: FAIL because the worker module is missing.
 
 - [ ] **Step 3: Implement queue state and worker loop**
 
-Add v17 migration coverage for persisted `generation_jobs.stage` plus a
-singleton `generation_worker_lease` row (`owner_id`, acquired/heartbeat/expiry
-timestamps). This database lease, not process-local state alone, enforces one
-worker across multiple app processes and supports expiry takeover.
+Add v17 migration coverage for persisted `generation_jobs.stage`,
+`generation_recoveries.expected_response_file`,
+`generation_recoveries.response_size`, and
+`generation_recoveries.response_sha256`, plus a singleton
+`generation_worker_lease` row (`owner_id`, monotonically increasing
+`fencing_epoch`, and acquired/heartbeat/expiry timestamps). This database
+lease, not process-local state alone, enforces one worker across multiple app
+processes and supports fenced expiry takeover.
 
 Create managed state with wake, cooperative cancellation, lifecycle guard, and
 task ownership:
@@ -823,13 +865,19 @@ pub(crate) struct GenerationJobQueue {
 
 struct GenerationJobQueueInner {
     wake: tokio::sync::Notify,
-    cancellations: tokio::sync::Mutex<
+    cancellations: std::sync::Mutex<
         std::collections::HashMap<String, tokio::sync::watch::Sender<bool>>,
     >,
     started: std::sync::atomic::AtomicBool,
     shutdown: tokio::sync::watch::Sender<bool>,
     task: tokio::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     owner_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkerTransitionAuthority {
+    pub owner_id: String,
+    pub fencing_epoch: i64,
 }
 
 impl GenerationJobQueue {
@@ -842,9 +890,11 @@ impl GenerationJobQueue {
 
 The worker must:
 
-1. Acquire/renew the database lease before reconciliation or claim. A second
-   in-process `start()` fails deterministically; another process remains passive
-   until lease expiry/takeover.
+1. Acquire/renew the database lease before reconciliation or claim. Acquisition
+   atomically increments `fencing_epoch` and returns
+   `WorkerTransitionAuthority { owner_id, fencing_epoch }`. A second in-process
+   `start()` fails deterministically; another process remains passive until
+   lease expiry/takeover.
 2. Reconcile startup states in one short transaction before accepting work.
 3. Claim one FIFO queued job with an atomic queued-to-running update that also
    sets persisted stage and heartbeat.
@@ -852,22 +902,27 @@ The worker must:
    releasing the map lock, then re-reading durable
    `cancel_requested_at` to close the claim/registration race.
 5. Resolve the profile secret by stored profile ID without changing endpoint/model snapshots.
-6. Drop-cancel only the provider HTTP future. Local decode/download/staging
+6. Before each provider call, derive the deterministic app-owned final response
+   path and persist it as `expected_response_file` with a fenced transaction;
+   `response_file`, size, and hash remain NULL while state is `requesting`.
+7. Drop-cancel only the provider HTTP future. Local decode/download/staging
    observes a cancellation probe; once blocking work starts, await completion
    and RAII cleanup. Never abandon a blocking file task.
-7. For `safe_to_retry` errors only, wait cancellably, recheck cancellation and
-   lease, reserve the next automatic attempt with a conditional transaction,
-   then call the engine again on the same job.
-8. Convert ambiguous outcomes to `interrupted` with `provider_outcome_unknown`; never replay them automatically.
-9. Persist generation/job terminal state in one transaction, release the
+8. For `safe_to_retry` errors only, retain the typed
+   `RetryAfterHint::{DelaySeconds, HttpDate}` through worker policy, calculate
+   the delay with the injected clock, wait cancellably, recheck cancellation
+   and lease, reserve the next automatic attempt with a conditional
+   transaction, then call the engine again on the same job.
+9. Convert ambiguous outcomes to `interrupted` with `provider_outcome_unknown`; never replay them automatically.
+10. Persist generation/job terminal state in one transaction, release the
    database lock, then emit one structured event built from the committed row.
-10. Update `last_heartbeat_at` and renew the lease on an injected interval while
+11. Update `last_heartbeat_at` and renew the lease on an injected interval while
     provider/backoff/recovery/local staging is active. Conditional heartbeat
     failures are logged and do not emit UI events or kill the loop.
-11. Drain claims until no queued rows remain. Before sleeping, create/enable a
+12. Drain claims until no queued rows remain. Before sleeping, create/enable a
     `Notify::notified()` future, recheck the DB, then select wake, bounded poll,
     lease timing, or shutdown so wake coalescing cannot strand work.
-12. Stop new claims on shutdown, signal the active stage, await safe local
+13. Stop new claims on shutdown, signal the active stage, await safe local
     cleanup, release the lease if still owner, remove the cancellation sender,
     and join the owned task. A single job/event/heartbeat error never stops the
     loop.
@@ -878,21 +933,30 @@ submissions are at most `1 + max_auto_attempts`. Cancellation during backoff
 does not increment it. Immediately before a retry, a conditional transaction
 increments `n -> n+1`; a crash after reservation is conservatively reconciled
 as interrupted rather than replayed. Use saturating exponential backoff with
-injected jitter, parse Retry-After seconds and HTTP-date, and if Retry-After
-exceeds the configured safe cap, stop auto retry and leave the terminal job
-manually retryable instead of calling early.
+injected jitter. The worker's injected clock maps a past HTTP-date to zero delay;
+overflow, an unrepresentable future date, or any delay above the configured safe
+cap stops auto retry and leaves the terminal job manually retryable instead of
+calling early.
 
-Every worker-owned claim, stage, retry reservation, heartbeat, success, or
-failure transaction verifies the same unexpired lease owner inside that
-transaction. Losing the lease prevents further durable worker transitions; the
-old owner cleans local staging and exits while the new owner reconciles the
-still-durable state.
+Every worker-owned claim, startup transition, stage update, expected-response
+path write, retry reservation, heartbeat, response-ready promotion,
+cancellation acknowledgement, success, or failure transaction accepts the same
+`WorkerTransitionAuthority` and verifies its unexpired `owner_id` plus exact
+`fencing_epoch` inside that transaction. Task 4 therefore adds this authority
+to the Task 3 response-ready, success, and failure finalizers in
+`generation_lifecycle.rs`; checking only the current lease row or owner string
+is insufficient. Losing the lease prevents further durable worker transitions,
+including a stale owner's terminal commit; the old owner cleans local staging
+and exits while the new owner reconciles the still-durable state.
 
-Cancellation uses `send_replace(true)`. A scope guard unregisters the sender on
-all exits. Never hold the cancellation-map mutex while acquiring the database
-mutex. Success SQL requires running status and `cancel_requested_at IS NULL`;
-zero rows trigger a re-read and cancel acknowledgement. Cancel-first cleans
-staged files and commits cancelled; completion-first remains completed.
+Cancellation uses `send_replace(true)`. The short cancellation registry uses
+`std::sync::Mutex`, so a synchronous RAII scope guard deterministically
+unregisters the sender on every return and panic path without spawning async
+cleanup. Never hold the cancellation-map mutex while acquiring the database
+mutex or across an await. Success SQL requires running status and
+`cancel_requested_at IS NULL`; zero rows trigger a re-read and cancel
+acknowledgement. Cancel-first cleans staged files and commits cancelled;
+completion-first remains completed.
 
 Extract a fakeable worker core below Tauri setup. `WorkerDeps` owns
 `Arc<dyn Trait + Send + Sync>` engine, file store/decoder, event sink, clock,
@@ -906,11 +970,27 @@ Define `reconcile_startup` as a short repository transaction returning owned
 `RecoveryCandidate` values with job/request/recovery metadata. Queued stays
 queued. Running with response-ready metadata remains running and becomes a
 local recovery candidate; running with a cancellation request but no possible
-response becomes cancelled; other unknown running becomes interrupted. Convert
-pre-v16 `processing` generations without jobs into synthetic secret-free jobs
-in the same transaction: response-ready rows become candidates, while unknown
-requesting rows become interrupted. Synthetic jobs use reconstructed canonical
-generation fields plus `unresolved` provider sentinels and never call a provider.
+response becomes cancelled; other unknown running becomes interrupted. A
+requesting recovery may contain only its distinct deterministic
+`expected_response_file`; its `response_file`, size, and hash remain NULL. If a
+self-describing envelope exists after the rename-before-DB-commit crash window,
+validate its regular canonical path, bounded size, envelope version/body,
+declared length, and SHA-256, then atomically promote it to response-ready with
+persisted `response_file`/size/hash and resume locally with no provider call.
+
+Convert pre-v16 `processing` generations without jobs into synthetic
+secret-free jobs in the same transaction: verified response-ready rows become
+candidates, while unknown requesting rows become interrupted. Such rows use a
+dedicated persisted `legacy_response_recovery` stage/marker and a strict
+linked-validator branch: unresolved provider sentinels are valid only for a
+running recovery-only job backed by a verified response-ready legacy artifact
+with persisted size/hash. Read legacy candidates in a short transaction,
+validate artifacts outside the DB mutex, then use a fenced transaction to
+recheck state and create the running synthetic job. Unknown requesting or
+invalid legacy artifacts create a terminal interrupted/failed synthetic job,
+never a running unresolved row. Generic FIFO claim, profile resolution, and
+provider execution reject the recovery-only stage, so a synthetic job can never
+call a provider.
 
 Validate candidate files asynchronously before decode: canonical app-owned
 response directory, regular file, bounded size, and parseable supported provider
@@ -940,11 +1020,27 @@ not block setup on recovery, network, filesystem downloads, or the long-running
 loop.
 
 Delete the old startup recovery implementation and its setup `block_on` path.
-On Tauri exit, schedule queue shutdown without holding app/database state locks.
+After the worker starts, rewire every legacy synchronous generation command to
+enqueue a durable job, wake the queue, and await that job's committed terminal
+result for response compatibility. It must neither claim nor invoke lifecycle
+or provider code itself. The leased worker is the only provider/lifecycle
+executor, including for legacy callers.
+
+For normal `RunEvent::ExitRequested`, use an atomic shutdown state: the first
+event calls `ExitRequestApi::prevent_exit()` and schedules shutdown exactly
+once; duplicate events while shutdown is pending are also prevented but do not
+reschedule it. The task awaits `queue.shutdown()` (including local cleanup,
+owner/epoch lease release, and task join), switches the guard to released, and
+then calls `AppHandle::exit(original_code)`; only the resulting event is allowed
+through. Change `updater::relaunch_app` to receive the queue, await the same
+shutdown, and only then call `app.restart()`. Never hold app/database state
+locks while awaiting shutdown. Test both paths through a fake exit/restart
+coordinator rather than terminating the test process.
+
 The database lease is renewed by the active worker and released only by its
-owner; a passive process can take over after expiry. Durable cancellation and
-heartbeat polling make cancellation work even when the command is issued from a
-different process whose in-memory registry has no sender.
+exact owner/epoch; a passive process can take over after expiry. Durable
+cancellation and heartbeat polling make cancellation work even when the command
+is issued from a different process whose in-memory registry has no sender.
 
 - [ ] **Step 5: Run worker and lifecycle tests GREEN**
 
@@ -959,7 +1055,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Task 4**
 
 ```bash
-git add src-tauri/src/generation_job_worker.rs src-tauri/src/db.rs src-tauri/src/generation_jobs.rs src-tauri/src/models.rs src-tauri/src/lib.rs
+git add src-tauri/src/generation_job_worker.rs src-tauri/src/db.rs src-tauri/src/generation_jobs.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/commands/generation.rs src-tauri/src/models.rs src-tauri/src/lib.rs src-tauri/src/updater.rs
 git commit -m "feat: run persistent generation worker"
 ```
 

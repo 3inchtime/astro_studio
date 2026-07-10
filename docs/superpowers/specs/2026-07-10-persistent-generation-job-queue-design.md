@@ -112,9 +112,14 @@ Add `generation_jobs`:
 | `error_message` | Sanitized user-facing detail |
 | `retryable` | Whether manual retry is allowed |
 
-Add a singleton `generation_worker_lease` table in v17 with owner and
-acquired/heartbeat/expiry timestamps. The database lease enforces one active
-worker across app processes; an in-process started flag alone is insufficient.
+Add a singleton `generation_worker_lease` table in v17 with owner,
+monotonically increasing `fencing_epoch`, and acquired/heartbeat/expiry
+timestamps. The same migration adds the persisted job stage plus recovery
+`expected_response_file`, artifact size, and SHA-256 columns. While recovery is
+`requesting`, only the expected path may be set; `response_file`, size, and hash
+remain NULL. The database lease enforces one active worker across app processes;
+an in-process started flag alone is insufficient, and the epoch fences terminal
+writes from an expired owner after takeover.
 
 Indexes support status/queue order, generation lookup, parent chain, and source
 lookup. Because application timestamps have one-second precision, FIFO queries
@@ -211,10 +216,14 @@ Job list filters support `generation_id` in addition to status/source filters,
 so a reloaded conversation can recover job metadata for cancel/retry actions.
 
 Existing synchronous commands remain as compatibility adapters until all
-first-party frontend callers migrate. They must not become an independent
-second execution path. Each adapter creates and claims a real durable job with
-a generated client request ID, runs exactly one classified provider attempt,
-and uses the same atomic terminal finalizers; `job_id` is never optional.
+first-party frontend callers migrate. During the Task 3 intermediate commit,
+before the worker exists, an adapter may create and directly execute exactly
+one durable job to keep that commit usable. Task 4 removes that temporary path:
+each adapter enqueues a real job with a generated client request ID, wakes the
+managed queue, and awaits the job's committed terminal result only to preserve
+its response shape. It never claims a job or invokes provider/lifecycle code.
+After Task 4 the leased worker is the sole executor and `job_id` is never
+optional.
 
 ## Worker Architecture
 
@@ -228,6 +237,11 @@ The managed worker starts with the Tauri application and owns:
 6. Heartbeats and durable state transitions.
 7. Emission of structured events.
 
+No command adapter, startup reconciler, or second app process may execute a
+provider call outside the leased worker. Queue and compatibility requests share
+the same FIFO claim path and cancellation registry, keeping maximum provider
+concurrency at one.
+
 The worker must not hold the SQLite mutex while awaiting network or filesystem
 operations. Claim and each durable transition use short transactions. A
 successful terminal transaction inserts images and updates recovery,
@@ -237,11 +251,22 @@ emitted only after releasing the database lock, and never describe a state that
 can still roll back.
 
 The queue owns a started guard, shutdown signal, joined task handle, and unique
-lease owner. It drains claims until empty after every wake, uses the
+lease owner. Lease acquisition atomically increments the epoch and returns a
+`WorkerTransitionAuthority { owner_id, fencing_epoch }`. Claim, startup
+transition, stage update, expected-response path write, retry reservation,
+heartbeat, response-ready promotion, success, failure, and cancellation
+acknowledgement all validate that same unexpired authority inside their
+transaction. Merely checking that some current lease exists is insufficient.
+Lease loss stops new work and fences every later write by the former owner while
+the new owner reconciles.
+
+The queue drains claims until empty after every wake, uses the
 register-notify/recheck/select pattern to avoid lost/coalesced wakes, renews the
 lease and job heartbeat on an injected interval, and observes durable
-cancellation so another process can cancel its work. Lease loss stops new work
-and prevents terminal writes by the former owner.
+cancellation so another process can cancel its work. Its short cancellation
+sender map uses `std::sync::Mutex`; a synchronous RAII guard can therefore
+remove the sender on every return or panic without awaiting. That mutex is never
+held across an await or while taking the database mutex.
 
 An in-process wake signal notifies the worker after enqueue. A bounded fallback
 poll ensures jobs are still discovered after a lost wake signal.
@@ -254,7 +279,8 @@ Running cancellation is cooperative:
 
 1. Set `cancel_requested_at`.
 2. Signal the registered cancellation token.
-3. Abort provider HTTP, download, or save stages where safe.
+3. Drop-cancel only the provider HTTP future; local decode/download/staging
+   observes cooperative probes and awaits blocking cleanup.
 4. Let the worker perform the terminal `cancelled` transition.
 
 The UI displays "Cancelling" from `cancel_requested_at`, but the durable status
@@ -298,9 +324,12 @@ retry; using it for another parent is a stable idempotency conflict.
 
 `auto_attempt` counts automatic retry reservations after the initial provider
 call, so total submissions never exceed `1 + max_auto_attempts`. Backoff is
-saturating exponential with injected jitter. Retry-After accepts seconds and
-HTTP-date; a value above the safe automatic-wait cap ends auto retry as manually
-retryable rather than calling early. Increment occurs conditionally after a
+saturating exponential with injected jitter. Provider errors retain a typed
+`RetryAfterHint::{DelaySeconds, HttpDate}` until the worker uses its injected
+clock; HTTP-date is not prematurely reduced with wall-clock time. A delay above
+the safe automatic-wait cap, an overflowing/unrepresentable future date, or an
+invalid value ends auto retry as manually retryable rather than calling early;
+a past HTTP-date becomes zero delay. Increment occurs conditionally after a
 cancellable wait and final cancellation/lease check, immediately before the
 retry submission; crash-after-reservation is reconciled conservatively without
 automatic replay.
@@ -317,22 +346,43 @@ On startup:
   or recovery artifact can exist; otherwise they become interrupted.
 - Recovery failures end in a visible failed or interrupted state rather than
   remaining processing forever.
+- A `requesting` recovery whose distinct `expected_response_file` already
+  contains a complete verified envelope is promoted to response-ready and
+  enters local-only recovery with no provider call. Before promotion its
+  `response_file`, size, and hash remain NULL. This closes the crash window
+  after atomic rename but before the database promotion.
 - Pre-v16 processing generations without jobs are converted transactionally to
-  synthetic secret-free jobs; response-ready rows enter local-only recovery and
-  unknown requesting rows become interrupted.
+  synthetic secret-free jobs; verified response-ready rows enter local-only
+  recovery and unknown requesting rows become interrupted. A synthetic running
+  row uses a dedicated `legacy_response_recovery` stage/marker. Unresolved
+  provider sentinels are valid only in that verified recovery-only branch,
+  which generic claim, profile resolution, and provider execution always
+  reject. Legacy candidates are read under a short transaction, verified
+  outside the DB mutex, then rechecked and converted under a fenced transaction;
+  invalid/requesting artifacts produce terminal synthetic rows rather than a
+  running unresolved job.
+
+Before each provider call, lifecycle derives the final response path from the
+generation/job ID and stores it in the requesting recovery row's distinct
+`expected_response_file` with fenced authority. A successful HTTP response is
+written as a versioned self-describing envelope containing the response body,
+declared byte size, and SHA-256 using temp write, file fsync/close, atomic rename,
+directory fsync, and reread verification. Lifecycle then promotes the row to
+response-ready with `response_file`/size/hash in one fenced transaction. Startup
+can therefore discover and verify the same deterministic envelope if a crash
+occurred between rename and promotion.
 
 Existing generation recovery artifacts remain the source of truth for
-response-ready recovery. Artifact writes must be atomic and verified before a
-recovery row is marked response-ready. The job table supplies the missing
-execution state. Startup reconciliation replaces the old blocking recovery
-loop: setup performs only short database reconciliation, then one managed
-worker resumes local recovery asynchronously without a second provider call.
+response-ready recovery, and the job table supplies the missing execution
+state. Startup reconciliation replaces the old blocking recovery loop: setup
+performs only short database reconciliation, then one managed worker resumes
+local recovery asynchronously without a second provider call.
 
 Candidate validation happens outside setup and the DB mutex: canonical path
-under the app-owned response directory, regular file, bounded size, and
-parseable supported response. Missing/tampered/escaping artifacts never call a
-provider. The old blocking startup recovery path is removed rather than run in
-parallel.
+under the app-owned response directory, regular file, bounded size, declared
+size and SHA-256 match, and a parseable supported response. Missing, tampered,
+or escaping artifacts never call a provider. The old blocking startup recovery
+path is removed rather than run in parallel.
 
 The engine's paid-call method returns a verified raw-response artifact after
 one HTTP submission; it does not decode images or update recovery rows. The
@@ -342,6 +392,18 @@ terminal mutation. The worker decides retry exhaustion and invokes the atomic
 generation/job failure finalizer. A short successful response completes with
 only the returned candidates and records requested versus actual count; it is
 never replayed to fill the shortfall.
+
+## Shutdown And Restart
+
+Normal Tauri `ExitRequested` uses an atomic state. The first event and any
+duplicates while shutdown is pending call `prevent_exit`, but shutdown is
+scheduled exactly once. The coordinator awaits active staging cleanup, queue
+shutdown, worker join, and owner/epoch lease release, marks the state released,
+then calls `AppHandle::exit` with the original code; only that resulting event
+passes. Updater relaunch directly awaits the same queue shutdown before
+`app.restart()` because restart cannot rely on the normal exit interception.
+Tests exercise both coordinators with fake exit/restart sinks rather than
+terminating the test process.
 
 ## Structured Errors
 
@@ -440,9 +502,12 @@ C2 adds:
 - State transitions compare the expected prior state.
 - Completion updates job, generation, images, and recovery state consistently.
 - Long-running network and file work happens outside the DB mutex.
-- Response artifacts are atomically written and verified before response-ready
-  state. Images/thumbnails are decoded and staged before final DB references are
-  committed; the terminal transaction performs database work only.
+- Requesting recovery stores only the deterministic expected path. Response
+  artifacts use temp write, file and directory fsync, atomic rename, and
+  size/hash verification before a fenced response-ready promotion writes the
+  actual response path. Images/thumbnails are decoded and staged before final
+  DB references are committed; the terminal transaction performs database work
+  only.
 - Failed transactions clean staged files without deleting previously committed
   user data.
 
@@ -456,7 +521,11 @@ C2 adds:
 - Secret-free snapshots and events.
 - Profile deletion between enqueue and execution.
 - Cancellation before claim and during each execution stage.
-- Retry chain and backoff decisions.
+- Retry chain and seconds/HTTP-date backoff decisions with an injected clock.
+- Cross-process lease exclusion, epoch takeover, and rejection of every stale
+  owner durable transition.
+- Cancellation-registry cleanup on normal/error/cancel/panic paths.
+- Normal exit and updater restart ordering through fake coordinators.
 
 ### Fake-Engine Integration Tests
 
@@ -468,8 +537,14 @@ Inject a fake image engine to cover:
 - Ambiguous provider outcome.
 - Cancellation during provider call, download, and save.
 - Response-ready restart recovery.
+- Crash after response rename but before promotion, including truncated,
+  temporary, tampered-body, tampered-metadata, and escaping artifacts.
+- Verified `legacy_response_recovery` and invalid legacy inputs, always with
+  zero provider submissions.
 - Restart without a response artifact.
 - Image-save and recovery failures.
+- Legacy compatibility and ordinary queued calls together with maximum fake
+  engine concurrency equal to one.
 
 ### Frontend Tests
 
@@ -492,12 +567,18 @@ Inject a fake image engine to cover:
 
 - Every accepted request has a durable queued job before provider work begins.
 - IPC enqueue returns without waiting for generation completion.
-- Exactly one worker executes jobs in FIFO order.
+- After Task 4, only the leased worker invokes provider/lifecycle code and it
+  executes jobs in FIFO order with maximum concurrency one.
+- Every worker-owned durable transition is fenced by owner and epoch.
+- A requesting recovery never presents its expected path as response-ready.
+- A running unresolved snapshot is valid only for a verified exact
+  `legacy_response_recovery` local-recovery job.
 - Queued and running jobs can be cancelled with correct terminal semantics.
 - Failed/interrupted jobs can be manually retried as linked child jobs.
 - Safe retries respect limits and `Retry-After`.
 - Ambiguous outcomes are never automatically replayed.
 - Restart produces a correct terminal or recoverable state for every prior
   running job.
+- Normal exit and updater restart await worker cleanup, join, and lease release.
 - Job snapshots and events contain no API keys.
 - Normal generation and canvas generation share the same worker and lifecycle.
