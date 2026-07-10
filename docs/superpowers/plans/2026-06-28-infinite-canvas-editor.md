@@ -915,7 +915,7 @@ it("fits a canvas rect into a stage with padding", () => {
     ),
   ).toEqual({
     x: 40,
-    y: 100,
+    y: 70,
     scale: 0.5078125,
   });
 });
