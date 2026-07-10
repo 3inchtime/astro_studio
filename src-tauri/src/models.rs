@@ -191,6 +191,51 @@ pub struct GenerateResult {
     pub images: Vec<GeneratedImage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationJobStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationJob {
+    pub id: String,
+    pub client_request_id: String,
+    pub generation_id: String,
+    pub parent_job_id: Option<String>,
+    pub source_kind: String,
+    pub source_ref: serde_json::Value,
+    pub status: GenerationJobStatus,
+    pub request: serde_json::Value,
+    pub provider_kind: String,
+    pub provider_profile_id: String,
+    pub endpoint_snapshot: String,
+    pub chain_attempt: i32,
+    pub auto_attempt: i32,
+    pub max_auto_attempts: i32,
+    pub queued_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub cancel_requested_at: Option<String>,
+    pub last_heartbeat_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnqueueGenerationResult {
+    pub job_id: String,
+    pub generation_id: String,
+    pub conversation_id: String,
+    pub status: GenerationJobStatus,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct OpenAiImageResponse {
     pub data: Vec<OpenAiImageData>,
@@ -355,4 +400,69 @@ pub struct LlmConfig {
     pub base_url: String,
     pub capability: String,
     pub enabled: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn generation_job_status_uses_snake_case_json() {
+        for (status, expected) in [
+            (GenerationJobStatus::Queued, "queued"),
+            (GenerationJobStatus::Running, "running"),
+            (GenerationJobStatus::Completed, "completed"),
+            (GenerationJobStatus::Failed, "failed"),
+            (GenerationJobStatus::Cancelled, "cancelled"),
+            (GenerationJobStatus::Interrupted, "interrupted"),
+        ] {
+            assert_eq!(serde_json::to_value(&status).unwrap(), json!(expected));
+            assert_eq!(
+                serde_json::from_value::<GenerationJobStatus>(json!(expected)).unwrap(),
+                status
+            );
+        }
+
+        let result = EnqueueGenerationResult {
+            job_id: "job-1".to_string(),
+            generation_id: "generation-1".to_string(),
+            conversation_id: "conversation-1".to_string(),
+            status: GenerationJobStatus::Queued,
+        };
+        let value = serde_json::to_value(result).expect("serialize enqueue result");
+        assert_eq!(value["status"], json!("queued"));
+    }
+
+    #[test]
+    fn generation_job_serializes_retryable_as_boolean() {
+        let job = GenerationJob {
+            id: "job-1".to_string(),
+            client_request_id: "request-1".to_string(),
+            generation_id: "generation-1".to_string(),
+            parent_job_id: None,
+            source_kind: "generate".to_string(),
+            source_ref: json!({}),
+            status: GenerationJobStatus::Failed,
+            request: json!({ "prompt": "a nebula" }),
+            provider_kind: "openai".to_string(),
+            provider_profile_id: "default".to_string(),
+            endpoint_snapshot: "https://api.example.com/v1/images/generations".to_string(),
+            chain_attempt: 1,
+            auto_attempt: 2,
+            max_auto_attempts: 2,
+            queued_at: "2026-07-10T00:00:00Z".to_string(),
+            started_at: Some("2026-07-10T00:00:01Z".to_string()),
+            finished_at: Some("2026-07-10T00:00:02Z".to_string()),
+            cancel_requested_at: None,
+            last_heartbeat_at: Some("2026-07-10T00:00:01Z".to_string()),
+            error_code: Some("provider_unavailable".to_string()),
+            error_message: Some("try again later".to_string()),
+            retryable: true,
+        };
+
+        let value = serde_json::to_value(job).expect("serialize generation job");
+        assert_eq!(value["retryable"], json!(true));
+        assert!(value["retryable"].is_boolean());
+    }
 }

@@ -40,6 +40,16 @@ mod tests {
             != 0
     }
 
+    fn index_exists(conn: &Connection, index: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+            params![index],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query index")
+            != 0
+    }
+
     fn create_legacy_database_with_recorded_v7_but_missing_conversation_columns(db_path: &Path) {
         let conn = Connection::open(db_path).expect("open legacy test db");
         conn.execute_batch(
@@ -162,6 +172,53 @@ mod tests {
                 "ready_to_generate"
             ));
             assert!(migration_version_exists(&conn, 15));
+        }
+
+        std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
+    }
+
+    #[test]
+    fn fresh_database_migrations_create_generation_jobs_table() {
+        let db_path = test_db_path("astro-studio-generation-jobs-migration-test");
+        let database = Database::open(&db_path).expect("open test db");
+
+        database.run_migrations().expect("run migrations");
+
+        {
+            let conn = database.conn.lock().expect("lock db");
+            for column in [
+                "id",
+                "client_request_id",
+                "generation_id",
+                "parent_job_id",
+                "source_kind",
+                "source_ref_json",
+                "status",
+                "request_json",
+                "provider_kind",
+                "provider_profile_id",
+                "endpoint_snapshot",
+                "chain_attempt",
+                "auto_attempt",
+                "max_auto_attempts",
+                "queued_at",
+                "started_at",
+                "finished_at",
+                "cancel_requested_at",
+                "last_heartbeat_at",
+                "error_code",
+                "error_message",
+                "retryable",
+            ] {
+                assert!(
+                    table_has_column(&conn, "generation_jobs", column),
+                    "missing generation_jobs.{column}"
+                );
+            }
+            assert!(index_exists(&conn, "idx_generation_jobs_status_queued"));
+            assert!(index_exists(&conn, "idx_generation_jobs_parent"));
+            assert!(index_exists(&conn, "idx_generation_jobs_source"));
+            assert!(migration_version_exists(&conn, 16));
         }
 
         std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
@@ -574,6 +631,43 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_prompt_agent_sessions_updated_at ON prompt_agent_sessions(updated_at);
             CREATE INDEX IF NOT EXISTS idx_prompt_agent_messages_session_id ON prompt_agent_messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_prompt_agent_messages_created_at ON prompt_agent_messages(created_at);",
+        )?;
+
+        // v16: Durable generation job queue
+        apply_migration(
+            &conn,
+            16,
+            "generation jobs",
+            "CREATE TABLE IF NOT EXISTS generation_jobs (
+                id TEXT PRIMARY KEY,
+                client_request_id TEXT NOT NULL UNIQUE,
+                generation_id TEXT NOT NULL UNIQUE REFERENCES generations(id) ON DELETE CASCADE,
+                parent_job_id TEXT REFERENCES generation_jobs(id) ON DELETE SET NULL,
+                source_kind TEXT NOT NULL,
+                source_ref_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL,
+                request_json TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                provider_profile_id TEXT NOT NULL,
+                endpoint_snapshot TEXT NOT NULL,
+                chain_attempt INTEGER NOT NULL DEFAULT 1,
+                auto_attempt INTEGER NOT NULL DEFAULT 0,
+                max_auto_attempts INTEGER NOT NULL DEFAULT 2,
+                queued_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                cancel_requested_at TEXT,
+                last_heartbeat_at TEXT,
+                error_code TEXT,
+                error_message TEXT,
+                retryable INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_generation_jobs_status_queued
+                ON generation_jobs(status, queued_at);
+            CREATE INDEX IF NOT EXISTS idx_generation_jobs_parent
+                ON generation_jobs(parent_job_id);
+            CREATE INDEX IF NOT EXISTS idx_generation_jobs_source
+                ON generation_jobs(source_kind);",
         )?;
 
         ensure_migration_compatibility(&conn)?;
