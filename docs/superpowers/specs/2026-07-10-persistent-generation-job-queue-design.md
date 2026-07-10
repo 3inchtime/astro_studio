@@ -122,6 +122,14 @@ key delete actions, and exact index columns rather than checking names alone.
 The generation record is created in the same transaction and begins in
 `queued`. Existing generation status consumers must be updated to recognize
 queued, running, completed, failed, cancelled, and interrupted consistently.
+Claim and terminal/cancel transitions update the generation and job together;
+the two records must not expose contradictory durable lifecycle states.
+
+Syntactically valid requests that cannot resolve provider configuration are
+inserted atomically as already-failed generation/job pairs. Missing public
+snapshot values use the documented `unresolved` identity sentinel and empty
+endpoint, with a sanitized nonretryable configuration error; no worker may
+claim these terminal rows.
 
 ## Secret Handling
 
@@ -237,6 +245,11 @@ Automatic retry increments `auto_attempt` on the same running job. Manual retry
 copies the canonical request and public profile snapshot into a new job,
 resolves the current secret for the same profile ID, resets `auto_attempt`, and
 increments `chain_attempt`.
+
+Manual retry also creates a fresh generation record, is allowed only for
+retryable failed/interrupted generate/edit jobs, and never mutates its parent.
+Reusing a client request ID is idempotent only for the same parent and logical
+retry; using it for another parent is a stable idempotency conflict.
 
 ## Startup Reconciliation And Recovery
 

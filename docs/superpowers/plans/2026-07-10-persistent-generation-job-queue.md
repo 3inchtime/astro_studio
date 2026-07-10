@@ -194,6 +194,7 @@ git commit -m "feat: add generation job schema"
 - Create: `src-tauri/src/generation_jobs.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/models.rs`
+- Modify: `src-tauri/src/error.rs`
 
 - [ ] **Step 1: Write failing repository tests**
 
@@ -244,7 +245,17 @@ fn transaction_composable_enqueue_rolls_back_with_outer_scope() {
 Also cover two jobs with the same second-level `queued_at`: claim/list order is
 stable by `queued_at ASC, rowid ASC`. Verify an idempotent
 `client_request_id` lookup occurs before any conversation, generation, log, or
-recovery side effect, not merely before the second job insert.
+recovery side effect, not merely before the second job insert. Rollback must
+also undo a newly created or updated conversation.
+
+Assert cross-table semantics: normal enqueue explicitly writes both job and
+generation `queued` with one timestamp; claim moves both to `running`; queued
+cancel moves both to `cancelled`; running cancel only records the request until
+worker acknowledgement. Retry accepts only retryable failed/interrupted
+generate/edit parents, creates a fresh generation plus child job, resets every
+attempt/error/time field, and leaves the parent unchanged. Reusing a retry
+client ID for a different parent is an idempotency conflict. Malformed or
+unknown-version cursors fail with a stable sanitized error.
 
 The fixture must use a real temporary SQLite database and v16 migration, not a mocked repository.
 
@@ -264,6 +275,10 @@ Create `generation_jobs.rs` with:
 
 ```rust
 pub(crate) fn can_transition(from: GenerationJobStatus, to: GenerationJobStatus) -> bool;
+pub(crate) fn find_job_by_client_request_id(
+    conn: &rusqlite::Connection,
+    client_request_id: &str,
+) -> Result<Option<GenerationJob>, AppError>;
 pub(crate) fn enqueue_job(
     conn: &mut rusqlite::Connection,
     request: &PreparedGenerationJob,
@@ -308,17 +323,31 @@ Task 1 intentionally defined only the wire-level job/result models. Define the
 missing contracts used above before implementing SQL:
 
 - Internal `PreparedGenerationJob` owns the already-normalized, secret-free
-  generation fields, conversation ID, canonical request snapshot, profile and
-  endpoint snapshot, source reference, IDs, and timestamps needed to insert
-  both `generations` and `generation_jobs` in one transaction.
+  generation fields, requested conversation/project IDs, prompt, canonical
+  request draft, profile and endpoint snapshot, source reference, IDs, and
+  timestamps needed to insert both `generations` and `generation_jobs` in one
+  transaction. It must not require a conversation resolved before that
+  transaction.
 - Public `GenerationJobFilter` includes statuses, source kind/reference,
   `generation_id`, bounded limit, and cursor.
 - Public `GenerationJobPage` contains items plus an opaque next cursor encoding
-  the same `(queued_at, rowid)` order.
+  the same `(queued_at, rowid)` order. The cursor is strictly parsed,
+  versioned, and documented as a short-lived pagination token rather than a
+  VACUUM-stable identifier.
 - Internal `GenerationJobTerminalUpdate` carries expected prior status and the
   sanitized terminal fields. Add `finish_job_in_transaction` so lifecycle
   finalization can update generation/recovery/images and job state inside one
   outer transaction.
+
+`PreparedGenerationJob` explicitly supplies every persisted generation field,
+valid JSON source paths/request metadata, and an initial state. Normal jobs
+insert generation/job as queued with the same `created_at`/`queued_at`.
+Syntactically valid requests whose provider configuration cannot resolve insert
+both records as failed in that one transaction with `finished_at`, sanitized
+stable error fields, and `retryable=false`; do not insert queued and patch it in
+a second transaction. When configuration fields are unavailable, use the
+documented secret-free sentinels `unresolved` for provider/profile identity and
+an empty endpoint snapshot. Workers never claim these terminal rows.
 
 Every transition must use an expected prior status in SQL. `enqueue_job` and
 `create_retry_job` open and commit their own transaction, delegating the actual
@@ -334,8 +363,34 @@ preserving the parent request/profile snapshot.
 
 `claim_next_job` must select and update inside one transaction using
 `ORDER BY queued_at ASC, rowid ASC`, then return only the row whose
-`queued -> running` update succeeded. No network, filesystem, event emission,
-or await may occur while the database mutex/transaction is held.
+`queued -> running` update succeeded, and update the linked generation to
+running in that transaction. Queued cancellation likewise updates job and
+generation atomically; running cancellation persists only
+`cancel_requested_at`. No network, filesystem, event emission, or await may
+occur while the database mutex/transaction is held.
+
+`enqueue_job` may use `find_job_by_client_request_id` as a cheap preflight, but
+`insert_job_in_transaction` must repeat that lookup before any write, then call
+the existing `resolve_conversation_id_for_generation` through the transaction.
+Insert the resolved ID into the canonical request and return value before
+committing. This protects both ambiguous client retries and concurrent callers:
+conversation create/update, generation, recovery, and job changes either all
+commit once or all roll back.
+
+Add a sanitized job error variant/helper in `error.rs` with stable codes for at
+least `generation_job_not_found`, `generation_job_invalid_transition`,
+`generation_job_not_retryable`, `generation_job_idempotency_conflict`,
+`generation_job_source_unsupported`, and `generation_job_corrupt_data`.
+Repository
+row/status/JSON failures must not panic or expose SQL, request JSON, endpoint,
+or profile secrets.
+
+Manual retry permits only failed/interrupted rows with `retryable=true` and
+source kind generate/edit. It copies canonical request, resolved conversation,
+and public provider/endpoint snapshots into a new generation and child job,
+increments `chain_attempt`, resets `auto_attempt`, status, errors, cancellation,
+and timestamps, and never mutates the parent. An existing retry client ID is
+idempotent only when it belongs to that same parent and logical retry.
 
 - [ ] **Step 4: Register the module and run tests GREEN**
 
@@ -350,7 +405,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 2**
 
 ```bash
-git add src-tauri/src/generation_jobs.rs src-tauri/src/lib.rs src-tauri/src/models.rs
+git add src-tauri/src/generation_jobs.rs src-tauri/src/lib.rs src-tauri/src/models.rs src-tauri/src/error.rs
 git commit -m "feat: add generation job repository"
 ```
 
