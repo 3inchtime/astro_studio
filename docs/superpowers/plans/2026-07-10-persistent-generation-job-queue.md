@@ -266,6 +266,17 @@ attempt/error/time field, and leaves the parent unchanged. Reusing a retry
 client ID for a different parent is an idempotency conflict. Malformed or
 unknown-version cursors fail with a stable sanitized error.
 
+Also exercise the existing conversation move operation. The enqueue-time
+project ID is an immutable historical execution/source snapshot, while a
+conversation's current project membership is mutable. After moving a queued
+conversation, get/list/enqueue-result/claim/cancel must remain healthy; after
+moving a running conversation, its fenced terminal transition must still
+commit. The shared validator verifies that the conversation ID still exists and
+that request/metadata/source snapshots agree with each other, but it must not
+require their historical project ID to equal the conversation's current
+project. Idempotent replay remains keyed to the original requested identity and
+the stored canonical snapshot after a move.
+
 The fixture must use a real temporary SQLite database and v16 migration, not a mocked repository.
 
 - [ ] **Step 2: Run repository tests and verify RED**
@@ -416,7 +427,9 @@ conversation/project identity in the canonical request and every generate,
 edit, or canvas source reference before
 committing. This protects both ambiguous client retries and concurrent callers:
 conversation create/update, generation, recovery, and job changes either all
-commit once or all roll back.
+commit once or all roll back. That canonical project is frozen at enqueue; a
+later legitimate `move_conversation_to_project` changes navigation membership,
+not the historical job snapshot, and is not persisted corruption.
 
 Add a sanitized job error variant/helper in `error.rs` with stable codes for at
 least `generation_job_not_found`, `generation_job_invalid_transition`,

@@ -168,13 +168,19 @@ sensitive query keys. Terminal user text comes from a fixed message table keyed
 by stable error code, not raw provider/database messages. Credential-like
 tokens in any persisted public string are rejected as defense in depth. The
 canonical request stores the resolved conversation's actual project and rewrites
-that identity into generate/edit/canvas source references. Its option fields are
-presence-aware: capability-filtered omissions remain absent through enqueue,
-reload, and retry even though generation columns store normalized display
-defaults. It also retains original requested conversation/project IDs solely as
-typed idempotency identity, distinct from the resolved execution destination.
-Get/list/enqueue-result/claim all use one linked projection validator so a
-contradictory job, generation, or recovery row is never returned as healthy.
+that identity into generate/edit/canvas source references. This is an immutable
+enqueue-time execution/source snapshot: moving the conversation to another
+project later changes current navigation membership but does not rewrite or
+invalidate the job. Its option fields are presence-aware: capability-filtered
+omissions remain absent through enqueue, reload, and retry even though
+generation columns store normalized display defaults. It also retains original
+requested conversation/project IDs solely as typed idempotency identity,
+distinct from the resolved execution destination. Get/list/enqueue-result/claim
+all use one linked projection validator so a contradictory job, generation, or
+recovery row is never returned as healthy. That validator proves the linked
+conversation still exists and the historical request/metadata/source snapshots
+agree with each other; it never compares their project snapshot to mutable
+current conversation membership.
 
 At execution time, the worker resolves the API key by profile ID and passes it
 only through a non-serializable, redacted execution context. It must never
@@ -520,6 +526,8 @@ C2 adds:
 - Queue ordering and single-worker claim.
 - Secret-free snapshots and events.
 - Profile deletion between enqueue and execution.
+- Conversation project moves while queued and running, without invalidating the
+  immutable enqueue snapshot or rolling back a terminal transition.
 - Cancellation before claim and during each execution stage.
 - Retry chain and seconds/HTTP-date backoff decisions with an injected clock.
 - Cross-process lease exclusion, epoch takeover, and rejection of every stale
