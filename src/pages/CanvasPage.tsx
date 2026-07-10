@@ -616,6 +616,10 @@ export default function CanvasPage() {
         return;
       }
 
+      if (!canEdit) {
+        return;
+      }
+
       if (key === "escape") {
         event.preventDefault();
         setSelectedObjectIds([]);

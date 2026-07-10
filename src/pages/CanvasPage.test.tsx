@@ -809,6 +809,34 @@ describe("CanvasPage", () => {
     );
   });
 
+  it("ignores tool shortcuts until the selected document finishes loading", async () => {
+    const firstDocument = canvasDocumentWithImage();
+    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
+    const secondLoad = createDeferred<typeof secondDocument>();
+
+    listCanvasDocuments.mockResolvedValue([firstDocument, secondDocument]);
+    getCanvasDocument.mockImplementation((documentId: string) =>
+      documentId === firstDocument.id ? Promise.resolve(firstDocument) : secondLoad.promise,
+    );
+
+    render(<CanvasPage />, { wrapper: TestWrapper });
+
+    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    expect(screen.getByText("Active tool: select")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
+    expect(await screen.findByText("Loading canvas...")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "b", code: "KeyB" });
+
+    await act(async () => {
+      secondLoad.resolve(secondDocument);
+      await secondLoad.promise;
+    });
+
+    expect(await screen.findByText("Active tool: select")).toBeInTheDocument();
+  });
+
   it("keeps the current document saving when an older save resolves", async () => {
     const firstDocument = canvasDocumentWithImage();
     const secondDocument = canvasDocumentWithIdentity(
