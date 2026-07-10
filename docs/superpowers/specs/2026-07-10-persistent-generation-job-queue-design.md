@@ -146,6 +146,14 @@ key. The enqueue transaction snapshots:
 - Endpoint and non-secret public profile options.
 - Generation/edit parameters and source references.
 
+The repository constructs `request_json` and generation metadata from typed,
+allowlisted public fields after conversation resolution; it never persists a
+free-form caller JSON object. Source references accept only documented identity
+fields. Endpoint snapshots are parsed URLs with no userinfo or decoded
+sensitive query keys. Terminal user text comes from a fixed message table keyed
+by stable error code, not raw provider/database messages. Credential-like
+tokens in any persisted public string are rejected as defense in depth.
+
 At execution time, the worker resolves the API key by profile ID and passes it
 only through a non-serializable, redacted execution context. It must never
 re-resolve an active profile or replace the snapshotted endpoint/model. A

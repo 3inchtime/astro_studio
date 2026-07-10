@@ -335,6 +335,16 @@ missing contracts used above before implementing SQL:
   timestamps needed to insert both `generations` and `generation_jobs` in one
   transaction. It must not require a conversation resolved before that
   transaction.
+- Typed `GenerationJobRequestKind`, `GenerationJobOptions`, and
+  `GenerationJobRequest` are the only shape serialized into `request_json`.
+  Repository code builds the finalized DTO from allowlisted prepared fields
+  after conversation resolution; it never persists an arbitrary caller JSON
+  object. Row decoding validates against the same DTO before exposing the wire
+  `serde_json::Value`.
+- Typed/validated `GenerationJobSourceRef` permits only documented identity
+  fields for generate/edit and the planned canvas document/round/revision IDs;
+  unknown or sensitive keys are rejected so future source metadata cannot turn
+  into an unbounded secret channel.
 - Public `GenerationJobFilter` includes statuses, source kind/reference,
   `generation_id`, bounded limit, and cursor.
 - Public `GenerationJobPage` contains items plus an opaque next cursor encoding
@@ -347,7 +357,8 @@ missing contracts used above before implementing SQL:
   outer transaction.
 
 `PreparedGenerationJob` explicitly supplies every persisted generation field,
-valid JSON source paths/request metadata, and an initial state. Normal jobs
+and repository code constructs valid source paths/request metadata JSON from
+those fields rather than accepting free-form metadata. Normal jobs
 insert generation/job as queued with the same `created_at`/`queued_at`.
 Syntactically valid requests whose provider configuration cannot resolve insert
 both records as failed in that one transaction with `finished_at`, sanitized
@@ -397,6 +408,15 @@ least `generation_job_not_found`, `generation_job_invalid_transition`,
 and `generation_job_corrupt_cursor`. Repository
 row/status/JSON failures must not panic or expose SQL, request JSON, endpoint,
 or profile secrets.
+
+Treat the repository as a final secret boundary. Parse endpoint snapshots with
+`reqwest::Url`, reject URL credentials and decoded sensitive query keys while
+allowing public parameters such as `api-version`, and reject credential-like
+tokens in persisted public strings. Terminal error text is selected from a
+fixed sanitized message table keyed by stable error code; never persist a raw
+provider/database message. Tests cover nested `apiKey`/`x-api-key`/
+`authorization`, encoded query keys, URL userinfo, token-like text, and safe
+ordinary prompts/endpoints.
 
 Manual retry permits only failed/interrupted rows with `retryable=true` and
 source kind generate/edit. It copies canonical request, resolved conversation,
@@ -495,7 +515,9 @@ structured engine errors are missing.
 
 - [ ] **Step 3: Split preparation from execution**
 
-Introduce:
+Reuse Task 2's typed `GenerationJobOptions` and `GenerationJobRequest`; do not
+redeclare or deserialize a parallel free-form request. Introduce lifecycle
+conversion and execution-only types:
 
 ```rust
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -505,29 +527,13 @@ pub(crate) enum GenerationLifecycleKind {
     Edit,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) struct GenerationJobOptions {
-    pub size: String,
-    pub quality: String,
-    pub background: String,
-    pub output_format: String,
-    pub output_compression: u8,
-    pub moderation: String,
-    pub input_fidelity: String,
-    pub stream: bool,
-    pub partial_images: u8,
-    pub image_count: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) struct GenerationJobRequest {
-    pub kind: GenerationLifecycleKind,
-    pub prompt: String,
-    pub model: String,
-    pub source_image_paths: Vec<String>,
-    pub options: GenerationJobOptions,
-    pub conversation_id: String,
-    pub project_id: Option<String>,
+impl From<GenerationJobRequestKind> for GenerationLifecycleKind {
+    fn from(kind: GenerationJobRequestKind) -> Self {
+        match kind {
+            GenerationJobRequestKind::Generate => Self::Generate,
+            GenerationJobRequestKind::Edit => Self::Edit,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
