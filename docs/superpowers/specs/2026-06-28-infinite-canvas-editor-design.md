@@ -1,8 +1,12 @@
 # Infinite Canvas Editor Iteration Design
 
 Date: 2026-06-28
-Status: Draft for review
+Status: Approved; helper foundation implemented, UI integration pending
 Owner: Codex
+
+Roadmap role: This specification is milestone B1 in the competitive feature
+roadmap. It must be completed before canvas generation rounds and visible
+revision branching are added.
 
 ## Context
 
