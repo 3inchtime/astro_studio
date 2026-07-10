@@ -166,7 +166,7 @@ Add commands and matching TypeScript API wrappers:
 - `list_generation_jobs(filters) -> GenerationJobPage`
 - `get_generation_job(job_id) -> GenerationJob`
 - `cancel_generation_job(job_id) -> GenerationJob`
-- `retry_generation_job(job_id) -> EnqueueGenerationResult`
+- `retry_generation_job(job_id, client_request_id) -> EnqueueGenerationResult`
 
 `EnqueueGenerationResult` includes `job_id`, `generation_id`, conversation ID,
 and initial status. It does not await provider completion.
@@ -326,14 +326,23 @@ in existing generation messages. Submitting no longer disables generation for
 the duration of provider execution; it creates a queued message and allows the
 user to navigate away.
 
-The enqueue acknowledgement has its own message transition: it keeps the
-assistant message processing, records `job_id` plus the raw job status, and
-replaces optimistic IDs with the persisted generation identity. Raw job status,
-retryability, and cancellation timestamp remain available separately from the
-coarse message status. Acknowledgements and terminal events are guarded by the
+The enqueue acknowledgement has its own message transition: it maps the raw
+initial status exhaustively (including an immediately failed configuration
+job), records `job_id`, sanitized error/retry/cancellation metadata, and
+replaces optimistic IDs with the persisted generation identity. Raw job status
+remains available separately from the coarse message status. Acknowledgements and terminal events are guarded by the
 conversation/view epoch so a late result cannot navigate back to or overwrite
 another conversation. All job events update shared caches; only a matching
 active terminal event reloads the visible conversation.
+
+An IPC failure with no acknowledgement uses retry-enqueue: resend the identical
+payload and identical client request ID to discover the idempotent result. A
+known retryable terminal job uses terminal-job retry: send the parent job ID
+and a new client request ID to create a child. Cancel/retry pending state is
+tracked per job; a persisted cancellation timestamp disables duplicate cancel,
+and mutation failure restores the action. The composer lock covers only the
+enqueue IPC and clears on every rejection while preserving unrelated prompt and
+optimization validation gates.
 
 C2 adds:
 

@@ -168,6 +168,12 @@ pub struct EnqueueGenerationResult {
     pub generation_id: String,
     pub conversation_id: String,
     pub status: GenerationJobStatus,
+    pub retryable: bool,
+    pub cancel_requested_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub queued_at: String,
+    pub finished_at: Option<String>,
 }
 ```
 
@@ -275,10 +281,10 @@ Create `generation_jobs.rs` with:
 
 ```rust
 pub(crate) fn can_transition(from: GenerationJobStatus, to: GenerationJobStatus) -> bool;
-pub(crate) fn find_job_by_client_request_id(
+pub(crate) fn find_enqueue_result_by_client_request_id(
     conn: &rusqlite::Connection,
     client_request_id: &str,
-) -> Result<Option<GenerationJob>, AppError>;
+) -> Result<Option<EnqueueGenerationResult>, AppError>;
 pub(crate) fn enqueue_job(
     conn: &mut rusqlite::Connection,
     request: &PreparedGenerationJob,
@@ -348,6 +354,10 @@ stable error fields, and `retryable=false`; do not insert queued and patch it in
 a second transaction. When configuration fields are unavailable, use the
 documented secret-free sentinels `unresolved` for provider/profile identity and
 an empty endpoint snapshot. Workers never claim these terminal rows.
+Reject invalid mixed states before writing: queued jobs cannot carry terminal
+timestamps/errors or unresolved provider sentinels, while initial failed jobs
+must carry a finished timestamp plus stable sanitized error fields and must not
+create a requesting recovery row.
 
 Every transition must use an expected prior status in SQL. `enqueue_job` and
 `create_retry_job` open and commit their own transaction, delegating the actual
@@ -369,7 +379,8 @@ generation atomically; running cancellation persists only
 `cancel_requested_at`. No network, filesystem, event emission, or await may
 occur while the database mutex/transaction is held.
 
-`enqueue_job` may use `find_job_by_client_request_id` as a cheap preflight, but
+`enqueue_job` may use `find_enqueue_result_by_client_request_id` as a cheap
+preflight, but
 `insert_job_in_transaction` must repeat that lookup before any write, then call
 the existing `resolve_conversation_id_for_generation` through the transaction.
 Insert the resolved ID into the canonical request and return value before
@@ -380,8 +391,9 @@ commit once or all roll back.
 Add a sanitized job error variant/helper in `error.rs` with stable codes for at
 least `generation_job_not_found`, `generation_job_invalid_transition`,
 `generation_job_not_retryable`, `generation_job_idempotency_conflict`,
-`generation_job_source_unsupported`, and `generation_job_corrupt_data`.
-Repository
+`generation_job_source_unsupported`,
+`generation_job_corrupt_persisted_data`, `generation_job_invalid_snapshot`,
+and `generation_job_corrupt_cursor`. Repository
 row/status/JSON failures must not panic or expose SQL, request JSON, endpoint,
 or profile secrets.
 
@@ -763,9 +775,11 @@ fn retry_rejects_non_retryable_completed_job() {
 Also test that a repeated `client_request_id` returns before conversation/log/
 recovery side effects, edit enqueue persists canonical source paths that remain
 usable after clearing `SelectedImageRegistry`, `generation_id` filtering finds
-the matching job, and every command emits/wakes only after its transaction has
-committed. Serialize the full event DTO and prove endpoint/API-key/body-preview
-secrets cannot appear.
+the matching job, and every mutating command emits only after its transaction
+has committed. Enqueue/retry wake the worker; cancel signals the cancellation
+registry after durable persistence. Read-only list/get neither emit nor wake.
+Serialize the full event DTO and prove endpoint/API-key/body-preview secrets
+cannot appear.
 
 Implement `JobCommandFixture` inside the command test module with a temporary
 v16 SQLite database, a profile containing the literal API key `secret-key`, and
@@ -816,6 +830,7 @@ pub fn get_generation_job(
 
 #[tauri::command]
 pub async fn cancel_generation_job(
+    app: tauri::AppHandle,
     db: tauri::State<'_, Database>,
     queue: tauri::State<'_, GenerationJobQueue>,
     job_id: String,
@@ -823,6 +838,7 @@ pub async fn cancel_generation_job(
 
 #[tauri::command]
 pub fn retry_generation_job(
+    app: tauri::AppHandle,
     db: tauri::State<'_, Database>,
     queue: tauri::State<'_, GenerationJobQueue>,
     job_id: String,
@@ -845,6 +861,9 @@ and revalidate them at execution. The worker must not depend on
 `client_request_id` before resolving/creating a conversation or writing logs.
 
 Provider configuration errors after syntactic acceptance must create a visible failed job. Validation errors that make the request unserializable may reject before enqueue.
+`EnqueueGenerationResult` returns the raw status plus sanitized retry,
+cancellation, error, and timestamp metadata defined in Task 1, so an initial
+failed acknowledgement is renderable without a second lookup.
 
 - [ ] **Step 4: Emit a single typed job event**
 
@@ -857,6 +876,13 @@ Ensure tests serialize the complete shape and assert no secret fields. Build the
 event from the committed row, release the database lock, then emit; legacy
 generation events must not describe terminal success/failure before the job
 transaction commits.
+
+Define a repository/event projection that joins the committed job to its
+generation's `conversation_id`. Do not infer conversation identity from
+`source_ref` or request JSON. Enqueue, retry, queued cancel, and running
+cancel-request all emit this projection; enqueue/retry then wake the queue, and
+running cancel signals its registered token after the durable event state
+exists.
 
 - [ ] **Step 5: Run command tests GREEN**
 
@@ -904,9 +930,15 @@ expect(generationStatusToMessageStatus("interrupted")).toBe("failed");
 Add exact tests for the complete Rust event shape (including
 `conversation_id`, `cancel_requested_at`, source, attempts, retryability, and
 timestamps), lookup by `generation_id`, and an enqueue acknowledgement helper.
-The helper keeps the assistant message processing, stores `jobId`, raw
-`jobStatus`, retryability/cancellation metadata, and replaces optimistic user,
-assistant, and source-image generation IDs with the persisted generation ID.
+The helper applies the exhaustive raw-status mapping (so an initial failed ack
+is failed, not processing), stores `jobId`, raw `jobStatus`, sanitized
+error/retry/cancellation metadata, and replaces optimistic user, assistant, and
+source-image generation IDs with the persisted generation ID.
+
+Lock every wrapper's IPC shape: enqueue uses one nested `request` with
+snake_case DTO fields; list uses `filters`; get/cancel use top-level `jobId`;
+retry uses top-level `jobId` and `clientRequestId`. Verify event unlisten cleanup
+and rejected invoke propagation as well as successful mapping.
 
 - [ ] **Step 2: Run tests and verify RED**
 
@@ -947,6 +979,8 @@ Add a dedicated enqueue-ack message helper rather than reusing
 `completeGenerationMessage`, which assumes images already exist. Status mapping
 is exhaustive: queued/running -> processing; completed -> complete;
 failed/cancelled/interrupted -> failed, while raw job state remains available.
+Populate its retry/cancel/error metadata directly from the expanded
+`EnqueueGenerationResult`.
 
 - [ ] **Step 4: Run API and state tests GREEN**
 
@@ -969,6 +1003,7 @@ git commit -m "feat: add generation queue client"
 - Modify: `src/pages/GeneratePage.tsx`
 - Modify: `src/pages/GeneratePage.test.tsx`
 - Modify: `src/components/generate/GenerationComposer.tsx`
+- Modify: `src/components/generate/GenerationFeed.tsx`
 - Modify: `src/components/generate/MessageBubble.tsx`
 - Modify: `src/locales/*.json`
 - Modify: `src/i18n.test.ts`
@@ -1022,6 +1057,9 @@ Also add tests for:
 - retry calls `retryGenerationJob(parentJobId, newClientRequestId)` and creates
   a child job instead of resubmitting the original client request;
 - a reloaded conversation recovers job metadata by `generation_id`.
+- enqueue rejection always releases the composer IPC lock; each cancel/retry
+  mutation has per-job pending state, disables only that job's action, restores
+  it after failure, and `cancel_requested_at` prevents duplicate Cancel clicks.
 
 - [ ] **Step 2: Run page tests and verify RED**
 
@@ -1048,6 +1086,12 @@ it in the queue request; do not re-add unsupported fields. Store the generated
 `clientRequestId` on optimistic state so an ambiguous enqueue failure/retry
 reuses it. Apply the enqueue-ack helper rather than the completion helper.
 
+Keep two retry paths explicit. A retry-enqueue after an IPC failure with no
+acknowledged job resends the identical payload and identical client request ID
+to discover/complete the idempotent enqueue. A terminal-job retry is available
+only with a known retryable parent job and calls the backend retry command with
+that parent ID plus a new client request ID; it never resubmits as a root job.
+
 Capture the active conversation/view epoch before awaiting enqueue. If the
 acknowledgement is stale, invalidate durable data only; do not mutate the new
 conversation's messages/version or navigate back. Job-event cache updates are
@@ -1056,7 +1100,12 @@ event.
 
 Hydrate `jobId`/raw state for persisted messages through generation-ID lookup.
 Cancel persists first and then shows Cancelling; Retry is a backend child-job
-operation and is offered only when `retryable` is true. Add localized queued,
+operation and is offered only when `retryable` is true. Track cancel/retry
+pending state per job, prevent repeated cancellation once
+`cancel_requested_at` exists, and restore actions after mutation failure. The
+enqueue IPC lock must clear in `finally` on success or rejection. Replacing the
+lifecycle-wide lock must preserve every existing disable condition for empty
+prompt, prompt optimization, validation, or another enqueue IPC. Add localized queued,
 running, cancelling, cancelled, interrupted, cancel, and retry labels with
 eight-locale parity. `MessageBubble` must expose these states instead of hiding
 all processing jobs behind the generic loading scene.
@@ -1074,7 +1123,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 7**
 
 ```bash
-git add src/pages/GeneratePage.tsx src/pages/GeneratePage.test.tsx src/components/generate/GenerationComposer.tsx src/components/generate/MessageBubble.tsx src/locales src/i18n.test.ts
+git add src/pages/GeneratePage.tsx src/pages/GeneratePage.test.tsx src/components/generate/GenerationComposer.tsx src/components/generate/GenerationFeed.tsx src/components/generate/MessageBubble.tsx src/locales src/i18n.test.ts
 git commit -m "feat: enqueue image generation requests"
 ```
 
