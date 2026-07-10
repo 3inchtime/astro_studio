@@ -1203,6 +1203,14 @@ Also add deferred-promise regressions for document lifecycle safety:
   debounce, and assert no A-derived content is written to B before B loads.
 - Resolve an older A save after B becomes dirty and assert the A completion does
   not clear B's dirty/saving state.
+- Start save 1 for A, edit again, and prove save 2 does not call the backend
+  until save 1 settles; save 2 must carry the newest snapshot.
+- Remove dirty A through a canvas-documents query refresh before its debounce;
+  assert the automatic transition flushes A to A before selecting B/null.
+- Reject autosave and switch-flush saves; assert dirty content remains, no
+  unhandled rejection occurs, Retry Save succeeds, and failed switch stays on A.
+- Reject a B load, show a load error, retry the same selected ID, and reach the
+  ready B editor after a successful retry.
 
 Before appending the tests above, add this local factory near the existing mock setup:
 
@@ -1378,6 +1386,12 @@ Add these keys to `src/locales/en.json` under the canvas section:
 "zoomStatus": "{{zoom}}%"
 ```
 
+Add save/load recovery labels to every locale as English fallbacks in this
+task: `canvas.saveStatus.error = "Save failed"`,
+`canvas.retrySave = "Retry save"`,
+`canvas.loadError = "Couldn't load this canvas."`, and
+`canvas.retryLoad = "Retry load"`.
+
 Add these exact fallback keys to every other locale file first, then improve translations after tests pass:
 
 ```json
@@ -1494,6 +1508,14 @@ The readiness gate applies to every keyboard-owned editor mutation, including
 Escape selection clearing and `v`/`b`/`e`/`h` tool changes. Add a deferred-load
 test that presses a tool shortcut while B is unresolved and proves the tool is
 unchanged after B loads.
+
+Serialize/coalesce backend saves so same-document snapshots cannot overtake;
+the newest queued snapshot must eventually persist. Route both sidebar and
+query-driven document transitions through one async routine that waits for the
+old dirty snapshot to save to its old ID before switching. A failed flush keeps
+the old document ready and dirty. Catch every fire-and-forget save rejection,
+retain the latest snapshot, and expose a sanitized Retry Save action. Track
+token-guarded load errors and expose Retry Load for the same selected ID.
 
 Add keyboard effect:
 
