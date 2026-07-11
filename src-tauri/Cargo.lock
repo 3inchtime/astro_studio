@@ -479,6 +479,7 @@ dependencies = [
  "chrono",
  "dirs",
  "env_logger",
+ "httpdate",
  "image",
  "log",
  "objc2 0.6.4",

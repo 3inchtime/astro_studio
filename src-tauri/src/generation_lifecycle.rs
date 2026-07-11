@@ -13,7 +13,6 @@ use rusqlite::params;
 use tauri::{Emitter, Manager};
 
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
-const RECOVERY_STATE_RESPONSE_READY: &str = "response_ready";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum GenerationLifecycleKind {
@@ -235,26 +234,6 @@ fn create_processing_generation(
     })
 }
 
-fn update_generation_recovery_response(
-    conn: &rusqlite::Connection,
-    generation_id: &str,
-    response_file: &str,
-) -> Result<(), AppError> {
-    conn.execute(
-        "UPDATE generation_recoveries SET request_state = ?1, response_file = ?2, updated_at = ?3 WHERE generation_id = ?4",
-        params![
-            RECOVERY_STATE_RESPONSE_READY,
-            response_file,
-            current_timestamp(),
-            generation_id
-        ],
-    )
-    .map_err(|e| AppError::Database {
-        message: format!("Update generation recovery failed: {}", e),
-    })?;
-    Ok(())
-}
-
 fn set_generation_failed(
     conn: &rusqlite::Connection,
     generation_id: &str,
@@ -368,7 +347,7 @@ fn save_generation_images(
 pub(crate) async fn run_generation_lifecycle(
     app: &tauri::AppHandle,
     db: &Database,
-    engine: &dyn ImageEngine,
+    engine: &crate::api_gateway::GptImageEngine,
     request: GenerationLifecycleRequest,
 ) -> Result<GenerateResult, AppError> {
     let mut options = image_request_options(
@@ -439,13 +418,6 @@ pub(crate) async fn run_generation_lifecycle(
         })?;
     let endpoint_url =
         resolve_image_endpoint_url_for_model(db, &model, request.kind.endpoint_kind())?;
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::FileSystem {
-            message: format!("Get app data dir failed: {}", e),
-        })?;
-
     {
         let conn = db.conn.lock().map_err(|e| AppError::Database {
             message: format!("Lock failed: {}", e),
@@ -471,30 +443,18 @@ pub(crate) async fn run_generation_lifecycle(
     let result = match request.kind {
         GenerationLifecycleKind::Generate => {
             engine
-                .generate(
-                    &generation_id,
-                    &model,
-                    &api_key,
-                    &endpoint_url,
-                    &request.prompt,
-                    &options,
-                    Some(db),
-                    Some(&app_data_dir),
-                )
+                .generate(&model, &api_key, &endpoint_url, &request.prompt, &options)
                 .await
         }
         GenerationLifecycleKind::Edit => {
             engine
                 .edit(
-                    &generation_id,
                     &model,
                     &api_key,
                     &endpoint_url,
                     &request.prompt,
                     &request.source_image_paths,
                     &options,
-                    Some(db),
-                    Some(&app_data_dir),
                 )
                 .await
         }
@@ -502,12 +462,16 @@ pub(crate) async fn run_generation_lifecycle(
 
     match result {
         Ok(engine_response) => {
-            if let Some(response_file) = engine_response.response_file.as_deref() {
-                let conn = db.conn.lock().map_err(|e| AppError::Database {
-                    message: format!("Lock failed: {}", e),
-                })?;
-                update_generation_recovery_response(&conn, &generation_id, response_file)?;
+            if engine_response.requested_image_count != options.image_count {
+                return Err(AppError::Validation {
+                    message: "Provider attempt request count did not match the persisted request"
+                        .to_string(),
+                });
             }
+            let images = engine
+                .decode_images_from_response(&engine_response.body_text)
+                .await
+                .map_err(|message| AppError::Validation { message })?;
 
             let saved_images = save_generation_images(
                 app,
@@ -515,7 +479,7 @@ pub(crate) async fn run_generation_lifecycle(
                 &generation_id,
                 &created_at,
                 &options.output_format,
-                &engine_response.images,
+                &images,
             )?;
 
             let _ = db.insert_log(
@@ -539,10 +503,11 @@ pub(crate) async fn run_generation_lifecycle(
             })
         }
         Err(e) => {
+            let message = e.sanitized_message;
             let _ = db.insert_log(
                 "generation",
                 "error",
-                &request.kind.failed_log_message(&e),
+                &request.kind.failed_log_message(&message),
                 Some(&generation_id),
                 None,
                 None,
@@ -551,14 +516,14 @@ pub(crate) async fn run_generation_lifecycle(
             let conn = db.conn.lock().map_err(|e| AppError::Database {
                 message: format!("Lock failed: {}", e),
             })?;
-            set_generation_failed(&conn, &generation_id, &e, true)?;
+            set_generation_failed(&conn, &generation_id, &message, true)?;
 
             let _ = app.emit(
                 "generation:failed",
-                serde_json::json!({ "generation_id": generation_id, "error": &e }),
+                serde_json::json!({ "generation_id": generation_id, "error": &message }),
             );
 
-            Err(AppError::Validation { message: e })
+            Err(AppError::Validation { message })
         }
     }
 }

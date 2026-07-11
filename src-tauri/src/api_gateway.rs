@@ -9,50 +9,167 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub struct EngineImagesResult {
-    pub images: Vec<Vec<u8>>,
-    pub response_file: Option<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RetryAfterHint {
+    DelaySeconds(u64),
+    HttpDate(chrono::DateTime<chrono::Utc>),
+    Invalid,
 }
 
-fn missing_image_count(requested: u8, received: usize) -> Option<u8> {
-    let requested = requested as usize;
-    (received < requested).then(|| (requested - received) as u8)
+pub(crate) fn parse_retry_after(value: Option<&str>) -> Option<RetryAfterHint> {
+    let value = value?;
+    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some(
+            value
+                .parse::<u64>()
+                .map(RetryAfterHint::DelaySeconds)
+                .unwrap_or(RetryAfterHint::Invalid),
+        );
+    }
+
+    Some(
+        httpdate::parse_http_date(value)
+            .map(|date| RetryAfterHint::HttpDate(chrono::DateTime::<chrono::Utc>::from(date)))
+            .unwrap_or(RetryAfterHint::Invalid),
+    )
+}
+
+fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<RetryAfterHint> {
+    match headers.get(header::RETRY_AFTER) {
+        None => None,
+        Some(value) => value
+            .to_str()
+            .ok()
+            .and_then(|value| parse_retry_after(Some(value)))
+            .or(Some(RetryAfterHint::Invalid)),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EngineCallError {
+    pub(crate) code: String,
+    pub(crate) sanitized_message: String,
+    pub(crate) retry_after: Option<RetryAfterHint>,
+    pub(crate) safe_to_retry: bool,
+    pub(crate) outcome_ambiguous: bool,
+}
+
+impl EngineCallError {
+    pub(crate) fn from_http_status(status: u16, retry_after: Option<RetryAfterHint>) -> Self {
+        let retry_hint_valid = retry_after != Some(RetryAfterHint::Invalid);
+        let (code, message, status_retryable) = match status {
+            429 => (
+                "rate_limited",
+                "The image provider rate limit was reached",
+                true,
+            ),
+            500..=599 => (
+                "provider_unavailable",
+                "The image provider is temporarily unavailable",
+                true,
+            ),
+            _ => (
+                "request_rejected",
+                "The image provider rejected the request",
+                false,
+            ),
+        };
+
+        Self {
+            code: code.to_string(),
+            sanitized_message: message.to_string(),
+            retry_after,
+            safe_to_retry: status_retryable && retry_hint_valid,
+            outcome_ambiguous: false,
+        }
+    }
+
+    pub(crate) fn network_before_response() -> Self {
+        Self {
+            code: "network_before_response".to_string(),
+            sanitized_message: "The image provider could not be reached".to_string(),
+            retry_after: None,
+            safe_to_retry: true,
+            outcome_ambiguous: false,
+        }
+    }
+
+    pub(crate) fn provider_outcome_unknown(_detail: &str) -> Self {
+        Self {
+            code: "provider_outcome_unknown".to_string(),
+            sanitized_message: "The image provider outcome could not be confirmed".to_string(),
+            retry_after: None,
+            safe_to_retry: false,
+            outcome_ambiguous: true,
+        }
+    }
+
+    pub(crate) fn request_rejected() -> Self {
+        Self {
+            code: "request_rejected".to_string(),
+            sanitized_message: "The image request is invalid".to_string(),
+            retry_after: None,
+            safe_to_retry: false,
+            outcome_ambiguous: false,
+        }
+    }
+
+    pub(crate) fn provider_configuration_invalid() -> Self {
+        Self {
+            code: "provider_configuration_invalid".to_string(),
+            sanitized_message: "The image provider configuration is invalid".to_string(),
+            retry_after: None,
+            safe_to_retry: false,
+            outcome_ambiguous: false,
+        }
+    }
+
+    fn from_send_error(error: &reqwest::Error) -> Self {
+        if error.is_builder() {
+            Self::request_rejected()
+        } else if error.is_connect() {
+            Self::network_before_response()
+        } else {
+            Self::provider_outcome_unknown("provider request did not complete")
+        }
+    }
+}
+
+/// Complete raw body from exactly one successful provider submission.
+///
+/// Intentionally does not implement `Debug` or `Serialize`: provider bodies may
+/// contain sensitive URLs and belong only to the response-artifact boundary.
+pub(crate) struct ProviderAttemptBody {
+    pub(crate) body_text: String,
+    pub(crate) requested_image_count: u8,
 }
 
 #[async_trait::async_trait]
 pub trait ImageEngine: Send + Sync {
     async fn generate(
         &self,
-        generation_id: &str,
         model: &str,
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
         options: &GptImageRequestOptions,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-    ) -> Result<EngineImagesResult, String>;
+    ) -> Result<ProviderAttemptBody, EngineCallError>;
 
     async fn edit(
         &self,
-        generation_id: &str,
         model: &str,
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
         source_image_paths: &[String],
         options: &GptImageRequestOptions,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-    ) -> Result<EngineImagesResult, String>;
+    ) -> Result<ProviderAttemptBody, EngineCallError>;
 }
 
 pub struct GptImageEngine {
     client: reqwest::Client,
     edit_client: reqwest::Client,
     download_client: reqwest::Client,
-    max_retries: u32,
-    timeout_secs: Option<u64>,
 }
 
 struct SafeDownloadDnsResolver;
@@ -63,7 +180,7 @@ impl reqwest::dns::Resolve for SafeDownloadDnsResolver {
         Box::pin(async move {
             let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
                 .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
+                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) })?
                 .collect();
             GptImageEngine::validate_resolved_download_addrs(&addrs)?;
             Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
@@ -82,32 +199,25 @@ impl GptImageEngine {
             client,
             edit_client,
             download_client,
-            max_retries: config.max_retries,
-            timeout_secs,
         })
     }
 
     fn normalize_timeout_secs(timeout_secs: u64) -> Option<u64> {
         match timeout_secs {
-            0 => None,
-            // Older releases persisted 120s as the implicit default. Treat it as "no limit"
-            // so upgraded clients stop aborting long-running image requests.
-            120 => None,
-            secs => Some(secs.max(1)),
+            0 | 120 => None,
+            seconds => Some(seconds.max(1)),
         }
     }
 
     fn build_client(timeout_secs: Option<u64>) -> reqwest::Client {
         let mut builder = reqwest::Client::builder();
-
         if let Some(timeout_secs) = timeout_secs {
             builder = builder.timeout(Duration::from_secs(timeout_secs));
         }
-
-        builder.build().unwrap_or_else(|e| {
+        builder.build().unwrap_or_else(|error| {
             log::warn!(
                 "Failed to build configured HTTP client: {}, using default client",
-                e
+                error
             );
             reqwest::Client::new()
         })
@@ -119,853 +229,168 @@ impl GptImageEngine {
             .no_proxy()
             .dns_resolver(Arc::new(SafeDownloadDnsResolver))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 3 {
-                    attempt.stop()
-                } else if GptImageEngine::validate_download_url(attempt.url().as_str()).is_err() {
+                if attempt.previous().len() >= 3
+                    || GptImageEngine::validate_download_url(attempt.url().as_str()).is_err()
+                {
                     attempt.stop()
                 } else {
                     attempt.follow()
                 }
             }))
             .build()
-            .map_err(|e| format!("Failed to build safe image download HTTP client: {}", e))
+            .map_err(|error| format!("Failed to build safe image download client: {error}"))
     }
-}
 
-#[async_trait::async_trait]
-impl ImageEngine for GptImageEngine {
-    async fn generate(
-        &self,
-        generation_id: &str,
-        model: &str,
-        api_key: &str,
-        endpoint_url: &str,
-        prompt: &str,
-        options: &GptImageRequestOptions,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-    ) -> Result<EngineImagesResult, String> {
-        match provider_for_model(model) {
-            ImageProvider::Gemini => {
-                return self
-                    .request_gemini_images(
-                        generation_id,
-                        model,
-                        api_key,
-                        endpoint_url,
-                        prompt,
-                        &[],
-                        options,
-                        db,
-                        log_dir,
-                    )
-                    .await;
-            }
-            ImageProvider::OpenAi => {}
+    async fn read_attempt_response(
+        response: reqwest::Response,
+        requested_image_count: u8,
+    ) -> Result<ProviderAttemptBody, EngineCallError> {
+        let status = response.status();
+        let retry_after = retry_after_from_headers(response.headers());
+        if !status.is_success() {
+            return Err(EngineCallError::from_http_status(
+                status.as_u16(),
+                retry_after,
+            ));
         }
 
-        let url = openai::image_endpoint_url(endpoint_url);
-
-        if let Some(db) = db {
-            let masked_key = if api_key.len() > 8 {
-                format!("{}...{}", &api_key[..3], &api_key[api_key.len() - 4..])
-            } else {
-                "sk-****".to_string()
-            };
-            let req_meta = serde_json::json!({
-                "url": &url,
-                "model": model,
-                "size": &options.size,
-                "quality": &options.quality,
-                "background": &options.background,
-                "output_format": &options.output_format,
-                "output_compression": options.output_compression,
-                "moderation": &options.moderation,
-                "stream": options.stream,
-                "partial_images": options.partial_images,
-                "image_count": options.image_count,
-                "api_key": masked_key,
-            });
-            let _ = db.insert_log(
-                "api_request",
-                "info",
-                &format!("POST {} — model: {}, size: {}", url, model, options.size),
-                Some(generation_id),
-                Some(&req_meta.to_string()),
-                None,
-            );
-        }
-
-        if api_key.is_empty() {
-            return Err("API key not set".to_string());
-        }
-
-        let mut images = Vec::with_capacity(options.image_count as usize);
-        let mut response_files = Vec::new();
-
-        while let Some(batch_count) = missing_image_count(options.image_count, images.len()) {
-            let mut batch_options = options.clone();
-            batch_options.image_count = batch_count;
-
-            let request_body = openai::build_generation_request_body(model, prompt, &batch_options);
-
-            log::info!(
-                "Sending image generation request to {} — model: {}, size: {}, quality: {}, background: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
-                url,
-                model,
-                batch_options.size,
-                batch_options.quality,
-                batch_options.background,
-                batch_options.output_format,
-                batch_options.output_compression,
-                batch_options.moderation,
-                batch_options.stream,
-                batch_options.partial_images,
-                batch_options.image_count
-            );
-
-            let mut last_error = None;
-            let mut batch_images = None;
-            let mut batch_response_file = None;
-
-            for attempt in 0..=self.max_retries {
-                let response = self
-                    .client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .header("Content-Type", "application/json")
-                    .json(&request_body)
-                    .send()
-                    .await;
-
-                let response = match response {
-                    Ok(response) => response,
-                    Err(e) => {
-                        let error = self.format_request_error(&url, &e, self.timeout_secs);
-                        if let Some(db) = db {
-                            let _ = db.insert_log(
-                                "api_response", "error",
-                                &error,
-                                Some(generation_id),
-                                Some(&serde_json::json!({"attempt": attempt + 1, "max_retries": self.max_retries}).to_string()),
-                                None,
-                            );
-                        }
-                        if attempt < self.max_retries {
-                            log::warn!(
-                                "{}; retrying ({}/{})",
-                                error,
-                                attempt + 1,
-                                self.max_retries
-                            );
-                            last_error = Some(error);
-                            continue;
-                        }
-                        return Err(error);
-                    }
-                };
-
-                let status = response.status();
-                let body_text = response
-                    .text()
-                    .await
-                    .map_err(|e| format!("Read body failed: {}", e))?;
-
-                if !status.is_success() {
-                    let response_file = self.write_response_body(log_dir, &body_text);
-                    let error = format!(
-                        "API error {} from {}: {}",
-                        status,
-                        url,
-                        Self::preview_text(&body_text, 500)
-                    );
-                    log::error!(
-                        "API error {} from {} — response preview: {}",
-                        status,
-                        url,
-                        Self::preview_text(&body_text, 500)
-                    );
-                    if let Some(db) = db {
-                        let _ = db.insert_log(
-                            "api_response",
-                            "error",
-                            &error,
-                            Some(generation_id),
-                            Some(
-                                &serde_json::json!({
-                                    "url": &url,
-                                    "status": status.as_u16(),
-                                    "body_size": body_text.len(),
-                                    "body_preview": Self::preview_text(&body_text, 500),
-                                })
-                                .to_string(),
-                            ),
-                            response_file.as_deref(),
-                        );
-                    }
-                    if status.is_server_error() && attempt < self.max_retries {
-                        log::warn!(
-                            "Retrying image generation ({}/{})",
-                            attempt + 1,
-                            self.max_retries
-                        );
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(error);
-                }
-
-                log::info!("API responded {} ({} bytes)", status, body_text.len());
-
-                batch_response_file = self.log_response_body(
-                    db,
-                    log_dir,
-                    Some(generation_id),
-                    status.as_u16(),
-                    &body_text,
-                );
-
-                let decoded_images = self.decode_images_from_response(&body_text).await?;
-                log::info!("Decoded {} image(s) from response", decoded_images.len());
-                batch_images = Some(decoded_images);
-                break;
-            }
-
-            let batch_images = batch_images
-                .ok_or_else(|| last_error.unwrap_or_else(|| "Request failed".to_string()))?;
-            if let Some(response_file) = batch_response_file {
-                response_files.push(response_file);
-            }
-
-            let batch_image_count = batch_images.len();
-            Self::append_images_up_to_requested_count(
-                &mut images,
-                batch_images,
-                options.image_count,
-            );
-
-            if let Some(remaining) = missing_image_count(options.image_count, images.len()) {
-                let message = format!(
-                    "API returned {}/{} requested image(s) for this batch; requesting {} remaining image(s)",
-                    batch_image_count, batch_count, remaining
-                );
-                log::warn!("{}", message);
-                if let Some(db) = db {
-                    let _ = db.insert_log(
-                        "generation",
-                        "warn",
-                        &message,
-                        Some(generation_id),
-                        Some(
-                            &serde_json::json!({
-                                "batch_image_count": batch_image_count,
-                                "batch_requested_count": batch_count,
-                                "remaining_image_count": remaining,
-                                "requested_image_count": options.image_count,
-                            })
-                            .to_string(),
-                        ),
-                        None,
-                    );
-                }
-            }
-        }
-
-        let response_file = self.recoverable_response_file(log_dir, response_files, &images);
-        Ok(EngineImagesResult {
-            images,
-            response_file,
+        let body_text = response
+            .text()
+            .await
+            .map_err(|_| EngineCallError::provider_outcome_unknown("response body read failed"))?;
+        Ok(ProviderAttemptBody {
+            body_text,
+            requested_image_count,
         })
     }
 
-    async fn edit(
-        &self,
-        generation_id: &str,
-        model: &str,
-        api_key: &str,
-        endpoint_url: &str,
-        prompt: &str,
-        source_image_paths: &[String],
-        options: &GptImageRequestOptions,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-    ) -> Result<EngineImagesResult, String> {
-        match provider_for_model(model) {
-            ImageProvider::Gemini => {
-                if source_image_paths.is_empty() {
-                    return Err("At least one source image is required for editing.".to_string());
-                }
-
-                let prepared_images = self.prepare_edit_images(source_image_paths).await?;
-                return self
-                    .request_gemini_images(
-                        generation_id,
-                        model,
-                        api_key,
-                        endpoint_url,
-                        prompt,
-                        &prepared_images,
-                        options,
-                        db,
-                        log_dir,
-                    )
-                    .await;
-            }
-            ImageProvider::OpenAi => {}
-        }
-
-        let url = openai::image_endpoint_url(endpoint_url);
-
-        if source_image_paths.is_empty() {
-            return Err("At least one source image is required for editing.".to_string());
-        }
-
-        if let Some(db) = db {
-            let masked_key = if api_key.len() > 8 {
-                format!("{}...{}", &api_key[..3], &api_key[api_key.len() - 4..])
-            } else {
-                "sk-****".to_string()
-            };
-            let req_meta = serde_json::json!({
-                "url": &url,
-                "model": model,
-                "source_image_count": source_image_paths.len(),
-                "size": &options.size,
-                "quality": &options.quality,
-                "background": &options.background,
-                "input_fidelity": &options.input_fidelity,
-                "output_format": &options.output_format,
-                "output_compression": options.output_compression,
-                "moderation": &options.moderation,
-                "stream": options.stream,
-                "partial_images": options.partial_images,
-                "image_count": options.image_count,
-                "api_key": masked_key,
-            });
-            let _ = db.insert_log(
-                "api_request",
-                "info",
-                &format!(
-                    "POST {} — model: {}, source_images: {}",
-                    url,
-                    model,
-                    source_image_paths.len()
-                ),
-                Some(generation_id),
-                Some(&req_meta.to_string()),
-                None,
-            );
-        }
-
-        if api_key.is_empty() {
-            return Err("API key not set".to_string());
-        }
-
-        let prepared_images = self.prepare_edit_images(source_image_paths).await?;
-
-        let mut images = Vec::with_capacity(options.image_count as usize);
-        let mut response_files = Vec::new();
-
-        while let Some(batch_count) = missing_image_count(options.image_count, images.len()) {
-            let mut batch_options = options.clone();
-            batch_options.image_count = batch_count;
-
-            log::info!(
-                "Sending image edit request to {} — model: {}, source_images: {}, size: {}, quality: {}, background: {}, input_fidelity: {}, output_format: {}, output_compression: {}, moderation: {}, stream: {}, partial_images: {}, count: {}",
-                url,
-                model,
-                prepared_images.len(),
-                batch_options.size,
-                batch_options.quality,
-                batch_options.background,
-                batch_options.input_fidelity,
-                batch_options.output_format,
-                batch_options.output_compression,
-                batch_options.moderation,
-                batch_options.stream,
-                batch_options.partial_images,
-                batch_options.image_count
-            );
-
-            let mut last_error = None;
-            let mut batch_images = None;
-            let mut batch_response_file = None;
-
-            for attempt in 0..=self.max_retries {
-                let form = self.build_edit_form(model, prompt, &batch_options, &prepared_images)?;
-
-                let response = self
-                    .edit_client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .multipart(form)
-                    .send()
-                    .await;
-
-                let response = match response {
-                    Ok(response) => response,
-                    Err(e) => {
-                        let error = self.format_request_error(&url, &e, None);
-                        if let Some(db) = db {
-                            let _ = db.insert_log(
-                                "api_response",
-                                "error",
-                                &error,
-                                Some(generation_id),
-                                Some(
-                                    &serde_json::json!({
-                                        "attempt": attempt + 1,
-                                        "max_retries": self.max_retries
-                                    })
-                                    .to_string(),
-                                ),
-                                None,
-                            );
-                        }
-                        if attempt < self.max_retries {
-                            log::warn!(
-                                "{}; retrying ({}/{})",
-                                error,
-                                attempt + 1,
-                                self.max_retries
-                            );
-                            last_error = Some(error);
-                            continue;
-                        }
-                        return Err(error);
-                    }
-                };
-
-                let status = response.status();
-                let body_text = response
-                    .text()
-                    .await
-                    .map_err(|e| format!("Read body failed: {}", e))?;
-
-                if !status.is_success() {
-                    let response_file = self.write_response_body(log_dir, &body_text);
-                    let error = format!(
-                        "API error {} from {}: {}",
-                        status,
-                        url,
-                        Self::preview_text(&body_text, 500)
-                    );
-                    log::error!(
-                        "API error {} from {} — response preview: {}",
-                        status,
-                        url,
-                        Self::preview_text(&body_text, 500)
-                    );
-                    if let Some(db) = db {
-                        let _ = db.insert_log(
-                            "api_response",
-                            "error",
-                            &error,
-                            Some(generation_id),
-                            Some(
-                                &serde_json::json!({
-                                    "url": &url,
-                                    "status": status.as_u16(),
-                                    "body_size": body_text.len(),
-                                    "body_preview": Self::preview_text(&body_text, 500),
-                                })
-                                .to_string(),
-                            ),
-                            response_file.as_deref(),
-                        );
-                    }
-                    if status.is_server_error() && attempt < self.max_retries {
-                        log::warn!("Retrying image edit ({}/{})", attempt + 1, self.max_retries);
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(error);
-                }
-
-                log::info!("API responded {} ({} bytes)", status, body_text.len());
-
-                batch_response_file = self.log_response_body(
-                    db,
-                    log_dir,
-                    Some(generation_id),
-                    status.as_u16(),
-                    &body_text,
-                );
-
-                let decoded_images = self.decode_images_from_response(&body_text).await?;
-                log::info!(
-                    "Decoded {} image(s) from edit response",
-                    decoded_images.len()
-                );
-                batch_images = Some(decoded_images);
-                break;
-            }
-
-            let batch_images = batch_images
-                .ok_or_else(|| last_error.unwrap_or_else(|| "Request failed".to_string()))?;
-            if let Some(response_file) = batch_response_file {
-                response_files.push(response_file);
-            }
-
-            let batch_image_count = batch_images.len();
-            Self::append_images_up_to_requested_count(
-                &mut images,
-                batch_images,
-                options.image_count,
-            );
-
-            if let Some(remaining) = missing_image_count(options.image_count, images.len()) {
-                let message = format!(
-                    "API returned {}/{} requested image(s) for this edit batch; requesting {} remaining image(s)",
-                    batch_image_count, batch_count, remaining
-                );
-                log::warn!("{}", message);
-                if let Some(db) = db {
-                    let _ = db.insert_log(
-                        "generation",
-                        "warn",
-                        &message,
-                        Some(generation_id),
-                        Some(
-                            &serde_json::json!({
-                                "batch_image_count": batch_image_count,
-                                "batch_requested_count": batch_count,
-                                "remaining_image_count": remaining,
-                                "requested_image_count": options.image_count,
-                            })
-                            .to_string(),
-                        ),
-                        None,
-                    );
-                }
-            }
-        }
-
-        let response_file = self.recoverable_response_file(log_dir, response_files, &images);
-        Ok(EngineImagesResult {
-            images,
-            response_file,
-        })
-    }
-}
-
-impl GptImageEngine {
     async fn request_gemini_images(
         &self,
-        generation_id: &str,
-        model: &str,
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
         source_images: &[PreparedEditImage],
         options: &GptImageRequestOptions,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-    ) -> Result<EngineImagesResult, String> {
-        let url = openai::image_endpoint_url(endpoint_url);
-
-        if let Some(db) = db {
-            let masked_key = if api_key.len() > 8 {
-                format!("{}...{}", &api_key[..3], &api_key[api_key.len() - 4..])
-            } else {
-                "sk-****".to_string()
-            };
-            let req_meta = serde_json::json!({
-                "url": &url,
-                "model": model,
-                "source_image_count": source_images.len(),
-                "size": &options.size,
-                "quality": &options.quality,
-                "background": &options.background,
-                "output_format": &options.output_format,
-                "output_compression": options.output_compression,
-                "moderation": &options.moderation,
-                "image_count": options.image_count,
-                "api_key": masked_key,
-            });
-            let _ = db.insert_log(
-                "api_request",
-                "info",
-                &format!(
-                    "POST {} — Gemini model: {}, source_images: {}",
-                    url,
-                    model,
-                    source_images.len()
-                ),
-                Some(generation_id),
-                Some(&req_meta.to_string()),
-                None,
-            );
-        }
-
+    ) -> Result<ProviderAttemptBody, EngineCallError> {
         if api_key.is_empty() {
-            return Err("API key not set".to_string());
+            return Err(EngineCallError::provider_configuration_invalid());
         }
 
-        let mut images = Vec::with_capacity(options.image_count as usize);
-        let mut response_files = Vec::new();
-
-        while let Some(batch_count) = missing_image_count(options.image_count, images.len()) {
-            let mut batch_options = options.clone();
-            batch_options.image_count = batch_count;
-            let inline_images = source_images
-                .iter()
-                .map(|image| gemini::GeminiInlineImage {
-                    mime_type: image.mime_type.clone(),
-                    data: base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        &image.bytes,
-                    ),
-                })
-                .collect::<Vec<_>>();
-            let request_body = gemini::build_request_body(prompt, &inline_images, &batch_options);
-
-            let mut last_error = None;
-            let mut batch_images = None;
-            let mut batch_response_file = None;
-
-            for attempt in 0..=self.max_retries {
-                let response = self
-                    .client
-                    .post(&url)
-                    .header("x-goog-api-key", api_key)
-                    .header("Content-Type", "application/json")
-                    .json(&request_body)
-                    .send()
-                    .await;
-
-                let response = match response {
-                    Ok(response) => response,
-                    Err(e) => {
-                        let error = gemini::augment_transport_error(
-                            model,
-                            &self.format_request_error(&url, &e, self.timeout_secs),
-                        );
-                        if let Some(db) = db {
-                            let _ = db.insert_log(
-                                "api_response",
-                                "error",
-                                &error,
-                                Some(generation_id),
-                                Some(
-                                    &serde_json::json!({
-                                        "attempt": attempt + 1,
-                                        "max_retries": self.max_retries
-                                    })
-                                    .to_string(),
-                                ),
-                                None,
-                            );
-                        }
-                        if attempt < self.max_retries {
-                            last_error = Some(error);
-                            continue;
-                        }
-                        return Err(error);
-                    }
-                };
-
-                let status = response.status();
-                let body_text = response
-                    .text()
-                    .await
-                    .map_err(|e| format!("Read body failed: {}", e))?;
-
-                if !status.is_success() {
-                    let response_file = self.write_response_body(log_dir, &body_text);
-                    let error = format!(
-                        "API error {} from {}: {}",
-                        status,
-                        url,
-                        Self::preview_text(&body_text, 500)
-                    );
-                    if let Some(db) = db {
-                        let _ = db.insert_log(
-                            "api_response",
-                            "error",
-                            &error,
-                            Some(generation_id),
-                            Some(
-                                &serde_json::json!({
-                                    "url": &url,
-                                    "status": status.as_u16(),
-                                    "body_size": body_text.len(),
-                                    "body_preview": Self::preview_text(&body_text, 500),
-                                })
-                                .to_string(),
-                            ),
-                            response_file.as_deref(),
-                        );
-                    }
-                    if status.is_server_error() && attempt < self.max_retries {
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(error);
-                }
-
-                batch_response_file = self.log_response_body(
-                    db,
-                    log_dir,
-                    Some(generation_id),
-                    status.as_u16(),
-                    &body_text,
-                );
-                let decoded_images = self.decode_images_from_response(&body_text).await?;
-                batch_images = Some(decoded_images);
-                break;
-            }
-
-            let batch_images = batch_images
-                .ok_or_else(|| last_error.unwrap_or_else(|| "Request failed".to_string()))?;
-            if let Some(response_file) = batch_response_file {
-                response_files.push(response_file);
-            }
-
-            Self::append_images_up_to_requested_count(
-                &mut images,
-                batch_images,
-                options.image_count,
-            );
-        }
-
-        let response_file = self.recoverable_response_file(log_dir, response_files, &images);
-        Ok(EngineImagesResult {
-            images,
-            response_file,
-        })
-    }
-
-    fn append_images_up_to_requested_count(
-        images: &mut Vec<Vec<u8>>,
-        batch_images: Vec<Vec<u8>>,
-        requested_count: u8,
-    ) {
-        let remaining = (requested_count as usize).saturating_sub(images.len());
-        images.extend(batch_images.into_iter().take(remaining));
-    }
-
-    fn recoverable_response_file(
-        &self,
-        log_dir: Option<&std::path::Path>,
-        response_files: Vec<String>,
-        images: &[Vec<u8>],
-    ) -> Option<String> {
-        if response_files.len() <= 1 {
-            return response_files.into_iter().next();
-        }
-
-        let data = images
+        let inline_images = source_images
             .iter()
-            .map(|bytes| {
-                serde_json::json!({
-                    "b64_json": base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        bytes
-                    )
-                })
+            .map(|image| gemini::GeminiInlineImage {
+                mime_type: image.mime_type.clone(),
+                data: base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &image.bytes,
+                ),
             })
             .collect::<Vec<_>>();
-        let body_text = serde_json::json!({ "data": data }).to_string();
-        self.write_response_body(log_dir, &body_text)
+        let request_body = gemini::build_request_body(prompt, &inline_images, options);
+        let response = self
+            .client
+            .post(openai::image_endpoint_url(endpoint_url))
+            .header("x-goog-api-key", api_key)
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|error| EngineCallError::from_send_error(&error))?;
+
+        Self::read_attempt_response(response, options.image_count).await
     }
 
-    fn format_request_error(
+    pub(crate) async fn decode_images_from_response(
         &self,
-        fallback_url: &str,
-        error: &reqwest::Error,
-        timeout_secs: Option<u64>,
-    ) -> String {
-        let request_url = error.url().map(|url| url.as_str()).unwrap_or(fallback_url);
+        body_text: &str,
+    ) -> Result<Vec<Vec<u8>>, String> {
+        if let Ok(api_response) = serde_json::from_str::<OpenAiImageResponse>(body_text) {
+            let mut images = Vec::new();
+            for data in &api_response.data {
+                if let Some(encoded) = &data.b64_json {
+                    let bytes =
+                        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+                            .map_err(|_| "Provider image data was not valid base64".to_string())?;
+                    images.push(bytes);
+                    continue;
+                }
 
-        let mut reasons = Vec::new();
-        if error.is_timeout() {
-            match timeout_secs {
-                Some(timeout_secs) => reasons.push(format!("timeout after {}s", timeout_secs)),
-                None => reasons.push("request timeout".to_string()),
+                if let Some(image_url) = &data.url {
+                    images.push(self.download_image(image_url).await?);
+                }
+            }
+            if !images.is_empty() {
+                return Ok(images);
             }
         }
-        if error.is_connect() {
-            reasons.push("connection error".to_string());
-        }
-        if error.is_request() {
-            reasons.push("request send failure".to_string());
-        }
-        if error.is_body() {
-            reasons.push("body read/write failure".to_string());
-        }
-        if error.is_decode() {
-            reasons.push("response decode failure".to_string());
-        }
-        if error.is_redirect() {
-            reasons.push("redirect failure".to_string());
-        }
-        if let Some(status) = error.status() {
-            reasons.push(format!("http {}", status));
-        }
 
-        let chain = Self::error_chain(error);
-        if reasons.is_empty() {
-            format!("Request failed for {}: {}", request_url, chain)
-        } else {
-            format!(
-                "Request failed for {} [{}]: {}",
-                request_url,
-                reasons.join(", "),
-                chain
-            )
-        }
+        let value: Value = serde_json::from_str(body_text)
+            .map_err(|_| "Provider response was not valid JSON".to_string())?;
+        gemini::parse_images(&value)
+            .map_err(|_| "Provider response did not include decodable image data".to_string())
     }
 
-    fn error_chain(error: &dyn std::error::Error) -> String {
-        let mut chain = Vec::new();
-        let mut current = Some(error);
-
-        while let Some(err) = current {
-            let message = err.to_string();
-            if !message.is_empty() && chain.last() != Some(&message) {
-                chain.push(message);
-            }
-            current = err.source();
+    async fn prepare_edit_images(
+        &self,
+        source_image_paths: &[String],
+    ) -> Result<Vec<PreparedEditImage>, EngineCallError> {
+        let mut prepared = Vec::with_capacity(source_image_paths.len());
+        for path in source_image_paths {
+            let bytes = tokio::fs::read(path)
+                .await
+                .map_err(|_| EngineCallError::request_rejected())?;
+            let file_name = Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("source-image")
+                .to_string();
+            prepared.push(PreparedEditImage {
+                file_name,
+                mime_type: openai::mime_type_for_path(path).to_string(),
+                bytes,
+            });
         }
-
-        chain.join(" <- ")
+        Ok(prepared)
     }
 
-    fn preview_text(value: &str, max_chars: usize) -> String {
-        let preview: String = value.chars().take(max_chars).collect();
-        if value.chars().count() > max_chars {
-            format!("{}...", preview)
-        } else {
-            preview
+    fn build_edit_form(
+        model: &str,
+        prompt: &str,
+        options: &GptImageRequestOptions,
+        source_images: &[PreparedEditImage],
+    ) -> Result<Form, EngineCallError> {
+        let mut form = Form::new();
+        for (key, value) in openai::build_edit_text_fields(model, prompt, options) {
+            form = form.text(key, value);
         }
+        for image in source_images {
+            let part = Part::bytes(image.bytes.clone())
+                .file_name(image.file_name.clone())
+                .mime_str(&image.mime_type)
+                .map_err(|_| EngineCallError::request_rejected())?;
+            form = form.part(openai::edit_image_part_field_name(), part);
+        }
+        Ok(form)
     }
 
     const MAX_DOWNLOAD_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 
     fn validate_download_url(url: &str) -> Result<reqwest::Url, String> {
         let parsed =
-            reqwest::Url::parse(url).map_err(|e| format!("Invalid image download URL: {}", e))?;
-
+            reqwest::Url::parse(url).map_err(|_| "Image download URL is invalid".to_string())?;
         if parsed.scheme() != "https" {
             return Err("Image download URL must use https".to_string());
         }
-
         let host = parsed
             .host_str()
             .ok_or_else(|| "Image download URL must include a host".to_string())?;
-
         if host.eq_ignore_ascii_case("localhost") {
             return Err("Image download URL host is not allowed".to_string());
         }
-
         let ip_host = host.trim_start_matches('[').trim_end_matches(']');
-        if let Ok(ip) = ip_host.parse::<IpAddr>() {
-            if Self::is_blocked_ip(ip) {
-                return Err("Image download URL IP is not allowed".to_string());
-            }
+        if ip_host.parse::<IpAddr>().is_ok_and(Self::is_blocked_ip) {
+            return Err("Image download URL IP is not allowed".to_string());
         }
-
         Ok(parsed)
     }
 
@@ -1000,13 +425,14 @@ impl GptImageEngine {
 
     fn validate_resolved_download_addrs(addrs: &[SocketAddr]) -> Result<(), String> {
         if addrs.is_empty() {
-            return Err("Image download URL host did not resolve".to_string());
+            return Err("Image download host did not resolve".to_string());
         }
-
-        if addrs.iter().any(|addr| Self::is_blocked_ip(addr.ip())) {
-            return Err("Image download URL resolved to a blocked IP".to_string());
+        if addrs
+            .iter()
+            .any(|address| Self::is_blocked_ip(address.ip()))
+        {
+            return Err("Image download host resolved to a blocked IP".to_string());
         }
-
         Ok(())
     }
 
@@ -1018,31 +444,19 @@ impl GptImageEngine {
         if reported_size > Self::MAX_DOWNLOAD_IMAGE_BYTES
             || bytes.len() as u64 > Self::MAX_DOWNLOAD_IMAGE_BYTES
         {
-            return Err(format!(
-                "Downloaded image exceeds {} bytes",
-                Self::MAX_DOWNLOAD_IMAGE_BYTES
-            ));
+            return Err("Downloaded image is too large".to_string());
         }
-
         let content_type = content_type
             .and_then(|value| value.split(';').next())
             .map(str::trim)
             .map(str::to_ascii_lowercase)
-            .ok_or_else(|| "Downloaded image response is missing Content-Type".to_string())?;
-
+            .ok_or_else(|| "Downloaded image is missing its media type".to_string())?;
         if !content_type.starts_with("image/") {
-            return Err(format!(
-                "Downloaded image response has unsupported Content-Type: {}",
-                content_type
-            ));
+            return Err("Downloaded image has an unsupported media type".to_string());
         }
-
         if !Self::has_image_magic(bytes) {
-            return Err(
-                "Downloaded image response did not contain recognizable image data".to_string(),
-            );
+            return Err("Downloaded content is not a supported image".to_string());
         }
-
         Ok(())
     }
 
@@ -1057,216 +471,113 @@ impl GptImageEngine {
 
     async fn download_image(&self, url: &str) -> Result<Vec<u8>, String> {
         let url = Self::validate_download_url(url)?;
-        let response = self
+        let mut response = self
             .download_client
             .get(url)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
-
+            .map_err(|_| "Image download failed".to_string())?;
         if !response.status().is_success() {
-            return Err(format!("HTTP {}", response.status()));
+            return Err("Image download was rejected".to_string());
         }
-
         let content_type = response
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-
-        if let Some(content_length) = response.content_length() {
-            if content_length > Self::MAX_DOWNLOAD_IMAGE_BYTES {
-                return Err(format!(
-                    "Downloaded image exceeds {} bytes",
-                    Self::MAX_DOWNLOAD_IMAGE_BYTES
-                ));
-            }
+        if response
+            .content_length()
+            .is_some_and(|size| size > Self::MAX_DOWNLOAD_IMAGE_BYTES)
+        {
+            return Err("Downloaded image is too large".to_string());
         }
 
         let mut bytes = Vec::new();
-        let mut response = response;
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "Image download failed".to_string())?
+        {
             bytes.extend_from_slice(&chunk);
             if bytes.len() as u64 > Self::MAX_DOWNLOAD_IMAGE_BYTES {
-                return Err(format!(
-                    "Downloaded image exceeds {} bytes",
-                    Self::MAX_DOWNLOAD_IMAGE_BYTES
-                ));
+                return Err("Downloaded image is too large".to_string());
             }
         }
-
         Self::validate_downloaded_image(&bytes, content_type.as_deref(), bytes.len() as u64)?;
-
         Ok(bytes)
     }
+}
 
-    fn mark_recovery_response_ready(
-        db: &crate::db::Database,
-        generation_id: &str,
-        response_file: &str,
-    ) {
-        let Ok(conn) = db.conn.lock() else {
-            return;
-        };
-        let _ = conn.execute(
-            "UPDATE generation_recoveries SET request_state = 'response_ready', response_file = ?1, updated_at = ?2 WHERE generation_id = ?3",
-            rusqlite::params![response_file, crate::current_timestamp(), generation_id],
-        );
-    }
-
-    fn write_recoverable_response_body(
-        &self,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-        generation_id: Option<&str>,
-        body_text: &str,
-    ) -> Option<String> {
-        let response_file = self.write_response_body(log_dir, body_text)?;
-        if let (Some(db), Some(generation_id)) = (db, generation_id) {
-            Self::mark_recovery_response_ready(db, generation_id, &response_file);
-        }
-        Some(response_file)
-    }
-
-    fn log_response_body(
-        &self,
-        db: Option<&crate::db::Database>,
-        log_dir: Option<&std::path::Path>,
-        generation_id: Option<&str>,
-        status: u16,
-        body_text: &str,
-    ) -> Option<String> {
-        let response_file =
-            self.write_recoverable_response_body(db, log_dir, generation_id, body_text);
-        if let Some(db) = db {
-            let resp_meta = serde_json::json!({
-                "status": status,
-                "body_size": body_text.len(),
-            });
-            let _ = db.insert_log(
-                "api_response",
-                "info",
-                &format!("{} — {} bytes", status, body_text.len()),
-                generation_id,
-                Some(&resp_meta.to_string()),
-                response_file.as_deref(),
-            );
-
-            return response_file;
-        }
-
-        None
-    }
-
-    fn write_response_body(
-        &self,
-        log_dir: Option<&std::path::Path>,
-        body_text: &str,
-    ) -> Option<String> {
-        let dir = log_dir?;
-        let logs_dir = dir.join("logs").join("responses");
-        let _ = std::fs::create_dir_all(&logs_dir);
-        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("{}_{}.json", ts, chrono::Local::now().timestamp_millis());
-        let path = logs_dir.join(&filename);
-        let _ = std::fs::write(&path, body_text);
-        Some(path.to_string_lossy().to_string())
-    }
-
-    pub(crate) async fn decode_images_from_response(
-        &self,
-        body_text: &str,
-    ) -> Result<Vec<Vec<u8>>, String> {
-        if let Ok(api_response) = serde_json::from_str::<OpenAiImageResponse>(body_text) {
-            let mut images = Vec::new();
-            for data in &api_response.data {
-                if let Some(b64) = &data.b64_json {
-                    let bytes =
-                        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
-                            .map_err(|e| format!("Base64 decode failed: {}", e))?;
-                    images.push(bytes);
-                    continue;
-                }
-
-                if let Some(image_url) = &data.url {
-                    let bytes = self
-                        .download_image(image_url)
-                        .await
-                        .map_err(|e| format!("Download image failed: {}", e))?;
-                    images.push(bytes);
-                }
-            }
-
-            if !images.is_empty() {
-                return Ok(images);
-            }
-        }
-
-        let value: Value = serde_json::from_str(body_text).map_err(|e| {
-            format!(
-                "Parse response failed: {}. Body: {}",
-                e,
-                &body_text[..body_text.len().min(300)]
-            )
-        })?;
-
-        gemini::parse_images(&value).map_err(|error| {
-            format!(
-                "{}. Response: {}",
-                error,
-                &body_text[..body_text.len().min(500)]
-            )
-        })
-    }
-
-    async fn prepare_edit_images(
-        &self,
-        source_image_paths: &[String],
-    ) -> Result<Vec<PreparedEditImage>, String> {
-        let mut prepared = Vec::with_capacity(source_image_paths.len());
-
-        for path in source_image_paths {
-            let bytes = tokio::fs::read(path)
-                .await
-                .map_err(|e| format!("Read source image failed ({}): {}", path, e))?;
-            let file_name = Path::new(path)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("source-image")
-                .to_string();
-
-            prepared.push(PreparedEditImage {
-                file_name,
-                mime_type: openai::mime_type_for_path(path).to_string(),
-                bytes,
-            });
-        }
-
-        Ok(prepared)
-    }
-
-    fn build_edit_form(
+#[async_trait::async_trait]
+impl ImageEngine for GptImageEngine {
+    async fn generate(
         &self,
         model: &str,
+        api_key: &str,
+        endpoint_url: &str,
         prompt: &str,
         options: &GptImageRequestOptions,
-        source_images: &[PreparedEditImage],
-    ) -> Result<Form, String> {
-        let mut form = Form::new();
-        for (key, value) in openai::build_edit_text_fields(model, prompt, options) {
-            form = form.text(key, value);
+    ) -> Result<ProviderAttemptBody, EngineCallError> {
+        if provider_for_model(model) == ImageProvider::Gemini {
+            return self
+                .request_gemini_images(api_key, endpoint_url, prompt, &[], options)
+                .await;
+        }
+        if api_key.is_empty() {
+            return Err(EngineCallError::provider_configuration_invalid());
         }
 
-        for image in source_images {
-            let part = Part::bytes(image.bytes.clone())
-                .file_name(image.file_name.clone())
-                .mime_str(&image.mime_type)
-                .map_err(|e| e.to_string())?;
+        let response = self
+            .client
+            .post(openai::image_endpoint_url(endpoint_url))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .json(&openai::build_generation_request_body(
+                model, prompt, options,
+            ))
+            .send()
+            .await
+            .map_err(|error| EngineCallError::from_send_error(&error))?;
+        Self::read_attempt_response(response, options.image_count).await
+    }
 
-            form = form.part(openai::edit_image_part_field_name(), part);
+    async fn edit(
+        &self,
+        model: &str,
+        api_key: &str,
+        endpoint_url: &str,
+        prompt: &str,
+        source_image_paths: &[String],
+        options: &GptImageRequestOptions,
+    ) -> Result<ProviderAttemptBody, EngineCallError> {
+        if api_key.is_empty() {
+            return Err(EngineCallError::provider_configuration_invalid());
+        }
+        if source_image_paths.is_empty() {
+            return Err(EngineCallError::request_rejected());
         }
 
-        Ok(form)
+        let prepared_images = self.prepare_edit_images(source_image_paths).await?;
+        if provider_for_model(model) == ImageProvider::Gemini {
+            return self
+                .request_gemini_images(api_key, endpoint_url, prompt, &prepared_images, options)
+                .await;
+        }
+
+        let response = self
+            .edit_client
+            .post(openai::image_endpoint_url(endpoint_url))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .multipart(Self::build_edit_form(
+                model,
+                prompt,
+                options,
+                &prepared_images,
+            )?)
+            .send()
+            .await
+            .map_err(|error| EngineCallError::from_send_error(&error))?;
+        Self::read_attempt_response(response, options.image_count).await
     }
 }
 
@@ -1279,13 +590,128 @@ struct PreparedEditImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn test_options(image_count: u8) -> GptImageRequestOptions {
+        GptImageRequestOptions {
+            size: DEFAULT_IMAGE_SIZE.to_string(),
+            quality: DEFAULT_IMAGE_QUALITY.to_string(),
+            background: DEFAULT_IMAGE_BACKGROUND.to_string(),
+            output_format: DEFAULT_OUTPUT_FORMAT.to_string(),
+            output_compression: DEFAULT_OUTPUT_COMPRESSION,
+            moderation: DEFAULT_IMAGE_MODERATION.to_string(),
+            input_fidelity: DEFAULT_INPUT_FIDELITY.to_string(),
+            stream: DEFAULT_IMAGE_STREAM,
+            partial_images: DEFAULT_PARTIAL_IMAGES,
+            image_count,
+        }
+    }
 
     #[test]
-    fn missing_image_count_requests_only_the_remaining_images() {
-        assert_eq!(missing_image_count(2, 0), Some(2));
-        assert_eq!(missing_image_count(2, 1), Some(1));
-        assert_eq!(missing_image_count(2, 2), None);
-        assert_eq!(missing_image_count(2, 3), None);
+    fn provider_errors_preserve_retry_after_shape_and_ambiguity() {
+        let seconds = EngineCallError::from_http_status(429, Some(RetryAfterHint::DelaySeconds(3)));
+        assert_eq!(seconds.code, "rate_limited");
+        assert_eq!(seconds.retry_after, Some(RetryAfterHint::DelaySeconds(3)));
+        assert!(seconds.safe_to_retry);
+        assert!(!seconds.outcome_ambiguous);
+
+        let date = chrono::DateTime::parse_from_rfc2822("Wed, 21 Oct 2015 07:28:00 GMT")
+            .expect("parse HTTP date")
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            parse_retry_after(Some("Wed, 21 Oct 2015 07:28:00 GMT")),
+            Some(RetryAfterHint::HttpDate(date))
+        );
+        assert_eq!(
+            parse_retry_after(Some("definitely-not-a-delay")),
+            Some(RetryAfterHint::Invalid)
+        );
+        assert_eq!(parse_retry_after(None), None);
+
+        let unknown = EngineCallError::provider_outcome_unknown("connection reset");
+        assert_eq!(unknown.code, "provider_outcome_unknown");
+        assert!(!unknown.safe_to_retry);
+        assert!(unknown.outcome_ambiguous);
+        assert!(!unknown.sanitized_message.contains("connection reset"));
+    }
+
+    #[test]
+    fn invalid_retry_after_does_not_authorize_retry() {
+        let error = EngineCallError::from_http_status(429, Some(RetryAfterHint::Invalid));
+        assert!(!error.safe_to_retry);
+        assert_eq!(error.retry_after, Some(RetryAfterHint::Invalid));
+    }
+
+    #[test]
+    fn retry_after_accepts_all_http_date_wire_formats() {
+        for value in [
+            "Sun, 06 Nov 1994 08:49:37 GMT",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+        ] {
+            assert!(
+                matches!(
+                    parse_retry_after(Some(value)),
+                    Some(RetryAfterHint::HttpDate(_))
+                ),
+                "expected an HTTP date for {value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_and_gemini_generate_submit_once_and_return_short_raw_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        for model in ["gpt-image-2", "nano-banana-2"] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind test server");
+            let address = listener.local_addr().expect("server address");
+            let submissions = Arc::new(AtomicUsize::new(0));
+            let observed_submissions = Arc::clone(&submissions);
+            let server = tokio::spawn(async move {
+                while let Ok(Ok((mut stream, _))) =
+                    tokio::time::timeout(Duration::from_millis(300), listener.accept()).await
+                {
+                    observed_submissions.fetch_add(1, Ordering::SeqCst);
+                    let mut request = vec![0; 8192];
+                    let _ = stream.read(&mut request).await.expect("read request");
+                    let body = r#"{"data":[{"b64_json":"not-decoded-here"}]}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream
+                        .write_all(response.as_bytes())
+                        .await
+                        .expect("write response");
+                }
+            });
+
+            let engine = GptImageEngine::new(&ApiConfig {
+                timeout_secs: 2,
+                max_retries: 5,
+            })
+            .expect("build engine");
+            let result = engine
+                .generate(
+                    model,
+                    "secret-key",
+                    &format!("http://{address}/images/generations"),
+                    "draw one image",
+                    &test_options(2),
+                )
+                .await
+                .expect("raw provider response");
+
+            assert_eq!(result.requested_image_count, 2);
+            assert!(result.body_text.contains("not-decoded-here"));
+            server.await.expect("join server");
+            assert_eq!(submissions.load(Ordering::SeqCst), 1, "model {model}");
+        }
     }
 
     #[test]
@@ -1326,20 +752,20 @@ mod tests {
             SocketAddr::from(([192, 168, 1, 10], 443)),
             SocketAddr::from(([169, 254, 169, 254], 443)),
         ];
-
-        for addr in addrs {
-            assert!(
-                GptImageEngine::validate_resolved_download_addrs(&[addr]).is_err(),
-                "{addr} should be rejected"
-            );
+        for address in addrs {
+            assert!(GptImageEngine::validate_resolved_download_addrs(&[address]).is_err());
         }
     }
 
     #[test]
     fn download_dns_validation_allows_public_resolved_addresses() {
-        let addrs = [SocketAddr::from(([93, 184, 216, 34], 443))];
-
-        assert!(GptImageEngine::validate_resolved_download_addrs(&addrs).is_ok());
+        assert!(
+            GptImageEngine::validate_resolved_download_addrs(&[SocketAddr::from((
+                [93, 184, 216, 34],
+                443,
+            ))])
+            .is_ok()
+        );
     }
 
     #[test]
@@ -1350,26 +776,22 @@ mod tests {
     #[test]
     fn image_download_validation_rejects_size_type_and_magic_mismatches() {
         let png = b"\x89PNG\r\n\x1a\nrest";
-
         assert!(GptImageEngine::validate_downloaded_image(
             png,
             Some("image/png"),
             GptImageEngine::MAX_DOWNLOAD_IMAGE_BYTES + 1
         )
         .is_err());
-
         assert!(GptImageEngine::validate_downloaded_image(
             png,
             Some("application/json"),
             png.len() as u64
         )
         .is_err());
-
         assert!(
             GptImageEngine::validate_downloaded_image(b"not an image", Some("image/png"), 12)
                 .is_err()
         );
-
         assert!(GptImageEngine::validate_downloaded_image(
             png,
             Some("image/png"),
