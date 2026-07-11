@@ -125,10 +125,12 @@ impl EngineCallError {
     }
 
     fn from_send_error(error: &reqwest::Error) -> Self {
-        if error.is_builder() {
-            Self::request_rejected()
+        if error.is_timeout() {
+            Self::provider_outcome_unknown("provider request timed out")
         } else if error.is_connect() {
             Self::network_before_response()
+        } else if error.is_builder() {
+            Self::request_rejected()
         } else {
             Self::provider_outcome_unknown("provider request did not complete")
         }
@@ -191,8 +193,8 @@ impl reqwest::dns::Resolve for SafeDownloadDnsResolver {
 impl GptImageEngine {
     pub fn new(config: &ApiConfig) -> Result<Self, String> {
         let timeout_secs = Self::normalize_timeout_secs(config.timeout_secs);
-        let client = Self::build_client(timeout_secs);
-        let edit_client = Self::build_client(None);
+        let client = Self::build_client(timeout_secs)?;
+        let edit_client = Self::build_client(None)?;
         let download_client = Self::build_download_client()?;
 
         Ok(Self {
@@ -209,18 +211,26 @@ impl GptImageEngine {
         }
     }
 
-    fn build_client(timeout_secs: Option<u64>) -> reqwest::Client {
-        let mut builder = reqwest::Client::builder();
+    fn build_client(timeout_secs: Option<u64>) -> Result<reqwest::Client, String> {
+        Self::build_client_with_proxy_policy(timeout_secs, false)
+    }
+
+    fn build_client_with_proxy_policy(
+        timeout_secs: Option<u64>,
+        disable_proxy: bool,
+    ) -> Result<reqwest::Client, String> {
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never());
+        if disable_proxy {
+            builder = builder.no_proxy();
+        }
         if let Some(timeout_secs) = timeout_secs {
             builder = builder.timeout(Duration::from_secs(timeout_secs));
         }
-        builder.build().unwrap_or_else(|error| {
-            log::warn!(
-                "Failed to build configured HTTP client: {}, using default client",
-                error
-            );
-            reqwest::Client::new()
-        })
+        builder
+            .build()
+            .map_err(|_| "Failed to build image provider HTTP client".to_string())
     }
 
     fn build_download_client() -> Result<reqwest::Client, String> {
@@ -593,6 +603,22 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    async fn read_http_request(stream: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut request = vec![0; 32 * 1024];
+        let _ = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut request))
+            .await
+            .expect("request read timeout")
+            .expect("read request");
+    }
+
+    fn error_from_attempt(result: Result<ProviderAttemptBody, EngineCallError>) -> EngineCallError {
+        match result {
+            Err(error) => error,
+            Ok(_) => panic!("provider attempt unexpectedly succeeded"),
+        }
+    }
+
     fn test_options(image_count: u8) -> GptImageRequestOptions {
         GptImageRequestOptions {
             size: DEFAULT_IMAGE_SIZE.to_string(),
@@ -605,6 +631,17 @@ mod tests {
             stream: DEFAULT_IMAGE_STREAM,
             partial_images: DEFAULT_PARTIAL_IMAGES,
             image_count,
+        }
+    }
+
+    fn local_test_engine(timeout_secs: Option<u64>) -> GptImageEngine {
+        GptImageEngine {
+            client: GptImageEngine::build_client_with_proxy_policy(timeout_secs, true)
+                .expect("build local test client"),
+            edit_client: GptImageEngine::build_client_with_proxy_policy(timeout_secs, true)
+                .expect("build local edit test client"),
+            download_client: GptImageEngine::build_download_client()
+                .expect("build local download client"),
         }
     }
 
@@ -691,11 +728,7 @@ mod tests {
                 }
             });
 
-            let engine = GptImageEngine::new(&ApiConfig {
-                timeout_secs: 2,
-                max_retries: 5,
-            })
-            .expect("build engine");
+            let engine = local_test_engine(Some(2));
             let result = engine
                 .generate(
                     model,
@@ -711,6 +744,239 @@ mod tests {
             assert!(result.body_text.contains("not-decoded-here"));
             server.await.expect("join server");
             assert_eq!(submissions.load(Ordering::SeqCst), 1, "model {model}");
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_generate_and_edit_never_follow_307_redirects() {
+        use tokio::io::AsyncWriteExt;
+
+        let source_root = std::env::temp_dir().join(format!(
+            "astro-studio-no-redirect-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&source_root).expect("create source root");
+        let source_path = source_root.join("source.png");
+        std::fs::write(&source_path, b"\x89PNG\r\n\x1a\nsource").expect("write source");
+
+        for (model, edit) in [
+            ("gpt-image-2", false),
+            ("nano-banana-2", false),
+            ("gpt-image-2", true),
+            ("nano-banana-2", true),
+        ] {
+            let redirect_target = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind redirect target");
+            let target_address = redirect_target.local_addr().expect("target address");
+            let target_calls = Arc::new(AtomicUsize::new(0));
+            let observed_target_calls = Arc::clone(&target_calls);
+            let target_task = tokio::spawn(async move {
+                if let Ok(Ok((mut stream, _))) =
+                    tokio::time::timeout(Duration::from_millis(400), redirect_target.accept()).await
+                {
+                    observed_target_calls.fetch_add(1, Ordering::SeqCst);
+                    read_http_request(&mut stream).await;
+                    let body = r#"{"data":[]}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream
+                        .write_all(response.as_bytes())
+                        .await
+                        .expect("write redirect target response");
+                }
+            });
+
+            let origin = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind redirect origin");
+            let origin_address = origin.local_addr().expect("origin address");
+            let origin_calls = Arc::new(AtomicUsize::new(0));
+            let observed_origin_calls = Arc::clone(&origin_calls);
+            let origin_task = tokio::spawn(async move {
+                let (mut stream, _) = origin.accept().await.expect("accept origin request");
+                observed_origin_calls.fetch_add(1, Ordering::SeqCst);
+                read_http_request(&mut stream).await;
+                let response = format!(
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{target_address}/paid-replay\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("write redirect response");
+            });
+
+            let engine = local_test_engine(Some(2));
+            let endpoint = format!("http://{origin_address}/paid-call");
+            let result = if edit {
+                engine
+                    .edit(
+                        model,
+                        "secret-key",
+                        &endpoint,
+                        "edit image",
+                        &[source_path.to_string_lossy().to_string()],
+                        &test_options(1),
+                    )
+                    .await
+            } else {
+                engine
+                    .generate(
+                        model,
+                        "secret-key",
+                        &endpoint,
+                        "draw image",
+                        &test_options(1),
+                    )
+                    .await
+            };
+            let error = error_from_attempt(result);
+            assert_eq!(error.code, "request_rejected", "model={model} edit={edit}");
+            origin_task.await.expect("join redirect origin");
+            target_task.await.expect("join redirect target");
+            assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                target_calls.load(Ordering::SeqCst),
+                0,
+                "model={model} edit={edit}"
+            );
+        }
+
+        std::fs::remove_dir_all(source_root).ok();
+    }
+
+    #[tokio::test]
+    async fn transport_failures_distinguish_connect_timeout_and_truncated_success() {
+        use tokio::io::AsyncWriteExt;
+
+        let refused = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind refused address");
+        let refused_address = refused.local_addr().expect("refused address");
+        drop(refused);
+        let refused_engine = local_test_engine(None);
+        let refused_error = error_from_attempt(
+            refused_engine
+                .generate(
+                    "gpt-image-2",
+                    "secret-key",
+                    &format!("http://{refused_address}/refused"),
+                    "draw image",
+                    &test_options(1),
+                )
+                .await,
+        );
+        assert_eq!(refused_error.code, "network_before_response");
+        assert!(refused_error.safe_to_retry);
+        assert!(!refused_error.outcome_ambiguous);
+
+        let engine = local_test_engine(Some(1));
+
+        let stalled = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stalled server");
+        let stalled_address = stalled.local_addr().expect("stalled address");
+        let stalled_task = tokio::spawn(async move {
+            let (mut stream, _) = stalled.accept().await.expect("accept stalled request");
+            read_http_request(&mut stream).await;
+            tokio::time::sleep(Duration::from_millis(1300)).await;
+        });
+        let stalled_error = error_from_attempt(
+            engine
+                .generate(
+                    "gpt-image-2",
+                    "secret-key",
+                    &format!("http://{stalled_address}/stalled"),
+                    "draw image",
+                    &test_options(1),
+                )
+                .await,
+        );
+        assert_eq!(stalled_error.code, "provider_outcome_unknown");
+        assert!(!stalled_error.safe_to_retry);
+        assert!(stalled_error.outcome_ambiguous);
+        stalled_task.await.expect("join stalled server");
+
+        let truncated = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind truncated server");
+        let truncated_address = truncated.local_addr().expect("truncated address");
+        let truncated_task = tokio::spawn(async move {
+            let (mut stream, _) = truncated.accept().await.expect("accept truncated request");
+            read_http_request(&mut stream).await;
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort",
+                )
+                .await
+                .expect("write truncated response");
+        });
+        let truncated_error = error_from_attempt(
+            engine
+                .generate(
+                    "gpt-image-2",
+                    "secret-key",
+                    &format!("http://{truncated_address}/truncated"),
+                    "draw image",
+                    &test_options(1),
+                )
+                .await,
+        );
+        assert_eq!(truncated_error.code, "provider_outcome_unknown");
+        assert!(!truncated_error.safe_to_retry);
+        assert!(truncated_error.outcome_ambiguous);
+        truncated_task.await.expect("join truncated server");
+    }
+
+    #[tokio::test]
+    async fn http_status_attempts_preserve_retry_policy_without_resubmission() {
+        use tokio::io::AsyncWriteExt;
+
+        for (status, retry_after, code, retryable) in [
+            (429, Some("4"), "rate_limited", true),
+            (503, None, "provider_unavailable", true),
+            (400, None, "request_rejected", false),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind status server");
+            let address = listener.local_addr().expect("status address");
+            let calls = Arc::new(AtomicUsize::new(0));
+            let observed_calls = Arc::clone(&calls);
+            let task = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.expect("accept status request");
+                observed_calls.fetch_add(1, Ordering::SeqCst);
+                read_http_request(&mut stream).await;
+                let retry_header = retry_after
+                    .map(|value| format!("Retry-After: {value}\r\n"))
+                    .unwrap_or_default();
+                let response = format!(
+                    "HTTP/1.1 {status} Error\r\n{retry_header}Content-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("write status response");
+            });
+            let engine = local_test_engine(Some(2));
+            let error = error_from_attempt(
+                engine
+                    .generate(
+                        "gpt-image-2",
+                        "secret-key",
+                        &format!("http://{address}/status"),
+                        "draw image",
+                        &test_options(1),
+                    )
+                    .await,
+            );
+            assert_eq!(error.code, code);
+            assert_eq!(error.safe_to_retry, retryable);
+            task.await.expect("join status server");
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
     }
 
