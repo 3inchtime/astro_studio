@@ -3,7 +3,7 @@ use crate::commands::{conversations, settings};
 use crate::current_timestamp;
 use crate::db::Database;
 use crate::error::AppError;
-use crate::file_manager::{self, StagedGenerationFiles};
+use crate::file_manager::{self, PromotedGenerationFiles, StagedGenerationFiles};
 use crate::generation_jobs::{
     begin_generation_job_write_transaction, finish_job_in_transaction, get_job_in_transaction,
     load_generation_execution_snapshot_in_transaction, set_actual_image_count_in_transaction,
@@ -20,6 +20,7 @@ use rusqlite::{params, OptionalExtension, Transaction};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::io::{Read, Write};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -152,6 +153,45 @@ pub(crate) struct ProviderAttemptResponse {
     pub(crate) response_size: u64,
     pub(crate) response_sha256: String,
     pub(crate) requested_image_count: u8,
+}
+
+/// Narrow, already-verified input for the response-ready SQL transition.
+/// Private fields ensure callers cannot bypass response artifact verification.
+pub(crate) struct VerifiedResponseCommit {
+    response_file: String,
+    requested_image_count: u8,
+    job_id: String,
+    generation_id: String,
+}
+
+/// Sealed, pure-data success projection derived from a live promoted-file
+/// guard. The lifetime prevents cleanup/disarm while the SQL commit is using
+/// the projection, without passing an I/O-capable guard into the transaction.
+pub(crate) struct PromotedImageCommit<'a> {
+    generation_id: String,
+    images: Vec<GeneratedImage>,
+    _guard: PhantomData<&'a PromotedGenerationFiles>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResponseVerificationEvent {
+    BeforeBodyHash,
+    BeforeFileMetadata,
+}
+
+/// Observes the exact boundaries before verified-response CPU or filesystem
+/// work. Implementations must be non-blocking and must not panic.
+trait ResponseVerificationObserver: Send + Sync {
+    fn observe(&self, event: ResponseVerificationEvent);
+}
+
+fn observe_response_verification(
+    observer: Option<&dyn ResponseVerificationObserver>,
+    event: ResponseVerificationEvent,
+) {
+    if let Some(observer) = observer {
+        observer.observe(event);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +411,7 @@ enum ResponseDirectoryOpenStage {
 impl FileResponseArtifactStore {
     const ENVELOPE_VERSION: u64 = 1;
     const MAX_RESPONSE_BODY_BYTES: u64 = 64 * 1024 * 1024;
+    const MAX_RESPONSE_ENVELOPE_BYTES: u64 = Self::MAX_RESPONSE_BODY_BYTES * 2;
 
     pub(crate) fn new(root_dir: PathBuf) -> Self {
         Self { root_dir }
@@ -570,6 +611,11 @@ impl FileResponseArtifactStore {
     where
         F: FnMut(ResponseDirectoryOpenStage),
     {
+        let root_metadata = std::fs::symlink_metadata(root_dir)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+            return Err(GenerationExecutionError::response_artifact());
+        }
         let canonical_root = root_dir
             .canonicalize()
             .map_err(|_| GenerationExecutionError::response_artifact())?;
@@ -603,7 +649,7 @@ impl FileResponseArtifactStore {
         let metadata = file
             .metadata()
             .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let maximum_envelope_size = Self::MAX_RESPONSE_BODY_BYTES.saturating_mul(2);
+        let maximum_envelope_size = Self::MAX_RESPONSE_ENVELOPE_BYTES;
         if !metadata.is_file() || metadata.len() > maximum_envelope_size {
             return Err(GenerationExecutionError::response_artifact());
         }
@@ -665,6 +711,9 @@ impl FileResponseArtifactStore {
         });
         let bytes = serde_json::to_vec(&envelope)
             .map_err(|_| GenerationExecutionError::response_artifact())?;
+        if bytes.len() as u64 > Self::MAX_RESPONSE_ENVELOPE_BYTES {
+            return Err(GenerationExecutionError::response_artifact());
+        }
         let relative_path = Self::response_relative_path(context)?;
         if response_path != root_dir.join(&relative_path) {
             return Err(GenerationExecutionError::response_artifact());
@@ -705,8 +754,7 @@ impl FileResponseArtifactStore {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let _ = prepared.directory.remove_file(&temporary_name);
                 let _ = Self::sync_cap_directory(&prepared.directory, &prepared.absolute_directory);
-                let existing =
-                    Self::load_verified_response_sync(root_dir, context, &response_path)?;
+                let existing = Self::load_verified_response_sync(root_dir, context, response_path)?;
                 if existing.response_size == response_size
                     && existing.response_sha256 == response_sha256
                     && existing.requested_image_count == body.requested_image_count
@@ -726,7 +774,7 @@ impl FileResponseArtifactStore {
             return Err(GenerationExecutionError::response_artifact());
         }
 
-        let verified = match Self::load_verified_response_sync(root_dir, context, &response_path) {
+        let verified = match Self::load_verified_response_sync(root_dir, context, response_path) {
             Ok(verified)
                 if verified.response_size == response_size
                     && verified.response_sha256 == response_sha256
@@ -845,17 +893,22 @@ fn response_path_is_valid(path: &Path) -> bool {
     !value.is_empty() && value.len() <= 32_768 && !value.chars().any(char::is_control)
 }
 
-fn response_path_matches_expected(expected: &Path, actual: &Path) -> bool {
+fn response_path_matches_expected(
+    expected: &Path,
+    actual: &Path,
+    observer: Option<&dyn ResponseVerificationObserver>,
+) -> bool {
     if !response_path_is_valid(expected) || !response_path_is_valid(actual) {
         return false;
     }
+    observe_response_verification(observer, ResponseVerificationEvent::BeforeFileMetadata);
     let Ok(metadata) = std::fs::symlink_metadata(actual) else {
         return false;
     };
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
         || metadata.len() == 0
-        || metadata.len() > FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES.saturating_mul(2)
+        || metadata.len() > FileResponseArtifactStore::MAX_RESPONSE_ENVELOPE_BYTES
     {
         return false;
     }
@@ -866,15 +919,78 @@ fn verified_response_shape_matches(
     response: &ProviderAttemptResponse,
     requested_image_count: u8,
     expected_path: Option<&Path>,
+    observer: Option<&dyn ResponseVerificationObserver>,
 ) -> bool {
     let actual_path = Path::new(&response.response_file);
-    response.requested_image_count == requested_image_count
-        && (1..=4).contains(&response.requested_image_count)
-        && response.response_size == response.body_text.len() as u64
-        && response.response_size <= FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES
-        && response.response_sha256.len() == 64
-        && response.response_sha256 == FileResponseArtifactStore::response_hash(&response.body_text)
-        && response_path_matches_expected(expected_path.unwrap_or(actual_path), actual_path)
+    if response.requested_image_count != requested_image_count
+        || !(1..=4).contains(&response.requested_image_count)
+        || response.response_size != response.body_text.len() as u64
+        || response.response_size > FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES
+        || response.response_sha256.len() != 64
+    {
+        return false;
+    }
+    observe_response_verification(observer, ResponseVerificationEvent::BeforeBodyHash);
+    response.response_sha256 == FileResponseArtifactStore::response_hash(&response.body_text)
+        && response_path_matches_expected(
+            expected_path.unwrap_or(actual_path),
+            actual_path,
+            observer,
+        )
+}
+
+impl VerifiedResponseCommit {
+    fn verify(
+        context: &GenerationExecutionContext,
+        expected_path: &Path,
+        response: &ProviderAttemptResponse,
+        observer: Option<&dyn ResponseVerificationObserver>,
+    ) -> Result<Self, AppError> {
+        if !response_path_matches_context(expected_path, context)
+            || !verified_response_shape_matches(
+                response,
+                response.requested_image_count,
+                Some(expected_path),
+                observer,
+            )
+        {
+            return Err(AppError::GenerationJobInvalidSnapshot);
+        }
+        Ok(Self {
+            response_file: response.response_file.clone(),
+            requested_image_count: response.requested_image_count,
+            job_id: context.job_id.clone(),
+            generation_id: context.generation_id.clone(),
+        })
+    }
+
+    fn matches_context(&self, context: &GenerationExecutionContext) -> bool {
+        self.job_id == context.job_id && self.generation_id == context.generation_id
+    }
+}
+
+fn response_path_matches_context(path: &Path, context: &GenerationExecutionContext) -> bool {
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::CurDir | std::path::Component::ParentDir
+        )
+    }) {
+        return false;
+    }
+    let expected_file_name = format!("{}.response.json", context.generation_id);
+    path.file_name().and_then(|value| value.to_str()) == Some(expected_file_name.as_str())
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|value| value.to_str())
+            == Some(context.job_id.as_str())
+        && path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .and_then(|value| value.to_str())
+            == Some("generation-jobs")
 }
 
 pub(crate) async fn perform_provider_http_attempt(
@@ -947,19 +1063,38 @@ pub(crate) async fn persist_provider_attempt_response(
     let expected_path = artifact_store.expected_response_path(&snapshot.context)?;
     let expected_size = body.body_text.len() as u64;
     let expected_hash = FileResponseArtifactStore::response_hash(&body.body_text);
-    let response = artifact_store
+    let persisted_response = artifact_store
         .persist_verified_response(&snapshot.context, body)
         .await?;
     if !verified_response_shape_matches(
-        &response,
+        &persisted_response,
         snapshot.runtime_options.image_count,
         Some(&expected_path),
-    ) || response.response_size != expected_size
-        || response.response_sha256 != expected_hash
+        None,
+    ) || persisted_response.response_size != expected_size
+        || persisted_response.response_sha256 != expected_hash
     {
         return Err(GenerationExecutionError::response_artifact());
     }
-    Ok(response)
+    let loaded_response = artifact_store
+        .load_verified_response(&snapshot.context, &expected_path)
+        .await?;
+    if !verified_response_shape_matches(
+        &loaded_response,
+        snapshot.runtime_options.image_count,
+        Some(&expected_path),
+        None,
+    ) || loaded_response.response_size != expected_size
+        || loaded_response.response_sha256 != expected_hash
+        || loaded_response.response_file != persisted_response.response_file
+        || loaded_response.response_size != persisted_response.response_size
+        || loaded_response.response_sha256 != persisted_response.response_sha256
+        || loaded_response.requested_image_count != persisted_response.requested_image_count
+        || loaded_response.body_text != persisted_response.body_text
+    {
+        return Err(GenerationExecutionError::response_artifact());
+    }
+    Ok(loaded_response)
 }
 
 fn lifecycle_database_error(context: &str, error: rusqlite::Error) -> AppError {
@@ -1005,10 +1140,12 @@ fn load_matching_execution_snapshot(
 pub(crate) fn promote_verified_response_in_transaction(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
-    response: &ProviderAttemptResponse,
+    response: &VerifiedResponseCommit,
 ) -> Result<(), AppError> {
     let snapshot = load_matching_execution_snapshot(tx, context)?;
-    if !verified_response_shape_matches(response, snapshot.runtime_options.image_count, None) {
+    if !response.matches_context(context)
+        || response.requested_image_count != snapshot.runtime_options.image_count
+    {
         return Err(AppError::GenerationJobInvalidSnapshot);
     }
     let (request_state, response_file): (String, Option<String>) = tx
@@ -1052,11 +1189,39 @@ pub(crate) fn promote_verified_response_in_transaction(
 pub(crate) fn promote_verified_response(
     db: &Database,
     context: &GenerationExecutionContext,
+    expected_path: &Path,
     response: &ProviderAttemptResponse,
 ) -> Result<(), AppError> {
+    promote_verified_response_with_optional_observer(db, context, expected_path, response, None)
+}
+
+fn promote_verified_response_with_observer(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    expected_path: &Path,
+    response: &ProviderAttemptResponse,
+    observer: &dyn ResponseVerificationObserver,
+) -> Result<(), AppError> {
+    promote_verified_response_with_optional_observer(
+        db,
+        context,
+        expected_path,
+        response,
+        Some(observer),
+    )
+}
+
+fn promote_verified_response_with_optional_observer(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    expected_path: &Path,
+    response: &ProviderAttemptResponse,
+    observer: Option<&dyn ResponseVerificationObserver>,
+) -> Result<(), AppError> {
+    let response = VerifiedResponseCommit::verify(context, expected_path, response, observer)?;
     let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
     let tx = begin_generation_job_write_transaction(&mut conn)?;
-    promote_verified_response_in_transaction(&tx, context, response)?;
+    promote_verified_response_in_transaction(&tx, context, &response)?;
     tx.commit()
         .map_err(|error| lifecycle_database_error("Commit verified response failed", error))
 }
@@ -1163,14 +1328,45 @@ fn generation_image_projection_is_valid(image: &GeneratedImage, generation_id: &
         && image.file_size > 0
 }
 
+impl<'a> PromotedImageCommit<'a> {
+    fn from_promoted(
+        promoted: &'a PromotedGenerationFiles,
+        generation_id: &str,
+    ) -> Result<Self, AppError> {
+        if !promoted.matches_generation(generation_id) {
+            return Err(AppError::GenerationJobInvalidSnapshot);
+        }
+        let images = promoted.saved_images();
+        let mut image_ids = HashSet::with_capacity(images.len());
+        if images.is_empty()
+            || images.len() > 4
+            || images.iter().any(|image| {
+                !generation_image_projection_is_valid(image, generation_id)
+                    || !image_ids.insert(image.id.as_str())
+            })
+        {
+            return Err(AppError::GenerationJobInvalidSnapshot);
+        }
+        Ok(Self {
+            generation_id: generation_id.to_string(),
+            images,
+            _guard: PhantomData,
+        })
+    }
+
+    fn images(&self) -> &[GeneratedImage] {
+        &self.images
+    }
+}
+
 pub(crate) fn commit_generation_success_in_transaction(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
     request: &GenerationJobRequest,
-    images: &[GeneratedImage],
+    promoted: &PromotedImageCommit<'_>,
 ) -> Result<GenerationSuccessTransition, AppError> {
     let snapshot = load_matching_execution_snapshot(tx, context)?;
-    if snapshot.request != *request {
+    if snapshot.request != *request || promoted.generation_id != context.generation_id {
         return Err(AppError::GenerationJobInvalidSnapshot);
     }
     let job = get_job_in_transaction(tx, &context.job_id)?;
@@ -1181,15 +1377,10 @@ pub(crate) fn commit_generation_success_in_transaction(
         return Ok(GenerationSuccessTransition::CancelRequested);
     }
     let requested_image_count = snapshot.runtime_options.image_count;
+    let images = promoted.images();
     let actual_image_count =
         u8::try_from(images.len()).map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
-    let mut image_ids = HashSet::with_capacity(images.len());
-    if !(1..=requested_image_count).contains(&actual_image_count)
-        || images.iter().any(|image| {
-            !generation_image_projection_is_valid(image, &context.generation_id)
-                || !image_ids.insert(image.id.as_str())
-        })
-    {
+    if !(1..=requested_image_count).contains(&actual_image_count) {
         return Err(AppError::GenerationJobInvalidSnapshot);
     }
 
@@ -1277,11 +1468,11 @@ fn commit_precreated_generation_success(
     db: &Database,
     context: &GenerationExecutionContext,
     request: &GenerationJobRequest,
-    images: &[GeneratedImage],
+    promoted: &PromotedImageCommit<'_>,
 ) -> Result<GenerationSuccessTransition, AppError> {
     let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
     let tx = begin_generation_job_write_transaction(&mut conn)?;
-    match commit_generation_success_in_transaction(&tx, context, request, images) {
+    match commit_generation_success_in_transaction(&tx, context, request, promoted) {
         Ok(GenerationSuccessTransition::Completed(result)) => {
             tx.commit().map_err(|error| {
                 lifecycle_database_error("Commit successful generation failed", error)
@@ -1311,7 +1502,8 @@ pub(crate) async fn continue_precreated_generation_after_provider(
     cancellation: &CancellationProbe,
 ) -> Result<PrecreatedLocalOutcome, GenerationExecutionError> {
     let response = persist_provider_attempt_response(artifact_store, snapshot, body).await?;
-    promote_verified_response(db, &snapshot.context, &response)
+    let expected_response_path = artifact_store.expected_response_path(&snapshot.context)?;
+    promote_verified_response(db, &snapshot.context, &expected_response_path, &response)
         .map_err(|error| repository_execution_error(&error, "response_ready_commit"))?;
     let staged =
         resume_verified_response(decoder, file_store, snapshot, &response, cancellation).await?;
@@ -1323,20 +1515,16 @@ pub(crate) async fn continue_precreated_generation_after_provider(
             sanitized_message: "Generated images could not be saved".to_string(),
             stage: "image_promotion".to_string(),
         })?;
-    if !promoted.matches_generation(&snapshot.context.generation_id) {
-        drop(promoted);
-        return Err(repository_execution_error(
-            &AppError::GenerationJobInvalidSnapshot,
-            "success_commit",
-        ));
-    }
-    let saved_images = promoted.saved_images();
+    let promoted_commit =
+        PromotedImageCommit::from_promoted(&promoted, &snapshot.context.generation_id)
+            .map_err(|error| repository_execution_error(&error, "success_commit"))?;
     let transition = commit_precreated_generation_success(
         db,
         &snapshot.context,
         &snapshot.request,
-        &saved_images,
+        &promoted_commit,
     );
+    drop(promoted_commit);
     match transition {
         Ok(GenerationSuccessTransition::Completed(result)) => {
             promoted.disarm_cleanup();
@@ -1949,7 +2137,7 @@ mod tests {
             &self,
             context: &GenerationExecutionContext,
         ) -> Result<PathBuf, GenerationExecutionError> {
-            Ok(self.root.join(format!("{}.response.json", context.job_id)))
+            FileResponseArtifactStore::new(self.root.clone()).expected_response_path(context)
         }
 
         async fn persist_verified_response(
@@ -1959,26 +2147,19 @@ mod tests {
         ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
             assert_eq!(context.job_id, "job-1");
             self.calls.fetch_add(1, Ordering::SeqCst);
-            std::fs::create_dir_all(&self.root)
-                .map_err(|_| GenerationExecutionError::response_artifact())?;
-            let response_path = self.root.join("job-1.response.json");
-            std::fs::write(&response_path, body.body_text.as_bytes())
-                .map_err(|_| GenerationExecutionError::response_artifact())?;
-            Ok(ProviderAttemptResponse {
-                response_size: body.body_text.len() as u64,
-                response_sha256: FileResponseArtifactStore::response_hash(&body.body_text),
-                response_file: response_path.to_string_lossy().to_string(),
-                body_text: body.body_text,
-                requested_image_count: body.requested_image_count,
-            })
+            FileResponseArtifactStore::new(self.root.clone())
+                .persist_verified_response(context, body)
+                .await
         }
 
         async fn load_verified_response(
             &self,
-            _context: &GenerationExecutionContext,
-            _path: &Path,
+            context: &GenerationExecutionContext,
+            path: &Path,
         ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
-            Err(GenerationExecutionError::response_artifact())
+            FileResponseArtifactStore::new(self.root.clone())
+                .load_verified_response(context, path)
+                .await
         }
     }
 
@@ -2060,6 +2241,55 @@ mod tests {
             _path: &Path,
         ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
             Err(GenerationExecutionError::response_artifact())
+        }
+    }
+
+    struct WrongOnDiskArtifactStore {
+        root: PathBuf,
+        load_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponseArtifactStore for WrongOnDiskArtifactStore {
+        fn expected_response_path(
+            &self,
+            context: &GenerationExecutionContext,
+        ) -> Result<PathBuf, GenerationExecutionError> {
+            FileResponseArtifactStore::new(self.root.clone()).expected_response_path(context)
+        }
+
+        async fn persist_verified_response(
+            &self,
+            context: &GenerationExecutionContext,
+            body: ProviderAttemptBody,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            let response_path = self.expected_response_path(context)?;
+            std::fs::create_dir_all(
+                response_path
+                    .parent()
+                    .ok_or_else(GenerationExecutionError::response_artifact)?,
+            )
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+            std::fs::write(&response_path, b"{}")
+                .map_err(|_| GenerationExecutionError::response_artifact())?;
+            Ok(ProviderAttemptResponse {
+                response_size: body.body_text.len() as u64,
+                response_sha256: FileResponseArtifactStore::response_hash(&body.body_text),
+                response_file: response_path.to_string_lossy().to_string(),
+                body_text: body.body_text,
+                requested_image_count: body.requested_image_count,
+            })
+        }
+
+        async fn load_verified_response(
+            &self,
+            context: &GenerationExecutionContext,
+            path: &Path,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            self.load_calls.fetch_add(1, Ordering::SeqCst);
+            FileResponseArtifactStore::new(self.root.clone())
+                .load_verified_response(context, path)
+                .await
         }
     }
 
@@ -2342,6 +2572,41 @@ mod tests {
                 self.all_unlocked.store(false, Ordering::SeqCst);
             }
             counter.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct DbLockResponseVerificationObserver {
+        db: Arc<Database>,
+        hash_calls: AtomicUsize,
+        metadata_calls: AtomicUsize,
+        all_unlocked: AtomicBool,
+    }
+
+    impl DbLockResponseVerificationObserver {
+        fn new(db: Arc<Database>) -> Self {
+            Self {
+                db,
+                hash_calls: AtomicUsize::new(0),
+                metadata_calls: AtomicUsize::new(0),
+                all_unlocked: AtomicBool::new(true),
+            }
+        }
+
+        fn record(&self, counter: &AtomicUsize) {
+            let unlocked = self.db.conn.try_lock().is_ok();
+            if !unlocked {
+                self.all_unlocked.store(false, Ordering::SeqCst);
+            }
+            counter.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl ResponseVerificationObserver for DbLockResponseVerificationObserver {
+        fn observe(&self, event: ResponseVerificationEvent) {
+            match event {
+                ResponseVerificationEvent::BeforeBodyHash => self.record(&self.hash_calls),
+                ResponseVerificationEvent::BeforeFileMetadata => self.record(&self.metadata_calls),
+            }
         }
     }
 
@@ -2631,6 +2896,9 @@ mod tests {
                 promote_verified_response(
                     fixture.db.as_ref(),
                     &fixture.snapshot.context,
+                    &response_store
+                        .expected_response_path(&fixture.snapshot.context)
+                        .expect("derive matrix response path"),
                     &response,
                 )
                 .expect("promote matrix response");
@@ -2656,36 +2924,37 @@ mod tests {
                 },
             );
             assert_eq!(result.is_ok(), should_succeed);
-            let conn = fixture.db.conn.lock().expect("lock matrix fixture");
-            let job = get_job(&conn, &fixture.snapshot.context.job_id).unwrap();
-            assert_eq!(
-                job.status,
-                if should_succeed {
-                    GenerationJobStatus::Failed
-                } else {
-                    GenerationJobStatus::Running
-                }
-            );
-            assert!(!format!("{job:?}").contains(raw_secret));
-            let recovery_count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM generation_recoveries WHERE generation_id = ?1",
-                    params![fixture.snapshot.context.generation_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(recovery_count, recovery_after);
-            if !should_succeed {
-                let state: String = conn
+            {
+                let conn = fixture.db.conn.lock().expect("lock matrix fixture");
+                let job = get_job(&conn, &fixture.snapshot.context.job_id).unwrap();
+                assert_eq!(
+                    job.status,
+                    if should_succeed {
+                        GenerationJobStatus::Failed
+                    } else {
+                        GenerationJobStatus::Running
+                    }
+                );
+                assert!(!format!("{job:?}").contains(raw_secret));
+                let recovery_count: i64 = conn
                     .query_row(
-                        "SELECT request_state FROM generation_recoveries WHERE generation_id = ?1",
+                        "SELECT COUNT(*) FROM generation_recoveries WHERE generation_id = ?1",
                         params![fixture.snapshot.context.generation_id],
                         |row| row.get(0),
                     )
                     .unwrap();
-                assert_eq!(state, "requesting");
+                assert_eq!(recovery_count, recovery_after);
+                if !should_succeed {
+                    let state: String = conn
+                        .query_row(
+                            "SELECT request_state FROM generation_recoveries WHERE generation_id = ?1",
+                            params![fixture.snapshot.context.generation_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(state, "requesting");
+                }
             }
-            drop(conn);
             if let Some(response) = response {
                 assert!(Path::new(&response.response_file).is_file());
                 response_store
@@ -2787,6 +3056,234 @@ mod tests {
         );
         drop(conn);
         fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn response_promotion_verifies_body_and_file_before_database_lock() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let response_store = fixture.response_store();
+        let response = response_store
+            .persist_verified_response(
+                &fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist response for lock oracle");
+        let expected_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
+            .expect("derive expected response path");
+        let observer = DbLockResponseVerificationObserver::new(Arc::clone(&fixture.db));
+
+        promote_verified_response_with_observer(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &expected_path,
+            &response,
+            &observer,
+        )
+        .expect("promote response after unlocked verification");
+
+        assert_eq!(observer.hash_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(observer.metadata_calls.load(Ordering::SeqCst), 1);
+        assert!(observer.all_unlocked.load(Ordering::SeqCst));
+        {
+            let conn = fixture.db.conn.lock().expect("read promoted recovery");
+            let (state, response_file): (String, Option<String>) = conn
+                .query_row(
+                    "SELECT request_state, response_file FROM generation_recoveries
+                     WHERE generation_id = ?1",
+                    params![fixture.snapshot.context.generation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("read promoted response state");
+            assert_eq!(state, "response_ready");
+            assert_eq!(
+                response_file.as_deref(),
+                Some(response.response_file.as_str())
+            );
+        }
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn response_promotion_rejects_wrong_count_and_exact_path_without_mutation() {
+        let wrong_count_fixture = PrecreatedTestFixture::new(1);
+        let wrong_count_store = wrong_count_fixture.response_store();
+        let wrong_count_response = wrong_count_store
+            .persist_verified_response(
+                &wrong_count_fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 2,
+                },
+            )
+            .await
+            .expect("persist structurally valid wrong-count response");
+        let wrong_count_path = wrong_count_store
+            .expected_response_path(&wrong_count_fixture.snapshot.context)
+            .expect("derive wrong-count response path");
+        let wrong_count_error = promote_verified_response(
+            wrong_count_fixture.db.as_ref(),
+            &wrong_count_fixture.snapshot.context,
+            &wrong_count_path,
+            &wrong_count_response,
+        )
+        .expect_err("snapshot count mismatch must not promote recovery");
+        assert!(matches!(
+            wrong_count_error,
+            AppError::GenerationJobInvalidSnapshot
+        ));
+        {
+            let conn = wrong_count_fixture.db.conn.lock().unwrap();
+            let (state, response_file): (String, Option<String>) = conn
+                .query_row(
+                    "SELECT request_state, response_file FROM generation_recoveries
+                     WHERE generation_id = ?1",
+                    params![wrong_count_fixture.snapshot.context.generation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((state.as_str(), response_file), ("requesting", None));
+        }
+        wrong_count_fixture.cleanup();
+
+        let wrong_path_fixture = PrecreatedTestFixture::new(1);
+        let expected_store = wrong_path_fixture.response_store();
+        let other_store = FileResponseArtifactStore::new(wrong_path_fixture.root.join("other"));
+        let wrong_path_response = other_store
+            .persist_verified_response(
+                &wrong_path_fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist response at a different valid path");
+        let expected_path = expected_store
+            .expected_response_path(&wrong_path_fixture.snapshot.context)
+            .expect("derive exact expected response path");
+        let wrong_path_error = promote_verified_response(
+            wrong_path_fixture.db.as_ref(),
+            &wrong_path_fixture.snapshot.context,
+            &expected_path,
+            &wrong_path_response,
+        )
+        .expect_err("a different regular response path must not promote recovery");
+        assert!(matches!(
+            wrong_path_error,
+            AppError::GenerationJobInvalidSnapshot
+        ));
+        {
+            let conn = wrong_path_fixture.db.conn.lock().unwrap();
+            let (state, response_file): (String, Option<String>) = conn
+                .query_row(
+                    "SELECT request_state, response_file FROM generation_recoveries
+                     WHERE generation_id = ?1",
+                    params![wrong_path_fixture.snapshot.context.generation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((state.as_str(), response_file), ("requesting", None));
+        }
+        wrong_path_fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn verified_response_commit_cannot_be_cross_wired_to_another_context() {
+        let owner = PrecreatedTestFixture::new(1);
+        let owner_store = owner.response_store();
+        let response = owner_store
+            .persist_verified_response(
+                &owner.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist owner response");
+        let expected_path = owner_store
+            .expected_response_path(&owner.snapshot.context)
+            .expect("derive owner response path");
+        let response = VerifiedResponseCommit::verify(
+            &owner.snapshot.context,
+            &expected_path,
+            &response,
+            None,
+        )
+        .expect("construct verified owner commit");
+        let other = PrecreatedTestFixture::new(1);
+
+        {
+            let mut conn = other.db.conn.lock().unwrap();
+            let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+            let error =
+                promote_verified_response_in_transaction(&tx, &other.snapshot.context, &response)
+                    .expect_err("verified response identity must not cross generation contexts");
+            assert!(matches!(error, AppError::GenerationJobInvalidSnapshot));
+            tx.rollback().unwrap();
+        }
+        {
+            let conn = other.db.conn.lock().unwrap();
+            let (state, response_file): (String, Option<String>) = conn
+                .query_row(
+                    "SELECT request_state, response_file FROM generation_recoveries
+                     WHERE generation_id = ?1",
+                    params![other.snapshot.context.generation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((state.as_str(), response_file), ("requesting", None));
+        }
+        owner.cleanup();
+        other.cleanup();
+    }
+
+    #[tokio::test]
+    async fn response_artifact_identity_cannot_be_rebound_to_another_context() {
+        let owner = PrecreatedTestFixture::new(1);
+        let owner_store = owner.response_store();
+        let response = owner_store
+            .persist_verified_response(
+                &owner.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist owner response");
+        let owner_path = owner_store
+            .expected_response_path(&owner.snapshot.context)
+            .expect("derive owner response path");
+        let other = PrecreatedTestFixture::new(1);
+
+        let result = promote_verified_response(
+            other.db.as_ref(),
+            &other.snapshot.context,
+            &owner_path,
+            &response,
+        );
+        let error = result.expect_err("job A's artifact cannot be rebound to job B");
+        assert!(matches!(error, AppError::GenerationJobInvalidSnapshot));
+        {
+            let conn = other.db.conn.lock().unwrap();
+            let (state, response_file): (String, Option<String>) = conn
+                .query_row(
+                    "SELECT request_state, response_file FROM generation_recoveries
+                     WHERE generation_id = ?1",
+                    params![other.snapshot.context.generation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((state.as_str(), response_file), ("requesting", None));
+        }
+        owner.cleanup();
+        other.cleanup();
     }
 
     #[tokio::test]
@@ -2963,49 +3460,50 @@ mod tests {
         assert_eq!(promoted_paths.len(), 4);
         assert!(promoted_paths.iter().all(|path| !path.exists()));
 
-        let conn = fixture.db.conn.lock().unwrap();
-        let (job_status, generation_status, state, response_file, metadata): (
-            String,
-            String,
-            String,
-            Option<String>,
-            String,
-        ) = conn
-            .query_row(
-                "SELECT j.status, g.status, r.request_state, r.response_file, g.request_metadata
-                 FROM generation_jobs j
-                 JOIN generations g ON g.id = j.generation_id
-                 JOIN generation_recoveries r ON r.generation_id = g.id
-                 WHERE j.id = ?1",
-                params![fixture.snapshot.context.job_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .unwrap();
-        let image_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
-                params![fixture.snapshot.context.generation_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            (job_status.as_str(), generation_status.as_str()),
-            ("running", "running")
-        );
-        assert_eq!(state, "response_ready");
-        assert!(response_file.is_some());
-        assert_eq!(image_count, 0);
-        let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
-        assert!(metadata.get("actual_image_count").is_none());
-        drop(conn);
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            let (job_status, generation_status, state, response_file, metadata): (
+                String,
+                String,
+                String,
+                Option<String>,
+                String,
+            ) = conn
+                .query_row(
+                    "SELECT j.status, g.status, r.request_state, r.response_file, g.request_metadata
+                     FROM generation_jobs j
+                     JOIN generations g ON g.id = j.generation_id
+                     JOIN generation_recoveries r ON r.generation_id = g.id
+                     WHERE j.id = ?1",
+                    params![fixture.snapshot.context.job_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            let image_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
+                    params![fixture.snapshot.context.generation_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                (job_status.as_str(), generation_status.as_str()),
+                ("running", "running")
+            );
+            assert_eq!(state, "response_ready");
+            assert!(response_file.is_some());
+            assert_eq!(image_count, 0);
+            let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+            assert!(metadata.get("actual_image_count").is_none());
+        }
         let response_path = response_store
             .expected_response_path(&fixture.snapshot.context)
             .unwrap();
@@ -3030,8 +3528,16 @@ mod tests {
             )
             .await
             .unwrap();
-        promote_verified_response(fixture.db.as_ref(), &fixture.snapshot.context, &response)
+        let expected_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
             .unwrap();
+        promote_verified_response(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &expected_path,
+            &response,
+        )
+        .unwrap();
         {
             let conn = fixture.db.conn.lock().unwrap();
             conn.execute_batch(
@@ -3062,44 +3568,45 @@ mod tests {
         .expect_err("terminal SQL fault must roll back recovery deletion and job update");
         assert_eq!(error.stable_code(), "database_error");
 
-        let conn = fixture.db.conn.lock().unwrap();
-        let (job_status, job_error, generation_status, generation_error, state, path): (
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-        ) = conn
-            .query_row(
-                "SELECT j.status, j.error_message, g.status, g.error_message,
-                        r.request_state, r.response_file
-                 FROM generation_jobs j
-                 JOIN generations g ON g.id = j.generation_id
-                 JOIN generation_recoveries r ON r.generation_id = g.id
-                 WHERE j.id = ?1",
-                params![fixture.snapshot.context.job_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            (job_status.as_str(), generation_status.as_str()),
-            ("running", "running")
-        );
-        assert_eq!((job_error, generation_error), (None, None));
-        assert_eq!(state, "response_ready");
-        assert_eq!(path.as_deref(), Some(response.response_file.as_str()));
-        assert!(!format!("{path:?}").contains(raw_secret));
-        drop(conn);
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            let (job_status, job_error, generation_status, generation_error, state, path): (
+                String,
+                Option<String>,
+                String,
+                Option<String>,
+                String,
+                Option<String>,
+            ) = conn
+                .query_row(
+                    "SELECT j.status, j.error_message, g.status, g.error_message,
+                            r.request_state, r.response_file
+                     FROM generation_jobs j
+                     JOIN generations g ON g.id = j.generation_id
+                     JOIN generation_recoveries r ON r.generation_id = g.id
+                     WHERE j.id = ?1",
+                    params![fixture.snapshot.context.job_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                (job_status.as_str(), generation_status.as_str()),
+                ("running", "running")
+            );
+            assert_eq!((job_error, generation_error), (None, None));
+            assert_eq!(state, "response_ready");
+            assert_eq!(path.as_deref(), Some(response.response_file.as_str()));
+            assert!(!format!("{path:?}").contains(raw_secret));
+        }
         response_store
             .load_verified_response(
                 &fixture.snapshot.context,
@@ -3254,8 +3761,8 @@ mod tests {
     async fn cross_wired_success_images_are_rejected_without_mutation() {
         let fixture = PrecreatedTestFixture::new(1);
         let other = PrecreatedTestFixture::new(1);
-        let response = fixture
-            .response_store()
+        let response_store = fixture.response_store();
+        let response = response_store
             .persist_verified_response(
                 &fixture.snapshot.context,
                 ProviderAttemptBody {
@@ -3265,17 +3772,29 @@ mod tests {
             )
             .await
             .unwrap();
-        promote_verified_response(fixture.db.as_ref(), &fixture.snapshot.context, &response)
+        let expected_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
             .unwrap();
-        let image = GeneratedImage {
-            id: "cross-wired-image".to_string(),
-            generation_id: other.snapshot.context.generation_id.clone(),
-            file_path: "/managed/cross-wired.png".to_string(),
-            thumbnail_path: "/managed/cross-wired-thumb.png".to_string(),
-            width: 4,
-            height: 4,
-            file_size: 128,
-        };
+        promote_verified_response(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &expected_path,
+            &response,
+        )
+        .unwrap();
+        let promoted = file_manager::FileManager::new(other.file_root())
+            .stage_generation_images(
+                &other.snapshot.context.generation_id,
+                &[jpeg_bytes()],
+                &other.snapshot.output_format,
+                &other.snapshot.created_at,
+            )
+            .unwrap()
+            .promote()
+            .unwrap();
+        let promoted_commit =
+            PromotedImageCommit::from_promoted(&promoted, &other.snapshot.context.generation_id)
+                .unwrap();
         let error = {
             let mut conn = fixture.db.conn.lock().unwrap();
             let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
@@ -3283,25 +3802,102 @@ mod tests {
                 &tx,
                 &fixture.snapshot.context,
                 &fixture.snapshot.request,
-                &[image],
+                &promoted_commit,
             )
             .expect_err("cross-wired image projection must fail");
             tx.rollback().unwrap();
             error
         };
+        drop(promoted_commit);
+        let promoted_paths = promoted.final_paths();
+        drop(promoted);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
         assert_eq!(error.stable_code(), "generation_job_invalid_snapshot");
         assert_eq!(fixture.row_count("images"), 0);
         assert_eq!(fixture.row_count("generation_recoveries"), 1);
-        let conn = fixture.db.conn.lock().unwrap();
-        assert_eq!(
-            get_job(&conn, &fixture.snapshot.context.job_id)
-                .unwrap()
-                .status,
-            GenerationJobStatus::Running
-        );
-        drop(conn);
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            assert_eq!(
+                get_job(&conn, &fixture.snapshot.context.job_id)
+                    .unwrap()
+                    .status,
+                GenerationJobStatus::Running
+            );
+        }
         fixture.cleanup();
         other.cleanup();
+    }
+
+    #[tokio::test]
+    async fn success_transaction_uses_only_guard_derived_image_paths() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let response_store = fixture.response_store();
+        let response = response_store
+            .persist_verified_response(
+                &fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist response before forged success attempt");
+        let expected_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
+            .expect("derive response path before forged success attempt");
+        promote_verified_response(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &expected_path,
+            &response,
+        )
+        .expect("promote verified response");
+        let promoted = file_manager::FileManager::new(fixture.file_root())
+            .stage_generation_images(
+                &fixture.snapshot.context.generation_id,
+                &[jpeg_bytes()],
+                &fixture.snapshot.output_format,
+                &fixture.snapshot.created_at,
+            )
+            .unwrap()
+            .promote()
+            .unwrap();
+        let promoted_paths = promoted.final_paths();
+        let promoted_commit =
+            PromotedImageCommit::from_promoted(&promoted, &fixture.snapshot.context.generation_id)
+                .expect("derive sealed success input from the live promoted guard");
+        assert_eq!(promoted_commit.images().len(), 1);
+        assert_eq!(
+            promoted_commit.images()[0].file_path,
+            promoted_paths[0].to_string_lossy()
+        );
+        assert_eq!(
+            promoted_commit.images()[0].thumbnail_path,
+            promoted_paths[1].to_string_lossy()
+        );
+
+        let result = {
+            let mut conn = fixture.db.conn.lock().unwrap();
+            let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+            let result = commit_generation_success_in_transaction(
+                &tx,
+                &fixture.snapshot.context,
+                &fixture.snapshot.request,
+                &promoted_commit,
+            );
+            tx.rollback().unwrap();
+            result
+        };
+        assert!(matches!(
+            result,
+            Ok(GenerationSuccessTransition::Completed(_))
+        ));
+        drop(promoted_commit);
+        drop(promoted);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+        assert_eq!(fixture.row_count("images"), 0);
+        assert_eq!(fixture.row_count("generation_recoveries"), 1);
+        fixture.cleanup();
     }
 
     #[async_trait::async_trait]
@@ -3399,6 +3995,42 @@ mod tests {
         assert_eq!(loaded.response_sha256, response.response_sha256);
 
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn oversized_encoded_response_envelope_creates_no_final_or_temporary_file() {
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-response-envelope-limit-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store = FileResponseArtifactStore::new(root.clone());
+        let context = fixture_execution_context();
+        let expected_path = store
+            .expected_response_path(&context)
+            .expect("derive oversized response path");
+        let control_body_length =
+            usize::try_from(FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES / 3)
+                .expect("response limit fits usize");
+        let result = store
+            .persist_verified_response(
+                &context,
+                ProviderAttemptBody {
+                    body_text: "\0".repeat(control_body_length),
+                    requested_image_count: 1,
+                },
+            )
+            .await;
+
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("an envelope beyond the loader bound must not be published"),
+        };
+        assert_eq!(error.code(), "recovery_failed");
+        assert!(!expected_path.exists());
+        assert!(
+            !root.exists(),
+            "envelope size validation must happen before directory or temp-file creation"
+        );
     }
 
     #[tokio::test]
@@ -3600,6 +4232,47 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn response_loader_rejects_a_symlinked_response_root() {
+        use std::os::unix::fs::symlink;
+
+        let parent = std::env::temp_dir().join(format!(
+            "astro-studio-response-root-symlink-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let real_root = parent.join("real-root");
+        let alias_root = parent.join("alias-root");
+        let real_store = FileResponseArtifactStore::new(real_root.clone());
+        let context = fixture_execution_context();
+        real_store
+            .persist_verified_response(
+                &context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist response under real root");
+        symlink(&real_root, &alias_root).expect("create response-root symlink");
+        let alias_store = FileResponseArtifactStore::new(alias_root.clone());
+        let alias_path = alias_store
+            .expected_response_path(&context)
+            .expect("derive alias response path");
+
+        let result = alias_store
+            .load_verified_response(&context, &alias_path)
+            .await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("loader must reject the response root before canonicalizing it"),
+        };
+        assert_eq!(error.code(), "recovery_failed");
+        std::fs::remove_file(alias_root).ok();
+        std::fs::remove_dir_all(parent).ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn response_loader_rejects_final_component_symlink() {
         use std::os::unix::fs::symlink;
 
@@ -3722,6 +4395,36 @@ mod tests {
         assert_eq!(artifact_calls.load(Ordering::SeqCst), 1);
         assert_eq!(response.requested_image_count, 2);
         std::fs::remove_dir_all(artifact_root).ok();
+    }
+
+    #[tokio::test]
+    async fn persisted_response_is_reread_before_it_can_become_verified() {
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-wrong-on-disk-response-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let load_calls = Arc::new(AtomicUsize::new(0));
+        let snapshot = fixture_execution_snapshot();
+        let result = persist_provider_attempt_response(
+            &WrongOnDiskArtifactStore {
+                root: root.clone(),
+                load_calls: Arc::clone(&load_calls),
+            },
+            &snapshot,
+            ProviderAttemptBody {
+                body_text: r#"{"data":[]}"#.to_string(),
+                requested_image_count: snapshot.runtime_options.image_count,
+            },
+        )
+        .await;
+
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("a correct return value cannot substitute for the on-disk envelope"),
+        };
+        assert_eq!(error.code(), "recovery_failed");
+        assert_eq!(load_calls.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]
