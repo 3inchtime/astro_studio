@@ -1,8 +1,10 @@
 use crate::commands::conversations;
 use crate::error::AppError;
+use crate::generation_lifecycle::{GenerationExecutionContext, GenerationExecutionSnapshot};
 use crate::models::{
     EnqueueGenerationResult, GenerationJob, GenerationJobFilter, GenerationJobPage,
-    GenerationJobStatus, DEFAULT_GENERATION_JOB_PAGE_LIMIT, MAX_GENERATION_JOB_PAGE_LIMIT,
+    GenerationJobStatus, GptImageRequestOptions, DEFAULT_GENERATION_JOB_PAGE_LIMIT,
+    MAX_GENERATION_JOB_PAGE_LIMIT,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -156,6 +158,17 @@ struct LinkedRecoverySnapshot {
     updated_at: String,
 }
 
+#[derive(Debug)]
+struct LinkedImageProjection {
+    id: String,
+    file_path: String,
+    thumbnail_path: Option<String>,
+    width: i32,
+    height: i32,
+    file_size: i64,
+    created_at: String,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum GenerationJobRequestKind {
@@ -287,6 +300,8 @@ struct CanonicalGenerationMetadata {
     partial_images: u8,
     image_count: u8,
     source_image_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    actual_image_count: Option<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -808,6 +823,41 @@ fn recovery_matches_job(
         && state_and_file_match
 }
 
+fn load_linked_images(
+    conn: &Connection,
+    generation_id: &str,
+) -> Result<Vec<LinkedImageProjection>, AppError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, file_path, thumbnail_path, width, height, file_size, created_at
+             FROM images WHERE generation_id = ?1 ORDER BY id ASC",
+        )
+        .map_err(|error| database_error("Prepare linked generation images failed", error))?;
+    let images = statement
+        .query_map(params![generation_id], |row| {
+            Ok(LinkedImageProjection {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                thumbnail_path: row.get(2)?,
+                width: row.get(3)?,
+                height: row.get(4)?,
+                file_size: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| database_error("Query linked generation images failed", error))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| persisted_row_error("Read linked generation images failed", error))?;
+    Ok(images)
+}
+
+fn image_projection_path_valid(path: &str) -> bool {
+    nonempty(path)
+        && path.len() <= 32_768
+        && !path.chars().any(char::is_control)
+        && public_string_is_safe(path)
+}
+
 fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(), AppError> {
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
         .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
@@ -827,6 +877,7 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
         .and_then(|value| {
             serde_json::from_str(value).map_err(|_| AppError::GenerationJobCorruptPersistedData)
         })?;
+    let images = load_linked_images(conn, &job.generation_id)?;
     let public_generation_fields = [
         generation.prompt.as_str(),
         generation.model.as_str(),
@@ -862,6 +913,9 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
         && metadata.input_fidelity == generation.input_fidelity
         && i32::from(metadata.image_count) == generation.image_count
         && metadata.source_image_count == source_image_paths.len()
+        && metadata.output_compression <= 100
+        && metadata.partial_images <= 3
+        && (1..=4).contains(&metadata.image_count)
         && request
             .options
             .stream
@@ -920,7 +974,40 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
         && generation.error_message == job.error_message
         && generation.created_at == job.queued_at
         && generation.deleted_at.is_none();
-    if !public_generation_fields || !metadata_matches || !request_matches || !generation_matches {
+    let image_rows_valid = images.iter().all(|image| {
+        source_reference_id_valid(&image.id)
+            && image_projection_path_valid(&image.file_path)
+            && image
+                .thumbnail_path
+                .as_deref()
+                .is_some_and(image_projection_path_valid)
+            && image.width > 0
+            && image.height > 0
+            && image.file_size > 0
+            && image.created_at == generation.created_at
+            && canonical_timestamp(&image.created_at)
+    });
+    let actual_image_count = u8::try_from(images.len()).ok();
+    let image_projection_matches = match job.status {
+        GenerationJobStatus::Completed => metadata.actual_image_count.is_some_and(|actual| {
+            actual_image_count == Some(actual)
+                && (1..=metadata.image_count).contains(&actual)
+                && image_rows_valid
+        }),
+        GenerationJobStatus::Queued
+        | GenerationJobStatus::Running
+        | GenerationJobStatus::Failed
+        | GenerationJobStatus::Cancelled
+        | GenerationJobStatus::Interrupted => {
+            metadata.actual_image_count.is_none() && images.is_empty()
+        }
+    };
+    if !public_generation_fields
+        || !metadata_matches
+        || !request_matches
+        || !generation_matches
+        || !image_projection_matches
+    {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
 
@@ -936,8 +1023,8 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
             .is_some_and(|recovery| recovery_matches_job(recovery, job, &request, &generation)),
         GenerationJobStatus::Failed if job.started_at.is_none() => recovery.is_none(),
         GenerationJobStatus::Cancelled if job.started_at.is_none() => recovery.is_none(),
-        GenerationJobStatus::Completed
-        | GenerationJobStatus::Failed
+        GenerationJobStatus::Completed => recovery.is_none(),
+        GenerationJobStatus::Failed
         | GenerationJobStatus::Cancelled
         | GenerationJobStatus::Interrupted => recovery
             .as_ref()
@@ -1427,6 +1514,7 @@ fn canonical_metadata(
         image_count: u8::try_from(request.image_count)
             .map_err(|_| AppError::GenerationJobInvalidSnapshot)?,
         source_image_count: request.source_image_paths.len(),
+        actual_image_count: None,
     })
 }
 
@@ -1879,32 +1967,38 @@ fn stored_job_from_row_offset(
 }
 
 pub(crate) fn claim_next_job(conn: &mut Connection) -> Result<Option<GenerationJob>, AppError> {
-    let tx = conn
-        .transaction()
-        .map_err(|error| database_error("Begin job claim transaction failed", error))?;
-    let candidate = tx
+    let tx = begin_generation_job_write_transaction(conn)?;
+    let candidate_id = tx
         .query_row(
-            &format!(
-                "SELECT {JOB_COLUMNS}
+            "SELECT id
              FROM generation_jobs
              WHERE status = 'queued'
              ORDER BY queued_at ASC, rowid ASC
-             LIMIT 1"
-            ),
+             LIMIT 1",
             [],
-            stored_job_from_row,
+            |row| row.get::<_, String>(0),
         )
         .optional()
-        .map_err(|error| persisted_row_error("Select next generation job failed", error))?
-        .map(decode_stored_job)
-        .transpose()?;
-    let Some(candidate) = candidate else {
+        .map_err(|error| persisted_row_error("Select next generation job failed", error))?;
+    let Some(candidate_id) = candidate_id else {
         tx.commit()
             .map_err(|error| database_error("Commit empty job claim failed", error))?;
         return Ok(None);
     };
-    validate_job_projection(&tx, &candidate)?;
-    let job_id = candidate.id;
+    let job = claim_job_in_transaction(&tx, &candidate_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit job claim failed", error))?;
+    Ok(Some(job))
+}
+
+pub(crate) fn claim_job_in_transaction(
+    tx: &Transaction<'_>,
+    job_id: &str,
+) -> Result<GenerationJob, AppError> {
+    let candidate = get_job(tx, job_id)?;
+    if candidate.status != GenerationJobStatus::Queued {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
     let generation_id = candidate.generation_id;
     let timestamp = crate::current_timestamp();
     let updated_job = tx
@@ -1928,10 +2022,76 @@ pub(crate) fn claim_next_job(conn: &mut Connection) -> Result<Option<GenerationJ
     if updated_generation != 1 {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
-    let job = get_job(&tx, &job_id)?;
-    tx.commit()
-        .map_err(|error| database_error("Commit job claim failed", error))?;
-    Ok(Some(job))
+    get_job(tx, job_id)
+}
+
+pub(crate) fn load_generation_execution_snapshot(
+    conn: &Connection,
+    job_id: &str,
+) -> Result<GenerationExecutionSnapshot, AppError> {
+    let tx = conn.unchecked_transaction().map_err(|error| {
+        database_error(
+            "Begin generation execution snapshot transaction failed",
+            error,
+        )
+    })?;
+    let snapshot = load_generation_execution_snapshot_in_transaction(&tx, job_id)?;
+    tx.commit().map_err(|error| {
+        database_error(
+            "Commit generation execution snapshot transaction failed",
+            error,
+        )
+    })?;
+    Ok(snapshot)
+}
+
+pub(crate) fn load_generation_execution_snapshot_in_transaction(
+    tx: &Transaction<'_>,
+    job_id: &str,
+) -> Result<GenerationExecutionSnapshot, AppError> {
+    let job = get_job(tx, job_id)?;
+    if job.status != GenerationJobStatus::Running {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    let generation = load_linked_generation(tx, &job.generation_id)?;
+    let metadata: CanonicalGenerationMetadata = generation
+        .request_metadata_json
+        .as_deref()
+        .ok_or(AppError::GenerationJobCorruptPersistedData)
+        .and_then(|value| {
+            serde_json::from_str(value).map_err(|_| AppError::GenerationJobCorruptPersistedData)
+        })?;
+    let runtime_options = GptImageRequestOptions {
+        size: generation.size.clone(),
+        quality: generation.quality.clone(),
+        background: generation.background.clone(),
+        output_format: generation.output_format.clone(),
+        output_compression: u8::try_from(generation.output_compression)
+            .map_err(|_| AppError::GenerationJobCorruptPersistedData)?,
+        moderation: generation.moderation.clone(),
+        input_fidelity: generation.input_fidelity.clone(),
+        stream: metadata.stream,
+        partial_images: metadata.partial_images,
+        image_count: u8::try_from(generation.image_count)
+            .map_err(|_| AppError::GenerationJobCorruptPersistedData)?,
+    };
+    Ok(GenerationExecutionSnapshot {
+        context: GenerationExecutionContext {
+            generation_id: job.generation_id,
+            job_id: job.id,
+            conversation_id: request.conversation_id.clone(),
+            provider_kind: job.provider_kind,
+            model: generation.model,
+            endpoint_url: job.endpoint_snapshot,
+            provider_profile_id: job.provider_profile_id,
+        },
+        request,
+        runtime_options,
+        created_at: generation.created_at,
+        output_format: generation.output_format,
+    })
 }
 
 pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJob, AppError> {

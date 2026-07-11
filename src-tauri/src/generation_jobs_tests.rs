@@ -185,7 +185,12 @@ impl JobFixture {
 fn count_table(conn: &Connection, table: &str) -> i64 {
     assert!(matches!(
         table,
-        "conversations" | "generations" | "generation_jobs" | "generation_recoveries" | "logs"
+        "conversations"
+            | "generations"
+            | "generation_jobs"
+            | "generation_recoveries"
+            | "images"
+            | "logs"
     ));
     conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
         row.get(0)
@@ -231,6 +236,137 @@ fn move_generation_conversation(
 
 fn stable_code(error: &AppError) -> &'static str {
     error.stable_code()
+}
+
+fn set_actual_image_count(conn: &Connection, generation_id: &str, actual_image_count: Option<u8>) {
+    let raw: String = conn
+        .query_row(
+            "SELECT request_metadata FROM generations WHERE id = ?1",
+            params![generation_id],
+            |row| row.get(0),
+        )
+        .expect("read canonical generation metadata");
+    let mut metadata: serde_json::Value =
+        serde_json::from_str(&raw).expect("parse canonical generation metadata");
+    let object = metadata.as_object_mut().expect("canonical metadata object");
+    match actual_image_count {
+        Some(count) => {
+            object.insert("actual_image_count".to_string(), json!(count));
+        }
+        None => {
+            object.remove("actual_image_count");
+        }
+    }
+    conn.execute(
+        "UPDATE generations SET request_metadata = ?1 WHERE id = ?2",
+        params![
+            serde_json::to_string(&metadata).expect("serialize canonical metadata"),
+            generation_id
+        ],
+    )
+    .expect("update canonical generation metadata");
+}
+
+fn insert_generation_images(conn: &Connection, generation_id: &str, count: u8) {
+    for index in 0..count {
+        conn.execute(
+            "INSERT INTO images (
+                id, generation_id, file_path, thumbnail_path, width, height, file_size, created_at
+             ) VALUES (?1, ?2, ?3, ?4, 16, 16, 256, '2026-07-10T00:00:00Z')",
+            params![
+                format!("{generation_id}-image-{index}"),
+                generation_id,
+                format!("/managed/images/{generation_id}-{index}.png"),
+                format!("/managed/thumbnails/{generation_id}-{index}.png"),
+            ],
+        )
+        .expect("insert generation image projection");
+    }
+}
+
+fn prepare_completed_projection(conn: &Connection, generation_id: &str, actual_count: u8) {
+    insert_generation_images(conn, generation_id, actual_count);
+    set_actual_image_count(conn, generation_id, Some(actual_count));
+    assert_eq!(
+        conn.execute(
+            "DELETE FROM generation_recoveries WHERE generation_id = ?1",
+            params![generation_id],
+        )
+        .expect("delete completed generation recovery"),
+        1
+    );
+}
+
+fn transition_fixture_job(
+    fixture: &JobFixture,
+    status: GenerationJobStatus,
+    suffix: &str,
+) -> crate::models::GenerationJob {
+    let queued = fixture.enqueue(&format!("request-{suffix}"), suffix);
+    match status {
+        GenerationJobStatus::Queued => queued,
+        GenerationJobStatus::Running => fixture.claim().expect("claim running fixture"),
+        GenerationJobStatus::Failed | GenerationJobStatus::Interrupted => {
+            fixture.claim().expect("claim terminal fixture");
+            let conn = fixture.database.conn.lock().expect("lock database");
+            finish_job(
+                &conn,
+                &GenerationJobTerminalUpdate {
+                    job_id: queued.id,
+                    expected_status: GenerationJobStatus::Running,
+                    status,
+                    finished_at: "2026-07-10T00:00:02Z".to_string(),
+                    error_code: Some("provider_unavailable".to_string()),
+                    error_message: None,
+                    retryable: true,
+                },
+            )
+            .expect("finish non-completed fixture")
+        }
+        GenerationJobStatus::Cancelled => {
+            let conn = fixture.database.conn.lock().expect("lock database");
+            request_cancel(&conn, &queued.id).expect("cancel queued fixture")
+        }
+        GenerationJobStatus::Completed => panic!("completed fixtures require image projection"),
+    }
+}
+
+fn completed_projection_fixture(
+    requested_count: u8,
+    actual_count: u8,
+    suffix: &str,
+) -> (JobFixture, crate::models::GenerationJob) {
+    let fixture = JobFixture::new();
+    let mut request = fixture.prepared(&format!("request-{suffix}"), suffix);
+    request.image_count = i32::from(requested_count);
+    request.request_options.image_count = Some(requested_count);
+    let queued = fixture
+        .enqueue_prepared(&request)
+        .expect("enqueue completed projection fixture");
+    fixture.claim().expect("claim completed projection fixture");
+    let completed = {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        let tx = conn
+            .unchecked_transaction()
+            .expect("begin completed projection transaction");
+        prepare_completed_projection(&tx, &queued.generation_id, actual_count);
+        let completed = finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: queued.job_id,
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Completed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            },
+        )
+        .expect("finish completed projection fixture");
+        tx.commit().expect("commit completed projection fixture");
+        completed
+    };
+    (fixture, completed)
 }
 
 #[test]
@@ -1275,6 +1411,575 @@ fn claim_and_list_use_stable_same_second_fifo_and_update_generation() {
 }
 
 #[test]
+fn exact_claim_in_insert_transaction_never_steals_older_fifo_job_and_rolls_back_cleanly() {
+    let fixture = JobFixture::new();
+    let older = fixture.enqueue("request-older", "older-fifo");
+    let counts_before = [
+        fixture.count("conversations"),
+        fixture.count("generations"),
+        fixture.count("generation_jobs"),
+        fixture.count("generation_recoveries"),
+        fixture.count("images"),
+    ];
+    let exact = fixture.prepared_at(
+        "request-exact",
+        "exact-compatibility",
+        "2026-07-10T00:00:01Z",
+    );
+
+    let mut conn = fixture.open_connection();
+    let tx = begin_generation_job_write_transaction(&mut conn)
+        .expect("begin exact insert-and-claim immediate transaction");
+    let inserted = insert_job_in_transaction(&tx, &exact).expect("insert exact job");
+    let claimed =
+        claim_job_in_transaction(&tx, &inserted.job_id).expect("claim exact inserted job");
+
+    assert_eq!(claimed.id, inserted.job_id);
+    assert_eq!(claimed.generation_id, inserted.generation_id);
+    assert_eq!(claimed.status, GenerationJobStatus::Running);
+    assert_eq!(
+        get_job(&tx, &older.id).unwrap().status,
+        GenerationJobStatus::Queued
+    );
+    let statuses: (String, String) = tx
+        .query_row(
+            "SELECT j.status, g.status FROM generation_jobs j
+             JOIN generations g ON g.id = j.generation_id WHERE j.id = ?1",
+            params![inserted.job_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read exact in-transaction statuses");
+    assert_eq!(statuses, ("running".to_string(), "running".to_string()));
+    tx.rollback().expect("rollback exact insert-and-claim");
+
+    assert_eq!(fixture.get(&older.id).status, GenerationJobStatus::Queued);
+    assert_eq!(fixture.generation_status(&older.generation_id), "queued");
+    assert_eq!(
+        stable_code(&{
+            let conn = fixture.database.conn.lock().expect("lock database");
+            get_job(&conn, &exact.job_id).expect_err("rolled-back exact job must not remain")
+        }),
+        "generation_job_not_found"
+    );
+    let conn = fixture.database.conn.lock().expect("lock database");
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM generations WHERE id = ?1",
+            params![exact.generation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    assert_eq!(
+        counts_before,
+        [
+            fixture.count("conversations"),
+            fixture.count("generations"),
+            fixture.count("generation_jobs"),
+            fixture.count("generation_recoveries"),
+            fixture.count("images"),
+        ]
+    );
+}
+
+#[test]
+fn exact_claim_rejects_missing_and_nonqueued_ids_without_touching_older_queued_job() {
+    let fixture = JobFixture::new();
+    let older = fixture.enqueue("request-older", "older-exact-errors");
+    let exact = fixture.prepared("request-exact", "exact-errors");
+
+    let mut conn = fixture.open_connection();
+    let tx =
+        begin_generation_job_write_transaction(&mut conn).expect("begin exact error transaction");
+    let missing = claim_job_in_transaction(&tx, "missing-exact-job")
+        .expect_err("missing exact claim must fail");
+    assert_eq!(stable_code(&missing), "generation_job_not_found");
+    assert_eq!(
+        get_job(&tx, &older.id).unwrap().status,
+        GenerationJobStatus::Queued
+    );
+
+    let inserted = insert_job_in_transaction(&tx, &exact).expect("insert exact job");
+    let running = claim_job_in_transaction(&tx, &inserted.job_id).expect("claim exact job once");
+    assert_eq!(running.status, GenerationJobStatus::Running);
+    let nonqueued = claim_job_in_transaction(&tx, &inserted.job_id)
+        .expect_err("running exact job must not be claimable again");
+    assert_eq!(stable_code(&nonqueued), "generation_job_invalid_transition");
+    assert_eq!(
+        get_job(&tx, &older.id).unwrap().status,
+        GenerationJobStatus::Queued
+    );
+    tx.rollback().expect("rollback exact error transaction");
+
+    assert_eq!(fixture.get(&older.id).status, GenerationJobStatus::Queued);
+    assert_eq!(fixture.count("generation_jobs"), 1);
+}
+
+#[test]
+fn failed_exact_insert_and_claim_rolls_back_every_inserted_row() {
+    let fixture = JobFixture::new();
+    let older = fixture.enqueue("request-older", "older-rollback-boundary");
+    let counts_before = [
+        fixture.count("conversations"),
+        fixture.count("generations"),
+        fixture.count("generation_recoveries"),
+        fixture.count("generation_jobs"),
+    ];
+    let exact = fixture.prepared("request-exact", "exact-rollback-boundary");
+
+    let error = (|| -> Result<(), AppError> {
+        let mut conn = fixture.open_connection();
+        let tx = begin_generation_job_write_transaction(&mut conn)?;
+        insert_job_in_transaction(&tx, &exact)?;
+        claim_job_in_transaction(&tx, "missing-exact-job")?;
+        tx.commit().map_err(|error| {
+            database_error("Commit exact compatibility transaction failed", error)
+        })?;
+        Ok(())
+    })()
+    .expect_err("failed exact claim must roll back the insert transaction");
+    assert_eq!(stable_code(&error), "generation_job_not_found");
+
+    let conn = fixture.database.conn.lock().expect("lock database");
+    assert_eq!(
+        get_job(&conn, &exact.job_id)
+            .expect_err("rolled-back exact job must not exist")
+            .stable_code(),
+        "generation_job_not_found"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM generations WHERE id = ?1",
+            params![exact.generation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    assert_eq!(
+        counts_before,
+        [
+            fixture.count("conversations"),
+            fixture.count("generations"),
+            fixture.count("generation_recoveries"),
+            fixture.count("generation_jobs"),
+        ]
+    );
+    assert_eq!(fixture.get(&older.id).status, GenerationJobStatus::Queued);
+}
+
+#[test]
+fn execution_snapshot_loads_only_running_persisted_values_without_refilling_options() {
+    let fixture = JobFixture::new();
+    let mut request = fixture.prepared("request-snapshot", "execution-snapshot");
+    request.requested_project_id = None;
+    request.size = "1536x1024".to_string();
+    request.quality = "medium".to_string();
+    request.background = "transparent".to_string();
+    request.output_format = "webp".to_string();
+    request.output_compression = 73;
+    request.moderation = "low".to_string();
+    request.input_fidelity = "low".to_string();
+    request.image_count = 3;
+    request.stream = true;
+    request.partial_images = 2;
+    request.request_options = GenerationJobOptions::default();
+    request.provider_kind = "openai".to_string();
+    request.provider_profile_id = "profile-stored".to_string();
+    request.endpoint_snapshot = "https://stored.example.test/v1/images/generations".to_string();
+    let queued = fixture
+        .enqueue_prepared(&request)
+        .expect("enqueue persisted snapshot fixture");
+
+    {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        let error = load_generation_execution_snapshot(&conn, &queued.job_id)
+            .expect_err("queued job must not produce an execution snapshot");
+        assert_eq!(stable_code(&error), "generation_job_invalid_transition");
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES
+             ('gpt-image-2_api_key', 'sk-current-secret'),
+             ('gpt-image-2_endpoint', 'https://current.example.test/changed')",
+            [],
+        )
+        .expect("install conflicting current settings");
+    }
+    fixture.claim().expect("claim persisted snapshot fixture");
+
+    let snapshot = {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        load_generation_execution_snapshot(&conn, &queued.job_id)
+            .expect("load running execution snapshot")
+    };
+    assert_eq!(snapshot.context.job_id, queued.job_id);
+    assert_eq!(snapshot.context.generation_id, queued.generation_id);
+    assert_eq!(snapshot.context.conversation_id, queued.conversation_id);
+    assert_eq!(snapshot.context.provider_kind, "openai");
+    assert_eq!(snapshot.context.provider_profile_id, "profile-stored");
+    assert_eq!(
+        snapshot.context.endpoint_url,
+        "https://stored.example.test/v1/images/generations"
+    );
+    assert_eq!(snapshot.context.model, "gpt-image-2");
+    assert_eq!(snapshot.request.options, GenerationJobOptions::default());
+    assert_eq!(snapshot.request.requested_project_id, None);
+    assert_eq!(snapshot.request.prompt, request.prompt);
+    assert_eq!(snapshot.request.project_id, "default");
+    assert_eq!(snapshot.runtime_options.size, request.size);
+    assert_eq!(snapshot.runtime_options.quality, request.quality);
+    assert_eq!(snapshot.runtime_options.background, request.background);
+    assert_eq!(
+        snapshot.runtime_options.output_format,
+        request.output_format
+    );
+    assert_eq!(snapshot.runtime_options.output_compression, 73);
+    assert_eq!(snapshot.runtime_options.moderation, request.moderation);
+    assert_eq!(
+        snapshot.runtime_options.input_fidelity,
+        request.input_fidelity
+    );
+    assert!(snapshot.runtime_options.stream);
+    assert_eq!(snapshot.runtime_options.partial_images, 2);
+    assert_eq!(snapshot.runtime_options.image_count, 3);
+    assert_eq!(snapshot.created_at, request.queued_at);
+    assert_eq!(snapshot.output_format, "webp");
+    let snapshot_debug = format!("{snapshot:?}");
+    assert!(!snapshot_debug.contains("sk-current-secret"));
+    assert!(!snapshot_debug.contains("https://current.example.test/changed"));
+
+    let metadata: serde_json::Value = {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        conn.query_row(
+            "SELECT request_metadata FROM generations WHERE id = ?1",
+            params![snapshot.context.generation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map(|raw| serde_json::from_str(&raw).unwrap())
+        .unwrap()
+    };
+    assert!(metadata.get("actual_image_count").is_none());
+
+    {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        finish_job(
+            &conn,
+            &GenerationJobTerminalUpdate {
+                job_id: snapshot.context.job_id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Failed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: Some("provider_unavailable".to_string()),
+                error_message: None,
+                retryable: true,
+            },
+        )
+        .expect("finish snapshot fixture");
+        let error = load_generation_execution_snapshot(&conn, &snapshot.context.job_id)
+            .expect_err("terminal job must not produce an execution snapshot");
+        assert_eq!(stable_code(&error), "generation_job_invalid_transition");
+    }
+}
+
+#[test]
+fn execution_snapshot_loader_reuses_one_read_transaction_across_linked_rows() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("request-consistent-snapshot", "consistent-snapshot");
+    fixture.claim().expect("claim consistent snapshot fixture");
+
+    let mut reader = fixture.open_connection();
+    let read_tx = reader
+        .transaction()
+        .expect("begin execution snapshot read transaction");
+    assert_eq!(
+        get_job(&read_tx, &queued.id).unwrap().status,
+        GenerationJobStatus::Running
+    );
+
+    let writer = fixture.open_connection();
+    let terminal = finish_job(
+        &writer,
+        &GenerationJobTerminalUpdate {
+            job_id: queued.id.clone(),
+            expected_status: GenerationJobStatus::Running,
+            status: GenerationJobStatus::Failed,
+            finished_at: "2026-07-10T00:00:02Z".to_string(),
+            error_code: Some("provider_unavailable".to_string()),
+            error_message: None,
+            retryable: true,
+        },
+    )
+    .expect("commit a concurrent terminal state");
+    assert_eq!(terminal.status, GenerationJobStatus::Failed);
+
+    let snapshot = load_generation_execution_snapshot_in_transaction(&read_tx, &queued.id)
+        .expect("read transaction must retain its running projection");
+    assert_eq!(snapshot.context.job_id, queued.id);
+    assert_eq!(snapshot.context.generation_id, queued.generation_id);
+    read_tx.commit().expect("commit execution snapshot read");
+
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let error = load_generation_execution_snapshot(&conn, &queued.id)
+        .expect_err("a fresh snapshot must observe the terminal state");
+    assert_eq!(stable_code(&error), "generation_job_invalid_transition");
+}
+
+#[test]
+fn completed_projection_accepts_short_result_and_preserves_requested_count() {
+    let (fixture, completed) = completed_projection_fixture(3, 2, "short-result");
+    assert_eq!(completed.status, GenerationJobStatus::Completed);
+    assert_eq!(fixture.count("images"), 2);
+    assert_eq!(fixture.count("generation_recoveries"), 0);
+
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let (requested, metadata_raw): (i32, String) = conn
+        .query_row(
+            "SELECT image_count, request_metadata FROM generations WHERE id = ?1",
+            params![completed.generation_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read completed generation projection");
+    let metadata: serde_json::Value =
+        serde_json::from_str(&metadata_raw).expect("parse completed metadata");
+    assert_eq!(requested, 3);
+    assert_eq!(metadata["image_count"], json!(3));
+    assert_eq!(metadata["actual_image_count"], json!(2));
+    get_job(&conn, &completed.id).expect("completed short result remains valid");
+}
+
+#[test]
+fn every_non_completed_status_requires_no_actual_count_and_zero_images() {
+    let statuses = [
+        GenerationJobStatus::Queued,
+        GenerationJobStatus::Running,
+        GenerationJobStatus::Failed,
+        GenerationJobStatus::Interrupted,
+        GenerationJobStatus::Cancelled,
+    ];
+
+    for (index, status) in statuses.into_iter().enumerate() {
+        let metadata_fixture = JobFixture::new();
+        let metadata_job = transition_fixture_job(
+            &metadata_fixture,
+            status.clone(),
+            &format!("metadata-{index}"),
+        );
+        {
+            let conn = metadata_fixture
+                .database
+                .conn
+                .lock()
+                .expect("lock metadata fixture");
+            set_actual_image_count(&conn, &metadata_job.generation_id, Some(1));
+            let error = get_job(&conn, &metadata_job.id)
+                .expect_err("non-completed actual count must be corrupt");
+            assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+        }
+
+        let image_fixture = JobFixture::new();
+        let image_job = transition_fixture_job(&image_fixture, status, &format!("image-{index}"));
+        let conn = image_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock image fixture");
+        insert_generation_images(&conn, &image_job.generation_id, 1);
+        let error =
+            get_job(&conn, &image_job.id).expect_err("non-completed image rows must be corrupt");
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+    }
+}
+
+#[test]
+fn completed_projection_requires_actual_range_image_count_paths_and_no_recovery() {
+    for (requested, actual, suffix) in [(1, 0, "zero-actual"), (1, 2, "over-requested")] {
+        let fixture = JobFixture::new();
+        let mut request = fixture.prepared(&format!("request-{suffix}"), suffix);
+        request.image_count = requested;
+        request.request_options.image_count = Some(requested as u8);
+        let queued = fixture
+            .enqueue_prepared(&request)
+            .expect("enqueue invalid range");
+        fixture.claim().expect("claim invalid range fixture");
+        let conn = fixture.database.conn.lock().expect("lock database");
+        let tx = conn
+            .unchecked_transaction()
+            .expect("begin invalid range tx");
+        insert_generation_images(&tx, &queued.generation_id, actual);
+        set_actual_image_count(&tx, &queued.generation_id, Some(actual));
+        tx.execute(
+            "DELETE FROM generation_recoveries WHERE generation_id = ?1",
+            params![queued.generation_id],
+        )
+        .expect("delete invalid range recovery");
+        let error = finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: queued.job_id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Completed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            },
+        )
+        .expect_err("invalid actual count must reject completion");
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+        tx.rollback().expect("rollback invalid completion");
+        drop(conn);
+        assert_eq!(
+            fixture.get(&queued.job_id).status,
+            GenerationJobStatus::Running
+        );
+        assert_eq!(fixture.count("images"), 0);
+        assert_eq!(fixture.count("generation_recoveries"), 1);
+    }
+
+    let missing_actual_fixture = JobFixture::new();
+    let missing_actual = missing_actual_fixture.enqueue("request-missing-actual", "missing-actual");
+    missing_actual_fixture
+        .claim()
+        .expect("claim missing actual fixture");
+    {
+        let conn = missing_actual_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock missing actual fixture");
+        let tx = conn
+            .unchecked_transaction()
+            .expect("begin missing actual tx");
+        insert_generation_images(&tx, &missing_actual.generation_id, 1);
+        tx.execute(
+            "DELETE FROM generation_recoveries WHERE generation_id = ?1",
+            params![missing_actual.generation_id],
+        )
+        .expect("delete missing actual recovery");
+        let error = finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: missing_actual.id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Completed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            },
+        )
+        .expect_err("missing actual count must reject completion");
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+        tx.rollback().expect("rollback missing actual completion");
+    }
+
+    let recovery_fixture = JobFixture::new();
+    let recovery_job = recovery_fixture.enqueue("request-recovery", "completed-recovery");
+    recovery_fixture
+        .claim()
+        .expect("claim completed recovery fixture");
+    {
+        let conn = recovery_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock recovery fixture");
+        let tx = conn.unchecked_transaction().expect("begin recovery tx");
+        insert_generation_images(&tx, &recovery_job.generation_id, 1);
+        set_actual_image_count(&tx, &recovery_job.generation_id, Some(1));
+        let error = finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: recovery_job.id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Completed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            },
+        )
+        .expect_err("completed recovery must be removed before finish");
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+        tx.rollback().expect("rollback recovery completion");
+    }
+
+    for (index, mutation) in ["metadata", "count", "path"].into_iter().enumerate() {
+        let (fixture, completed) = completed_projection_fixture(3, 2, &format!("tamper-{index}"));
+        let conn = fixture.database.conn.lock().expect("lock tamper fixture");
+        match mutation {
+            "metadata" => set_actual_image_count(&conn, &completed.generation_id, Some(1)),
+            "count" => {
+                conn.execute(
+                    "DELETE FROM images WHERE id = (
+                         SELECT id FROM images WHERE generation_id = ?1 ORDER BY id LIMIT 1
+                     )",
+                    params![completed.generation_id],
+                )
+                .expect("tamper completed image count");
+            }
+            "path" => {
+                conn.execute(
+                    "UPDATE images SET file_path = '' WHERE generation_id = ?1",
+                    params![completed.generation_id],
+                )
+                .expect("tamper completed image path");
+            }
+            _ => unreachable!(),
+        }
+        let error = get_job(&conn, &completed.id).expect_err("tampered completion must be corrupt");
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+    }
+}
+
+#[test]
+fn retry_metadata_never_inherits_actual_image_count() {
+    let fixture = JobFixture::new();
+    let failed = fixture.fail_retryable("request-retry-actual", "retry-actual");
+    let child = {
+        let mut conn = fixture.database.conn.lock().expect("lock database");
+        create_retry_job(&mut conn, &failed.id, "retry-actual-child").expect("create retry child")
+    };
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let child_metadata: serde_json::Value = conn
+        .query_row(
+            "SELECT request_metadata FROM generations WHERE id = ?1",
+            params![child.generation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map(|raw| serde_json::from_str(&raw).unwrap())
+        .unwrap();
+    assert!(child_metadata.get("actual_image_count").is_none());
+    drop(conn);
+
+    let corrupt_fixture = JobFixture::new();
+    let corrupt_parent =
+        corrupt_fixture.fail_retryable("request-corrupt-actual", "corrupt-retry-actual");
+    {
+        let conn = corrupt_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock corrupt parent");
+        set_actual_image_count(&conn, &corrupt_parent.generation_id, Some(1));
+    }
+    let error = {
+        let mut conn = corrupt_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock corrupt retry");
+        create_retry_job(&mut conn, &corrupt_parent.id, "corrupt-retry-child")
+            .expect_err("retry must reject parent actual count")
+    };
+    assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+    assert_eq!(corrupt_fixture.count("generation_jobs"), 1);
+    assert_eq!(corrupt_fixture.count("generations"), 1);
+}
+
+#[test]
 fn claim_rejects_corrupt_unresolved_queued_snapshot_before_transition() {
     let fixture = JobFixture::new();
     let queued = fixture.enqueue("request-1", "corrupt-claim");
@@ -1493,11 +2198,7 @@ fn composable_finish_allows_recovery_cleanup_earlier_in_the_same_transaction() {
     let tx = conn
         .transaction()
         .expect("begin terminal outer transaction");
-    tx.execute(
-        "DELETE FROM generation_recoveries WHERE generation_id = ?1",
-        params![queued.generation_id],
-    )
-    .expect("clean recovery in outer transaction");
+    prepare_completed_projection(&tx, &queued.generation_id, 1);
     let completed = finish_job_in_transaction(
         &tx,
         &GenerationJobTerminalUpdate {
@@ -2404,8 +3105,12 @@ fn missing_job_and_nonretryable_terminal_job_have_stable_codes() {
     fixture.claim().expect("claim completed job");
     {
         let conn = fixture.database.conn.lock().expect("lock database");
-        finish_job(
-            &conn,
+        let tx = conn
+            .unchecked_transaction()
+            .expect("begin completed job transaction");
+        prepare_completed_projection(&tx, &queued.generation_id, 1);
+        finish_job_in_transaction(
+            &tx,
             &GenerationJobTerminalUpdate {
                 job_id: queued.id.clone(),
                 expected_status: GenerationJobStatus::Running,
@@ -2417,6 +3122,7 @@ fn missing_job_and_nonretryable_terminal_job_have_stable_codes() {
             },
         )
         .expect("complete job");
+        tx.commit().expect("commit completed job");
     }
     let error = {
         let mut conn = fixture.database.conn.lock().expect("lock database");

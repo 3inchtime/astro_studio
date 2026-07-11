@@ -132,6 +132,7 @@ pub(crate) struct ProviderAttemptResponse {
     pub(crate) requested_image_count: u8,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct GenerationExecutionSnapshot {
     pub(crate) context: GenerationExecutionContext,
     pub(crate) request: GenerationJobRequest,
