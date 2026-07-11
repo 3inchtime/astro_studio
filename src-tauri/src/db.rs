@@ -26,6 +26,19 @@ mod tests {
         _directory: TestDatabaseDirectory,
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    struct QueuedRecoverySnapshot {
+        request_kind: String,
+        request_state: String,
+        output_format: String,
+        response_file: Option<String>,
+        expected_response_file: Option<String>,
+        response_size: Option<i64>,
+        response_sha256: Option<String>,
+        created_at: String,
+        updated_at: String,
+    }
+
     impl MigratedTestDatabase {
         fn new(prefix: &str) -> Self {
             let db_path = test_db_path(prefix);
@@ -69,6 +82,41 @@ mod tests {
             .filter_map(|row| row.ok())
             .any(|name| name == column);
         has_column
+    }
+
+    fn table_column_definition(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+    ) -> Option<(String, bool, Option<String>)> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare table info");
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)? != 0,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .expect("query table info")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("read table info")
+        .into_iter()
+        .find_map(|(name, data_type, not_null, default_value)| {
+            (name == column).then_some((data_type, not_null, default_value))
+        })
+    }
+
+    fn table_exists(conn: &Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            params![table],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query table existence")
+            != 0
     }
 
     fn migration_version_exists(conn: &Connection, version: i32) -> bool {
@@ -197,6 +245,18 @@ mod tests {
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 project_id TEXT REFERENCES projects(id) ON DELETE SET NULL
+            );
+            CREATE TABLE generations (
+                id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL,
+                engine TEXT NOT NULL DEFAULT 'gpt-image-2',
+                size TEXT NOT NULL DEFAULT '1024x1024',
+                quality TEXT NOT NULL DEFAULT 'auto',
+                status TEXT NOT NULL DEFAULT 'pending',
+                request_kind TEXT NOT NULL DEFAULT 'generate',
+                output_format TEXT NOT NULL DEFAULT 'png',
+                conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             );",
         )
         .expect("create legacy schema");
@@ -208,6 +268,167 @@ mod tests {
             )
             .expect("insert migration version");
         }
+    }
+
+    fn create_recorded_v16_generation_queue_database(db_path: &Path) -> Database {
+        let database = Database::open(db_path).expect("open recorded v16 test db");
+        {
+            let conn = database.conn.lock().expect("lock recorded v16 db");
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                );
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT,
+                    pinned_at TEXT,
+                    deleted_at TEXT
+                );
+                CREATE TABLE conversations (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                    archived_at TEXT,
+                    pinned_at TEXT,
+                    deleted_at TEXT
+                );
+                CREATE TABLE generations (
+                    id TEXT PRIMARY KEY,
+                    prompt TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    request_kind TEXT NOT NULL DEFAULT 'generate',
+                    output_format TEXT NOT NULL DEFAULT 'png',
+                    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE generation_recoveries (
+                    generation_id TEXT PRIMARY KEY REFERENCES generations(id) ON DELETE CASCADE,
+                    request_kind TEXT NOT NULL,
+                    request_state TEXT NOT NULL,
+                    output_format TEXT NOT NULL,
+                    response_file TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE generation_jobs (
+                    id TEXT PRIMARY KEY,
+                    client_request_id TEXT NOT NULL UNIQUE,
+                    generation_id TEXT NOT NULL UNIQUE REFERENCES generations(id) ON DELETE CASCADE,
+                    parent_job_id TEXT REFERENCES generation_jobs(id) ON DELETE SET NULL,
+                    source_kind TEXT NOT NULL,
+                    source_ref_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL,
+                    request_json TEXT NOT NULL,
+                    provider_kind TEXT NOT NULL,
+                    provider_profile_id TEXT NOT NULL,
+                    endpoint_snapshot TEXT NOT NULL,
+                    chain_attempt INTEGER NOT NULL DEFAULT 1,
+                    auto_attempt INTEGER NOT NULL DEFAULT 0,
+                    max_auto_attempts INTEGER NOT NULL DEFAULT 2,
+                    queued_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    cancel_requested_at TEXT,
+                    last_heartbeat_at TEXT,
+                    error_code TEXT,
+                    error_message TEXT,
+                    retryable INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO projects (id, name, created_at, updated_at)
+                    VALUES ('v16-project', 'V16 Project', '2026-07-10T00:00:00Z', '2026-07-10T00:00:00Z');
+                INSERT INTO conversations (id, title, project_id, created_at, updated_at)
+                    VALUES ('v16-conversation', 'V16 Conversation', 'v16-project',
+                        '2026-07-10T00:00:00Z', '2026-07-10T00:00:00Z');
+                INSERT INTO generations (id, prompt, status, conversation_id, created_at)
+                    VALUES ('v16-running-generation', 'running fixture', 'running',
+                        'v16-conversation', '2026-07-10T00:00:00Z'),
+                       ('v16-queued-generation', 'queued fixture', 'queued',
+                        'v16-conversation', '2026-07-10T00:00:00Z'),
+                       ('v16-failed-generation', 'failed fixture', 'failed',
+                        'v16-conversation', '2026-07-10T00:00:00Z'),
+                       ('v16-running-missing-recovery-generation',
+                        'running without recovery fixture', 'running',
+                        'v16-conversation', '2026-07-10T00:00:00Z'),
+                       ('v16-unknown-generation', 'future status fixture', 'future_status',
+                        'v16-conversation', '2026-07-10T00:00:00Z');
+                INSERT INTO generation_recoveries (
+                    generation_id, request_kind, request_state, output_format, response_file,
+                    created_at, updated_at
+                ) VALUES (
+                    'v16-running-generation', 'generate', 'response_ready', 'png',
+                    '/tmp/v16-response.json', '2026-07-10T00:00:00Z', '2026-07-10T00:00:01Z'
+                );
+                INSERT INTO generation_jobs (
+                    id, client_request_id, generation_id, source_kind, status, request_json,
+                    provider_kind, provider_profile_id, endpoint_snapshot, queued_at, started_at,
+                    last_heartbeat_at
+                ) VALUES (
+                    'v16-running-job', 'v16-running-request', 'v16-running-generation',
+                    'generate', 'running', '{}', 'openai', 'provider-a',
+                    'https://api.example.test/v1/images/generations',
+                    '2026-07-10T00:00:00Z', '2026-07-10T00:00:01Z',
+                    '2026-07-10T00:00:01Z'
+                );
+                INSERT INTO generation_jobs (
+                    id, client_request_id, generation_id, source_kind, status, request_json,
+                    provider_kind, provider_profile_id, endpoint_snapshot, queued_at
+                ) VALUES (
+                    'v16-queued-job', 'v16-queued-request', 'v16-queued-generation',
+                    'generate', 'queued', '{}', 'openai', 'provider-a',
+                    'https://api.example.test/v1/images/generations',
+                    '2026-07-10T00:00:00Z'
+                );
+                INSERT INTO generation_jobs (
+                    id, client_request_id, generation_id, source_kind, status, request_json,
+                    provider_kind, provider_profile_id, endpoint_snapshot, queued_at, started_at,
+                    finished_at, last_heartbeat_at, error_code, error_message
+                ) VALUES (
+                    'v16-failed-job', 'v16-failed-request', 'v16-failed-generation',
+                    'generate', 'failed', '{}', 'openai', 'provider-a',
+                    'https://api.example.test/v1/images/generations',
+                    '2026-07-10T00:00:00Z', '2026-07-10T00:00:01Z',
+                    '2026-07-10T00:00:02Z', '2026-07-10T00:00:01Z',
+                    'provider_unavailable', 'The provider is unavailable'
+                );
+                INSERT INTO generation_jobs (
+                    id, client_request_id, generation_id, source_kind, status, request_json,
+                    provider_kind, provider_profile_id, endpoint_snapshot, queued_at, started_at,
+                    last_heartbeat_at
+                ) VALUES (
+                    'v16-running-missing-recovery-job',
+                    'v16-running-missing-recovery-request',
+                    'v16-running-missing-recovery-generation', 'generate', 'running', '{}',
+                    'openai', 'provider-a',
+                    'https://api.example.test/v1/images/generations',
+                    '2026-07-10T00:00:00Z', '2026-07-10T00:00:01Z',
+                    '2026-07-10T00:00:01Z'
+                );
+                INSERT INTO generation_jobs (
+                    id, client_request_id, generation_id, source_kind, status, request_json,
+                    provider_kind, provider_profile_id, endpoint_snapshot, queued_at
+                ) VALUES (
+                    'v16-unknown-job', 'v16-unknown-request', 'v16-unknown-generation',
+                    'generate', 'future_status', '{}', 'openai', 'provider-a',
+                    'https://api.example.test/v1/images/generations',
+                    '2026-07-10T00:00:00Z'
+                );",
+            )
+            .expect("create recorded v16 queue schema");
+            for version in 1..=16 {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                    params![version, "2026-07-10T00:00:00Z"],
+                )
+                .expect("record v16 migration history");
+            }
+        }
+        database
     }
 
     #[test]
@@ -243,6 +464,11 @@ mod tests {
             assert!(table_has_column(&conn, "conversations", "archived_at"));
             assert!(table_has_column(&conn, "conversations", "pinned_at"));
             assert!(table_has_column(&conn, "conversations", "deleted_at"));
+            assert!(table_exists(&conn, "generation_recoveries"));
+            for column in ["expected_response_file", "response_size", "response_sha256"] {
+                assert!(table_has_column(&conn, "generation_recoveries", column));
+            }
+            assert!(migration_version_exists(&conn, 17));
         }
 
         std::fs::remove_dir_all(db_path.parent().expect("db parent")).ok();
@@ -482,6 +708,502 @@ mod tests {
             ["source_kind"]
         );
     }
+
+    #[test]
+    fn generation_worker_v17_fresh_database_has_queue_recovery_and_singleton_lease_schema() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v17-fresh-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+
+        assert_eq!(
+            table_column_definition(&conn, "generation_jobs", "stage"),
+            Some((
+                "TEXT".to_string(),
+                true,
+                Some("'migration_unknown'".to_string())
+            ))
+        );
+        for column in ["expected_response_file", "response_size", "response_sha256"] {
+            assert!(
+                table_has_column(&conn, "generation_recoveries", column),
+                "missing generation_recoveries.{column}"
+            );
+        }
+        assert_eq!(
+            table_column_definition(&conn, "generation_recoveries", "expected_response_file"),
+            Some(("TEXT".to_string(), false, None))
+        );
+        assert_eq!(
+            table_column_definition(&conn, "generation_recoveries", "response_size"),
+            Some(("INTEGER".to_string(), false, None))
+        );
+        assert_eq!(
+            table_column_definition(&conn, "generation_recoveries", "response_sha256"),
+            Some(("TEXT".to_string(), false, None))
+        );
+        assert!(table_exists(&conn, "generation_worker_lease"));
+        assert_eq!(
+            table_column_definition(&conn, "generation_worker_lease", "owner_id"),
+            Some(("TEXT".to_string(), false, None))
+        );
+        assert_eq!(
+            table_column_definition(&conn, "generation_worker_lease", "fencing_epoch"),
+            Some(("INTEGER".to_string(), true, Some("0".to_string())))
+        );
+        for column in ["acquired_at", "heartbeat_at", "expires_at"] {
+            assert_eq!(
+                table_column_definition(&conn, "generation_worker_lease", column),
+                Some(("INTEGER".to_string(), false, None)),
+                "unexpected generation_worker_lease.{column} definition"
+            );
+        }
+        let lease: (
+            i64,
+            Option<String>,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        ) = conn
+            .query_row(
+                "SELECT id, owner_id, fencing_epoch, acquired_at, heartbeat_at, expires_at
+                 FROM generation_worker_lease",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("read singleton worker lease");
+        assert_eq!(lease, (1, None, 0, None, None, None));
+        assert!(migration_version_exists(&conn, 17));
+
+        insert_generation_jobs_context(&conn);
+        insert_generation_fixture(&conn, "v17-default-stage-generation");
+        insert_generation_job_fixture(
+            &conn,
+            "v17-default-stage-job",
+            "v17-default-stage-request",
+            "v17-default-stage-generation",
+            None,
+        )
+        .expect("insert post-migration job without explicit stage");
+        assert_eq!(
+            conn.query_row(
+                "SELECT stage FROM generation_jobs WHERE id = 'v17-default-stage-job'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("read fail-closed default stage"),
+            "migration_unknown"
+        );
+    }
+
+    #[test]
+    fn generation_worker_v17_upgrades_recorded_v16_rows_with_safe_backfill() {
+        let db_path = test_db_path("astro-studio-generation-worker-v17-upgrade-test");
+        let directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let database = create_recorded_v16_generation_queue_database(&db_path);
+
+        database.run_migrations().expect("upgrade recorded v16 db");
+
+        let conn = database.conn.lock().expect("lock upgraded db");
+        let stages = conn
+            .prepare("SELECT id, stage FROM generation_jobs ORDER BY id")
+            .expect("prepare upgraded stages")
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("query upgraded stages")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("read upgraded stages");
+        assert_eq!(
+            stages,
+            [
+                ("v16-failed-job".to_string(), "terminal".to_string()),
+                ("v16-queued-job".to_string(), "queued".to_string()),
+                (
+                    "v16-running-job".to_string(),
+                    "startup_reconciliation".to_string()
+                ),
+                (
+                    "v16-running-missing-recovery-job".to_string(),
+                    "startup_reconciliation".to_string()
+                ),
+                (
+                    "v16-unknown-job".to_string(),
+                    "migration_unknown".to_string()
+                ),
+            ]
+        );
+        let recovery: (String, Option<String>, Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT response_file, expected_response_file, response_size, response_sha256
+                 FROM generation_recoveries WHERE generation_id = 'v16-running-generation'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read upgraded recovery");
+        assert_eq!(
+            recovery,
+            ("/tmp/v16-response.json".to_string(), None, None, None)
+        );
+        let queued_recovery = conn
+            .query_row(
+                "SELECT request_kind, request_state, output_format, response_file,
+                        expected_response_file, response_size, response_sha256,
+                        created_at, updated_at
+                 FROM generation_recoveries
+                 WHERE generation_id = 'v16-queued-generation'",
+                [],
+                |row| {
+                    Ok(QueuedRecoverySnapshot {
+                        request_kind: row.get(0)?,
+                        request_state: row.get(1)?,
+                        output_format: row.get(2)?,
+                        response_file: row.get(3)?,
+                        expected_response_file: row.get(4)?,
+                        response_size: row.get(5)?,
+                        response_sha256: row.get(6)?,
+                        created_at: row.get(7)?,
+                        updated_at: row.get(8)?,
+                    })
+                },
+            )
+            .expect("read synthesized queued recovery");
+        assert_eq!(
+            queued_recovery,
+            QueuedRecoverySnapshot {
+                request_kind: "generate".to_string(),
+                request_state: "requesting".to_string(),
+                output_format: "png".to_string(),
+                response_file: None,
+                expected_response_file: None,
+                response_size: None,
+                response_sha256: None,
+                created_at: "2026-07-10T00:00:00Z".to_string(),
+                updated_at: "2026-07-10T00:00:00Z".to_string(),
+            }
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM generation_recoveries
+                 WHERE generation_id = 'v16-running-missing-recovery-generation'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count unsafe running recovery repair"),
+            0,
+            "migration must not synthesize replayable recovery for an unknown running outcome"
+        );
+        assert!(migration_version_exists(&conn, 17));
+        drop(conn);
+        drop(database);
+        drop(directory);
+    }
+
+    #[test]
+    fn generation_worker_v17_partial_rerun_preserves_explicit_stage() {
+        let db_path = test_db_path("astro-studio-generation-worker-v17-partial-test");
+        let directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let database = create_recorded_v16_generation_queue_database(&db_path);
+        {
+            let conn = database.conn.lock().expect("lock partial v17 db");
+            conn.execute(
+                "ALTER TABLE generation_jobs
+                 ADD COLUMN stage TEXT NOT NULL DEFAULT 'migration_unknown'",
+                [],
+            )
+            .expect("partially add worker stage");
+            conn.execute(
+                "UPDATE generation_jobs SET stage = 'provider_request'
+                 WHERE id = 'v16-running-job'",
+                [],
+            )
+            .expect("persist explicit stage before migration rerun");
+        }
+
+        database
+            .run_migrations()
+            .expect("resume partially applied v17 migration");
+
+        let conn = database.conn.lock().expect("lock resumed v17 db");
+        assert_eq!(
+            conn.query_row(
+                "SELECT stage FROM generation_jobs WHERE id = 'v16-running-job'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("read preserved explicit stage"),
+            "provider_request"
+        );
+        drop(conn);
+        drop(database);
+        drop(directory);
+    }
+
+    #[test]
+    fn generation_worker_v17_refuses_success_when_migration_record_is_suppressed() {
+        let db_path = test_db_path("astro-studio-generation-worker-v17-record-test");
+        let directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let database = create_recorded_v16_generation_queue_database(&db_path);
+        {
+            let conn = database.conn.lock().expect("lock migration record db");
+            conn.execute_batch(
+                "CREATE TRIGGER suppress_v17_migration_record
+                 BEFORE INSERT ON schema_migrations
+                 WHEN NEW.version = 17
+                 BEGIN
+                     SELECT RAISE(IGNORE);
+                 END;",
+            )
+            .expect("install migration record suppression trigger");
+        }
+
+        let error = database
+            .run_migrations()
+            .expect_err("migration must fail when its version row is not persisted");
+        assert!(
+            format!("{error:?}").contains("record migration 17"),
+            "unexpected migration record error: {error:?}"
+        );
+        {
+            let conn = database.conn.lock().expect("lock failed migration db");
+            assert!(!migration_version_exists(&conn, 17));
+            assert!(
+                !table_has_column(&conn, "generation_jobs", "stage"),
+                "failed migration recording must roll back every schema side effect"
+            );
+            conn.execute("DROP TRIGGER suppress_v17_migration_record", [])
+                .expect("remove migration record suppression trigger");
+        }
+
+        database
+            .run_migrations()
+            .expect("migration remains resumable after record failure");
+        let conn = database.conn.lock().expect("lock resumed migration db");
+        assert!(migration_version_exists(&conn, 17));
+        drop(conn);
+        drop(database);
+        drop(directory);
+    }
+
+    #[test]
+    fn generation_worker_v17_repeated_migration_is_idempotent() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v17-repeat-test");
+
+        fixture
+            .database
+            .run_migrations()
+            .expect("repeat v17 migrations");
+
+        let conn = fixture.database.conn.lock().expect("lock db");
+        let version_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 17",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count v17 migration record");
+        let lease_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM generation_worker_lease", [], |row| {
+                row.get(0)
+            })
+            .expect("count singleton lease rows");
+        assert_eq!(version_count, 1);
+        assert_eq!(lease_count, 1);
+        assert_eq!(
+            table_column_definition(&conn, "generation_jobs", "stage"),
+            Some((
+                "TEXT".to_string(),
+                true,
+                Some("'migration_unknown'".to_string())
+            ))
+        );
+    }
+
+    #[test]
+    fn generation_worker_v17_lease_enforces_singleton_key_and_nonnegative_epoch() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v17-lease-test");
+        let conn = fixture.database.conn.lock().expect("lock db");
+
+        let wrong_key = conn
+            .execute(
+                "INSERT INTO generation_worker_lease (id, fencing_epoch) VALUES (2, 0)",
+                [],
+            )
+            .expect_err("lease table must reject another singleton key");
+        assert_constraint_violation(wrong_key, "CHECK constraint failed");
+
+        let negative_epoch = conn
+            .execute(
+                "UPDATE generation_worker_lease SET fencing_epoch = -1 WHERE id = 1",
+                [],
+            )
+            .expect_err("lease table must reject a negative fencing epoch");
+        assert_constraint_violation(negative_epoch, "generation worker fencing epoch decreased");
+
+        for (sql, expectation) in [
+            (
+                "UPDATE generation_worker_lease SET owner_id = 'worker-a' WHERE id = 1",
+                "lease table must reject an owner without timestamps",
+            ),
+            (
+                "UPDATE generation_worker_lease SET acquired_at = 1000 WHERE id = 1",
+                "lease table must reject timestamps without an owner",
+            ),
+            (
+                "UPDATE generation_worker_lease
+                    SET owner_id = '', acquired_at = 1000, heartbeat_at = 1000,
+                        expires_at = 2000
+                  WHERE id = 1",
+                "lease table must reject an empty owner",
+            ),
+            (
+                "UPDATE generation_worker_lease
+                    SET owner_id = 'worker-a', acquired_at = 1001, heartbeat_at = 1000,
+                        expires_at = 2000
+                  WHERE id = 1",
+                "lease table must reject heartbeat before acquisition",
+            ),
+            (
+                "UPDATE generation_worker_lease
+                    SET owner_id = 'worker-a', acquired_at = 1000, heartbeat_at = 2000,
+                        expires_at = 2000
+                  WHERE id = 1",
+                "lease table must require heartbeat before expiry",
+            ),
+            (
+                "UPDATE generation_worker_lease
+                    SET owner_id = 'worker-a', acquired_at = 1000, heartbeat_at = 1500,
+                        expires_at = 2000
+                  WHERE id = 1",
+                "an owned lease must use a positive fencing epoch",
+            ),
+        ] {
+            let error = conn.execute(sql, []).expect_err(expectation);
+            assert_constraint_violation(error, "CHECK constraint failed");
+        }
+
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = 'worker-a', fencing_epoch = 1, acquired_at = 1000,
+                    heartbeat_at = 1500, expires_at = 2000
+              WHERE id = 1",
+            [],
+        )
+        .expect("lease table must accept a complete ordered lease");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = NULL, acquired_at = NULL, heartbeat_at = NULL, expires_at = NULL
+              WHERE id = 1",
+            [],
+        )
+        .expect("lease table must accept a fully released lease");
+        let decreased_epoch = conn
+            .execute(
+                "UPDATE generation_worker_lease SET fencing_epoch = 0 WHERE id = 1",
+                [],
+            )
+            .expect_err("lease fencing epoch must never decrease");
+        assert_constraint_violation(decreased_epoch, "generation worker fencing epoch decreased");
+
+        let moved_key = conn
+            .execute("UPDATE generation_worker_lease SET id = 2 WHERE id = 1", [])
+            .expect_err("singleton lease key must remain fixed");
+        assert_constraint_violation(moved_key, "CHECK constraint failed");
+        assert_eq!(
+            conn.query_row(
+                "SELECT id, owner_id, fencing_epoch FROM generation_worker_lease",
+                [],
+                |row| Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?
+                )),
+            )
+            .expect("read singleton after rejected writes"),
+            (1, None, 1)
+        );
+    }
+
+    #[test]
+    fn generation_worker_v17_concurrent_upgrade_records_migration_and_lease_once() {
+        let db_path = test_db_path("astro-studio-generation-worker-v17-concurrent-test");
+        let directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let setup = create_recorded_v16_generation_queue_database(&db_path);
+        drop(setup);
+
+        let databases = [
+            Database::open(&db_path).expect("open first migration connection"),
+            Database::open(&db_path).expect("open second migration connection"),
+        ];
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(databases.len() + 1));
+        let handles = databases.map(|database| {
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                database
+                    .run_migrations()
+                    .map_err(|error| format!("{error:?}"))
+            })
+        });
+
+        barrier.wait();
+        for handle in handles {
+            handle
+                .join()
+                .expect("concurrent migration thread panicked")
+                .expect("concurrent migration must succeed");
+        }
+
+        let database = Database::open(&db_path).expect("reopen concurrently migrated db");
+        let conn = database.conn.lock().expect("lock concurrently migrated db");
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 17",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count concurrent v17 migration records"),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM generation_worker_lease", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count concurrent singleton lease rows"),
+            1
+        );
+        drop(conn);
+        drop(database);
+        drop(directory);
+    }
 }
 
 fn ensure_schema_migrations(conn: &Connection) -> Result<(), AppError> {
@@ -510,14 +1232,45 @@ fn migration_applied(conn: &Connection, version: i32) -> Result<bool, AppError> 
 }
 
 fn record_migration(conn: &Connection, version: i32) -> Result<(), AppError> {
-    conn.execute(
-        "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-        params![version, crate::current_timestamp()],
-    )
-    .map_err(|e| AppError::Database {
-        message: format!("record migration {}: {}", version, e),
-    })?;
+    let inserted = conn
+        .execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)
+             ON CONFLICT(version) DO NOTHING",
+            params![version, crate::current_timestamp()],
+        )
+        .map_err(|e| AppError::Database {
+            message: format!("record migration {version}: {e}"),
+        })?;
+    if inserted == 0 && !migration_applied(conn, version)? {
+        return Err(AppError::Database {
+            message: format!("record migration {version}: version row was not persisted"),
+        });
+    }
     Ok(())
+}
+
+fn migration_transaction_error(context: &str, error: rusqlite::Error) -> AppError {
+    AppError::Database {
+        message: format!("{context}: {error}"),
+    }
+}
+
+fn rollback_migration(conn: &Connection) {
+    let _ = conn.execute_batch("ROLLBACK");
+}
+
+fn begin_migration(conn: &Connection) -> Result<(), AppError> {
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|error| migration_transaction_error("Configure migration writer wait", error))?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|error| migration_transaction_error("Begin migration transaction", error))
+}
+
+fn commit_migration(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch("COMMIT").map_err(|error| {
+        rollback_migration(conn);
+        migration_transaction_error("Commit migration transaction", error)
+    })
 }
 
 fn execute_migration_sql(conn: &Connection, sql: &str) -> Result<(), AppError> {
@@ -547,11 +1300,19 @@ fn apply_migration(
     _description: &str,
     sql: &str,
 ) -> Result<(), AppError> {
-    if migration_applied(conn, version)? {
-        return Ok(());
+    begin_migration(conn)?;
+    let result = (|| {
+        if migration_applied(conn, version)? {
+            return Ok(());
+        }
+        execute_migration_sql(conn, sql)?;
+        record_migration(conn, version)
+    })();
+    if let Err(error) = result {
+        rollback_migration(conn);
+        return Err(error);
     }
-    execute_migration_sql(conn, sql)?;
-    record_migration(conn, version)
+    commit_migration(conn)
 }
 
 fn ensure_migration_compatibility(conn: &Connection) -> Result<(), AppError> {
@@ -928,6 +1689,104 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_generation_jobs_source
                 ON generation_jobs(source_kind);",
         )?;
+
+        // v17: Managed generation worker state and response artifact metadata
+        apply_migration(
+            &conn,
+            17,
+            "generation worker state",
+            "ALTER TABLE generation_jobs
+                ADD COLUMN stage TEXT NOT NULL DEFAULT 'migration_unknown';
+            UPDATE generation_jobs
+                SET stage = CASE status
+                    WHEN 'queued' THEN 'queued'
+                    WHEN 'running' THEN 'startup_reconciliation'
+                    WHEN 'completed' THEN 'terminal'
+                    WHEN 'failed' THEN 'terminal'
+                    WHEN 'cancelled' THEN 'terminal'
+                    WHEN 'interrupted' THEN 'terminal'
+                    ELSE 'migration_unknown'
+                END
+                WHERE stage = 'migration_unknown';
+            CREATE TABLE IF NOT EXISTS generation_recoveries (
+                generation_id TEXT PRIMARY KEY REFERENCES generations(id) ON DELETE CASCADE,
+                request_kind TEXT NOT NULL,
+                request_state TEXT NOT NULL,
+                output_format TEXT NOT NULL,
+                response_file TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_generation_recoveries_state
+                ON generation_recoveries(request_state);
+            INSERT INTO generation_recoveries (
+                generation_id, request_kind, request_state, output_format, response_file,
+                created_at, updated_at
+            )
+            SELECT j.generation_id, g.request_kind, 'requesting', g.output_format, NULL,
+                   j.queued_at, j.queued_at
+              FROM generation_jobs j
+              JOIN generations g ON g.id = j.generation_id
+             WHERE j.status = 'queued'
+               AND j.stage = 'queued'
+               AND NOT EXISTS (
+                   SELECT 1 FROM generation_recoveries r
+                    WHERE r.generation_id = j.generation_id
+               );
+            ALTER TABLE generation_recoveries ADD COLUMN expected_response_file TEXT;
+            ALTER TABLE generation_recoveries
+                ADD COLUMN response_size INTEGER
+                CHECK (
+                    response_size IS NULL
+                    OR (typeof(response_size) = 'integer' AND response_size >= 0)
+                );
+            ALTER TABLE generation_recoveries ADD COLUMN response_sha256 TEXT;
+            CREATE TABLE IF NOT EXISTS generation_worker_lease (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                owner_id TEXT,
+                fencing_epoch INTEGER NOT NULL DEFAULT 0
+                    CHECK (typeof(fencing_epoch) = 'integer' AND fencing_epoch >= 0),
+                acquired_at INTEGER
+                    CHECK (acquired_at IS NULL OR (typeof(acquired_at) = 'integer' AND acquired_at >= 0)),
+                heartbeat_at INTEGER
+                    CHECK (heartbeat_at IS NULL OR (typeof(heartbeat_at) = 'integer' AND heartbeat_at >= 0)),
+                expires_at INTEGER
+                    CHECK (expires_at IS NULL OR (typeof(expires_at) = 'integer' AND expires_at >= 0)),
+                CHECK (
+                    (
+                        owner_id IS NULL
+                        AND acquired_at IS NULL
+                        AND heartbeat_at IS NULL
+                        AND expires_at IS NULL
+                    )
+                    OR (
+                        typeof(owner_id) = 'text'
+                        AND length(trim(owner_id)) > 0
+                        AND acquired_at IS NOT NULL
+                        AND heartbeat_at IS NOT NULL
+                        AND expires_at IS NOT NULL
+                        AND fencing_epoch > 0
+                        AND acquired_at <= heartbeat_at
+                        AND heartbeat_at < expires_at
+                    )
+                )
+            );
+            INSERT OR IGNORE INTO generation_worker_lease (
+                id, owner_id, fencing_epoch, acquired_at, heartbeat_at, expires_at
+            ) VALUES (1, NULL, 0, NULL, NULL, NULL);",
+        )?;
+
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS prevent_generation_worker_lease_epoch_decrease
+             BEFORE UPDATE OF fencing_epoch ON generation_worker_lease
+             WHEN NEW.fencing_epoch < OLD.fencing_epoch
+             BEGIN
+                 SELECT RAISE(ABORT, 'generation worker fencing epoch decreased');
+             END;",
+        )
+        .map_err(|error| AppError::Database {
+            message: format!("Create generation worker lease fence trigger failed: {error}"),
+        })?;
 
         ensure_migration_compatibility(&conn)?;
 
