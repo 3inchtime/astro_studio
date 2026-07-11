@@ -1,15 +1,22 @@
-use crate::api_gateway::ImageEngine;
+use crate::api_gateway::{EngineCallError, ImageEngine, ProviderAttemptBody};
 use crate::commands::{conversations, settings};
 use crate::current_timestamp;
 use crate::db::Database;
 use crate::error::AppError;
-use crate::file_manager;
+use crate::file_manager::{self, StagedGenerationFiles};
+use crate::generation_jobs::{GenerationJobRequest, GenerationJobRequestKind};
+use crate::image_engines::{provider_for_model, ImageProvider};
 use crate::model_registry::{
     image_endpoint_url_for_model_settings, normalize_image_model,
     sanitize_request_options_for_model, ImageEndpointKind,
 };
 use crate::models::*;
 use rusqlite::params;
+use sha2::{Digest, Sha256};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
@@ -65,6 +72,544 @@ pub(crate) struct GenerationLifecycleRequest {
     pub(crate) image_count: Option<u8>,
     pub(crate) conversation_id: Option<String>,
     pub(crate) project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenerationExecutionContext {
+    pub(crate) generation_id: String,
+    pub(crate) job_id: String,
+    pub(crate) conversation_id: String,
+    pub(crate) provider_kind: String,
+    pub(crate) model: String,
+    pub(crate) endpoint_url: String,
+    pub(crate) provider_profile_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GenerationExecutionError {
+    Engine(EngineCallError),
+    Local {
+        code: String,
+        sanitized_message: String,
+        stage: String,
+    },
+}
+
+impl GenerationExecutionError {
+    pub(crate) fn code(&self) -> &str {
+        match self {
+            Self::Engine(error) => &error.code,
+            Self::Local { code, .. } => code,
+        }
+    }
+
+    pub(crate) fn sanitized_message(&self) -> &str {
+        match self {
+            Self::Engine(error) => &error.sanitized_message,
+            Self::Local {
+                sanitized_message, ..
+            } => sanitized_message,
+        }
+    }
+
+    fn response_artifact() -> Self {
+        Self::Local {
+            code: "recovery_failed".to_string(),
+            sanitized_message: "The provider response could not be verified".to_string(),
+            stage: "response_artifact".to_string(),
+        }
+    }
+}
+
+/// Verified response envelope. Raw bodies are deliberately not serializable or
+/// debuggable outside the app-owned response store.
+pub(crate) struct ProviderAttemptResponse {
+    pub(crate) body_text: String,
+    pub(crate) response_file: String,
+    pub(crate) response_size: u64,
+    pub(crate) response_sha256: String,
+    pub(crate) requested_image_count: u8,
+}
+
+pub(crate) struct GenerationExecutionSnapshot {
+    pub(crate) context: GenerationExecutionContext,
+    pub(crate) request: GenerationJobRequest,
+    pub(crate) runtime_options: GptImageRequestOptions,
+    pub(crate) created_at: String,
+    pub(crate) output_format: String,
+}
+
+pub(crate) struct ProviderExecutionCredentials {
+    api_key: String,
+}
+
+impl ProviderExecutionCredentials {
+    pub(crate) fn new(api_key: String) -> Self {
+        Self { api_key }
+    }
+
+    pub(crate) fn expose_for_engine(&self) -> &str {
+        &self.api_key
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct CancellationProbe {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationProbe {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn checkpoint(&self, stage: &str) -> Result<(), GenerationExecutionError> {
+        if self.is_cancelled() {
+            Err(GenerationExecutionError::Local {
+                code: "cancelled_by_user".to_string(),
+                sanitized_message: "The generation was cancelled".to_string(),
+                stage: stage.to_string(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[async_trait::async_trait]
+pub(crate) trait ImageResponseDecoder: Send + Sync {
+    async fn decode_and_download(
+        &self,
+        response: &ProviderAttemptResponse,
+        cancellation: &CancellationProbe,
+    ) -> Result<Vec<Vec<u8>>, GenerationExecutionError>;
+}
+
+pub(crate) struct EngineImageResponseDecoder<'a> {
+    engine: &'a crate::api_gateway::GptImageEngine,
+}
+
+impl<'a> EngineImageResponseDecoder<'a> {
+    pub(crate) fn new(engine: &'a crate::api_gateway::GptImageEngine) -> Self {
+        Self { engine }
+    }
+}
+
+#[async_trait::async_trait]
+impl ImageResponseDecoder for EngineImageResponseDecoder<'_> {
+    async fn decode_and_download(
+        &self,
+        response: &ProviderAttemptResponse,
+        cancellation: &CancellationProbe,
+    ) -> Result<Vec<Vec<u8>>, GenerationExecutionError> {
+        cancellation.checkpoint("response_decode")?;
+        if response.response_size != response.body_text.len() as u64
+            || response.response_sha256
+                != FileResponseArtifactStore::response_hash(&response.body_text)
+            || !(1..=4).contains(&response.requested_image_count)
+        {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        let mut images = self
+            .engine
+            .decode_images_from_response(&response.body_text)
+            .await
+            .map_err(|_| GenerationExecutionError::Local {
+                code: "response_decode_failed".to_string(),
+                sanitized_message: "The provider response could not be decoded".to_string(),
+                stage: "response_decode".to_string(),
+            })?;
+        cancellation.checkpoint("response_decode")?;
+        images.truncate(response.requested_image_count as usize);
+        if images.is_empty() {
+            return Err(GenerationExecutionError::Local {
+                code: "response_decode_failed".to_string(),
+                sanitized_message: "The provider response did not contain an image".to_string(),
+                stage: "response_decode".to_string(),
+            });
+        }
+        Ok(images)
+    }
+}
+
+#[async_trait::async_trait]
+pub(crate) trait GenerationFileStore: Send + Sync {
+    async fn stage_images(
+        &self,
+        snapshot: &GenerationExecutionSnapshot,
+        images: Vec<Vec<u8>>,
+        cancellation: &CancellationProbe,
+    ) -> Result<StagedGenerationFiles, GenerationExecutionError>;
+}
+
+#[derive(Clone)]
+pub(crate) struct LocalGenerationFileStore {
+    root_dir: PathBuf,
+}
+
+impl LocalGenerationFileStore {
+    pub(crate) fn new(root_dir: PathBuf) -> Self {
+        Self { root_dir }
+    }
+}
+
+#[async_trait::async_trait]
+impl GenerationFileStore for LocalGenerationFileStore {
+    async fn stage_images(
+        &self,
+        snapshot: &GenerationExecutionSnapshot,
+        images: Vec<Vec<u8>>,
+        cancellation: &CancellationProbe,
+    ) -> Result<StagedGenerationFiles, GenerationExecutionError> {
+        cancellation.checkpoint("image_staging")?;
+        let root_dir = self.root_dir.clone();
+        let generation_id = snapshot.context.generation_id.clone();
+        let output_format = snapshot.output_format.clone();
+        let created_at = snapshot.created_at.clone();
+        let staged = tokio::task::spawn_blocking(move || {
+            file_manager::FileManager::new(root_dir).stage_generation_images(
+                &generation_id,
+                &images,
+                &output_format,
+                &created_at,
+            )
+        })
+        .await
+        .map_err(|_| GenerationExecutionError::Local {
+            code: "image_save_failed".to_string(),
+            sanitized_message: "The generated images could not be staged".to_string(),
+            stage: "image_staging".to_string(),
+        })?
+        .map_err(|_| GenerationExecutionError::Local {
+            code: "image_save_failed".to_string(),
+            sanitized_message: "The generated images could not be staged".to_string(),
+            stage: "image_staging".to_string(),
+        })?;
+        cancellation.checkpoint("image_staging")?;
+        Ok(staged)
+    }
+}
+
+#[async_trait::async_trait]
+pub(crate) trait ResponseArtifactStore: Send + Sync {
+    async fn persist_verified_response(
+        &self,
+        context: &GenerationExecutionContext,
+        body: ProviderAttemptBody,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError>;
+}
+
+#[derive(Clone)]
+pub(crate) struct FileResponseArtifactStore {
+    root_dir: PathBuf,
+}
+
+impl FileResponseArtifactStore {
+    const ENVELOPE_VERSION: u64 = 1;
+    const MAX_RESPONSE_BODY_BYTES: u64 = 64 * 1024 * 1024;
+
+    pub(crate) fn new(root_dir: PathBuf) -> Self {
+        Self { root_dir }
+    }
+
+    fn identity_segment_is_safe(value: &str) -> bool {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    }
+
+    pub(crate) fn response_path(
+        &self,
+        context: &GenerationExecutionContext,
+    ) -> Result<PathBuf, GenerationExecutionError> {
+        if !Self::identity_segment_is_safe(&context.job_id)
+            || !Self::identity_segment_is_safe(&context.generation_id)
+        {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        Ok(self
+            .root_dir
+            .join("generation-jobs")
+            .join(&context.job_id)
+            .join(format!("{}.response.json", context.generation_id)))
+    }
+
+    fn response_hash(body_text: &str) -> String {
+        format!("{:x}", Sha256::digest(body_text.as_bytes()))
+    }
+
+    fn decode_verified_envelope(
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        let envelope: serde_json::Value = serde_json::from_slice(bytes)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        let object = envelope
+            .as_object()
+            .filter(|object| object.len() == 5)
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        if object.get("version").and_then(serde_json::Value::as_u64) != Some(Self::ENVELOPE_VERSION)
+        {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        let body_text = object
+            .get("body_text")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        let response_size = object
+            .get("body_size")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        let response_sha256 = object
+            .get("body_sha256")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        let requested_image_count = object
+            .get("requested_image_count")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+            .filter(|value| (1..=4).contains(value))
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        if response_size != body_text.len() as u64
+            || response_size > Self::MAX_RESPONSE_BODY_BYTES
+            || response_sha256.len() != 64
+            || response_sha256 != Self::response_hash(body_text)
+        {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        Ok(ProviderAttemptResponse {
+            body_text: body_text.to_string(),
+            response_file: path.to_string_lossy().to_string(),
+            response_size,
+            response_sha256: response_sha256.to_string(),
+            requested_image_count,
+        })
+    }
+
+    fn load_verified_response_sync(
+        root_dir: &Path,
+        path: &Path,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        if !metadata.file_type().is_file()
+            || metadata.len() > Self::MAX_RESPONSE_BODY_BYTES.saturating_mul(2)
+        {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        let canonical_root = root_dir
+            .canonicalize()
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        let canonical_path = path
+            .canonicalize()
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        if !canonical_path.starts_with(canonical_root) {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        let bytes = std::fs::read(&canonical_path)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        Self::decode_verified_envelope(&canonical_path, &bytes)
+    }
+
+    pub(crate) async fn load_verified_response(
+        &self,
+        path: &Path,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        let root_dir = self.root_dir.clone();
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || Self::load_verified_response_sync(&root_dir, &path))
+            .await
+            .map_err(|_| GenerationExecutionError::response_artifact())?
+    }
+
+    fn write_verified_response_sync(
+        root_dir: &Path,
+        response_path: &Path,
+        body: ProviderAttemptBody,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        let response_size = body.body_text.len() as u64;
+        if response_size > Self::MAX_RESPONSE_BODY_BYTES
+            || !(1..=4).contains(&body.requested_image_count)
+        {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        let response_sha256 = Self::response_hash(&body.body_text);
+        let envelope = serde_json::json!({
+            "version": Self::ENVELOPE_VERSION,
+            "body_text": body.body_text,
+            "body_size": response_size,
+            "body_sha256": response_sha256,
+            "requested_image_count": body.requested_image_count,
+        });
+        let bytes = serde_json::to_vec(&envelope)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        let parent = response_path
+            .parent()
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        std::fs::create_dir_all(parent)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+
+        if response_path.exists() {
+            let existing = Self::load_verified_response_sync(root_dir, response_path)?;
+            if existing.response_size == response_size
+                && existing.response_sha256 == response_sha256
+                && existing.requested_image_count == body.requested_image_count
+            {
+                return Ok(existing);
+            }
+            return Err(GenerationExecutionError::response_artifact());
+        }
+
+        let file_name = response_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        let temporary_path = parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut temporary_file = options
+            .open(&temporary_path)
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        let write_result = temporary_file
+            .write_all(&bytes)
+            .and_then(|()| temporary_file.sync_all());
+        drop(temporary_file);
+        if write_result.is_err() {
+            let _ = std::fs::remove_file(&temporary_path);
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        if std::fs::rename(&temporary_path, response_path).is_err()
+            || std::fs::File::open(parent)
+                .and_then(|file| file.sync_all())
+                .is_err()
+        {
+            let _ = std::fs::remove_file(&temporary_path);
+            let _ = std::fs::remove_file(response_path);
+            return Err(GenerationExecutionError::response_artifact());
+        }
+
+        let verified = Self::load_verified_response_sync(root_dir, response_path)?;
+        if verified.response_size != response_size
+            || verified.response_sha256 != response_sha256
+            || verified.requested_image_count != body.requested_image_count
+        {
+            let _ = std::fs::remove_file(response_path);
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        Ok(verified)
+    }
+}
+
+#[async_trait::async_trait]
+impl ResponseArtifactStore for FileResponseArtifactStore {
+    async fn persist_verified_response(
+        &self,
+        context: &GenerationExecutionContext,
+        body: ProviderAttemptBody,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        let root_dir = self.root_dir.clone();
+        let response_path = self.response_path(context)?;
+        tokio::task::spawn_blocking(move || {
+            Self::write_verified_response_sync(&root_dir, &response_path, body)
+        })
+        .await
+        .map_err(|_| GenerationExecutionError::response_artifact())?
+    }
+}
+
+pub(crate) async fn perform_provider_attempt(
+    engine: &dyn ImageEngine,
+    artifact_store: &dyn ResponseArtifactStore,
+    snapshot: &GenerationExecutionSnapshot,
+    credentials: &ProviderExecutionCredentials,
+) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+    let expected_provider_kind = match provider_for_model(&snapshot.context.model) {
+        ImageProvider::OpenAi => "openai",
+        ImageProvider::Gemini => "gemini",
+    };
+    if snapshot.context.provider_kind != expected_provider_kind
+        || snapshot.request.model != snapshot.context.model
+        || snapshot.request.conversation_id != snapshot.context.conversation_id
+        || snapshot.output_format != snapshot.runtime_options.output_format
+        || snapshot.context.endpoint_url.is_empty()
+        || snapshot.context.provider_profile_id.is_empty()
+        || credentials.expose_for_engine().is_empty()
+    {
+        return Err(GenerationExecutionError::Engine(
+            EngineCallError::provider_configuration_invalid(),
+        ));
+    }
+
+    let body = match snapshot.request.kind {
+        GenerationJobRequestKind::Generate => {
+            engine
+                .generate(
+                    &snapshot.context.model,
+                    credentials.expose_for_engine(),
+                    &snapshot.context.endpoint_url,
+                    &snapshot.request.prompt,
+                    &snapshot.runtime_options,
+                )
+                .await
+        }
+        GenerationJobRequestKind::Edit => {
+            engine
+                .edit(
+                    &snapshot.context.model,
+                    credentials.expose_for_engine(),
+                    &snapshot.context.endpoint_url,
+                    &snapshot.request.prompt,
+                    &snapshot.request.source_image_paths,
+                    &snapshot.runtime_options,
+                )
+                .await
+        }
+    }
+    .map_err(GenerationExecutionError::Engine)?;
+
+    if body.requested_image_count != snapshot.runtime_options.image_count {
+        return Err(GenerationExecutionError::response_artifact());
+    }
+    let response = artifact_store
+        .persist_verified_response(&snapshot.context, body)
+        .await?;
+    if response.requested_image_count != snapshot.runtime_options.image_count {
+        return Err(GenerationExecutionError::response_artifact());
+    }
+    Ok(response)
+}
+
+pub(crate) async fn resume_verified_response(
+    decoder: &dyn ImageResponseDecoder,
+    file_store: &dyn GenerationFileStore,
+    snapshot: &GenerationExecutionSnapshot,
+    response: &ProviderAttemptResponse,
+    cancellation: &CancellationProbe,
+) -> Result<StagedGenerationFiles, GenerationExecutionError> {
+    if response.requested_image_count != snapshot.runtime_options.image_count {
+        return Err(GenerationExecutionError::response_artifact());
+    }
+    cancellation.checkpoint("response_decode")?;
+    let images = decoder.decode_and_download(response, cancellation).await?;
+    cancellation.checkpoint("image_staging")?;
+    file_store
+        .stage_images(snapshot, images, cancellation)
+        .await
 }
 
 fn normalize_image_moderation(moderation: &str) -> &'static str {
@@ -531,7 +1076,146 @@ pub(crate) async fn run_generation_lifecycle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api_gateway::{ProviderAttemptBody, RetryAfterHint};
+    use crate::generation_jobs::{
+        GenerationJobOptions, GenerationJobRequest, GenerationJobRequestKind,
+    };
     use crate::models::DEFAULT_IMAGE_COUNT;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
+    use std::io::Cursor;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn fixture_execution_context() -> GenerationExecutionContext {
+        GenerationExecutionContext {
+            generation_id: "generation-1".to_string(),
+            job_id: "job-1".to_string(),
+            conversation_id: "conversation-1".to_string(),
+            provider_kind: "openai".to_string(),
+            model: "gpt-image-2".to_string(),
+            endpoint_url: "https://example.test/images/generations".to_string(),
+            provider_profile_id: "profile-1".to_string(),
+        }
+    }
+
+    fn jpeg_bytes() -> Vec<u8> {
+        let image = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(4, 4, Rgb([24, 96, 180])));
+        let mut bytes = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+            .expect("encode jpeg");
+        bytes
+    }
+
+    fn fixture_execution_snapshot() -> GenerationExecutionSnapshot {
+        GenerationExecutionSnapshot {
+            context: fixture_execution_context(),
+            request: GenerationJobRequest {
+                kind: GenerationJobRequestKind::Generate,
+                prompt: "draw a nebula".to_string(),
+                model: "gpt-image-2".to_string(),
+                source_image_paths: Vec::new(),
+                options: GenerationJobOptions {
+                    image_count: Some(2),
+                    ..GenerationJobOptions::default()
+                },
+                requested_conversation_id: None,
+                requested_project_id: None,
+                conversation_id: "conversation-1".to_string(),
+                project_id: "default".to_string(),
+            },
+            runtime_options: image_request_options(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(2),
+            ),
+            created_at: "2026-04-29T06:18:01Z".to_string(),
+            output_format: "png".to_string(),
+        }
+    }
+
+    struct FakeSingleAttemptEngine {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ImageEngine for FakeSingleAttemptEngine {
+        async fn generate(
+            &self,
+            _model: &str,
+            api_key: &str,
+            endpoint_url: &str,
+            _prompt: &str,
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            assert_eq!(api_key, "ephemeral-key");
+            assert_eq!(endpoint_url, "https://example.test/images/generations");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ProviderAttemptBody {
+                body_text: r#"{"data":[]}"#.to_string(),
+                requested_image_count: options.image_count,
+            })
+        }
+
+        async fn edit(
+            &self,
+            _model: &str,
+            _api_key: &str,
+            _endpoint_url: &str,
+            _prompt: &str,
+            _source_image_paths: &[String],
+            _options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            panic!("generate fixture must not call edit")
+        }
+    }
+
+    struct FakeArtifactStore {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponseArtifactStore for FakeArtifactStore {
+        async fn persist_verified_response(
+            &self,
+            context: &GenerationExecutionContext,
+            body: ProviderAttemptBody,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            assert_eq!(context.job_id, "job-1");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ProviderAttemptResponse {
+                response_size: body.body_text.len() as u64,
+                response_sha256: FileResponseArtifactStore::response_hash(&body.body_text),
+                response_file: "/safe/job-1.response.json".to_string(),
+                body_text: body.body_text,
+                requested_image_count: body.requested_image_count,
+            })
+        }
+    }
+
+    struct FakeLocalDecoder {
+        calls: Arc<AtomicUsize>,
+        images: Vec<Vec<u8>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ImageResponseDecoder for FakeLocalDecoder {
+        async fn decode_and_download(
+            &self,
+            _response: &ProviderAttemptResponse,
+            cancellation: &CancellationProbe,
+        ) -> Result<Vec<Vec<u8>>, GenerationExecutionError> {
+            cancellation.checkpoint("response_decode")?;
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.images.clone())
+        }
+    }
 
     #[test]
     fn lifecycle_request_kind_names_generate_and_edit_for_persistence() {
@@ -564,5 +1248,205 @@ mod tests {
         assert!(metadata.contains("\"source_image_count\":1"));
         assert!(!metadata.contains("private.png"));
         assert!(!metadata.contains("source_image_paths"));
+    }
+
+    #[tokio::test]
+    async fn response_artifact_path_is_deterministic_and_verified_after_atomic_write() {
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-response-artifact-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store = FileResponseArtifactStore::new(root.clone());
+        let context = fixture_execution_context();
+        let response = store
+            .persist_verified_response(
+                &context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[{"b64_json":"aW1hZ2U="}]}"#.to_string(),
+                    requested_image_count: 2,
+                },
+            )
+            .await
+            .expect("persist verified response");
+
+        assert_eq!(
+            Path::new(&response.response_file),
+            root.canonicalize()
+                .expect("canonical response root")
+                .join("generation-jobs")
+                .join("job-1")
+                .join("generation-1.response.json")
+        );
+        assert_eq!(response.requested_image_count, 2);
+        assert_eq!(response.response_size, response.body_text.len() as u64);
+        assert_eq!(response.response_sha256.len(), 64);
+        assert!(Path::new(&response.response_file).is_file());
+        assert!(std::fs::read_dir(
+            Path::new(&response.response_file)
+                .parent()
+                .expect("response parent")
+        )
+        .expect("read response directory")
+        .all(|entry| !entry
+            .expect("directory entry")
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
+
+        let loaded = store
+            .load_verified_response(Path::new(&response.response_file))
+            .await
+            .expect("load verified response");
+        assert_eq!(loaded.body_text, response.body_text);
+        assert_eq!(loaded.response_sha256, response.response_sha256);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn response_artifact_rejects_tampered_body_or_metadata() {
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-response-artifact-tamper-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store = FileResponseArtifactStore::new(root.clone());
+        let response = store
+            .persist_verified_response(
+                &fixture_execution_context(),
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist response");
+        let path = Path::new(&response.response_file);
+        let mut envelope: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).expect("read envelope"))
+                .expect("parse envelope");
+        envelope["body_text"] = serde_json::json!("tampered");
+        std::fs::write(
+            path,
+            serde_json::to_vec(&envelope).expect("encode envelope"),
+        )
+        .expect("tamper envelope");
+
+        let error = match store.load_verified_response(path).await {
+            Err(error) => error,
+            Ok(_) => panic!("tampered response must fail verification"),
+        };
+        assert_eq!(error.code(), "recovery_failed");
+        assert!(!error.sanitized_message().contains("tampered"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn provider_attempt_uses_snapshot_once_then_hands_raw_body_to_artifact_store() {
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let artifact_calls = Arc::new(AtomicUsize::new(0));
+        let response = perform_provider_attempt(
+            &FakeSingleAttemptEngine {
+                calls: Arc::clone(&engine_calls),
+            },
+            &FakeArtifactStore {
+                calls: Arc::clone(&artifact_calls),
+            },
+            &fixture_execution_snapshot(),
+            &ProviderExecutionCredentials::new("ephemeral-key".to_string()),
+        )
+        .await
+        .expect("perform provider attempt");
+
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(artifact_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(response.requested_image_count, 2);
+    }
+
+    #[tokio::test]
+    async fn verified_response_decodes_then_stages_without_provider_submission() {
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-local-resume-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let response = ProviderAttemptResponse {
+            body_text: r#"{"data":[]}"#.to_string(),
+            response_file: root.join("response.json").to_string_lossy().to_string(),
+            response_size: 11,
+            response_sha256: "0".repeat(64),
+            requested_image_count: 2,
+        };
+        let staged = resume_verified_response(
+            &FakeLocalDecoder {
+                calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+            },
+            &LocalGenerationFileStore::new(root.clone()),
+            &fixture_execution_snapshot(),
+            &response,
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect("resume response locally");
+
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(staged.len(), 1);
+        assert!(staged.final_paths().iter().all(|path| !path.exists()));
+        drop(staged);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn cancelled_local_resume_stops_before_decoder_or_staging() {
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let cancellation = CancellationProbe::new();
+        cancellation.cancel();
+        let response = ProviderAttemptResponse {
+            body_text: r#"{"data":[]}"#.to_string(),
+            response_file: "/safe/response.json".to_string(),
+            response_size: 11,
+            response_sha256: "0".repeat(64),
+            requested_image_count: 2,
+        };
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-cancelled-resume-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let result = resume_verified_response(
+            &FakeLocalDecoder {
+                calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+            },
+            &LocalGenerationFileStore::new(root.clone()),
+            &fixture_execution_snapshot(),
+            &response,
+            &cancellation,
+        )
+        .await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("cancelled resume must fail"),
+        };
+        assert_eq!(error.code(), "cancelled_by_user");
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 0);
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn retry_after_metadata_remains_available_to_worker_policy() {
+        let error = GenerationExecutionError::Engine(EngineCallError::from_http_status(
+            429,
+            Some(RetryAfterHint::DelaySeconds(5)),
+        ));
+        assert_eq!(error.code(), "rate_limited");
+        assert!(matches!(
+            error,
+            GenerationExecutionError::Engine(EngineCallError {
+                retry_after: Some(RetryAfterHint::DelaySeconds(5)),
+                safe_to_retry: true,
+                ..
+            })
+        ));
     }
 }
