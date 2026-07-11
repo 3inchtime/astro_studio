@@ -900,6 +900,7 @@ git commit -m "refactor: execute precreated generations"
 - Modify: `src-tauri/src/models.rs`
 - Modify: `src-tauri/src/generation_jobs.rs`
 - Modify: `src-tauri/src/generation_lifecycle.rs`
+- Modify: `src-tauri/src/file_manager.rs`
 - Modify: `src-tauri/src/commands/generation.rs`
 - Modify: `src-tauri/src/updater.rs`
 
@@ -974,7 +975,13 @@ Cover these policies with injected clocks/sleepers and real SQLite state:
   response-ready-after-commit crash, and pre-v16 processing generations without
   jobs; a complete deterministic requesting artifact is promoted and recovered
   with zero engine calls, and none of the recovery-only synthetic paths may call
-  the provider.
+  the provider;
+- image/thumbnail artifact-set orphan sweeping after a crash between file
+  promotion and the final SQL commit: only strict attempt-UUID names older than
+  an injected grace period and absent from both `images.file_path` and
+  `images.thumbnail_path` may be removed; a committed set, a current staging
+  set, a recently promoted set, or any deterministic response artifact must be
+  preserved.
 
 - [ ] **Step 2: Run worker tests and verify RED**
 
@@ -1142,6 +1149,20 @@ completion-versus-cancel rules based on whether verified local completion can
 commit; do not blindly replay or discard a known provider result. Repeated
 crashes leave enough durable metadata for the same local-only recovery.
 
+Image and thumbnail publication uses one random `artifact_set_id` per local
+attempt, embedded in both final basenames, so a stale lease owner never shares
+or deletes another attempt's pathname. A crash after publication but before the
+terminal SQL transaction can bypass RAII cleanup. Startup reconciliation must
+therefore run a DB-aware managed-file sweep outside the database mutex: read the
+complete referenced image/thumbnail path set in a short transaction, release
+the lock, scan only the app-owned image roots, group files by a strict
+generation/index/artifact-set naming parser, and delete only whole unreferenced
+sets older than an injected grace period. Reacquire a short transaction and
+recheck that a candidate set is still unreferenced immediately before deletion
+authorization. Never scan arbitrary paths, follow symlinks, remove current
+`.generation-staging` contents, or treat deterministic response artifacts as
+image orphans. Sweep failure is diagnostic and cannot block the worker loop.
+
 Move the concrete `GenerationJobEvent`, persisted `stage`, committed
 job+generation conversation projection, and object-safe `JobEventSink` into
 Task 4. Claim, retry ordinal, startup transition, cancel acknowledgement, and
@@ -1197,7 +1218,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Task 4**
 
 ```bash
-git add src-tauri/src/generation_job_worker.rs src-tauri/src/db.rs src-tauri/src/generation_jobs.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/commands/generation.rs src-tauri/src/models.rs src-tauri/src/lib.rs src-tauri/src/updater.rs
+git add src-tauri/src/generation_job_worker.rs src-tauri/src/db.rs src-tauri/src/generation_jobs.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/file_manager.rs src-tauri/src/commands/generation.rs src-tauri/src/models.rs src-tauri/src/lib.rs src-tauri/src/updater.rs
 git commit -m "feat: run persistent generation worker"
 ```
 

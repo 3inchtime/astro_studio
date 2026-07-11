@@ -304,6 +304,17 @@ while the database mutex is held. On SQL failure the transaction and global
 connection mutex are released before the promoted-file guard performs cleanup;
 both promotion and cleanup hooks must be able to acquire `db.conn.try_lock()`.
 
+Each local attempt uses one random `artifact_set_id` in both image and thumbnail
+final basenames. Different attempts never share a final pathname, so a stale
+lease owner can clean only its own set. Because a process crash after promotion
+but before SQL commit bypasses the RAII guard, startup reconciliation also owns
+a conservative orphan sweep. It snapshots DB-referenced image and thumbnail
+paths under a short lock, then scans only strict managed-root filenames outside
+the lock. It may remove a whole artifact set only when the name parses exactly,
+the set is older than a grace period, and a final short DB recheck still finds
+no reference. Committed, recent, staged, symlinked, malformed, and deterministic
+response artifacts are never removed; sweep errors are diagnostic only.
+
 The queue owns a started guard, shutdown signal, joined task handle, and unique
 lease owner. Lease acquisition atomically increments the epoch and returns a
 `WorkerTransitionAuthority { owner_id, fencing_epoch }`. Claim, startup
@@ -400,6 +411,10 @@ On startup:
   or recovery artifact can exist; otherwise they become interrupted.
 - Recovery failures end in a visible failed or interrupted state rather than
   remaining processing forever.
+- Unreferenced image/thumbnail artifact sets left by a crash between local
+  promotion and terminal SQL commit are swept only after strict managed-name,
+  grace-period, and two-phase DB-reference checks. Current staging data,
+  committed files, and deterministic provider-response artifacts are excluded.
 - A `requesting` recovery whose distinct `expected_response_file` already
   contains a complete verified envelope is promoted to response-ready and
   enters local-only recovery with no provider call. Before promotion its
