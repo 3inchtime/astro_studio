@@ -294,6 +294,63 @@ fn repeated_client_request_returns_existing_before_any_duplicate_side_effect() {
 }
 
 #[test]
+fn concurrent_root_enqueue_and_retry_wait_for_writer_then_return_existing_job() {
+    let fixture = JobFixture::new();
+    let enqueue_request = fixture.prepared("concurrent-enqueue", "concurrent-enqueue");
+    let mut first_conn = fixture.open_connection();
+    let first_tx = begin_generation_job_write_transaction(&mut first_conn)
+        .expect("begin first immediate enqueue");
+    let first = insert_job_in_transaction(&first_tx, &enqueue_request)
+        .expect("insert first concurrent enqueue");
+
+    let enqueue_path = fixture.path.clone();
+    let competing_request = enqueue_request.clone();
+    let competing_enqueue = std::thread::spawn(move || {
+        let mut conn = Connection::open(enqueue_path).expect("open competing enqueue connection");
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .expect("configure competing enqueue connection");
+        enqueue_job(&mut conn, &competing_request)
+    });
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    first_tx.commit().expect("commit first concurrent enqueue");
+    let replay = competing_enqueue
+        .join()
+        .expect("join competing enqueue")
+        .expect("concurrent enqueue must converge");
+    assert_eq!(replay.job_id, first.job_id);
+    assert_eq!(replay.generation_id, first.generation_id);
+    {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        request_cancel(&conn, &first.job_id).expect("clear first queued fixture job");
+    }
+
+    let parent = fixture.fail_retryable("retry-parent", "retry-parent");
+    let mut retry_conn = fixture.open_connection();
+    let retry_tx = begin_generation_job_write_transaction(&mut retry_conn)
+        .expect("begin first immediate retry");
+    let first_retry =
+        insert_retry_job_in_transaction(&retry_tx, &parent.id, "concurrent-retry", None)
+            .expect("insert first concurrent retry");
+
+    let retry_path = fixture.path.clone();
+    let parent_id = parent.id.clone();
+    let competing_retry = std::thread::spawn(move || {
+        let mut conn = Connection::open(retry_path).expect("open competing retry connection");
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .expect("configure competing retry connection");
+        create_retry_job(&mut conn, &parent_id, "concurrent-retry")
+    });
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    retry_tx.commit().expect("commit first concurrent retry");
+    let retry_replay = competing_retry
+        .join()
+        .expect("join competing retry")
+        .expect("concurrent retry must converge");
+    assert_eq!(retry_replay.job_id, first_retry.job_id);
+    assert_eq!(retry_replay.generation_id, first_retry.generation_id);
+}
+
+#[test]
 fn duplicate_recheck_inside_outer_transaction_precedes_conversation_resolution() {
     let fixture = JobFixture::new();
     let first = fixture.enqueue("request-1", "same-operation");
@@ -832,16 +889,22 @@ fn unknown_source_reference_keys_are_rejected_before_persistence() {
 #[test]
 fn safe_custom_endpoint_queries_and_ordinary_prose_are_preserved() {
     let fixture = JobFixture::new();
-    for (index, endpoint) in [
-        "https://api.example.test/images?api-version=2026-01-01",
-        "https://api.example.test/images?routing=primary&region=west",
+    for (index, (endpoint, prompt)) in [
+        (
+            "https://api.example.test/images?api-version=2026-01-01",
+            "Paint a ring bearer standing in a garden",
+        ),
+        (
+            "https://api.example.test/images?routing=primary&region=west",
+            "Illustrate Aizawa-kun reading under a tree",
+        ),
     ]
     .into_iter()
     .enumerate()
     {
         let mut request = fixture.prepared(&format!("request-{index}"), "safe-query");
         request.endpoint_snapshot = endpoint.to_string();
-        request.prompt = "Paint a sketch of the bearer of light".to_string();
+        request.prompt = prompt.to_string();
         let result = fixture.enqueue_prepared(&request).expect("safe snapshot");
         let job = fixture.get(&result.job_id);
         assert_eq!(job.endpoint_snapshot, endpoint);
@@ -875,7 +938,7 @@ fn credential_token_patterns_are_rejected_from_all_public_snapshot_channels() {
     requests.push(path);
 
     let mut source_ref = fixture.prepared("request-source-ref", "secret-source-ref");
-    source_ref.source_ref = json!({ "id": "AIza-secret-source" });
+    source_ref.source_ref = json!({ "id": format!("AIza{}", "A".repeat(35)) });
     requests.push(source_ref);
 
     let mut client_request = fixture.prepared("request-client", "secret-client-request");
@@ -931,7 +994,7 @@ fn credential_tokens_in_injected_persisted_public_fields_are_reported_as_corrupt
             }
             1 => {
                 conn.execute(
-                    "UPDATE generations SET prompt = 'Bearer abcdefgh1234' WHERE id = ?1",
+                    "UPDATE generations SET prompt = 'Authorization: Bearer abcdefgh1234' WHERE id = ?1",
                     params![queued.generation_id],
                 )
                 .expect("inject generation prompt token");

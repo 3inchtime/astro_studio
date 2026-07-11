@@ -7,7 +7,9 @@ use crate::models::{
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
+use rusqlite::{
+    params, params_from_iter, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -21,6 +23,8 @@ const ALIASED_JOB_COLUMNS: &str = "g.id, g.client_request_id, g.generation_id, g
     g.provider_profile_id, g.endpoint_snapshot, g.chain_attempt, g.auto_attempt,
     g.max_auto_attempts, g.queued_at, g.started_at, g.finished_at, g.cancel_requested_at,
     g.last_heartbeat_at, g.error_code, g.error_message, g.retryable";
+
+const GENERATION_JOB_WRITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Clone)]
 pub(crate) struct PreparedGenerationJob {
@@ -1075,16 +1079,44 @@ fn has_jwt_token(value: &str) -> bool {
 }
 
 fn has_bearer_token(value: &str) -> bool {
-    let words = value.split_whitespace().collect::<Vec<_>>();
-    words.windows(2).any(|pair| {
-        let marker = pair[0].trim_matches(|character: char| !character.is_ascii_alphanumeric());
-        if !marker.eq_ignore_ascii_case("bearer") {
+    let lowercase = value.to_ascii_lowercase();
+    lowercase.match_indices("bearer").any(|(start, marker)| {
+        let marker_end = start + marker.len();
+        let boundary_before = start == 0
+            || !lowercase[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_ascii_alphanumeric());
+        let Some(first_after) = lowercase[marker_end..].chars().next() else {
+            return false;
+        };
+        if !boundary_before || !first_after.is_whitespace() {
             return false;
         }
-        let candidate = pair[1].trim_matches(|character: char| {
-            !character.is_ascii_alphanumeric() && !matches!(character, '-' | '_' | '.')
-        });
-        contains_credential_token(candidate) || candidate.len() >= 8
+        let candidate_start = marker_end
+            + lowercase[marker_end..]
+                .find(|character: char| !character.is_whitespace())
+                .unwrap_or(lowercase.len() - marker_end);
+        if candidate_start >= lowercase.len() {
+            return false;
+        }
+        let candidate = &lowercase[candidate_start..ascii_token_end(&lowercase, candidate_start)];
+        let explicit_authorization = lowercase[..start].trim_end().ends_with("authorization:")
+            || lowercase[..start].trim_end().ends_with("authorization=");
+        let has_digit = candidate.bytes().any(|byte| byte.is_ascii_digit());
+        let has_token_symbol = candidate
+            .bytes()
+            .any(|byte| matches!(byte, b'-' | b'_' | b'.'));
+        explicit_authorization && candidate.len() >= 8
+            || has_prefixed_token(candidate, "sk-", 6)
+            || has_prefixed_token(candidate, "sk_", 6)
+            || has_prefixed_token(candidate, "ghp_", 8)
+            || has_prefixed_token(candidate, "github_pat_", 12)
+            || has_prefixed_token(candidate, "aiza", 32)
+            || has_slack_token(candidate)
+            || has_jwt_token(candidate)
+            || (candidate.len() >= 16 && (has_digit || has_token_symbol))
+            || candidate.len() >= 32
     })
 }
 
@@ -1093,7 +1125,7 @@ fn contains_credential_token(value: &str) -> bool {
         || has_prefixed_token(value, "sk_", 6)
         || has_prefixed_token(value, "ghp_", 8)
         || has_prefixed_token(value, "github_pat_", 12)
-        || has_prefixed_token(value, "aiza", 8)
+        || has_prefixed_token(value, "aiza", 32)
         || has_slack_token(value)
         || has_jwt_token(value)
         || has_bearer_token(value)
@@ -1624,13 +1656,20 @@ pub(crate) fn enqueue_job(
         return Err(AppError::GenerationJobIdempotencyConflict);
     }
 
-    let tx = conn
-        .transaction()
-        .map_err(|error| database_error("Begin generation job transaction failed", error))?;
+    let tx = begin_generation_job_write_transaction(conn)?;
     let result = insert_job_in_transaction(&tx, request)?;
     tx.commit()
         .map_err(|error| database_error("Commit generation job transaction failed", error))?;
     Ok(result)
+}
+
+pub(crate) fn begin_generation_job_write_transaction(
+    conn: &mut Connection,
+) -> Result<Transaction<'_>, AppError> {
+    conn.busy_timeout(GENERATION_JOB_WRITE_BUSY_TIMEOUT)
+        .map_err(|error| database_error("Configure generation job writer wait failed", error))?;
+    conn.transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| database_error("Begin generation job write transaction failed", error))
 }
 
 fn decode_cursor(value: &str) -> Result<JobCursor, AppError> {
@@ -2271,9 +2310,7 @@ pub(crate) fn create_retry_job(
     if let Some(existing) = find_job_by_client_request_id(conn, client_request_id)? {
         return retry_existing_result(conn, parent_id, &existing, None);
     }
-    let tx = conn
-        .transaction()
-        .map_err(|error| database_error("Begin retry transaction failed", error))?;
+    let tx = begin_generation_job_write_transaction(conn)?;
     let result = insert_retry_job_in_transaction(&tx, parent_id, client_request_id, None)?;
     tx.commit()
         .map_err(|error| database_error("Commit retry transaction failed", error))?;
