@@ -14,6 +14,7 @@ use rusqlite::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 
 const JOB_COLUMNS: &str = "id, client_request_id, generation_id, parent_job_id, source_kind,
     source_ref_json, status, request_json, provider_kind, provider_profile_id, endpoint_snapshot,
@@ -167,6 +168,16 @@ struct LinkedImageProjection {
     height: i32,
     file_size: i64,
     created_at: String,
+}
+
+/// All linked rows needed to validate a page. Keeping validation detached from
+/// `Connection` prevents per-job projection queries from creeping back in.
+#[derive(Debug, Default)]
+struct JobProjectionBatch {
+    generations: HashMap<String, LinkedGenerationSnapshot>,
+    live_conversation_ids: HashSet<String>,
+    images: HashMap<String, Vec<LinkedImageProjection>>,
+    recoveries: HashMap<String, LinkedRecoverySnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -624,32 +635,76 @@ fn decode_stored_job(stored: StoredGenerationJob) -> Result<GenerationJob, AppEr
     })
 }
 
-fn query_job(
-    conn: &Connection,
+fn query_job_in_transaction(
+    tx: &Transaction<'_>,
     predicate: &str,
     value: &str,
 ) -> Result<Option<GenerationJob>, AppError> {
     let sql = format!("SELECT {JOB_COLUMNS} FROM generation_jobs WHERE {predicate} = ?1");
-    let stored = conn
+    let stored = tx
         .query_row(&sql, params![value], stored_job_from_row)
         .optional()
         .map_err(|error| persisted_row_error("Read generation job failed", error))?;
     let job = stored.map(decode_stored_job).transpose()?;
     if let Some(job) = job.as_ref() {
-        validate_job_projection(conn, job)?;
+        let generation_ids = vec![job.generation_id.clone()];
+        let mut no_query_observer = || {};
+        let projections = load_job_projection_batch_with_query_observer(
+            tx,
+            &generation_ids,
+            &mut no_query_observer,
+        )?;
+        validate_job_projection(job, &projections)?;
     }
     Ok(job)
 }
 
+fn with_generation_job_read_transaction<T>(
+    conn: &Connection,
+    operation: &str,
+    read: impl FnOnce(&Transaction<'_>) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let tx = conn.unchecked_transaction().map_err(|error| {
+        database_error(
+            &format!("Begin {operation} generation job read transaction failed"),
+            error,
+        )
+    })?;
+    let result = read(&tx)?;
+    tx.commit().map_err(|error| {
+        database_error(
+            &format!("Commit {operation} generation job read transaction failed"),
+            error,
+        )
+    })?;
+    Ok(result)
+}
+
 pub(crate) fn get_job(conn: &Connection, id: &str) -> Result<GenerationJob, AppError> {
-    query_job(conn, "id", id)?.ok_or(AppError::GenerationJobNotFound)
+    with_generation_job_read_transaction(conn, "get", |tx| get_job_in_transaction(tx, id))
+}
+
+pub(crate) fn get_job_in_transaction(
+    tx: &Transaction<'_>,
+    id: &str,
+) -> Result<GenerationJob, AppError> {
+    query_job_in_transaction(tx, "id", id)?.ok_or(AppError::GenerationJobNotFound)
 }
 
 pub(crate) fn find_job_by_client_request_id(
     conn: &Connection,
     client_request_id: &str,
 ) -> Result<Option<GenerationJob>, AppError> {
-    query_job(conn, "client_request_id", client_request_id)
+    with_generation_job_read_transaction(conn, "find", |tx| {
+        find_job_by_client_request_id_in_transaction(tx, client_request_id)
+    })
+}
+
+pub(crate) fn find_job_by_client_request_id_in_transaction(
+    tx: &Transaction<'_>,
+    client_request_id: &str,
+) -> Result<Option<GenerationJob>, AppError> {
+    query_job_in_transaction(tx, "client_request_id", client_request_id)
 }
 
 fn resolved_conversation_identity(
@@ -705,29 +760,6 @@ fn live_conversation_id(conn: &Connection, conversation_id: &str) -> Result<Stri
     Ok(conversation.0)
 }
 
-fn conversation_id_for_generation(
-    conn: &Connection,
-    generation_id: &str,
-) -> Result<String, AppError> {
-    let conversation = conn
-        .query_row(
-            "SELECT conversation_id, typeof(conversation_id) FROM generations WHERE id = ?1",
-            params![generation_id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()
-        .map_err(|error| persisted_row_error("Read job conversation failed", error))?
-        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
-    if conversation.1 != "text" {
-        return Err(AppError::GenerationJobCorruptPersistedData);
-    }
-    let conversation_id = conversation
-        .0
-        .filter(|conversation_id| nonempty(conversation_id))
-        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
-    live_conversation_id(conn, &conversation_id)
-}
-
 fn load_linked_generation(
     conn: &Connection,
     generation_id: &str,
@@ -739,56 +771,52 @@ fn load_linked_generation(
                 error_message, conversation_id, created_at, deleted_at
          FROM generations WHERE id = ?1",
         params![generation_id],
-        |row| {
-            Ok(LinkedGenerationSnapshot {
-                prompt: row.get(0)?,
-                model: row.get(1)?,
-                request_kind: row.get(2)?,
-                size: row.get(3)?,
-                quality: row.get(4)?,
-                background: row.get(5)?,
-                output_format: row.get(6)?,
-                output_compression: row.get(7)?,
-                moderation: row.get(8)?,
-                input_fidelity: row.get(9)?,
-                image_count: row.get(10)?,
-                source_image_count: row.get(11)?,
-                source_image_paths_json: row.get(12)?,
-                request_metadata_json: row.get(13)?,
-                status: row.get(14)?,
-                error_message: row.get(15)?,
-                conversation_id: row.get(16)?,
-                created_at: row.get(17)?,
-                deleted_at: row.get(18)?,
-            })
-        },
+        |row| linked_generation_from_row_offset(row, 0),
     )
     .optional()
     .map_err(|error| persisted_row_error("Read linked generation failed", error))?
     .ok_or(AppError::GenerationJobCorruptPersistedData)
 }
 
-fn load_linked_recovery(
-    conn: &Connection,
-    generation_id: &str,
-) -> Result<Option<LinkedRecoverySnapshot>, AppError> {
-    conn.query_row(
-        "SELECT request_kind, request_state, output_format, response_file, created_at, updated_at
-         FROM generation_recoveries WHERE generation_id = ?1",
-        params![generation_id],
-        |row| {
-            Ok(LinkedRecoverySnapshot {
-                request_kind: row.get(0)?,
-                request_state: row.get(1)?,
-                output_format: row.get(2)?,
-                response_file: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|error| persisted_row_error("Read linked generation recovery failed", error))
+fn linked_generation_from_row_offset(
+    row: &Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<LinkedGenerationSnapshot> {
+    Ok(LinkedGenerationSnapshot {
+        prompt: row.get(offset)?,
+        model: row.get(offset + 1)?,
+        request_kind: row.get(offset + 2)?,
+        size: row.get(offset + 3)?,
+        quality: row.get(offset + 4)?,
+        background: row.get(offset + 5)?,
+        output_format: row.get(offset + 6)?,
+        output_compression: row.get(offset + 7)?,
+        moderation: row.get(offset + 8)?,
+        input_fidelity: row.get(offset + 9)?,
+        image_count: row.get(offset + 10)?,
+        source_image_count: row.get(offset + 11)?,
+        source_image_paths_json: row.get(offset + 12)?,
+        request_metadata_json: row.get(offset + 13)?,
+        status: row.get(offset + 14)?,
+        error_message: row.get(offset + 15)?,
+        conversation_id: row.get(offset + 16)?,
+        created_at: row.get(offset + 17)?,
+        deleted_at: row.get(offset + 18)?,
+    })
+}
+
+fn linked_recovery_from_row_offset(
+    row: &Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<LinkedRecoverySnapshot> {
+    Ok(LinkedRecoverySnapshot {
+        request_kind: row.get(offset)?,
+        request_state: row.get(offset + 1)?,
+        output_format: row.get(offset + 2)?,
+        response_file: row.get(offset + 3)?,
+        created_at: row.get(offset + 4)?,
+        updated_at: row.get(offset + 5)?,
+    })
 }
 
 fn recovery_matches_job(
@@ -823,32 +851,200 @@ fn recovery_matches_job(
         && state_and_file_match
 }
 
-fn load_linked_images(
-    conn: &Connection,
-    generation_id: &str,
-) -> Result<Vec<LinkedImageProjection>, AppError> {
-    let mut statement = conn
-        .prepare(
-            "SELECT id, file_path, thumbnail_path, width, height, file_size, created_at
-             FROM images WHERE generation_id = ?1 ORDER BY id ASC",
+fn linked_image_from_row_offset(
+    row: &Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<LinkedImageProjection> {
+    Ok(LinkedImageProjection {
+        id: row.get(offset)?,
+        file_path: row.get(offset + 1)?,
+        thumbnail_path: row.get(offset + 2)?,
+        width: row.get(offset + 3)?,
+        height: row.get(offset + 4)?,
+        file_size: row.get(offset + 5)?,
+        created_at: row.get(offset + 6)?,
+    })
+}
+
+fn batch_predicate(column: &str, value_count: usize) -> String {
+    if value_count == 0 {
+        "0".to_string()
+    } else {
+        format!(
+            "{column} IN ({})",
+            std::iter::repeat_n("?", value_count)
+                .collect::<Vec<_>>()
+                .join(", ")
         )
-        .map_err(|error| database_error("Prepare linked generation images failed", error))?;
-    let images = statement
-        .query_map(params![generation_id], |row| {
-            Ok(LinkedImageProjection {
-                id: row.get(0)?,
-                file_path: row.get(1)?,
-                thumbnail_path: row.get(2)?,
-                width: row.get(3)?,
-                height: row.get(4)?,
-                file_size: row.get(5)?,
-                created_at: row.get(6)?,
-            })
+    }
+}
+
+fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
+fn load_linked_generations_batch(
+    tx: &Transaction<'_>,
+    generation_ids: &[String],
+    observe_query: &mut dyn FnMut(),
+) -> Result<HashMap<String, LinkedGenerationSnapshot>, AppError> {
+    observe_query();
+    let sql = format!(
+        "SELECT id, prompt, engine, request_kind, size, quality, background, output_format,
+                output_compression, moderation, input_fidelity, image_count,
+                source_image_count, source_image_paths, request_metadata, status,
+                error_message, conversation_id, created_at, deleted_at
+         FROM generations WHERE {}",
+        batch_predicate("id", generation_ids.len())
+    );
+    let mut statement = tx
+        .prepare(&sql)
+        .map_err(|error| database_error("Prepare linked generation batch failed", error))?;
+    let rows = statement
+        .query_map(params_from_iter(generation_ids.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                linked_generation_from_row_offset(row, 1)?,
+            ))
         })
-        .map_err(|error| database_error("Query linked generation images failed", error))?
+        .map_err(|error| database_error("Query linked generation batch failed", error))?
         .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| persisted_row_error("Read linked generation images failed", error))?;
+        .map_err(|error| persisted_row_error("Read linked generation batch failed", error))?;
+    let mut generations = HashMap::with_capacity(rows.len());
+    for (generation_id, generation) in rows {
+        if generations.insert(generation_id, generation).is_some() {
+            return Err(AppError::GenerationJobCorruptPersistedData);
+        }
+    }
+    Ok(generations)
+}
+
+fn load_live_conversation_ids_batch(
+    tx: &Transaction<'_>,
+    conversation_ids: &[String],
+    observe_query: &mut dyn FnMut(),
+) -> Result<HashSet<String>, AppError> {
+    observe_query();
+    let sql = format!(
+        "SELECT id, typeof(id) FROM conversations
+         WHERE deleted_at IS NULL AND {}",
+        batch_predicate("id", conversation_ids.len())
+    );
+    let mut statement = tx
+        .prepare(&sql)
+        .map_err(|error| database_error("Prepare live conversation batch failed", error))?;
+    let rows = statement
+        .query_map(params_from_iter(conversation_ids.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| database_error("Query live conversation batch failed", error))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| persisted_row_error("Read live conversation batch failed", error))?;
+    let mut live_conversation_ids = HashSet::with_capacity(rows.len());
+    for (conversation_id, sql_type) in rows {
+        if sql_type != "text" || !live_conversation_ids.insert(conversation_id) {
+            return Err(AppError::GenerationJobCorruptPersistedData);
+        }
+    }
+    Ok(live_conversation_ids)
+}
+
+fn load_linked_images_batch(
+    tx: &Transaction<'_>,
+    generation_ids: &[String],
+    observe_query: &mut dyn FnMut(),
+) -> Result<HashMap<String, Vec<LinkedImageProjection>>, AppError> {
+    observe_query();
+    let sql = format!(
+        "SELECT generation_id, id, file_path, thumbnail_path, width, height, file_size, created_at
+         FROM images WHERE {} ORDER BY generation_id ASC, id ASC",
+        batch_predicate("generation_id", generation_ids.len())
+    );
+    let mut statement = tx
+        .prepare(&sql)
+        .map_err(|error| database_error("Prepare linked image batch failed", error))?;
+    let rows = statement
+        .query_map(params_from_iter(generation_ids.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                linked_image_from_row_offset(row, 1)?,
+            ))
+        })
+        .map_err(|error| database_error("Query linked image batch failed", error))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| persisted_row_error("Read linked image batch failed", error))?;
+    let mut images = HashMap::<String, Vec<LinkedImageProjection>>::new();
+    let mut image_ids = HashSet::with_capacity(rows.len());
+    for (generation_id, image) in rows {
+        if !image_ids.insert(image.id.clone()) {
+            return Err(AppError::GenerationJobCorruptPersistedData);
+        }
+        images.entry(generation_id).or_default().push(image);
+    }
     Ok(images)
+}
+
+fn load_linked_recoveries_batch(
+    tx: &Transaction<'_>,
+    generation_ids: &[String],
+    observe_query: &mut dyn FnMut(),
+) -> Result<HashMap<String, LinkedRecoverySnapshot>, AppError> {
+    observe_query();
+    let sql = format!(
+        "SELECT generation_id, request_kind, request_state, output_format, response_file,
+                created_at, updated_at
+         FROM generation_recoveries WHERE {}",
+        batch_predicate("generation_id", generation_ids.len())
+    );
+    let mut statement = tx
+        .prepare(&sql)
+        .map_err(|error| database_error("Prepare linked recovery batch failed", error))?;
+    let rows = statement
+        .query_map(params_from_iter(generation_ids.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                linked_recovery_from_row_offset(row, 1)?,
+            ))
+        })
+        .map_err(|error| database_error("Query linked recovery batch failed", error))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| persisted_row_error("Read linked recovery batch failed", error))?;
+    let mut recoveries = HashMap::with_capacity(rows.len());
+    for (generation_id, recovery) in rows {
+        if recoveries.insert(generation_id, recovery).is_some() {
+            return Err(AppError::GenerationJobCorruptPersistedData);
+        }
+    }
+    Ok(recoveries)
+}
+
+fn load_job_projection_batch_with_query_observer(
+    tx: &Transaction<'_>,
+    generation_ids: &[String],
+    observe_query: &mut dyn FnMut(),
+) -> Result<JobProjectionBatch, AppError> {
+    // These four calls intentionally execute even for an empty page so list
+    // reads retain a fixed main-plus-four statement plan.
+    let generations = load_linked_generations_batch(tx, generation_ids, observe_query)?;
+    let conversation_ids = unique_strings(
+        generations
+            .values()
+            .filter_map(|generation| generation.conversation_id.clone()),
+    );
+    let live_conversation_ids =
+        load_live_conversation_ids_batch(tx, &conversation_ids, observe_query)?;
+    let images = load_linked_images_batch(tx, generation_ids, observe_query)?;
+    let recoveries = load_linked_recoveries_batch(tx, generation_ids, observe_query)?;
+    Ok(JobProjectionBatch {
+        generations,
+        live_conversation_ids,
+        images,
+        recoveries,
+    })
 }
 
 fn image_projection_path_valid(path: &str) -> bool {
@@ -858,16 +1054,25 @@ fn image_projection_path_valid(path: &str) -> bool {
         && public_string_is_safe(path)
 }
 
-fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(), AppError> {
+fn validate_job_projection(
+    job: &GenerationJob,
+    projections: &JobProjectionBatch,
+) -> Result<(), AppError> {
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
         .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
-    let generation = load_linked_generation(conn, &job.generation_id)?;
+    let generation = projections
+        .generations
+        .get(&job.generation_id)
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
     let conversation_id = generation
         .conversation_id
         .as_deref()
         .filter(|value| nonempty(value) && public_string_is_safe(value))
         .ok_or(AppError::GenerationJobCorruptPersistedData)?;
-    let linked_conversation_id = live_conversation_id(conn, conversation_id)?;
+    let linked_conversation_id = projections
+        .live_conversation_ids
+        .get(conversation_id)
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
     let source_image_paths: Vec<String> = serde_json::from_str(&generation.source_image_paths_json)
         .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
     let metadata: CanonicalGenerationMetadata = generation
@@ -877,7 +1082,11 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
         .and_then(|value| {
             serde_json::from_str(value).map_err(|_| AppError::GenerationJobCorruptPersistedData)
         })?;
-    let images = load_linked_images(conn, &job.generation_id)?;
+    let images = projections
+        .images
+        .get(&job.generation_id)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let public_generation_fields = [
         generation.prompt.as_str(),
         generation.model.as_str(),
@@ -901,7 +1110,7 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
             .iter()
             .all(|path| nonempty(path) && public_string_is_safe(path));
     let metadata_matches = metadata.request_kind == request.kind
-        && metadata.conversation_id == linked_conversation_id
+        && metadata.conversation_id == linked_conversation_id.as_str()
         && metadata.project_id == request.project_id
         && metadata.model == generation.model
         && metadata.size == generation.size
@@ -924,7 +1133,7 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
             .options
             .partial_images
             .is_none_or(|value| metadata.partial_images == value);
-    let request_matches = request.conversation_id == linked_conversation_id
+    let request_matches = request.conversation_id == linked_conversation_id.as_str()
         && request.prompt == generation.prompt
         && request.model == generation.model
         && request.kind.as_str() == generation.request_kind
@@ -1011,24 +1220,22 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
 
-    let recovery = load_linked_recovery(conn, &job.generation_id)?;
+    let recovery = projections.recoveries.get(&job.generation_id);
     let recovery_valid = match job.status {
-        GenerationJobStatus::Queued => recovery.as_ref().is_some_and(|recovery| {
+        GenerationJobStatus::Queued => recovery.is_some_and(|recovery| {
             recovery.request_state == "requesting"
                 && recovery.updated_at == job.queued_at
-                && recovery_matches_job(recovery, job, &request, &generation)
+                && recovery_matches_job(recovery, job, &request, generation)
         }),
         GenerationJobStatus::Running => recovery
-            .as_ref()
-            .is_some_and(|recovery| recovery_matches_job(recovery, job, &request, &generation)),
+            .is_some_and(|recovery| recovery_matches_job(recovery, job, &request, generation)),
         GenerationJobStatus::Failed if job.started_at.is_none() => recovery.is_none(),
         GenerationJobStatus::Cancelled if job.started_at.is_none() => recovery.is_none(),
         GenerationJobStatus::Completed => recovery.is_none(),
         GenerationJobStatus::Failed
         | GenerationJobStatus::Cancelled
         | GenerationJobStatus::Interrupted => recovery
-            .as_ref()
-            .is_none_or(|recovery| recovery_matches_job(recovery, job, &request, &generation)),
+            .is_none_or(|recovery| recovery_matches_job(recovery, job, &request, generation)),
     };
     if recovery_valid {
         Ok(())
@@ -1037,20 +1244,15 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
     }
 }
 
-fn enqueue_result_for_job(
-    conn: &Connection,
+fn enqueue_result_for_validated_job(
     job: &GenerationJob,
 ) -> Result<EnqueueGenerationResult, AppError> {
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
         .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
-    let conversation_id = conversation_id_for_generation(conn, &job.generation_id)?;
-    if request.conversation_id != conversation_id {
-        return Err(AppError::GenerationJobCorruptPersistedData);
-    }
     Ok(EnqueueGenerationResult {
         job_id: job.id.clone(),
         generation_id: job.generation_id.clone(),
-        conversation_id,
+        conversation_id: request.conversation_id,
         status: job.status.clone(),
         retryable: job.retryable,
         cancel_requested_at: job.cancel_requested_at.clone(),
@@ -1065,9 +1267,18 @@ pub(crate) fn find_enqueue_result_by_client_request_id(
     conn: &Connection,
     client_request_id: &str,
 ) -> Result<Option<EnqueueGenerationResult>, AppError> {
-    find_job_by_client_request_id(conn, client_request_id)?
+    with_generation_job_read_transaction(conn, "find enqueue result", |tx| {
+        find_enqueue_result_by_client_request_id_in_transaction(tx, client_request_id)
+    })
+}
+
+pub(crate) fn find_enqueue_result_by_client_request_id_in_transaction(
+    tx: &Transaction<'_>,
+    client_request_id: &str,
+) -> Result<Option<EnqueueGenerationResult>, AppError> {
+    find_job_by_client_request_id_in_transaction(tx, client_request_id)?
         .as_ref()
-        .map(|job| enqueue_result_for_job(conn, job))
+        .map(enqueue_result_for_validated_job)
         .transpose()
 }
 
@@ -1750,17 +1961,19 @@ fn insert_prepared_rows_in_transaction(
     )
     .map_err(|error| database_error("Insert generation job failed", error))?;
 
-    let job = get_job(tx, &request.job_id)?;
-    enqueue_result_for_job(tx, &job)
+    let job = get_job_in_transaction(tx, &request.job_id)?;
+    enqueue_result_for_validated_job(&job)
 }
 
 pub(crate) fn insert_job_in_transaction(
     tx: &Transaction<'_>,
     request: &PreparedGenerationJob,
 ) -> Result<EnqueueGenerationResult, AppError> {
-    if let Some(existing) = find_job_by_client_request_id(tx, &request.client_request_id)? {
+    if let Some(existing) =
+        find_job_by_client_request_id_in_transaction(tx, &request.client_request_id)?
+    {
         if existing_matches_prepared(&existing, request) {
-            return enqueue_result_for_job(tx, &existing);
+            return enqueue_result_for_validated_job(&existing);
         }
         return Err(AppError::GenerationJobIdempotencyConflict);
     }
@@ -1785,7 +1998,7 @@ pub(crate) fn enqueue_job(
 ) -> Result<EnqueueGenerationResult, AppError> {
     if let Some(existing) = find_job_by_client_request_id(conn, &request.client_request_id)? {
         if existing_matches_prepared(&existing, request) {
-            return enqueue_result_for_job(conn, &existing);
+            return enqueue_result_for_validated_job(&existing);
         }
         return Err(AppError::GenerationJobIdempotencyConflict);
     }
@@ -1831,9 +2044,10 @@ fn encode_cursor(queued_at: &str, rowid: i64) -> Result<String, AppError> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-pub(crate) fn list_jobs(
-    conn: &Connection,
+fn list_jobs_in_transaction_with_query_observer(
+    tx: &Transaction<'_>,
     filter: &GenerationJobFilter,
+    observe_query: &mut dyn FnMut(),
 ) -> Result<GenerationJobPage, AppError> {
     let limit = filter
         .limit
@@ -1902,7 +2116,8 @@ pub(crate) fn list_jobs(
          ORDER BY g.queued_at ASC, g.rowid ASC
          LIMIT ?{limit_index}"
     );
-    let mut statement = conn
+    observe_query();
+    let mut statement = tx
         .prepare(&sql)
         .map_err(|error| database_error("Prepare generation job list failed", error))?;
     let stored = statement
@@ -1920,10 +2135,19 @@ pub(crate) fn list_jobs(
         .take(limit as usize)
         .map(|(rowid, stored)| {
             let job = decode_stored_job(stored)?;
-            validate_job_projection(conn, &job)?;
             Ok((rowid, job))
         })
         .collect::<Result<Vec<_>, AppError>>()?;
+    let generation_ids = unique_strings(
+        items_with_order
+            .iter()
+            .map(|(_, job)| job.generation_id.clone()),
+    );
+    let projections =
+        load_job_projection_batch_with_query_observer(tx, &generation_ids, observe_query)?;
+    for (_, job) in &items_with_order {
+        validate_job_projection(job, &projections)?;
+    }
     let next_cursor = if has_more {
         items_with_order
             .last()
@@ -1934,6 +2158,21 @@ pub(crate) fn list_jobs(
     };
     let items = items_with_order.drain(..).map(|(_, job)| job).collect();
     Ok(GenerationJobPage { items, next_cursor })
+}
+
+pub(crate) fn list_jobs_in_transaction(
+    tx: &Transaction<'_>,
+    filter: &GenerationJobFilter,
+) -> Result<GenerationJobPage, AppError> {
+    let mut no_query_observer = || {};
+    list_jobs_in_transaction_with_query_observer(tx, filter, &mut no_query_observer)
+}
+
+pub(crate) fn list_jobs(
+    conn: &Connection,
+    filter: &GenerationJobFilter,
+) -> Result<GenerationJobPage, AppError> {
+    with_generation_job_read_transaction(conn, "list", |tx| list_jobs_in_transaction(tx, filter))
 }
 
 fn stored_job_from_row_offset(
@@ -1995,7 +2234,7 @@ pub(crate) fn claim_job_in_transaction(
     tx: &Transaction<'_>,
     job_id: &str,
 ) -> Result<GenerationJob, AppError> {
-    let candidate = get_job(tx, job_id)?;
+    let candidate = get_job_in_transaction(tx, job_id)?;
     if candidate.status != GenerationJobStatus::Queued {
         return Err(AppError::GenerationJobInvalidTransition);
     }
@@ -2022,7 +2261,7 @@ pub(crate) fn claim_job_in_transaction(
     if updated_generation != 1 {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
-    get_job(tx, job_id)
+    get_job_in_transaction(tx, job_id)
 }
 
 pub(crate) fn load_generation_execution_snapshot(
@@ -2049,7 +2288,7 @@ pub(crate) fn load_generation_execution_snapshot_in_transaction(
     tx: &Transaction<'_>,
     job_id: &str,
 ) -> Result<GenerationExecutionSnapshot, AppError> {
-    let job = get_job(tx, job_id)?;
+    let job = get_job_in_transaction(tx, job_id)?;
     if job.status != GenerationJobStatus::Running {
         return Err(AppError::GenerationJobInvalidTransition);
     }
@@ -2098,7 +2337,7 @@ pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJo
     let tx = conn
         .unchecked_transaction()
         .map_err(|error| database_error("Begin job cancellation transaction failed", error))?;
-    let current = get_job(&tx, id)?;
+    let current = get_job_in_transaction(&tx, id)?;
     let timestamp = crate::current_timestamp();
     match current.status {
         GenerationJobStatus::Queued => {
@@ -2162,7 +2401,7 @@ pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJo
         }
         _ => return Err(AppError::GenerationJobInvalidTransition),
     }
-    let job = get_job(&tx, id)?;
+    let job = get_job_in_transaction(&tx, id)?;
     tx.commit()
         .map_err(|error| database_error("Commit job cancellation failed", error))?;
     Ok(job)
@@ -2267,7 +2506,7 @@ pub(crate) fn finish_job_in_transaction(
     if updated_generation != 1 {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
-    get_job(tx, &update.job_id)
+    get_job_in_transaction(tx, &update.job_id)
 }
 
 pub(crate) fn finish_job(
@@ -2369,8 +2608,8 @@ fn load_retry_generation(
     })
 }
 
-fn retry_existing_result(
-    conn: &Connection,
+fn retry_existing_result_in_transaction(
+    tx: &Transaction<'_>,
     parent_id: &str,
     existing: &GenerationJob,
     source_ref_override: Option<&Value>,
@@ -2378,7 +2617,7 @@ fn retry_existing_result(
     if existing.parent_job_id.as_deref() != Some(parent_id) {
         return Err(AppError::GenerationJobIdempotencyConflict);
     }
-    let parent = get_job(conn, parent_id)?;
+    let parent = get_job_in_transaction(tx, parent_id)?;
     if !matches!(parent.source_kind.as_str(), "generate" | "edit") && source_ref_override.is_none()
     {
         return Err(AppError::GenerationJobUnsupportedSource);
@@ -2416,7 +2655,7 @@ fn retry_existing_result(
     {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
-    enqueue_result_for_job(conn, existing)
+    enqueue_result_for_validated_job(existing)
 }
 
 pub(crate) fn insert_retry_job_in_transaction(
@@ -2425,10 +2664,10 @@ pub(crate) fn insert_retry_job_in_transaction(
     client_request_id: &str,
     source_ref_override: Option<&Value>,
 ) -> Result<EnqueueGenerationResult, AppError> {
-    if let Some(existing) = find_job_by_client_request_id(tx, client_request_id)? {
-        return retry_existing_result(tx, parent_id, &existing, source_ref_override);
+    if let Some(existing) = find_job_by_client_request_id_in_transaction(tx, client_request_id)? {
+        return retry_existing_result_in_transaction(tx, parent_id, &existing, source_ref_override);
     }
-    let parent = get_job(tx, parent_id)?;
+    let parent = get_job_in_transaction(tx, parent_id)?;
     if !matches!(parent.source_kind.as_str(), "generate" | "edit") && source_ref_override.is_none()
     {
         return Err(AppError::GenerationJobUnsupportedSource);
@@ -2513,8 +2752,14 @@ pub(crate) fn create_retry_job(
     parent_id: &str,
     client_request_id: &str,
 ) -> Result<EnqueueGenerationResult, AppError> {
-    if let Some(existing) = find_job_by_client_request_id(conn, client_request_id)? {
-        return retry_existing_result(conn, parent_id, &existing, None);
+    let existing_result = with_generation_job_read_transaction(conn, "find retry", |tx| {
+        find_job_by_client_request_id_in_transaction(tx, client_request_id)?
+            .as_ref()
+            .map(|existing| retry_existing_result_in_transaction(tx, parent_id, existing, None))
+            .transpose()
+    })?;
+    if let Some(existing_result) = existing_result {
+        return Ok(existing_result);
     }
     let tx = begin_generation_job_write_transaction(conn)?;
     let result = insert_retry_job_in_transaction(&tx, parent_id, client_request_id, None)?;

@@ -4,6 +4,7 @@ use crate::error::AppError;
 use crate::models::{GenerationJobFilter, GenerationJobStatus};
 use rusqlite::{params, Connection};
 use serde_json::json;
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 struct TestDatabaseDirectory(PathBuf);
@@ -1438,7 +1439,7 @@ fn exact_claim_in_insert_transaction_never_steals_older_fifo_job_and_rolls_back_
     assert_eq!(claimed.generation_id, inserted.generation_id);
     assert_eq!(claimed.status, GenerationJobStatus::Running);
     assert_eq!(
-        get_job(&tx, &older.id).unwrap().status,
+        get_job_in_transaction(&tx, &older.id).unwrap().status,
         GenerationJobStatus::Queued
     );
     let statuses: (String, String) = tx
@@ -1497,7 +1498,7 @@ fn exact_claim_rejects_missing_and_nonqueued_ids_without_touching_older_queued_j
         .expect_err("missing exact claim must fail");
     assert_eq!(stable_code(&missing), "generation_job_not_found");
     assert_eq!(
-        get_job(&tx, &older.id).unwrap().status,
+        get_job_in_transaction(&tx, &older.id).unwrap().status,
         GenerationJobStatus::Queued
     );
 
@@ -1508,7 +1509,7 @@ fn exact_claim_rejects_missing_and_nonqueued_ids_without_touching_older_queued_j
         .expect_err("running exact job must not be claimable again");
     assert_eq!(stable_code(&nonqueued), "generation_job_invalid_transition");
     assert_eq!(
-        get_job(&tx, &older.id).unwrap().status,
+        get_job_in_transaction(&tx, &older.id).unwrap().status,
         GenerationJobStatus::Queued
     );
     tx.rollback().expect("rollback exact error transaction");
@@ -1694,7 +1695,7 @@ fn execution_snapshot_loader_reuses_one_read_transaction_across_linked_rows() {
         .transaction()
         .expect("begin execution snapshot read transaction");
     assert_eq!(
-        get_job(&read_tx, &queued.id).unwrap().status,
+        get_job_in_transaction(&read_tx, &queued.id).unwrap().status,
         GenerationJobStatus::Running
     );
 
@@ -1714,6 +1715,34 @@ fn execution_snapshot_loader_reuses_one_read_transaction_across_linked_rows() {
     .expect("commit a concurrent terminal state");
     assert_eq!(terminal.status, GenerationJobStatus::Failed);
 
+    assert_eq!(
+        get_job_in_transaction(&read_tx, &queued.id).unwrap().status,
+        GenerationJobStatus::Running
+    );
+    assert_eq!(
+        find_job_by_client_request_id_in_transaction(&read_tx, "request-consistent-snapshot")
+            .unwrap()
+            .unwrap()
+            .status,
+        GenerationJobStatus::Running
+    );
+    assert_eq!(
+        list_jobs_in_transaction(&read_tx, &GenerationJobFilter::default())
+            .unwrap()
+            .items[0]
+            .status,
+        GenerationJobStatus::Running
+    );
+    assert_eq!(
+        find_enqueue_result_by_client_request_id_in_transaction(
+            &read_tx,
+            "request-consistent-snapshot"
+        )
+        .unwrap()
+        .unwrap()
+        .status,
+        GenerationJobStatus::Running
+    );
     let snapshot = load_generation_execution_snapshot_in_transaction(&read_tx, &queued.id)
         .expect("read transaction must retain its running projection");
     assert_eq!(snapshot.context.job_id, queued.id);
@@ -1721,9 +1750,115 @@ fn execution_snapshot_loader_reuses_one_read_transaction_across_linked_rows() {
     read_tx.commit().expect("commit execution snapshot read");
 
     let conn = fixture.database.conn.lock().expect("lock database");
-    let error = load_generation_execution_snapshot(&conn, &queued.id)
+    assert_eq!(
+        get_job(&conn, &queued.id).unwrap().status,
+        GenerationJobStatus::Failed
+    );
+    assert_eq!(
+        find_job_by_client_request_id(&conn, "request-consistent-snapshot")
+            .unwrap()
+            .unwrap()
+            .status,
+        GenerationJobStatus::Failed
+    );
+    assert_eq!(
+        list_jobs(&conn, &GenerationJobFilter::default())
+            .unwrap()
+            .items[0]
+            .status,
+        GenerationJobStatus::Failed
+    );
+    assert_eq!(
+        find_enqueue_result_by_client_request_id(&conn, "request-consistent-snapshot")
+            .unwrap()
+            .unwrap()
+            .status,
+        GenerationJobStatus::Failed
+    );
+    let snapshot_error = load_generation_execution_snapshot(&conn, &queued.id)
         .expect_err("a fresh snapshot must observe the terminal state");
-    assert_eq!(stable_code(&error), "generation_job_invalid_transition");
+    assert_eq!(
+        stable_code(&snapshot_error),
+        "generation_job_invalid_transition"
+    );
+}
+
+#[test]
+fn hundred_row_list_projection_uses_exactly_main_plus_four_batch_queries() {
+    let fixture = JobFixture::new();
+    let mut writer = fixture.open_connection();
+    let write_tx = begin_generation_job_write_transaction(&mut writer)
+        .expect("begin hundred-row insert transaction");
+    for index in 0..101 {
+        insert_job_in_transaction(
+            &write_tx,
+            &fixture.prepared(
+                &format!("request-batch-{index:03}"),
+                &format!("batch-{index:03}"),
+            ),
+        )
+        .expect("insert batch projection fixture");
+    }
+    write_tx.commit().expect("commit batch projection fixtures");
+
+    let mut reader = fixture.open_connection();
+    let read_tx = reader.transaction().expect("begin batch list read");
+    let query_count = Cell::new(0usize);
+    let mut observe_query = || query_count.set(query_count.get() + 1);
+    let first = list_jobs_in_transaction_with_query_observer(
+        &read_tx,
+        &GenerationJobFilter {
+            limit: Some(100),
+            ..GenerationJobFilter::default()
+        },
+        &mut observe_query,
+    )
+    .expect("list first hundred-row page");
+    assert_eq!(first.items.len(), 100);
+    assert_eq!(first.items[0].client_request_id, "request-batch-000");
+    assert_eq!(first.items[99].client_request_id, "request-batch-099");
+    assert!(first.next_cursor.is_some());
+    assert_eq!(query_count.get(), 5, "main query plus four batch queries");
+
+    query_count.set(0);
+    let second = list_jobs_in_transaction_with_query_observer(
+        &read_tx,
+        &GenerationJobFilter {
+            limit: Some(100),
+            cursor: first.next_cursor,
+            ..GenerationJobFilter::default()
+        },
+        &mut observe_query,
+    )
+    .expect("list second batch page");
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].client_request_id, "request-batch-100");
+    assert!(second.next_cursor.is_none());
+    assert_eq!(
+        query_count.get(),
+        5,
+        "small pages keep the fixed query plan"
+    );
+
+    query_count.set(0);
+    let empty = list_jobs_in_transaction_with_query_observer(
+        &read_tx,
+        &GenerationJobFilter {
+            generation_id: Some("missing-generation".to_string()),
+            limit: Some(100),
+            ..GenerationJobFilter::default()
+        },
+        &mut observe_query,
+    )
+    .expect("list empty batch page");
+    assert!(empty.items.is_empty());
+    assert!(empty.next_cursor.is_none());
+    assert_eq!(
+        query_count.get(),
+        5,
+        "empty pages keep the fixed query plan"
+    );
+    read_tx.commit().expect("commit batch list read");
 }
 
 #[test]
