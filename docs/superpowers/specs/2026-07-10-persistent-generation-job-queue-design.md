@@ -256,6 +256,13 @@ successful body or structured `EngineCallError`. A separate
 a verified artifact; a separate `ImageResponseDecoder` performs only local
 decode/download work. Neither trait owns database state or a Tauri handle.
 
+Repository loading produces one `GenerationExecutionSnapshot` containing the
+execution context, canonical request, normalized persisted runtime options,
+generation `created_at`, and output format. Provider and staging phases consume
+that snapshot directly. The artifact store receives the complete raw provider
+body object, including requested image count, so that count cannot disappear
+between HTTP submission and final metadata.
+
 Execution validates the model/provider snapshot before resolving the stored
 profile secret. Capability-omitted request options are reconstructed from the
 linked generation's normalized persisted columns, never from current defaults.
@@ -293,7 +300,9 @@ Decode and image/thumbnail staging occur without the SQLite mutex. Staged files
 are promoted to final non-overwriting names before acquiring that mutex, and a
 `PromotedGenerationFiles` RAII guard removes only this attempt's files if the
 subsequent pure-SQL transaction fails. No write, encode, fsync, or rename occurs
-while the database mutex is held.
+while the database mutex is held. On SQL failure the transaction and global
+connection mutex are released before the promoted-file guard performs cleanup;
+both promotion and cleanup hooks must be able to acquire `db.conn.try_lock()`.
 
 The queue owns a started guard, shutdown signal, joined task handle, and unique
 lease owner. Lease acquisition atomically increments the epoch and returns a
@@ -370,7 +379,7 @@ retry; using it for another parent is a stable idempotency conflict.
 `auto_attempt` counts automatic retry reservations after the initial provider
 call, so total submissions never exceed `1 + max_auto_attempts`. Backoff is
 saturating exponential with injected jitter. Provider errors retain a typed
-`RetryAfterHint::{DelaySeconds, HttpDate}` until the worker uses its injected
+`RetryAfterHint::{DelaySeconds, HttpDate, Invalid}` until the worker uses its injected
 clock; HTTP-date is not prematurely reduced with wall-clock time. A delay above
 the safe automatic-wait cap, an overflowing/unrepresentable future date, or an
 invalid value ends auto retry as manually retryable rather than calling early;
@@ -434,8 +443,10 @@ size and SHA-256 match, and a parseable supported response. Missing, tampered,
 or escaping artifacts never call a provider. The old blocking startup recovery
 path is removed rather than run in parallel.
 
-The engine's paid-call method returns a verified raw-response artifact after
-one HTTP submission; it does not decode images or update recovery rows. The
+The engine's paid-call method returns a raw successful body after one HTTP
+submission; it does not write artifacts, decode images, or update recovery
+rows. `perform_provider_attempt` passes that body to `ResponseArtifactStore`
+and returns the verified raw-response artifact. The
 lifecycle commits `response_ready`, then uses a separate local decode/download
 seam. Provider errors and all local errors return to worker policy without
 terminal mutation. The worker decides retry exhaustion and invokes the atomic

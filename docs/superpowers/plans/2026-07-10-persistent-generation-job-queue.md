@@ -663,6 +663,14 @@ pub(crate) struct GenerationExecutionContext {
     pub provider_profile_id: String,
 }
 
+pub(crate) struct GenerationExecutionSnapshot {
+    pub context: GenerationExecutionContext,
+    pub request: GenerationJobRequest,
+    pub runtime_options: GptImageRequestOptions,
+    pub created_at: String,
+    pub output_format: String,
+}
+
 pub(crate) struct ProviderExecutionCredentials {
     api_key: String,
 }
@@ -677,7 +685,7 @@ pub(crate) trait ResponseArtifactStore: Send + Sync {
     async fn persist_verified_response(
         &self,
         context: &GenerationExecutionContext,
-        body_text: String,
+        body: ProviderAttemptBody,
     ) -> Result<ProviderAttemptResponse, GenerationExecutionError>;
 }
 
@@ -693,15 +701,14 @@ pub(crate) trait ImageResponseDecoder: Send + Sync {
 pub(crate) async fn perform_provider_attempt(
     engine: &dyn ImageEngine,
     artifact_store: &dyn ResponseArtifactStore,
-    context: &GenerationExecutionContext,
+    snapshot: &GenerationExecutionSnapshot,
     credentials: &ProviderExecutionCredentials,
-    request: &GenerationJobRequest,
 ) -> Result<ProviderAttemptResponse, GenerationExecutionError>;
 
 pub(crate) async fn resume_verified_response(
     decoder: &dyn ImageResponseDecoder,
     file_store: &dyn GenerationFileStore,
-    context: &GenerationExecutionContext,
+    snapshot: &GenerationExecutionSnapshot,
     response: &ProviderAttemptResponse,
     cancellation: &CancellationProbe,
 ) -> Result<StagedGenerationFiles, GenerationExecutionError>;
@@ -755,11 +762,16 @@ execution applies provider/model defaults and sanitization without writing those
 omitted fields back into the canonical snapshot. For every omitted option,
 execution loads the concrete normalized field already stored on the linked
 generation; it never re-applies possibly changed application defaults after
-restart. Validate that snapshotted `provider_kind` agrees with model routing
+restart. Repository loading returns one `GenerationExecutionSnapshot` carrying
+the canonical request, reconstructed `runtime_options`, persisted `created_at`
+and `output_format`, and execution context; provider and staging functions take
+that snapshot rather than rebuilding values independently. Validate that
+snapshotted `provider_kind` agrees with model routing
 before resolving credentials or calling the engine. Change
 `ImageEngine::generate` and `ImageEngine::edit` to return
 `Result<ProviderAttemptBody, EngineCallError>`; `perform_provider_attempt` then
-passes that raw successful body to `ResponseArtifactStore` and returns the
+passes the complete raw successful body, including `requested_image_count`, to
+`ResponseArtifactStore` and returns the
 verified `ProviderAttemptResponse`. Each engine call performs one
 provider HTTP submission and exposes
 429 `Retry-After`, explicitly retryable 5xx, known connection-before-response,
@@ -814,6 +826,11 @@ transaction fails, remove only files created by this attempt; never delete
 previously committed user files. No decode, download, image encoding, file write,
 or rename occurs while the DB transaction is open.
 
+On SQL failure, end the transaction scope and release the global connection
+mutex before explicitly cleaning or dropping `PromotedGenerationFiles`.
+Both the promote hook and the failure-cleanup hook must observe
+`db.conn.try_lock()` success; cleanup is never filesystem I/O under the DB lock.
+
 Extend typed canonical generation metadata with optional `actual_image_count`.
 Queued/running/retry snapshots keep it `None`; completed metadata sets it to the
 actual inserted image-row count and the linked projection validator checks the
@@ -823,7 +840,7 @@ provider responses without changing the requested image count.
 Only the provider HTTP future is drop-cancel-safe. Decode/download and file
 staging poll `CancellationProbe`; if blocking work has started, wait for it to
 finish and let the RAII guard clean up instead of dropping its join handle.
-`commit_generation_success` conditionally updates a running job only when
+`commit_generation_success_in_transaction` conditionally updates a running job only when
 `cancel_requested_at IS NULL`. If cancellation committed first, clean staged
 files and atomically acknowledge cancelled; if completion committed first,
 later cancellation cannot overwrite it.
@@ -861,6 +878,8 @@ a queued/running job's requesting or response-ready recovery row.
 cd src-tauri && cargo test --lib generation_lifecycle
 cargo test --lib api_gateway
 cargo test --lib commands::generation
+cargo test --lib generation_jobs
+cargo test --lib
 ```
 
 Expected: PASS with no duplicate generation rows.
@@ -1031,7 +1050,8 @@ The worker must:
    observes a cancellation probe; once blocking work starts, await completion
    and RAII cleanup. Never abandon a blocking file task.
 8. For `safe_to_retry` errors only, retain the typed
-   `RetryAfterHint::{DelaySeconds, HttpDate}` through worker policy, calculate
+   `RetryAfterHint::{DelaySeconds, HttpDate, Invalid}` through worker policy,
+   never derive a retry delay from `Invalid`, calculate
    the delay with the injected clock, wait cancellably, recheck cancellation
    and lease, reserve the next automatic attempt with a conditional
    transaction, then call the engine again on the same job.
