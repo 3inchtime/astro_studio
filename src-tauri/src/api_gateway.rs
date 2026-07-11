@@ -5,7 +5,6 @@ use reqwest::header;
 use reqwest::multipart::{Form, Part};
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -146,6 +145,39 @@ pub(crate) struct ProviderAttemptBody {
     pub(crate) requested_image_count: u8,
 }
 
+/// Immutable, already-validated source image for one edit provider attempt.
+///
+/// The bytes deliberately have no pathname-based fallback, and this type does
+/// not implement `Debug` or `Serialize` because source images may be private.
+pub struct PreparedEditImage {
+    file_name: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+}
+
+impl PreparedEditImage {
+    pub(crate) fn new(file_name: String, bytes: Vec<u8>) -> Self {
+        let mime_type = openai::mime_type_for_path(&file_name).to_string();
+        Self {
+            file_name,
+            mime_type,
+            bytes,
+        }
+    }
+
+    pub(crate) fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    pub(crate) fn mime_type(&self) -> &str {
+        &self.mime_type
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 #[async_trait::async_trait]
 pub trait ImageEngine: Send + Sync {
     async fn generate(
@@ -163,7 +195,7 @@ pub trait ImageEngine: Send + Sync {
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
-        source_image_paths: &[String],
+        source_images: &[PreparedEditImage],
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError>;
 }
@@ -290,10 +322,10 @@ impl GptImageEngine {
         let inline_images = source_images
             .iter()
             .map(|image| gemini::GeminiInlineImage {
-                mime_type: image.mime_type.clone(),
+                mime_type: image.mime_type().to_string(),
                 data: base64::Engine::encode(
                     &base64::engine::general_purpose::STANDARD,
-                    &image.bytes,
+                    image.bytes(),
                 ),
             })
             .collect::<Vec<_>>();
@@ -345,29 +377,6 @@ impl GptImageEngine {
             .map_err(|_| "Provider response did not include decodable image data".to_string())
     }
 
-    async fn prepare_edit_images(
-        &self,
-        source_image_paths: &[String],
-    ) -> Result<Vec<PreparedEditImage>, EngineCallError> {
-        let mut prepared = Vec::with_capacity(source_image_paths.len());
-        for path in source_image_paths {
-            let bytes = tokio::fs::read(path)
-                .await
-                .map_err(|_| EngineCallError::request_rejected())?;
-            let file_name = Path::new(path)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("source-image")
-                .to_string();
-            prepared.push(PreparedEditImage {
-                file_name,
-                mime_type: openai::mime_type_for_path(path).to_string(),
-                bytes,
-            });
-        }
-        Ok(prepared)
-    }
-
     fn build_edit_form(
         model: &str,
         prompt: &str,
@@ -379,9 +388,9 @@ impl GptImageEngine {
             form = form.text(key, value);
         }
         for image in source_images {
-            let part = Part::bytes(image.bytes.clone())
-                .file_name(image.file_name.clone())
-                .mime_str(&image.mime_type)
+            let part = Part::bytes(image.bytes().to_vec())
+                .file_name(image.file_name().to_string())
+                .mime_str(image.mime_type())
                 .map_err(|_| EngineCallError::request_rejected())?;
             form = form.part(openai::edit_image_part_field_name(), part);
         }
@@ -575,20 +584,19 @@ impl ImageEngine for GptImageEngine {
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
-        source_image_paths: &[String],
+        source_images: &[PreparedEditImage],
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
         if api_key.is_empty() {
             return Err(EngineCallError::provider_configuration_invalid());
         }
-        if source_image_paths.is_empty() {
+        if source_images.is_empty() {
             return Err(EngineCallError::request_rejected());
         }
 
-        let prepared_images = self.prepare_edit_images(source_image_paths).await?;
         if provider_for_model(model) == ImageProvider::Gemini {
             return self
-                .request_gemini_images(api_key, endpoint_url, prompt, &prepared_images, options)
+                .request_gemini_images(api_key, endpoint_url, prompt, source_images, options)
                 .await;
         }
 
@@ -600,19 +608,13 @@ impl ImageEngine for GptImageEngine {
                 model,
                 prompt,
                 options,
-                &prepared_images,
+                source_images,
             )?)
             .send()
             .await
             .map_err(|error| EngineCallError::from_send_error(&error))?;
         Self::read_attempt_response(response, options.image_count).await
     }
-}
-
-struct PreparedEditImage {
-    file_name: String,
-    mime_type: String,
-    bytes: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -628,6 +630,43 @@ mod tests {
             .await
             .expect("request read timeout")
             .expect("read request");
+    }
+
+    async fn read_complete_http_request(stream: &mut tokio::net::TcpStream) -> Vec<u8> {
+        use tokio::io::AsyncReadExt;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let mut request = Vec::new();
+            loop {
+                if let Some(header_end) = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|index| index + 4)
+                {
+                    let headers = String::from_utf8_lossy(&request[..header_end]);
+                    let content_length = headers.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    });
+                    if content_length.is_some_and(|length| request.len() >= header_end + length) {
+                        return request;
+                    }
+                }
+                if request.len() > 1024 * 1024 {
+                    panic!("test HTTP request exceeded bound");
+                }
+                let mut chunk = [0_u8; 4096];
+                let read = stream.read(&mut chunk).await.expect("read HTTP request");
+                if read == 0 {
+                    return request;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+        })
+        .await
+        .expect("complete request read timeout")
     }
 
     fn error_from_attempt(result: Result<ProviderAttemptBody, EngineCallError>) -> EngineCallError {
@@ -661,6 +700,10 @@ mod tests {
             download_client: GptImageEngine::build_download_client()
                 .expect("build local download client"),
         }
+    }
+
+    fn prepared_test_image(bytes: Vec<u8>) -> PreparedEditImage {
+        PreparedEditImage::new("source.png".to_string(), bytes)
     }
 
     #[test]
@@ -769,14 +812,6 @@ mod tests {
     async fn provider_generate_and_edit_never_follow_307_redirects() {
         use tokio::io::AsyncWriteExt;
 
-        let source_root = std::env::temp_dir().join(format!(
-            "astro-studio-no-redirect-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&source_root).expect("create source root");
-        let source_path = source_root.join("source.png");
-        std::fs::write(&source_path, b"\x89PNG\r\n\x1a\nsource").expect("write source");
-
         for (model, edit) in [
             ("gpt-image-2", false),
             ("nano-banana-2", false),
@@ -830,13 +865,14 @@ mod tests {
             let engine = local_test_engine(Some(2));
             let endpoint = format!("http://{origin_address}/paid-call");
             let result = if edit {
+                let prepared = prepared_test_image(b"\x89PNG\r\n\x1a\nsource".to_vec());
                 engine
                     .edit(
                         model,
                         "secret-key",
                         &endpoint,
                         "edit image",
-                        &[source_path.to_string_lossy().to_string()],
+                        &[prepared],
                         &test_options(1),
                     )
                     .await
@@ -862,8 +898,68 @@ mod tests {
                 "model={model} edit={edit}"
             );
         }
+    }
 
-        std::fs::remove_dir_all(source_root).ok();
+    #[tokio::test]
+    async fn prepared_edit_bytes_survive_source_deletion_and_are_submitted_once() {
+        use tokio::io::AsyncWriteExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-prepared-edit-bytes-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create prepared edit root");
+        let source_path = root.join("source.png");
+        let original = b"\x89PNG\r\n\x1a\nowned-source-bytes".to_vec();
+        std::fs::write(&source_path, &original).expect("write prepared source");
+        let prepared = prepared_test_image(std::fs::read(&source_path).expect("read source once"));
+        std::fs::remove_file(&source_path).expect("delete source before engine call");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind prepared edit server");
+        let address = listener.local_addr().expect("prepared edit address");
+        let submissions = Arc::new(AtomicUsize::new(0));
+        let observed_submissions = Arc::clone(&submissions);
+        let expected_bytes = original.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept prepared edit");
+            observed_submissions.fetch_add(1, Ordering::SeqCst);
+            let request = read_complete_http_request(&mut stream).await;
+            assert!(
+                request
+                    .windows(expected_bytes.len())
+                    .any(|window| window == expected_bytes),
+                "multipart request must contain the immutable prepared bytes"
+            );
+            let body = r#"{"data":[]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write prepared edit response");
+        });
+
+        let engine = local_test_engine(Some(2));
+        let result = engine
+            .edit(
+                "gpt-image-2",
+                "secret-key",
+                &format!("http://{address}/images/edits"),
+                "edit source",
+                &[prepared],
+                &test_options(1),
+            )
+            .await
+            .expect("engine consumes prepared bytes without reopening source");
+        assert_eq!(result.requested_image_count, 1);
+        server.await.expect("join prepared edit server");
+        assert_eq!(submissions.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]

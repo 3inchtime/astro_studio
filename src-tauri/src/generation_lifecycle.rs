@@ -1,4 +1,4 @@
-use crate::api_gateway::{EngineCallError, ImageEngine, ProviderAttemptBody};
+use crate::api_gateway::{EngineCallError, ImageEngine, PreparedEditImage, ProviderAttemptBody};
 use crate::commands::{conversations, settings};
 use crate::current_timestamp;
 use crate::db::Database;
@@ -215,6 +215,19 @@ impl ProviderExecutionCredentials {
     pub(crate) fn expose_for_engine(&self) -> &str {
         &self.api_key
     }
+}
+
+enum PreparedProviderPayload {
+    Generate,
+    Edit(Vec<PreparedEditImage>),
+}
+
+/// Sealed preparation result that must be fully produced before the provider
+/// HTTP future is created. It deliberately has no `Debug`/`Serialize` surface.
+pub(crate) struct PreparedProviderAttempt {
+    context: GenerationExecutionContext,
+    request: GenerationJobRequest,
+    payload: PreparedProviderPayload,
 }
 
 #[derive(Clone, Default)]
@@ -835,7 +848,13 @@ fn source_image_invalid() -> GenerationExecutionError {
     }
 }
 
-fn revalidate_persisted_source_image(path_text: &str) -> Result<(), GenerationExecutionError> {
+fn prepare_persisted_edit_image_with_hook<F>(
+    path_text: &str,
+    before_parent_open: F,
+) -> Result<PreparedEditImage, GenerationExecutionError>
+where
+    F: FnOnce(),
+{
     use crate::commands::generation::{
         source_image_media_type_for_path, validate_source_image_data, MAX_SOURCE_IMAGE_BYTES,
     };
@@ -844,48 +863,112 @@ fn revalidate_persisted_source_image(path_text: &str) -> Result<(), GenerationEx
     if path_text.is_empty() || path_text.chars().any(char::is_control) || !path.is_absolute() {
         return Err(source_image_invalid());
     }
-    let metadata = std::fs::symlink_metadata(path).map_err(|_| source_image_invalid())?;
-    if metadata.file_type().is_symlink()
-        || !metadata.file_type().is_file()
-        || metadata.len() == 0
-        || metadata.len() > MAX_SOURCE_IMAGE_BYTES
-    {
+    let parent = path
+        .parent()
+        .filter(|parent| parent.is_absolute())
+        .ok_or_else(source_image_invalid)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty() && !name.chars().any(char::is_control))
+        .ok_or_else(source_image_invalid)?;
+    let expected_parent_identity =
+        same_file::Handle::from_path(parent).map_err(|_| source_image_invalid())?;
+    let canonical_parent = parent.canonicalize().map_err(|_| source_image_invalid())?;
+    if canonical_parent != parent {
         return Err(source_image_invalid());
     }
-    let canonical_path = path.canonicalize().map_err(|_| source_image_invalid())?;
-    if canonical_path != path {
+    let path_metadata = std::fs::symlink_metadata(path).map_err(|_| source_image_invalid())?;
+    if path_metadata.file_type().is_symlink() || !path_metadata.file_type().is_file() {
         return Err(source_image_invalid());
     }
-    source_image_media_type_for_path(&canonical_path).map_err(|_| source_image_invalid())?;
-
-    let mut file = std::fs::File::open(&canonical_path).map_err(|_| source_image_invalid())?;
-    let mut header = [0_u8; 16];
-    let bytes_read = file.read(&mut header).map_err(|_| source_image_invalid())?;
-    validate_source_image_data(&canonical_path, &header[..bytes_read])
+    before_parent_open();
+    let directory =
+        cap_std::fs::Dir::open_ambient_dir(&canonical_parent, cap_std::ambient_authority())
+            .map_err(|_| source_image_invalid())?;
+    let opened_parent_identity = same_file::Handle::from_file(
+        directory
+            .try_clone()
+            .map_err(|_| source_image_invalid())?
+            .into_std_file(),
+    )
+    .map_err(|_| source_image_invalid())?;
+    if opened_parent_identity != expected_parent_identity {
+        return Err(source_image_invalid());
+    }
+    let entry_metadata = directory
+        .symlink_metadata(file_name)
         .map_err(|_| source_image_invalid())?;
-
-    let metadata_after = std::fs::symlink_metadata(path).map_err(|_| source_image_invalid())?;
-    let canonical_after = path.canonicalize().map_err(|_| source_image_invalid())?;
-    if metadata_after.file_type().is_symlink()
-        || !metadata_after.file_type().is_file()
-        || metadata_after.len() != metadata.len()
-        || canonical_after != canonical_path
-    {
+    if entry_metadata.file_type().is_symlink() || !entry_metadata.is_file() {
         return Err(source_image_invalid());
     }
-    Ok(())
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.read(true);
+    cap_fs_ext::OpenOptionsFollowExt::follow(&mut options, cap_fs_ext::FollowSymlinks::No);
+    let file = directory
+        .open_with(file_name, &options)
+        .map_err(|_| source_image_invalid())?;
+    let metadata = file.metadata().map_err(|_| source_image_invalid())?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_SOURCE_IMAGE_BYTES {
+        return Err(source_image_invalid());
+    }
+    let expected_size = metadata.len();
+    let mut bytes = Vec::with_capacity(usize::try_from(expected_size).unwrap_or_default());
+    file.take(MAX_SOURCE_IMAGE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| source_image_invalid())?;
+    if bytes.len() as u64 != expected_size || bytes.len() as u64 > MAX_SOURCE_IMAGE_BYTES {
+        return Err(source_image_invalid());
+    }
+    source_image_media_type_for_path(path).map_err(|_| source_image_invalid())?;
+    validate_source_image_data(path, &bytes).map_err(|_| source_image_invalid())?;
+    Ok(PreparedEditImage::new(file_name.to_string(), bytes))
 }
 
-fn revalidate_edit_source_images(
-    snapshot: &GenerationExecutionSnapshot,
-) -> Result<(), GenerationExecutionError> {
-    if snapshot.request.source_image_paths.is_empty() {
+fn prepare_persisted_edit_image(
+    path_text: &str,
+) -> Result<PreparedEditImage, GenerationExecutionError> {
+    prepare_persisted_edit_image_with_hook(path_text, || {})
+}
+
+async fn prepare_edit_source_images(
+    source_image_paths: &[String],
+) -> Result<Vec<PreparedEditImage>, GenerationExecutionError> {
+    if source_image_paths.is_empty() {
         return Err(source_image_invalid());
     }
-    for path in &snapshot.request.source_image_paths {
-        revalidate_persisted_source_image(path)?;
-    }
-    Ok(())
+    let source_image_paths = source_image_paths.to_vec();
+    tokio::task::spawn_blocking(move || {
+        source_image_paths
+            .iter()
+            .map(|path| prepare_persisted_edit_image(path))
+            .collect()
+    })
+    .await
+    .map_err(|_| source_image_invalid())?
+}
+
+pub(crate) async fn prepare_provider_attempt(
+    snapshot: &GenerationExecutionSnapshot,
+) -> Result<PreparedProviderAttempt, GenerationExecutionError> {
+    let payload = match snapshot.request.kind {
+        GenerationJobRequestKind::Generate => {
+            if !snapshot.request.source_image_paths.is_empty() {
+                return Err(GenerationExecutionError::Engine(
+                    EngineCallError::provider_configuration_invalid(),
+                ));
+            }
+            PreparedProviderPayload::Generate
+        }
+        GenerationJobRequestKind::Edit => PreparedProviderPayload::Edit(
+            prepare_edit_source_images(&snapshot.request.source_image_paths).await?,
+        ),
+    };
+    Ok(PreparedProviderAttempt {
+        context: snapshot.context.clone(),
+        request: snapshot.request.clone(),
+        payload,
+    })
 }
 
 fn response_path_is_valid(path: &Path) -> bool {
@@ -997,7 +1080,13 @@ pub(crate) async fn perform_provider_http_attempt(
     engine: &dyn ImageEngine,
     snapshot: &GenerationExecutionSnapshot,
     credentials: &ProviderExecutionCredentials,
+    prepared: &PreparedProviderAttempt,
 ) -> Result<ProviderAttemptBody, GenerationExecutionError> {
+    if prepared.context != snapshot.context || prepared.request != snapshot.request {
+        return Err(GenerationExecutionError::Engine(
+            EngineCallError::provider_configuration_invalid(),
+        ));
+    }
     let expected_provider_kind = match provider_for_model(&snapshot.context.model) {
         ImageProvider::OpenAi => "openai",
         ImageProvider::Gemini => "gemini",
@@ -1017,6 +1106,11 @@ pub(crate) async fn perform_provider_http_attempt(
 
     let body = match snapshot.request.kind {
         GenerationJobRequestKind::Generate => {
+            if !matches!(&prepared.payload, PreparedProviderPayload::Generate) {
+                return Err(GenerationExecutionError::Engine(
+                    EngineCallError::provider_configuration_invalid(),
+                ));
+            }
             engine
                 .generate(
                     &snapshot.context.model,
@@ -1028,14 +1122,25 @@ pub(crate) async fn perform_provider_http_attempt(
                 .await
         }
         GenerationJobRequestKind::Edit => {
-            revalidate_edit_source_images(snapshot)?;
+            let PreparedProviderPayload::Edit(source_images) = &prepared.payload else {
+                return Err(GenerationExecutionError::Engine(
+                    EngineCallError::provider_configuration_invalid(),
+                ));
+            };
+            if source_images.len() != snapshot.request.source_image_paths.len()
+                || source_images.is_empty()
+            {
+                return Err(GenerationExecutionError::Engine(
+                    EngineCallError::provider_configuration_invalid(),
+                ));
+            }
             engine
                 .edit(
                     &snapshot.context.model,
                     credentials.expose_for_engine(),
                     &snapshot.context.endpoint_url,
                     &snapshot.request.prompt,
-                    &snapshot.request.source_image_paths,
+                    source_images,
                     &snapshot.runtime_options,
                 )
                 .await
@@ -1939,16 +2044,27 @@ pub(crate) async fn run_generation_lifecycle(
                 .await
         }
         GenerationLifecycleKind::Edit => {
-            engine
-                .edit(
-                    &model,
-                    &api_key,
-                    &endpoint_url,
-                    &request.prompt,
-                    &request.source_image_paths,
-                    &options,
-                )
-                .await
+            match prepare_edit_source_images(&request.source_image_paths).await {
+                Ok(source_images) => {
+                    engine
+                        .edit(
+                            &model,
+                            &api_key,
+                            &endpoint_url,
+                            &request.prompt,
+                            &source_images,
+                            &options,
+                        )
+                        .await
+                }
+                Err(error) => Err(EngineCallError {
+                    code: error.code().to_string(),
+                    sanitized_message: error.sanitized_message().to_string(),
+                    retry_after: None,
+                    safe_to_retry: false,
+                    outcome_ambiguous: false,
+                }),
+            }
         }
     };
 
@@ -2023,7 +2139,7 @@ pub(crate) async fn run_generation_lifecycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_gateway::{ProviderAttemptBody, RetryAfterHint};
+    use crate::api_gateway::{PreparedEditImage, ProviderAttemptBody, RetryAfterHint};
     use crate::file_manager::GenerationFileLifecycleObserver;
     use crate::generation_jobs::{
         begin_generation_job_write_transaction, claim_job_in_transaction, enqueue_job, get_job,
@@ -2090,6 +2206,15 @@ mod tests {
         }
     }
 
+    async fn perform_prepared_test_attempt(
+        engine: &dyn ImageEngine,
+        snapshot: &GenerationExecutionSnapshot,
+        credentials: &ProviderExecutionCredentials,
+    ) -> Result<ProviderAttemptBody, GenerationExecutionError> {
+        let prepared = prepare_provider_attempt(snapshot).await?;
+        perform_provider_http_attempt(engine, snapshot, credentials, &prepared).await
+    }
+
     struct FakeSingleAttemptEngine {
         calls: Arc<AtomicUsize>,
     }
@@ -2119,7 +2244,7 @@ mod tests {
             _api_key: &str,
             _endpoint_url: &str,
             _prompt: &str,
-            _source_image_paths: &[String],
+            _source_images: &[PreparedEditImage],
             _options: &GptImageRequestOptions,
         ) -> Result<ProviderAttemptBody, EngineCallError> {
             panic!("generate fixture must not call edit")
@@ -2477,10 +2602,76 @@ mod tests {
             _api_key: &str,
             _endpoint_url: &str,
             _prompt: &str,
-            _source_image_paths: &[String],
+            _source_images: &[PreparedEditImage],
             options: &GptImageRequestOptions,
         ) -> Result<ProviderAttemptBody, EngineCallError> {
             self.respond(options)
+        }
+    }
+
+    enum EditPathMutationAtEngineEntry {
+        Delete,
+        ReplaceWithSameLength(Vec<u8>),
+        #[cfg(unix)]
+        ReplaceWithSymlink(PathBuf),
+    }
+
+    struct PreparedBytesObservationEngine {
+        calls: Arc<AtomicUsize>,
+        source_path: PathBuf,
+        expected_bytes: Vec<u8>,
+        mutation: EditPathMutationAtEngineEntry,
+    }
+
+    #[async_trait::async_trait]
+    impl ImageEngine for PreparedBytesObservationEngine {
+        async fn generate(
+            &self,
+            _model: &str,
+            _api_key: &str,
+            _endpoint_url: &str,
+            _prompt: &str,
+            _options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            panic!("edit bytes fixture must not call generate")
+        }
+
+        async fn edit(
+            &self,
+            _model: &str,
+            _api_key: &str,
+            _endpoint_url: &str,
+            _prompt: &str,
+            source_images: &[PreparedEditImage],
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match &self.mutation {
+                EditPathMutationAtEngineEntry::Delete => {
+                    std::fs::remove_file(&self.source_path).expect("delete source at engine entry");
+                }
+                EditPathMutationAtEngineEntry::ReplaceWithSameLength(bytes) => {
+                    assert_eq!(bytes.len(), self.expected_bytes.len());
+                    std::fs::write(&self.source_path, bytes)
+                        .expect("replace source at engine entry");
+                }
+                #[cfg(unix)]
+                EditPathMutationAtEngineEntry::ReplaceWithSymlink(target) => {
+                    use std::os::unix::fs::symlink;
+                    let original = self.source_path.with_extension("original.jpg");
+                    std::fs::rename(&self.source_path, original)
+                        .expect("move source at engine entry");
+                    symlink(target, &self.source_path).expect("symlink source at engine entry");
+                }
+            }
+            assert_eq!(source_images.len(), 1);
+            assert_eq!(source_images[0].bytes(), self.expected_bytes.as_slice());
+            assert_eq!(source_images[0].mime_type(), "image/jpeg");
+            assert!(source_images[0].file_name().ends_with(".jpg"));
+            Ok(ProviderAttemptBody {
+                body_text: r#"{"data":[]}"#.to_string(),
+                requested_image_count: options.image_count,
+            })
         }
     }
 
@@ -2690,7 +2881,7 @@ mod tests {
             calls: Arc::clone(&engine_calls),
             outcome: CoreEngineOutcome::Success,
         };
-        let body = perform_provider_http_attempt(
+        let body = perform_prepared_test_attempt(
             &engine,
             &fixture.snapshot,
             &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
@@ -2793,7 +2984,7 @@ mod tests {
         let fixture = PrecreatedTestFixture::new(1);
         let engine_calls = Arc::new(AtomicUsize::new(0));
         let raw_secret = "sk-provider-secret-must-not-persist";
-        let error = match perform_provider_http_attempt(
+        let error = match perform_prepared_test_attempt(
             &FakeCoreEngine {
                 calls: Arc::clone(&engine_calls),
                 outcome: CoreEngineOutcome::Error(EngineCallError {
@@ -2988,7 +3179,7 @@ mod tests {
         }
         let engine_calls = Arc::new(AtomicUsize::new(0));
         let decoder_calls = Arc::new(AtomicUsize::new(0));
-        let body = perform_provider_http_attempt(
+        let body = perform_prepared_test_attempt(
             &FakeCoreEngine {
                 calls: Arc::clone(&engine_calls),
                 outcome: CoreEngineOutcome::Success,
@@ -3291,7 +3482,7 @@ mod tests {
         let fixture = PrecreatedTestFixture::new(1);
         let engine_calls = Arc::new(AtomicUsize::new(0));
         let decoder_calls = Arc::new(AtomicUsize::new(0));
-        let body = perform_provider_http_attempt(
+        let body = perform_prepared_test_attempt(
             &FakeCoreEngine {
                 calls: Arc::clone(&engine_calls),
                 outcome: CoreEngineOutcome::Success,
@@ -3404,7 +3595,7 @@ mod tests {
         }
         let engine_calls = Arc::new(AtomicUsize::new(0));
         let decoder_calls = Arc::new(AtomicUsize::new(0));
-        let body = perform_provider_http_attempt(
+        let body = perform_prepared_test_attempt(
             &FakeCoreEngine {
                 calls: Arc::clone(&engine_calls),
                 outcome: CoreEngineOutcome::Success,
@@ -3622,7 +3813,7 @@ mod tests {
         let fixture = PrecreatedTestFixture::new(1);
         let engine_calls = Arc::new(AtomicUsize::new(0));
         let decoder_calls = Arc::new(AtomicUsize::new(0));
-        let body = perform_provider_http_attempt(
+        let body = perform_prepared_test_attempt(
             &FakeCoreEngine {
                 calls: Arc::clone(&engine_calls),
                 outcome: CoreEngineOutcome::Success,
@@ -3715,16 +3906,7 @@ mod tests {
             std::fs::create_dir_all(&source_root).unwrap();
             let source = source_root.join("source.jpg");
             std::fs::write(&source, jpeg_bytes()).unwrap();
-            let persisted_path = match mutation {
-                #[cfg(unix)]
-                Mutation::Symlink => {
-                    use std::os::unix::fs::symlink;
-                    let link = source_root.join("source-link.jpg");
-                    symlink(&source, &link).unwrap();
-                    link.to_string_lossy().to_string()
-                }
-                _ => source.canonicalize().unwrap().to_string_lossy().to_string(),
-            };
+            let persisted_path = source.canonicalize().unwrap().to_string_lossy().to_string();
             let fixture = PrecreatedTestFixture::new_with_request(
                 1,
                 GenerationJobRequestKind::Edit,
@@ -3734,10 +3916,15 @@ mod tests {
                 Mutation::Delete => std::fs::remove_file(&source).unwrap(),
                 Mutation::Replace => std::fs::write(&source, b"not an image").unwrap(),
                 #[cfg(unix)]
-                Mutation::Symlink => {}
+                Mutation::Symlink => {
+                    use std::os::unix::fs::symlink;
+                    let original = source_root.join("original.jpg");
+                    std::fs::rename(&source, &original).unwrap();
+                    symlink(&original, &source).unwrap();
+                }
             }
             let calls = Arc::new(AtomicUsize::new(0));
-            let error = match perform_provider_http_attempt(
+            let error = match perform_prepared_test_attempt(
                 &FakeCoreEngine {
                     calls: Arc::clone(&calls),
                     outcome: CoreEngineOutcome::Success,
@@ -3755,6 +3942,155 @@ mod tests {
             fixture.cleanup();
             std::fs::remove_dir_all(source_root).ok();
         }
+    }
+
+    #[tokio::test]
+    async fn edit_attempt_uses_prepared_bytes_when_path_changes_at_engine_entry() {
+        enum MutationKind {
+            Delete,
+            SameLengthReplacement,
+            #[cfg(unix)]
+            SymlinkReplacement,
+        }
+
+        for mutation_kind in [
+            MutationKind::Delete,
+            MutationKind::SameLengthReplacement,
+            #[cfg(unix)]
+            MutationKind::SymlinkReplacement,
+        ] {
+            let source_root = std::env::temp_dir().join(format!(
+                "astro-studio-edit-prepared-bytes-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&source_root).unwrap();
+            let source_path = source_root.join("source.jpg");
+            let original = b"\xff\xd8\xfforiginal-source-payload".to_vec();
+            let replacement = b"\xff\xd8\xffreplacement-source-data".to_vec();
+            assert_eq!(original.len(), replacement.len());
+            std::fs::write(&source_path, &original).unwrap();
+            let canonical_source = source_path.canonicalize().unwrap();
+            let fixture = PrecreatedTestFixture::new_with_request(
+                1,
+                GenerationJobRequestKind::Edit,
+                vec![canonical_source.to_string_lossy().to_string()],
+            );
+            let mutation = match mutation_kind {
+                MutationKind::Delete => EditPathMutationAtEngineEntry::Delete,
+                MutationKind::SameLengthReplacement => {
+                    EditPathMutationAtEngineEntry::ReplaceWithSameLength(replacement.clone())
+                }
+                #[cfg(unix)]
+                MutationKind::SymlinkReplacement => {
+                    let target = source_root.join("replacement.jpg");
+                    std::fs::write(&target, &replacement).unwrap();
+                    EditPathMutationAtEngineEntry::ReplaceWithSymlink(target)
+                }
+            };
+            let calls = Arc::new(AtomicUsize::new(0));
+            let prepared = prepare_provider_attempt(&fixture.snapshot)
+                .await
+                .expect("prepare edit bytes before provider future");
+            let body = perform_provider_http_attempt(
+                &PreparedBytesObservationEngine {
+                    calls: Arc::clone(&calls),
+                    source_path: canonical_source,
+                    expected_bytes: original,
+                    mutation,
+                },
+                &fixture.snapshot,
+                &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+                &prepared,
+            )
+            .await
+            .expect("prepared bytes remain authoritative after pathname mutation");
+            assert_eq!(body.requested_image_count, 1);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            fixture.cleanup();
+            std::fs::remove_dir_all(source_root).ok();
+        }
+    }
+
+    #[test]
+    fn edit_source_parent_swap_between_identity_and_cap_open_is_rejected() {
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-edit-parent-swap-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let parent = root.join("source-parent");
+        let replacement_parent = root.join("replacement-parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::create_dir_all(&replacement_parent).unwrap();
+        let source_path = parent.join("source.jpg");
+        std::fs::write(&source_path, b"\xff\xd8\xfforiginal-source").unwrap();
+        std::fs::write(
+            replacement_parent.join("source.jpg"),
+            b"\xff\xd8\xffreplacement-data",
+        )
+        .unwrap();
+        let canonical_source = source_path.canonicalize().unwrap();
+        let original_parent = root.join("original-parent");
+        let mut hook_ran = false;
+        let result = prepare_persisted_edit_image_with_hook(
+            canonical_source.to_string_lossy().as_ref(),
+            || {
+                std::fs::rename(&parent, &original_parent).unwrap();
+                std::fs::rename(&replacement_parent, &parent).unwrap();
+                hook_ran = true;
+            },
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("replacement parent identity must be rejected"),
+        };
+        assert!(hook_ran);
+        assert_eq!(error.code(), "source_image_invalid");
+        assert_eq!(
+            error.sanitized_message(),
+            "A source image is unavailable or invalid"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_source_parent_symlink_swap_after_canonicalize_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-edit-parent-symlink-swap-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let parent = root.join("source-parent");
+        let external_parent = root.join("external-parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::create_dir_all(&external_parent).unwrap();
+        let source_path = parent.join("source.jpg");
+        std::fs::write(&source_path, b"\xff\xd8\xfforiginal-source").unwrap();
+        std::fs::write(
+            external_parent.join("source.jpg"),
+            b"\xff\xd8\xffexternal-source",
+        )
+        .unwrap();
+        let canonical_source = source_path.canonicalize().unwrap();
+        let original_parent = root.join("original-parent");
+        let mut hook_ran = false;
+        let result = prepare_persisted_edit_image_with_hook(
+            canonical_source.to_string_lossy().as_ref(),
+            || {
+                std::fs::rename(&parent, &original_parent).unwrap();
+                symlink(&external_parent, &parent).unwrap();
+                hook_ran = true;
+            },
+        );
+
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("symlinked replacement parent must not become the identity anchor"),
+        };
+        assert!(hook_ran);
+        assert_eq!(error.code(), "source_image_invalid");
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]
@@ -4369,7 +4705,7 @@ mod tests {
             "astro-studio-fake-artifact-store-{}",
             uuid::Uuid::new_v4()
         ));
-        let body = perform_provider_http_attempt(
+        let body = perform_prepared_test_attempt(
             &FakeSingleAttemptEngine {
                 calls: Arc::clone(&engine_calls),
             },
@@ -4395,6 +4731,52 @@ mod tests {
         assert_eq!(artifact_calls.load(Ordering::SeqCst), 1);
         assert_eq!(response.requested_image_count, 2);
         std::fs::remove_dir_all(artifact_root).ok();
+    }
+
+    #[tokio::test]
+    async fn sealed_prepared_attempt_rejects_snapshot_and_variant_crosswire_before_engine() {
+        let snapshot = fixture_execution_snapshot();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let credentials = ProviderExecutionCredentials::new("ephemeral-key".to_string());
+
+        let prepared = prepare_provider_attempt(&snapshot).await.unwrap();
+        let mut other_snapshot = snapshot.clone();
+        other_snapshot.context.job_id = "job-other".to_string();
+        let context_error = match perform_provider_http_attempt(
+            &FakeSingleAttemptEngine {
+                calls: Arc::clone(&calls),
+            },
+            &other_snapshot,
+            &credentials,
+            &prepared,
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("prepared context cannot be rebound to another snapshot"),
+        };
+        assert_eq!(context_error.code(), "provider_configuration_invalid");
+
+        let wrong_variant = PreparedProviderAttempt {
+            context: snapshot.context.clone(),
+            request: snapshot.request.clone(),
+            payload: PreparedProviderPayload::Edit(Vec::new()),
+        };
+        let variant_error = match perform_provider_http_attempt(
+            &FakeSingleAttemptEngine {
+                calls: Arc::clone(&calls),
+            },
+            &snapshot,
+            &credentials,
+            &wrong_variant,
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("generate snapshot cannot consume edit preparation"),
+        };
+        assert_eq!(variant_error.code(), "provider_configuration_invalid");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
