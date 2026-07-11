@@ -11,6 +11,7 @@ use crate::model_registry::{
     sanitize_request_options_for_model, ImageEndpointKind,
 };
 use crate::models::*;
+use cap_fs_ext::DirExt;
 use rusqlite::params;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -338,6 +339,12 @@ struct PreparedResponseDirectory {
     absolute_directory: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ResponseDirectoryOpenStage {
+    Jobs,
+    Job,
+}
+
 impl FileResponseArtifactStore {
     const ENVELOPE_VERSION: u64 = 1;
     const MAX_RESPONSE_BODY_BYTES: u64 = 64 * 1024 * 1024;
@@ -358,14 +365,18 @@ impl FileResponseArtifactStore {
         &self,
         context: &GenerationExecutionContext,
     ) -> Result<PathBuf, GenerationExecutionError> {
+        Ok(self.root_dir.join(Self::response_relative_path(context)?))
+    }
+
+    fn response_relative_path(
+        context: &GenerationExecutionContext,
+    ) -> Result<PathBuf, GenerationExecutionError> {
         if !Self::identity_segment_is_safe(&context.job_id)
             || !Self::identity_segment_is_safe(&context.generation_id)
         {
             return Err(GenerationExecutionError::response_artifact());
         }
-        Ok(self
-            .root_dir
-            .join("generation-jobs")
+        Ok(PathBuf::from("generation-jobs")
             .join(&context.job_id)
             .join(format!("{}.response.json", context.generation_id)))
     }
@@ -399,11 +410,16 @@ impl FileResponseArtifactStore {
         Ok(())
     }
 
-    fn create_cap_directory(
+    fn create_cap_directory_with_hook<F>(
         parent: &cap_std::fs::Dir,
         parent_absolute: &Path,
         name: &str,
-    ) -> Result<cap_std::fs::Dir, GenerationExecutionError> {
+        stage: ResponseDirectoryOpenStage,
+        before_open: &mut F,
+    ) -> Result<cap_std::fs::Dir, GenerationExecutionError>
+    where
+        F: FnMut(ResponseDirectoryOpenStage),
+    {
         match parent.create_dir(name) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -415,18 +431,23 @@ impl FileResponseArtifactStore {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(GenerationExecutionError::response_artifact());
         }
+        before_open(stage);
         let directory = parent
-            .open_dir(name)
+            .open_dir_nofollow(name)
             .map_err(|_| GenerationExecutionError::response_artifact())?;
         Self::sync_cap_directory(parent, parent_absolute)?;
         Self::sync_cap_directory(&directory, &parent_absolute.join(name))?;
         Ok(directory)
     }
 
-    fn prepare_response_directory(
+    fn prepare_response_directory_with_hook<F>(
         root_dir: &Path,
-        response_path: &Path,
-    ) -> Result<PreparedResponseDirectory, GenerationExecutionError> {
+        context: &GenerationExecutionContext,
+        before_open: &mut F,
+    ) -> Result<PreparedResponseDirectory, GenerationExecutionError>
+    where
+        F: FnMut(ResponseDirectoryOpenStage),
+    {
         file_manager::create_dir_all_durable(root_dir)
             .map_err(|_| GenerationExecutionError::response_artifact())?;
         let root_metadata = std::fs::symlink_metadata(root_dir)
@@ -434,27 +455,39 @@ impl FileResponseArtifactStore {
         if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
             return Err(GenerationExecutionError::response_artifact());
         }
-        let requested_parent = response_path
-            .parent()
-            .ok_or_else(GenerationExecutionError::response_artifact)?;
-        let job_name = requested_parent
-            .file_name()
-            .and_then(|value| value.to_str())
-            .filter(|value| Self::identity_segment_is_safe(value))
-            .ok_or_else(GenerationExecutionError::response_artifact)?;
+        Self::response_relative_path(context)?;
         let canonical_root = root_dir
             .canonicalize()
             .map_err(|_| GenerationExecutionError::response_artifact())?;
         let root =
             cap_std::fs::Dir::open_ambient_dir(&canonical_root, cap_std::ambient_authority())
                 .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let jobs = Self::create_cap_directory(&root, &canonical_root, "generation-jobs")?;
+        let jobs = Self::create_cap_directory_with_hook(
+            &root,
+            &canonical_root,
+            "generation-jobs",
+            ResponseDirectoryOpenStage::Jobs,
+            before_open,
+        )?;
         let jobs_absolute = canonical_root.join("generation-jobs");
-        let job = Self::create_cap_directory(&jobs, &jobs_absolute, job_name)?;
+        let job = Self::create_cap_directory_with_hook(
+            &jobs,
+            &jobs_absolute,
+            &context.job_id,
+            ResponseDirectoryOpenStage::Job,
+            before_open,
+        )?;
         Ok(PreparedResponseDirectory {
             directory: job,
-            absolute_directory: jobs_absolute.join(job_name),
+            absolute_directory: jobs_absolute.join(&context.job_id),
         })
+    }
+
+    fn prepare_response_directory(
+        root_dir: &Path,
+        context: &GenerationExecutionContext,
+    ) -> Result<PreparedResponseDirectory, GenerationExecutionError> {
+        Self::prepare_response_directory_with_hook(root_dir, context, &mut |_| {})
     }
 
     fn decode_verified_envelope(
@@ -505,51 +538,38 @@ impl FileResponseArtifactStore {
         })
     }
 
-    fn load_verified_response_sync(
+    fn load_verified_response_sync_with_hook<F>(
         root_dir: &Path,
+        context: &GenerationExecutionContext,
         path: &Path,
-    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        before_open: &mut F,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError>
+    where
+        F: FnMut(ResponseDirectoryOpenStage),
+    {
         let canonical_root = root_dir
             .canonicalize()
             .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let parent = path
-            .parent()
-            .ok_or_else(GenerationExecutionError::response_artifact)?;
-        let canonical_parent = parent
-            .canonicalize()
-            .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let relative_parent = canonical_parent
-            .strip_prefix(&canonical_root)
-            .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let mut components = relative_parent.components();
-        let jobs_component = components
-            .next()
-            .and_then(|component| component.as_os_str().to_str());
-        let job_component = components
-            .next()
-            .and_then(|component| component.as_os_str().to_str());
-        if jobs_component != Some("generation-jobs")
-            || !job_component.is_some_and(Self::identity_segment_is_safe)
-            || components.next().is_some()
-        {
+        let relative_path = Self::response_relative_path(context)?;
+        let raw_expected_path = root_dir.join(&relative_path);
+        let canonical_expected_path = canonical_root.join(&relative_path);
+        if path != raw_expected_path && path != canonical_expected_path {
             return Err(GenerationExecutionError::response_artifact());
         }
-        let file_name = path
+        let file_name = relative_path
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(GenerationExecutionError::response_artifact)?;
-        let generation_id = file_name
-            .strip_suffix(".response.json")
-            .filter(|value| Self::identity_segment_is_safe(value))
-            .ok_or_else(GenerationExecutionError::response_artifact)?;
-        if generation_id.is_empty() {
-            return Err(GenerationExecutionError::response_artifact());
-        }
         let root =
             cap_std::fs::Dir::open_ambient_dir(&canonical_root, cap_std::ambient_authority())
                 .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let directory = root
-            .open_dir(relative_parent)
+        before_open(ResponseDirectoryOpenStage::Jobs);
+        let jobs = root
+            .open_dir_nofollow("generation-jobs")
+            .map_err(|_| GenerationExecutionError::response_artifact())?;
+        before_open(ResponseDirectoryOpenStage::Job);
+        let directory = jobs
+            .open_dir_nofollow(&context.job_id)
             .map_err(|_| GenerationExecutionError::response_artifact())?;
         let mut options = cap_std::fs::OpenOptions::new();
         options.read(true);
@@ -573,7 +593,15 @@ impl FileResponseArtifactStore {
         if bytes.len() as u64 > maximum_envelope_size {
             return Err(GenerationExecutionError::response_artifact());
         }
-        Self::decode_verified_envelope(&canonical_parent.join(file_name), &bytes)
+        Self::decode_verified_envelope(&canonical_expected_path, &bytes)
+    }
+
+    fn load_verified_response_sync(
+        root_dir: &Path,
+        context: &GenerationExecutionContext,
+        path: &Path,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+        Self::load_verified_response_sync_with_hook(root_dir, context, path, &mut |_| {})
     }
 
     pub(crate) async fn load_verified_response(
@@ -581,29 +609,20 @@ impl FileResponseArtifactStore {
         context: &GenerationExecutionContext,
         path: &Path,
     ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
-        let expected_path = self.response_path(context)?;
-        let expected_parent = expected_path
-            .parent()
-            .ok_or_else(GenerationExecutionError::response_artifact)?
-            .canonicalize()
-            .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let actual_parent = path
-            .parent()
-            .ok_or_else(GenerationExecutionError::response_artifact)?
-            .canonicalize()
-            .map_err(|_| GenerationExecutionError::response_artifact())?;
-        if expected_parent != actual_parent || expected_path.file_name() != path.file_name() {
-            return Err(GenerationExecutionError::response_artifact());
-        }
+        self.response_path(context)?;
         let root_dir = self.root_dir.clone();
+        let context = context.clone();
         let path = path.to_path_buf();
-        tokio::task::spawn_blocking(move || Self::load_verified_response_sync(&root_dir, &path))
-            .await
-            .map_err(|_| GenerationExecutionError::response_artifact())?
+        tokio::task::spawn_blocking(move || {
+            Self::load_verified_response_sync(&root_dir, &context, &path)
+        })
+        .await
+        .map_err(|_| GenerationExecutionError::response_artifact())?
     }
 
     fn write_verified_response_sync(
         root_dir: &Path,
+        context: &GenerationExecutionContext,
         response_path: &Path,
         body: ProviderAttemptBody,
     ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
@@ -623,11 +642,15 @@ impl FileResponseArtifactStore {
         });
         let bytes = serde_json::to_vec(&envelope)
             .map_err(|_| GenerationExecutionError::response_artifact())?;
-        let file_name = response_path
+        let relative_path = Self::response_relative_path(context)?;
+        if response_path != root_dir.join(&relative_path) {
+            return Err(GenerationExecutionError::response_artifact());
+        }
+        let file_name = relative_path
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(GenerationExecutionError::response_artifact)?;
-        let prepared = Self::prepare_response_directory(root_dir, response_path)?;
+        let prepared = Self::prepare_response_directory(root_dir, context)?;
         let response_path = prepared.absolute_directory.join(file_name);
         let temporary_name = format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4());
         let mut options = cap_std::fs::OpenOptions::new();
@@ -660,7 +683,8 @@ impl FileResponseArtifactStore {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let _ = prepared.directory.remove_file(&temporary_name);
                 let _ = Self::sync_cap_directory(&prepared.directory, &prepared.absolute_directory);
-                let existing = Self::load_verified_response_sync(root_dir, &response_path)?;
+                let existing =
+                    Self::load_verified_response_sync(root_dir, context, &response_path)?;
                 if existing.response_size == response_size
                     && existing.response_sha256 == response_sha256
                     && existing.requested_image_count == body.requested_image_count
@@ -680,7 +704,7 @@ impl FileResponseArtifactStore {
             return Err(GenerationExecutionError::response_artifact());
         }
 
-        let verified = match Self::load_verified_response_sync(root_dir, &response_path) {
+        let verified = match Self::load_verified_response_sync(root_dir, context, &response_path) {
             Ok(verified)
                 if verified.response_size == response_size
                     && verified.response_sha256 == response_sha256
@@ -716,8 +740,9 @@ impl ResponseArtifactStore for FileResponseArtifactStore {
     ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
         let root_dir = self.root_dir.clone();
         let response_path = self.response_path(context)?;
+        let context = context.clone();
         tokio::task::spawn_blocking(move || {
-            Self::write_verified_response_sync(&root_dir, &response_path, body)
+            Self::write_verified_response_sync(&root_dir, &context, &response_path, body)
         })
         .await
         .map_err(|_| GenerationExecutionError::response_artifact())?
@@ -1601,6 +1626,48 @@ mod tests {
         std::fs::remove_dir_all(outside).ok();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn response_writer_rejects_job_directory_swapped_after_validation() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-response-write-swap-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job_dir = root.join("generation-jobs").join("job-1");
+        let original_job_dir = root.join("generation-jobs").join("job-1-original");
+        let other_job_dir = root.join("generation-jobs").join("job-other");
+        std::fs::create_dir_all(&job_dir).expect("create job directory");
+        std::fs::create_dir_all(&other_job_dir).expect("create other job directory");
+        let context = fixture_execution_context();
+        let mut swapped = false;
+
+        let result = FileResponseArtifactStore::prepare_response_directory_with_hook(
+            &root,
+            &context,
+            &mut |stage| {
+                if stage == ResponseDirectoryOpenStage::Job && !swapped {
+                    std::fs::rename(&job_dir, &original_job_dir)
+                        .expect("move validated job directory");
+                    symlink("job-other", &job_dir)
+                        .expect("replace job directory with sibling symlink");
+                    swapped = true;
+                }
+            },
+        );
+        if let Ok(prepared) = &result {
+            prepared
+                .directory
+                .write("escaped", b"escaped")
+                .expect("demonstrate followed directory handle");
+        }
+
+        assert!(result.is_err());
+        assert!(!other_job_dir.join("escaped").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
     #[tokio::test]
     async fn concurrent_response_install_never_overwrites_or_deletes_the_winner() {
         let root = std::env::temp_dir().join(format!(
@@ -1718,6 +1785,58 @@ mod tests {
             .load_verified_response(&context, response_path)
             .await
             .is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn response_loader_rejects_job_directory_swapped_after_validation() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "astro-studio-response-read-swap-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store = FileResponseArtifactStore::new(root.clone());
+        let context = fixture_execution_context();
+        let response = store
+            .persist_verified_response(
+                &context,
+                ProviderAttemptBody {
+                    body_text: r#"{"trusted":true}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist trusted response");
+        let response_path = PathBuf::from(&response.response_file);
+        let job_dir = root.join("generation-jobs").join("job-1");
+        let original_job_dir = root.join("generation-jobs").join("job-1-original");
+        let other_job_dir = root.join("generation-jobs").join("job-other");
+        std::fs::create_dir_all(&other_job_dir).expect("create other job directory");
+        std::fs::copy(
+            &response_path,
+            other_job_dir.join("generation-1.response.json"),
+        )
+        .expect("copy valid envelope into other job");
+        let mut swapped = false;
+
+        let loaded = FileResponseArtifactStore::load_verified_response_sync_with_hook(
+            &root,
+            &context,
+            &response_path,
+            &mut |stage| {
+                if stage == ResponseDirectoryOpenStage::Job && !swapped {
+                    std::fs::rename(&job_dir, &original_job_dir)
+                        .expect("move validated job directory");
+                    symlink("job-other", &job_dir)
+                        .expect("replace job directory with sibling symlink");
+                    swapped = true;
+                }
+            },
+        );
+
+        assert!(loaded.is_err());
         std::fs::remove_dir_all(root).ok();
     }
 

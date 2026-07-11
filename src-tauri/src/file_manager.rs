@@ -157,6 +157,10 @@ pub(crate) fn remove_dir_all_durable(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+fn open_staged_thumbnail_for_sync(path: &Path) -> std::io::Result<File> {
+    std::fs::OpenOptions::new().write(true).open(path)
+}
+
 impl Drop for PromotedPathGuard {
     fn drop(&mut self) {
         if self.armed {
@@ -469,7 +473,7 @@ impl FileManager {
                 .thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
                 .save_with_format(&staged_thumbnail_path, ImageFormat::Png)
                 .map_err(|error| format!("Write staged thumbnail failed: {error}"))?;
-            File::open(&staged_thumbnail_path)
+            open_staged_thumbnail_for_sync(&staged_thumbnail_path)
                 .and_then(|file| file.sync_all())
                 .map_err(|error| format!("Sync staged thumbnail failed: {error}"))?;
         }
@@ -722,6 +726,20 @@ mod tests {
         drop(first);
         assert!(second_paths.iter().all(|path| path.exists()));
         drop(second);
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn staged_thumbnail_sync_handle_is_write_capable() {
+        let base_dir = test_base_dir();
+        let path = base_dir.join("thumbnail.png");
+        std::fs::write(&path, b"thumbnail").expect("create thumbnail fixture");
+
+        let mut file = open_staged_thumbnail_for_sync(&path).expect("open thumbnail sync handle");
+        file.write_all(b"T")
+            .expect("thumbnail sync handle must carry write access");
+        file.sync_all().expect("sync thumbnail fixture");
+
         std::fs::remove_dir_all(base_dir).ok();
     }
 }
