@@ -1027,6 +1027,32 @@ fn ascii_token_end(value: &str, start: usize) -> usize {
         .unwrap_or(value.len())
 }
 
+fn bearer_token_end(value: &str, start: usize) -> usize {
+    value[start..]
+        .char_indices()
+        .find_map(|(offset, character)| {
+            (!character.is_ascii_alphanumeric()
+                && !matches!(character, '-' | '.' | '_' | '~' | '+' | '/' | '='))
+            .then_some(start + offset)
+        })
+        .unwrap_or(value.len())
+}
+
+fn bearer_token_shape_valid(candidate: &str) -> bool {
+    let mut padding_started = false;
+    !candidate.is_empty()
+        && candidate.bytes().all(|byte| {
+            if byte == b'=' {
+                padding_started = true;
+                true
+            } else {
+                !padding_started
+                    && (byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/'))
+            }
+        })
+}
+
 fn has_prefixed_token(value: &str, prefix: &str, minimum_length: usize) -> bool {
     let lowercase = value.to_ascii_lowercase();
     lowercase.match_indices(prefix).any(|(start, _)| {
@@ -1078,6 +1104,24 @@ fn has_jwt_token(value: &str) -> bool {
     })
 }
 
+fn has_google_api_key(value: &str) -> bool {
+    value.match_indices("AIza").any(|(start, _)| {
+        let boundary_is_public = start == 0
+            || !value[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_ascii_alphanumeric());
+        let candidate_end = value[start..]
+            .char_indices()
+            .find_map(|(offset, character)| {
+                (!character.is_ascii_alphanumeric() && !matches!(character, '-' | '_'))
+                    .then_some(start + offset)
+            })
+            .unwrap_or(value.len());
+        boundary_is_public && candidate_end.saturating_sub(start) == 39
+    })
+}
+
 fn has_bearer_token(value: &str) -> bool {
     let lowercase = value.to_ascii_lowercase();
     lowercase.match_indices("bearer").any(|(start, marker)| {
@@ -1100,19 +1144,21 @@ fn has_bearer_token(value: &str) -> bool {
         if candidate_start >= lowercase.len() {
             return false;
         }
-        let candidate = &lowercase[candidate_start..ascii_token_end(&lowercase, candidate_start)];
+        let candidate_end = bearer_token_end(&lowercase, candidate_start);
+        let candidate = &lowercase[candidate_start..candidate_end];
+        let original_candidate = &value[candidate_start..candidate_end];
         let explicit_authorization = lowercase[..start].trim_end().ends_with("authorization:")
             || lowercase[..start].trim_end().ends_with("authorization=");
         let has_digit = candidate.bytes().any(|byte| byte.is_ascii_digit());
         let has_token_symbol = candidate
             .bytes()
             .any(|byte| matches!(byte, b'-' | b'_' | b'.'));
-        explicit_authorization && candidate.len() >= 8
+        explicit_authorization && candidate.len() >= 8 && bearer_token_shape_valid(candidate)
             || has_prefixed_token(candidate, "sk-", 6)
             || has_prefixed_token(candidate, "sk_", 6)
             || has_prefixed_token(candidate, "ghp_", 8)
             || has_prefixed_token(candidate, "github_pat_", 12)
-            || has_prefixed_token(candidate, "aiza", 32)
+            || has_google_api_key(original_candidate)
             || has_slack_token(candidate)
             || has_jwt_token(candidate)
             || (candidate.len() >= 16 && (has_digit || has_token_symbol))
@@ -1125,7 +1171,7 @@ fn contains_credential_token(value: &str) -> bool {
         || has_prefixed_token(value, "sk_", 6)
         || has_prefixed_token(value, "ghp_", 8)
         || has_prefixed_token(value, "github_pat_", 12)
-        || has_prefixed_token(value, "aiza", 32)
+        || has_google_api_key(value)
         || has_slack_token(value)
         || has_jwt_token(value)
         || has_bearer_token(value)

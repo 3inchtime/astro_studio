@@ -898,6 +898,10 @@ fn safe_custom_endpoint_queries_and_ordinary_prose_are_preserved() {
             "https://api.example.test/images?routing=primary&region=west",
             "Illustrate Aizawa-kun reading under a tree",
         ),
+        (
+            "https://api.example.test/images?routing=secondary",
+            "Place Aizawa-kun-reading-under-a-tree.png in a collage",
+        ),
     ]
     .into_iter()
     .enumerate()
@@ -924,6 +928,10 @@ fn credential_token_patterns_are_rejected_from_all_public_snapshot_channels() {
     let mut opaque_bearer = fixture.prepared("request-bearer", "secret-bearer");
     opaque_bearer.prompt = "Authorization: Bearer abcdefgh1234".to_string();
     requests.push(opaque_bearer);
+
+    let mut rfc_bearer = fixture.prepared("request-rfc-bearer", "secret-rfc-bearer");
+    rfc_bearer.prompt = "Authorization: Bearer abc/defghijklmnop==".to_string();
+    requests.push(rfc_bearer);
 
     let mut model = fixture.prepared("request-model", "secret-model");
     model.model = "sk_model-secret".to_string();
