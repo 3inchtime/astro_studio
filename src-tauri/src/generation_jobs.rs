@@ -2019,6 +2019,43 @@ pub(crate) fn begin_generation_job_write_transaction(
         .map_err(|error| database_error("Begin generation job write transaction failed", error))
 }
 
+/// Inserts, claims, and snapshots one caller-selected root job in a single
+/// immediate transaction. Unlike `claim_next_job`, this compatibility path
+/// must never claim an older queued job or silently reuse another idempotent
+/// identity.
+pub(crate) fn insert_and_claim_exact_job(
+    conn: &mut Connection,
+    request: &PreparedGenerationJob,
+) -> Result<GenerationExecutionSnapshot, AppError> {
+    let tx = begin_generation_job_write_transaction(conn)?;
+    let inserted = insert_job_in_transaction(&tx, request)?;
+    if inserted.job_id != request.job_id || inserted.generation_id != request.generation_id {
+        return Err(AppError::GenerationJobIdempotencyConflict);
+    }
+
+    let claimed = claim_job_in_transaction(&tx, &request.job_id)?;
+    if claimed.id != request.job_id || claimed.generation_id != request.generation_id {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+
+    let snapshot = load_generation_execution_snapshot_in_transaction(&tx, &request.job_id)?;
+    if snapshot.context.job_id != request.job_id
+        || snapshot.context.generation_id != request.generation_id
+        || snapshot.context.conversation_id != inserted.conversation_id
+        || snapshot.request.conversation_id != inserted.conversation_id
+    {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+
+    tx.commit().map_err(|error| {
+        database_error(
+            "Commit exact generation job insert-and-claim transaction failed",
+            error,
+        )
+    })?;
+    Ok(snapshot)
+}
+
 fn decode_cursor(value: &str) -> Result<JobCursor, AppError> {
     let bytes = URL_SAFE_NO_PAD
         .decode(value)

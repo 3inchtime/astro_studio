@@ -1412,6 +1412,131 @@ fn claim_and_list_use_stable_same_second_fifo_and_update_generation() {
 }
 
 #[test]
+fn insert_and_claim_exact_job_commits_only_the_requested_identity_and_leaves_fifo_queued() {
+    let fixture = JobFixture::new();
+    let older = fixture.enqueue("request-older", "older-fifo");
+    let exact = fixture.prepared_at(
+        "request-exact",
+        "exact-compatibility",
+        "2026-07-10T00:00:01Z",
+    );
+
+    let snapshot = {
+        let mut conn = fixture.open_connection();
+        insert_and_claim_exact_job(&mut conn, &exact).expect("insert and claim exact job")
+    };
+
+    assert_eq!(snapshot.context.job_id, exact.job_id);
+    assert_eq!(snapshot.context.generation_id, exact.generation_id);
+    assert_eq!(snapshot.request.prompt, exact.prompt);
+    assert_eq!(snapshot.request.model, exact.model);
+    assert_eq!(
+        fixture.get(&exact.job_id).status,
+        GenerationJobStatus::Running
+    );
+    assert_eq!(fixture.generation_status(&exact.generation_id), "running");
+    assert_eq!(fixture.get(&older.id).status, GenerationJobStatus::Queued);
+    assert_eq!(fixture.generation_status(&older.generation_id), "queued");
+}
+
+#[test]
+fn insert_and_claim_exact_job_rolls_back_all_rows_when_snapshot_loading_fails() {
+    let fixture = JobFixture::new();
+    let exact = fixture.prepared("request-exact", "late-snapshot-failure");
+    let counts_before = [
+        fixture.count("conversations"),
+        fixture.count("generations"),
+        fixture.count("generation_recoveries"),
+        fixture.count("generation_jobs"),
+    ];
+
+    let error = {
+        let mut conn = fixture.open_connection();
+        conn.execute_batch(
+            "CREATE TRIGGER corrupt_exact_snapshot_after_claim
+             AFTER UPDATE OF status ON generation_jobs
+             WHEN NEW.status = 'running'
+               AND NEW.client_request_id = 'request-exact'
+             BEGIN
+                 UPDATE generations
+                 SET request_metadata = '{}'
+                 WHERE id = NEW.generation_id;
+             END;",
+        )
+        .expect("install deterministic late failure trigger");
+        insert_and_claim_exact_job(&mut conn, &exact)
+            .expect_err("corrupt execution snapshot must abort exact insertion")
+    };
+
+    assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+    assert_eq!(
+        counts_before,
+        [
+            fixture.count("conversations"),
+            fixture.count("generations"),
+            fixture.count("generation_recoveries"),
+            fixture.count("generation_jobs"),
+        ]
+    );
+}
+
+#[test]
+fn insert_and_claim_exact_job_rejects_idempotent_hit_with_different_persisted_identity() {
+    let fixture = JobFixture::new();
+    let first_request = fixture.prepared("request-shared", "same-operation");
+    let existing = fixture
+        .enqueue_prepared(&first_request)
+        .expect("enqueue existing identity");
+    let replay_with_new_identity = fixture.prepared("request-shared", "same-operation");
+    assert_ne!(replay_with_new_identity.job_id, existing.job_id);
+    assert_ne!(
+        replay_with_new_identity.generation_id,
+        existing.generation_id
+    );
+    let counts_before = [
+        fixture.count("conversations"),
+        fixture.count("generations"),
+        fixture.count("generation_recoveries"),
+        fixture.count("generation_jobs"),
+    ];
+
+    let error = {
+        let mut conn = fixture.open_connection();
+        insert_and_claim_exact_job(&mut conn, &replay_with_new_identity)
+            .expect_err("exact compatibility path must reject another persisted identity")
+    };
+
+    assert_eq!(stable_code(&error), "generation_job_idempotency_conflict");
+    assert_eq!(
+        fixture.get(&existing.job_id).status,
+        GenerationJobStatus::Queued
+    );
+    assert_eq!(fixture.generation_status(&existing.generation_id), "queued");
+    assert_eq!(
+        counts_before,
+        [
+            fixture.count("conversations"),
+            fixture.count("generations"),
+            fixture.count("generation_recoveries"),
+            fixture.count("generation_jobs"),
+        ]
+    );
+    let conn = fixture.database.conn.lock().expect("lock database");
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM generation_jobs WHERE id = ?1 OR generation_id = ?2",
+            params![
+                replay_with_new_identity.job_id,
+                replay_with_new_identity.generation_id
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn exact_claim_in_insert_transaction_never_steals_older_fifo_job_and_rolls_back_cleanly() {
     let fixture = JobFixture::new();
     let older = fixture.enqueue("request-older", "older-fifo");

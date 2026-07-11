@@ -308,6 +308,24 @@ pub(crate) fn read_model_api_key(db: &Database, model: &str) -> Result<Option<St
     Ok(Some(profile.api_key).filter(|key| !key.trim().is_empty()))
 }
 
+pub(crate) fn read_model_provider_api_key(
+    db: &Database,
+    model: &str,
+    provider_profile_id: &str,
+) -> Result<Option<String>, AppError> {
+    let normalized_model = normalize_image_model(model);
+    let state = read_model_provider_profiles_state(db, normalized_model)?;
+    let profile = state
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == provider_profile_id)
+        .ok_or_else(|| AppError::ProviderProfileNotFound {
+            model: normalized_model.to_string(),
+        })?;
+
+    Ok(Some(profile.api_key).filter(|key| !key.trim().is_empty()))
+}
+
 pub(crate) fn save_model_api_key_value(
     db: &Database,
     model: &str,
@@ -841,6 +859,99 @@ mod tests {
         );
         assert_eq!(saved.profiles[0].api_key, "sk-a");
         assert_eq!(saved.profiles[1].api_key, "sk-active");
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn exact_provider_api_key_lookup_ignores_active_profile_switch() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-exact-key-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-a".to_string(),
+            profiles: vec![
+                ModelProviderProfile {
+                    id: "provider-a".to_string(),
+                    name: "Provider A".to_string(),
+                    api_key: "sk-a-current".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_NANO_BANANA),
+                },
+                ModelProviderProfile {
+                    id: "provider-b".to_string(),
+                    name: "Provider B".to_string(),
+                    api_key: "sk-b-current".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_NANO_BANANA),
+                },
+            ],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_NANO_BANANA, state).unwrap();
+
+        let mut switched = read_model_provider_profiles_state(&db, ENGINE_NANO_BANANA).unwrap();
+        switched.active_provider_id = "provider-b".to_string();
+        save_model_provider_profiles_state(&db, ENGINE_NANO_BANANA, switched).unwrap();
+
+        assert_eq!(
+            read_model_provider_api_key(&db, GEMINI_MODEL_NANO_BANANA, "provider-a",).unwrap(),
+            Some("sk-a-current".to_string())
+        );
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn exact_provider_api_key_lookup_rejects_missing_profile_without_fallback() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-missing-key-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-a".to_string(),
+            profiles: vec![ModelProviderProfile {
+                id: "provider-a".to_string(),
+                name: "Provider A".to_string(),
+                api_key: "sk-active".to_string(),
+                endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+            }],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        let error = read_model_provider_api_key(&db, ENGINE_GPT_IMAGE_2, "missing-provider")
+            .expect_err("missing profile must not fall back to the active profile");
+
+        assert!(matches!(
+            error,
+            AppError::ProviderProfileNotFound { model }
+                if model == ENGINE_GPT_IMAGE_2
+        ));
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn exact_provider_api_key_lookup_returns_none_for_empty_key() {
+        let (db, db_path) = temp_test_db("astro-studio-provider-empty-key-test");
+        let state = ModelProviderProfilesState {
+            active_provider_id: "provider-with-key".to_string(),
+            profiles: vec![
+                ModelProviderProfile {
+                    id: "provider-empty".to_string(),
+                    name: "Provider Empty".to_string(),
+                    api_key: "   ".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+                },
+                ModelProviderProfile {
+                    id: "provider-with-key".to_string(),
+                    name: "Provider With Key".to_string(),
+                    api_key: "sk-active".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+                },
+            ],
+        };
+        save_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2, state).unwrap();
+
+        assert_eq!(
+            read_model_provider_api_key(&db, ENGINE_GPT_IMAGE_2, "provider-empty").unwrap(),
+            None
+        );
 
         drop(db);
         remove_temp_test_db(db_path);
