@@ -492,12 +492,11 @@ fn decode_stored_job(stored: StoredGenerationJob) -> Result<GenerationJob, AppEr
         None => stored.error_message.is_none(),
         _ => false,
     };
-    let executable_provider = stored.provider_kind != "unresolved"
-        && stored.provider_profile_id != "unresolved"
-        && nonempty(&stored.provider_kind)
-        && nonempty(&stored.provider_profile_id)
-        && nonempty(&stored.endpoint_snapshot)
-        && endpoint_snapshot_is_public(&stored.endpoint_snapshot);
+    let executable_provider = executable_provider_snapshot_is_valid(
+        &stored.provider_kind,
+        &stored.provider_profile_id,
+        &stored.endpoint_snapshot,
+    );
     let stored_public_fields_valid = [
         stored.id.as_str(),
         stored.client_request_id.as_str(),
@@ -533,12 +532,7 @@ fn decode_stored_job(stored: StoredGenerationJob) -> Result<GenerationJob, AppEr
         && ((stored.provider_kind == "unresolved"
             && stored.provider_profile_id == "unresolved"
             && stored.endpoint_snapshot.is_empty())
-            || (stored.provider_kind != "unresolved"
-                && stored.provider_profile_id != "unresolved"
-                && nonempty(&stored.provider_kind)
-                && nonempty(&stored.provider_profile_id)
-                && nonempty(&stored.endpoint_snapshot)
-                && endpoint_snapshot_is_public(&stored.endpoint_snapshot)));
+            || executable_provider);
     let state_fields_valid = match status {
         GenerationJobStatus::Queued => {
             stored.started_at.is_none()
@@ -1502,6 +1496,21 @@ fn endpoint_snapshot_is_public(endpoint: &str) -> bool {
         .all(|(key, value)| !sensitive_query_key(&key) && !credential_like_query_value(&value))
 }
 
+pub(crate) fn executable_provider_snapshot_is_valid(
+    provider_kind: &str,
+    provider_profile_id: &str,
+    endpoint_snapshot: &str,
+) -> bool {
+    provider_kind != "unresolved"
+        && provider_profile_id != "unresolved"
+        && nonempty(provider_kind)
+        && nonempty(provider_profile_id)
+        && public_string_is_safe(provider_kind)
+        && public_string_is_safe(provider_profile_id)
+        && nonempty(endpoint_snapshot)
+        && endpoint_snapshot_is_public(endpoint_snapshot)
+}
+
 fn nonempty(value: &str) -> bool {
     !value.trim().is_empty()
 }
@@ -1783,12 +1792,11 @@ fn validate_prepared_job(request: &PreparedGenerationJob) -> Result<(), AppError
     let unresolved_provider = request.provider_kind == "unresolved"
         && request.provider_profile_id == "unresolved"
         && request.endpoint_snapshot.is_empty();
-    let resolved_provider = request.provider_kind != "unresolved"
-        && request.provider_profile_id != "unresolved"
-        && nonempty(&request.provider_kind)
-        && nonempty(&request.provider_profile_id)
-        && nonempty(&request.endpoint_snapshot)
-        && snapshot_is_public;
+    let resolved_provider = executable_provider_snapshot_is_valid(
+        &request.provider_kind,
+        &request.provider_profile_id,
+        &request.endpoint_snapshot,
+    );
     let status_fields_valid = match request.status {
         GenerationJobStatus::Queued => {
             request.finished_at.is_none()
