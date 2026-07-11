@@ -167,6 +167,9 @@ fields. Endpoint snapshots are parsed URLs with no userinfo or decoded
 sensitive query keys. Terminal user text comes from a fixed message table keyed
 by stable error code, not raw provider/database messages. Credential-like
 tokens in any persisted public string are rejected as defense in depth. The
+detector uses high-confidence shapes so ordinary prose is not rejected:
+`Bearer` needs authorization context, a known prefix, or an opaque token form,
+and `AIza` requires the long Google-key shape rather than a name prefix. The
 canonical request stores the resolved conversation's actual project and rewrites
 that identity into generate/edit/canvas source references. This is an immutable
 enqueue-time execution/source snapshot: moving the conversation to another
@@ -217,6 +220,13 @@ same ID is submitted again, the command returns the previously persisted
 result before creating a conversation, generation, log, or recovery side
 effect. Syntactically valid requests that fail provider configuration
 resolution are persisted as failed jobs so the failure remains visible.
+
+Cross-process writers use a bounded-wait `BEGIN IMMEDIATE` repository helper
+and repeat the idempotency lookup inside that transaction. This serializes the
+read-before-insert window in WAL mode: a concurrent identical enqueue or retry
+waits for the first short transaction, then returns its committed job instead
+of surfacing `SQLITE_BUSY`. Larger caller-owned transactions must acquire the
+same immediate write intent before their first repository read.
 
 Job list filters support `generation_id` in addition to status/source filters,
 so a reloaded conversation can recover job metadata for cancel/retry actions.

@@ -257,6 +257,15 @@ stable by `queued_at ASC, rowid ASC`. Verify an idempotent
 recovery side effect, not merely before the second job insert. Rollback must
 also undo a newly created or updated conversation.
 
+Use two WAL connections to hold the first identical enqueue/retry uncommitted
+while the second root call starts. Root writers must enter through a shared
+bounded-wait `BEGIN IMMEDIATE` helper, then repeat the client-ID lookup inside
+that serialized transaction; after the first commit the second returns the
+same logical job rather than `SQLITE_BUSY` or a duplicate. Any caller composing
+`insert_job_in_transaction` or `insert_retry_job_in_transaction` into a larger
+transaction must start it with the same helper (or an equivalent already-held
+immediate write transaction) before its first read.
+
 Assert cross-table semantics: normal enqueue explicitly writes both job and
 generation `queued` with one timestamp; claim moves both to `running`; queued
 cancel moves both to `cancelled`; running cancel only records the request until
@@ -431,6 +440,12 @@ commit once or all roll back. That canonical project is frozen at enqueue; a
 later legitimate `move_conversation_to_project` changes navigation membership,
 not the historical job snapshot, and is not persisted corruption.
 
+`enqueue_job` and `create_retry_job` must use the shared bounded-wait
+`BEGIN IMMEDIATE` helper. Their cheap outer preflight is only an optimization;
+the lookup inside the immediate transaction is authoritative. Larger callers
+that invoke the composable insert functions must acquire the same write intent
+before their first repository read.
+
 Add a sanitized job error variant/helper in `error.rs` with stable codes for at
 least `generation_job_not_found`, `generation_job_invalid_transition`,
 `generation_job_not_retryable`, `generation_job_idempotency_conflict`,
@@ -450,8 +465,11 @@ provider/database message. Tests cover nested `apiKey`/`x-api-key`/
 ordinary prompts/endpoints.
 Apply credential-token detection to every persisted public string, including
 prompt/model/profile IDs, source paths, request IDs, and source-reference IDs.
-Reject real bearer/prefix/JWT patterns without rejecting ordinary prose such as
-"bearer of light" or words beginning with "sk".
+Reject real bearer/prefix/JWT patterns with high-confidence shapes: `Bearer`
+requires explicit authorization context, a known credential prefix, or an
+opaque token shape/length, while Google keys require the long `AIza` key form.
+Do not reject ordinary prose such as "ring bearer standing", "Aizawa-kun", or
+words beginning with "sk".
 
 Before claim changes either row, load the linked generation plus requesting
 recovery and compare conversation/project, prompt/model/kind, normalized
