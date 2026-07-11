@@ -242,7 +242,7 @@ fn retry_creates_a_child_job_without_mutating_the_parent() {
 fn transaction_composable_enqueue_rolls_back_with_outer_scope() {
     let fixture = JobFixture::new();
     let mut conn = fixture.open_connection();
-    let tx = conn.transaction().unwrap();
+    let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
     insert_job_in_transaction(&tx, &fixture.prepared_job("request-1")).unwrap();
     tx.rollback().unwrap();
 
@@ -468,6 +468,9 @@ prompt/model/profile IDs, source paths, request IDs, and source-reference IDs.
 Reject real bearer/prefix/JWT patterns with high-confidence shapes: `Bearer`
 requires explicit authorization context, a known credential prefix, or an
 opaque token shape/length, while Google keys require the long `AIza` key form.
+Authorization Bearer parsing accepts the RFC 6750 b64token alphabet, including
+`~+/=`; Google detection is case-sensitive `AIza` plus the real 35-character
+suffix, so long `Aizawa-*` names remain ordinary text.
 Do not reject ordinary prose such as "ring bearer standing", "Aizawa-kun", or
 words beginning with "sk".
 
@@ -514,8 +517,10 @@ git commit -m "feat: add generation job repository"
 - Modify: `src-tauri/src/generation_jobs.rs`
 - Modify: `src-tauri/src/file_manager.rs`
 - Modify: `src-tauri/src/commands/generation.rs`
+- Modify: `src-tauri/src/lib.rs`
 - Test: `src-tauri/src/api_gateway.rs`
 - Test: `src-tauri/src/generation_lifecycle.rs`
+- Test: `src-tauri/src/lib.rs`
 
 - [ ] **Step 1: Write failing lifecycle-context tests**
 
@@ -560,12 +565,22 @@ Prove execution never inserts another generation/conversation/recovery row and
 does not resolve a different active provider profile.
 
 Also prove: the synchronous compatibility adapter atomically creates and claims
-a real job before executing; a successful provider response is atomically
+a specific real job before executing even when an older FIFO job exists; a
+successful provider response is atomically
 written/verified and marked response-ready before decode/download; gateway code
 does not mutate recovery rows; filesystem image staging happens outside the DB
 mutex and cleans up on injected final-transaction failure; a short response
 completes after one HTTP submission, persists only returned images, and records
 requested versus actual count without worker replay.
+
+Add fake `ResponseArtifactStore` and `ImageResponseDecoder` tests. The artifact
+store observes a deterministic job/generation-derived path and no DB lock; the
+decoder is invoked only after response-ready commit and performs zero provider
+submissions. A promoted-file hook must observe `db.conn.try_lock()` success,
+proving every write/rename happens before the DB mutex is acquired. Startup
+tests prove the legacy cleanup in `lib.rs` preserves requesting/response-ready
+rows linked to queued/running jobs and only touches generations for which no
+`generation_jobs` row exists.
 
 - [ ] **Step 2: Run lifecycle tests and verify RED**
 
@@ -612,6 +627,12 @@ pub(crate) struct EngineCallError {
 pub(crate) enum RetryAfterHint {
     DelaySeconds(u64),
     HttpDate(chrono::DateTime<chrono::Utc>),
+    Invalid,
+}
+
+pub(crate) struct ProviderAttemptBody {
+    pub body_text: String,
+    pub requested_image_count: u8,
 }
 
 pub(crate) struct ProviderAttemptResponse {
@@ -636,6 +657,7 @@ pub(crate) struct GenerationExecutionContext {
     pub generation_id: String,
     pub job_id: String,
     pub conversation_id: String,
+    pub provider_kind: String,
     pub model: String,
     pub endpoint_url: String,
     pub provider_profile_id: String,
@@ -650,32 +672,65 @@ impl ProviderExecutionCredentials {
     pub(crate) fn expose_for_engine(&self) -> &str;
 }
 
+#[async_trait::async_trait]
+pub(crate) trait ResponseArtifactStore: Send + Sync {
+    async fn persist_verified_response(
+        &self,
+        context: &GenerationExecutionContext,
+        body_text: String,
+    ) -> Result<ProviderAttemptResponse, GenerationExecutionError>;
+}
+
+#[async_trait::async_trait]
+pub(crate) trait ImageResponseDecoder: Send + Sync {
+    async fn decode_and_download(
+        &self,
+        response: &ProviderAttemptResponse,
+        cancellation: &CancellationProbe,
+    ) -> Result<Vec<Vec<u8>>, GenerationExecutionError>;
+}
+
 pub(crate) async fn perform_provider_attempt(
     engine: &dyn ImageEngine,
+    artifact_store: &dyn ResponseArtifactStore,
     context: &GenerationExecutionContext,
     credentials: &ProviderExecutionCredentials,
     request: &GenerationJobRequest,
-) -> Result<ProviderAttemptResponse, EngineCallError>;
+) -> Result<ProviderAttemptResponse, GenerationExecutionError>;
 
 pub(crate) async fn resume_verified_response(
-    engine: &dyn ImageEngine,
+    decoder: &dyn ImageResponseDecoder,
     file_store: &dyn GenerationFileStore,
     context: &GenerationExecutionContext,
     response: &ProviderAttemptResponse,
     cancellation: &CancellationProbe,
 ) -> Result<StagedGenerationFiles, GenerationExecutionError>;
 
-pub(crate) fn commit_generation_success(
-    conn: &mut rusqlite::Connection,
+pub(crate) fn commit_generation_success_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
     context: &GenerationExecutionContext,
     request: &GenerationJobRequest,
-    staged: &mut StagedGenerationFiles,
+    promoted: &mut PromotedGenerationFiles,
 ) -> Result<GenerateResult, AppError>;
+
+pub(crate) fn promote_verified_response_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+) -> Result<(), AppError>;
+
+pub(crate) struct GenerationTerminalDisposition {
+    pub status: GenerationJobStatus,
+    pub error_code: String,
+    pub retryable: bool,
+    pub preserve_response_ready: bool,
+}
 
 pub(crate) fn finalize_generation_failure_in_transaction(
     tx: &rusqlite::Transaction<'_>,
     context: &GenerationExecutionContext,
     error: &GenerationExecutionError,
+    disposition: &GenerationTerminalDisposition,
 ) -> Result<(), AppError>;
 ```
 
@@ -686,22 +741,38 @@ this value while preserving the stored endpoint/model snapshots.
 `GenerationExecutionError` preserves retry/ambiguity metadata for worker policy
 while classifying local decode/save/database failures separately. The legacy
 adapter is the only layer that converts it back to `AppError`.
-`GenerationFileStore`, `CancellationProbe`, and the RAII
-`StagedGenerationFiles` guard are `Send + Sync` test seams that do not require a
-Tauri `AppHandle`; production wrappers construct them from the app data path.
+`GenerationFileStore`, `CancellationProbe`, the RAII
+`StagedGenerationFiles`/`PromotedGenerationFiles` guards,
+`ResponseArtifactStore`, and `ImageResponseDecoder` are `Send + Sync` test seams
+that do not require a Tauri `AppHandle`; production wrappers construct them from
+the app data path. The artifact store, not the gateway, owns the response root
+and derives the deterministic path from job/generation identity.
 
 Add explicit conversion between `GenerationJobOptions` and
 `GptImageRequestOptions`; do not make the runtime options struct the persisted
 DTO. The persisted DTO retains `None` for capability-filtered omissions;
 execution applies provider/model defaults and sanitization without writing those
-omitted fields back into the canonical snapshot. Change `ImageEngine::generate` and `ImageEngine::edit` to return
-`Result<ProviderAttemptResponse, EngineCallError>`. Each call performs one
+omitted fields back into the canonical snapshot. For every omitted option,
+execution loads the concrete normalized field already stored on the linked
+generation; it never re-applies possibly changed application defaults after
+restart. Validate that snapshotted `provider_kind` agrees with model routing
+before resolving credentials or calling the engine. Change
+`ImageEngine::generate` and `ImageEngine::edit` to return
+`Result<ProviderAttemptBody, EngineCallError>`; `perform_provider_attempt` then
+passes that raw successful body to `ResponseArtifactStore` and returns the
+verified `ProviderAttemptResponse`. Each engine call performs one
 provider HTTP submission and exposes
 429 `Retry-After`, explicitly retryable 5xx, known connection-before-response,
 and ambiguous post-send failures without logging or returning secrets. A
 provider returning fewer images does not trigger hidden follow-up paid calls;
 the response proceeds to completion with only the returned candidates, while
 request metadata records requested and actual counts.
+
+Preserve absent, valid seconds, valid HTTP-date, and invalid `Retry-After` as
+distinct typed states. An invalid header is not silently treated as absent and
+must not authorize automatic retry in Task 4. Treat connect failure known to
+precede request acceptance separately from timeout, midstream close, or 2xx body
+read failure whose provider outcome is ambiguous.
 
 Derive the final response path deterministically from generation/job ID. On a
 successful HTTP response, write one self-describing envelope containing body,
@@ -711,7 +782,8 @@ then reread and verify it before returning. Gateway code must not mutate
 response-ready after verification. Task 4 adds a distinct persisted
 `expected_response_file` before the paid call, plus size/hash columns, to close
 the remaining rename-before-promotion crash window without making a requesting
-row look response-ready. Expose a separate fakeable decode/download operation
+row look response-ready. Use the separate fakeable `ImageResponseDecoder`
+decode/download operation
 over `ProviderAttemptResponse`; it performs no provider generation submission.
 Lifecycle first commits `response_ready` with the verified path, then
 decodes/downloads so a crash can resume locally without a paid replay.
@@ -723,20 +795,30 @@ can be persisted. Remove the gateway-owned `max_retries` loop; the synchronous
 compatibility adapter performs one classified attempt while first-party callers
 move to the queue.
 
-Split execution into the four explicit phases above. No phase may create a
+Split execution into the explicit phases above. No phase may create a
 generation row. Every error returns a structured outcome without terminal
 generation/job mutation; only worker policy knows whether automatic attempts
 are exhausted. After policy decides, it calls an explicit
 `finalize_generation_failure_in_transaction` that updates generation and job
-together.
+together. The finalizer receives `GenerationTerminalDisposition`, because the
+same execution error can become failed or interrupted, retryable or not, and a
+verified response-ready recovery may need to be preserved for local resume.
 
-For success, decode and stage/validate image plus thumbnail files before taking
-the database mutex. Move staged files into their final generation-owned names,
-then use one short transaction for image rows, recovery deletion, generation
+For success, decode and stage/validate image plus thumbnail files, then promote
+them into final generation-owned names before taking the database mutex.
+`StagedGenerationFiles::promote` returns an RAII
+`PromotedGenerationFiles` cleanup guard. Only then acquire the DB mutex and use
+one short pure-SQL transaction for image rows, recovery deletion, generation
 completion/requested-vs-actual metadata, and `completed` job transition. If the
 transaction fails, remove only files created by this attempt; never delete
 previously committed user files. No decode, download, image encoding, file write,
 or rename occurs while the DB transaction is open.
+
+Extend typed canonical generation metadata with optional `actual_image_count`.
+Queued/running/retry snapshots keep it `None`; completed metadata sets it to the
+actual inserted image-row count and the linked projection validator checks the
+same count. This remains compatible with `deny_unknown_fields` and records short
+provider responses without changing the requested image count.
 
 Only the provider HTTP future is drop-cancel-safe. Decode/download and file
 staging poll `CancellationProbe`; if blocking work has started, wait for it to
@@ -750,6 +832,10 @@ Retain `run_generation_lifecycle` as a compatibility adapter, but it is not a
 jobless path: generate a unique client request ID, atomically create a real
 durable job/generation through the repository, claim it, execute exactly one
 classified attempt synchronously, and call the same success/failure finalizers.
+Creation and claim use one `BEGIN IMMEDIATE` transaction and a
+`claim_job_in_transaction(tx, job_id)` compare-and-set for that exact ID. Never
+call FIFO `claim_next_job` after enqueue: an older queued job must remain queued
+and cannot be accidentally executed by the compatibility command.
 Do not make `job_id` optional. The managed worker owns
 `generation-job:updated`; only this compatibility adapter translates committed
 outcomes into legacy `generation:*` events.
@@ -764,6 +850,11 @@ those paths for existence, header, and type after restart without consulting
 `SelectedImageRegistry`; invalid paths fail as `source_image_invalid` before an
 engine call.
 
+Until Task 4 removes the old startup recovery loop, change its cleanup and scan
+in `lib.rs` to operate only on legacy generations for which
+`NOT EXISTS (SELECT 1 FROM generation_jobs ...)`. It must never delete or process
+a queued/running job's requesting or response-ready recovery row.
+
 - [ ] **Step 4: Run lifecycle and command tests GREEN**
 
 ```bash
@@ -777,7 +868,7 @@ Expected: PASS with no duplicate generation rows.
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/file_manager.rs src-tauri/src/commands/generation.rs
+git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/api_gateway.rs src-tauri/src/models.rs src-tauri/src/generation_lifecycle.rs src-tauri/src/generation_jobs.rs src-tauri/src/file_manager.rs src-tauri/src/commands/generation.rs src-tauri/src/lib.rs
 git commit -m "refactor: execute precreated generations"
 ```
 

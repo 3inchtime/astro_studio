@@ -169,7 +169,9 @@ by stable error code, not raw provider/database messages. Credential-like
 tokens in any persisted public string are rejected as defense in depth. The
 detector uses high-confidence shapes so ordinary prose is not rejected:
 `Bearer` needs authorization context, a known prefix, or an opaque token form,
-and `AIza` requires the long Google-key shape rather than a name prefix. The
+with RFC 6750 `~+/=` characters preserved during parsing. `AIza` matching is
+case-sensitive and requires the real 35-character suffix rather than a long
+`Aizawa-*` name prefix. The
 canonical request stores the resolved conversation's actual project and rewrites
 that identity into generate/edit/canvas source references. This is an immutable
 enqueue-time execution/source snapshot: moving the conversation to another
@@ -241,6 +243,27 @@ its response shape. It never claims a job or invokes provider/lifecycle code.
 After Task 4 the leased worker is the sole executor and `job_id` is never
 optional.
 
+The Task 3-only direct adapter creates and claims its exact new job in one
+immediate transaction using `claim_job_in_transaction(tx, job_id)`. It never
+calls the FIFO claim API after enqueue, because an older queued job must not be
+stolen by a synchronous caller.
+
+## Execution Boundary
+
+The paid-call trait performs exactly one HTTP submission and returns a raw
+successful body or structured `EngineCallError`. A separate
+`ResponseArtifactStore` owns the app response directory and atomically produces
+a verified artifact; a separate `ImageResponseDecoder` performs only local
+decode/download work. Neither trait owns database state or a Tauri handle.
+
+Execution validates the model/provider snapshot before resolving the stored
+profile secret. Capability-omitted request options are reconstructed from the
+linked generation's normalized persisted columns, never from current defaults.
+Canonical metadata has optional `actual_image_count`: it is absent before
+completion and equals the inserted image-row count after a short provider
+response. Retry-After distinguishes absent, seconds, HTTP-date, and invalid
+header values; invalid never authorizes automatic retry.
+
 ## Worker Architecture
 
 The managed worker starts with the Tauri application and owns:
@@ -265,6 +288,12 @@ generation, and job state together. A terminal failure transaction likewise
 updates generation and job together. Events are built from the committed row,
 emitted only after releasing the database lock, and never describe a state that
 can still roll back.
+
+Decode and image/thumbnail staging occur without the SQLite mutex. Staged files
+are promoted to final non-overwriting names before acquiring that mutex, and a
+`PromotedGenerationFiles` RAII guard removes only this attempt's files if the
+subsequent pure-SQL transaction fails. No write, encode, fsync, or rename occurs
+while the database mutex is held.
 
 The queue owns a started guard, shutdown signal, joined task handle, and unique
 lease owner. Lease acquisition atomically increments the epoch and returns a
@@ -393,6 +422,11 @@ response-ready recovery, and the job table supplies the missing execution
 state. Startup reconciliation replaces the old blocking recovery loop: setup
 performs only short database reconciliation, then one managed worker resumes
 local recovery asynchronously without a second provider call.
+
+During the Task 3 intermediate commit, before Task 4 removes that old loop, its
+cleanup and scan are restricted to legacy generations with no linked
+`generation_jobs` row. It cannot delete or process requesting/response-ready
+recovery owned by a queued or running job.
 
 Candidate validation happens outside setup and the DB mutex: canonical path
 under the app-owned response directory, regular file, bounded size, declared
