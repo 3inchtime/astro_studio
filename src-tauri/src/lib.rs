@@ -373,7 +373,10 @@ async fn recover_interrupted_generations(
                 }
             };
 
-            let decoded_images = match engine.decode_images_from_response(&body_text).await {
+            let decoded_images = match engine
+                .decode_images_from_response(&body_text, &|| false)
+                .await
+            {
                 Ok(decoded_images) => decoded_images,
                 Err(error) => {
                     let conn = db.conn.lock().map_err(|e| AppError::Database {

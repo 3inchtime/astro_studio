@@ -25,23 +25,143 @@ struct StagedImageFile {
 pub(crate) struct StagedGenerationFiles {
     entries: Vec<StagedImageFile>,
     staging_dir: PathBuf,
+    cleanup_armed: bool,
 }
 
 pub(crate) struct PromotedGenerationFiles {
     entries: Vec<StagedImageFile>,
+    ownership_dir: PathBuf,
     cleanup_armed: bool,
 }
 
+struct OwnedFinalLink {
+    ownership_path: PathBuf,
+    final_path: PathBuf,
+}
+
 struct PromotedPathGuard {
-    paths: Vec<PathBuf>,
+    links: Vec<OwnedFinalLink>,
     armed: bool,
+}
+
+fn remove_final_if_owned(ownership_path: &Path, final_path: &Path) {
+    if same_file::is_same_file(ownership_path, final_path).unwrap_or(false) {
+        let _ = remove_file_durable(final_path);
+    }
+}
+
+pub(crate) fn sync_directory(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FlushFileBuffers, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        };
+
+        let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Windows does not document directory FlushFileBuffers as a portable
+        // durability primitive. Attempt it where supported, but keep directory
+        // publication functional when the filesystem rejects the operation.
+        // SAFETY: `path` is a live, NUL-terminated UTF-16 buffer for the duration
+        // of the calls. Any valid returned handle is closed exactly once.
+        unsafe {
+            let handle = CreateFileW(
+                path.as_ptr(),
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                0,
+            );
+            if handle != INVALID_HANDLE_VALUE {
+                let _ = FlushFileBuffers(handle);
+                let _ = CloseHandle(handle);
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+pub(crate) fn create_dir_all_durable(path: &Path) -> std::io::Result<()> {
+    let mut missing = Vec::new();
+    let mut cursor = path;
+    while !cursor.exists() {
+        missing.push(cursor.to_path_buf());
+        cursor = cursor.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory path has no existing ancestor",
+            )
+        })?;
+    }
+    let existing = std::fs::symlink_metadata(cursor)?;
+    if existing.file_type().is_symlink() || !existing.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "directory ancestor is not a plain directory",
+        ));
+    }
+
+    for directory in missing.into_iter().rev() {
+        match std::fs::create_dir(&directory) {
+            Ok(()) => {
+                if let Some(parent) = directory.parent() {
+                    sync_directory(parent)?;
+                }
+                sync_directory(&directory)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = std::fs::symlink_metadata(&directory)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "directory component is not a plain directory",
+                    ));
+                }
+                if let Some(parent) = directory.parent() {
+                    sync_directory(parent)?;
+                }
+                sync_directory(&directory)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_file_durable(path: &Path) -> std::io::Result<()> {
+    std::fs::remove_file(path)?;
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_dir_all_durable(path: &Path) -> std::io::Result<()> {
+    std::fs::remove_dir_all(path)?;
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    Ok(())
 }
 
 impl Drop for PromotedPathGuard {
     fn drop(&mut self) {
         if self.armed {
-            for path in self.paths.iter().rev() {
-                let _ = std::fs::remove_file(path);
+            for link in self.links.iter().rev() {
+                remove_final_if_owned(&link.ownership_path, &link.final_path);
             }
         }
     }
@@ -65,41 +185,44 @@ impl StagedGenerationFiles {
     }
 
     pub(crate) fn promote(mut self) -> Result<PromotedGenerationFiles, String> {
-        if self.final_paths().iter().any(|path| path.exists()) {
-            return Err("Generation output already exists".to_string());
-        }
-
         let mut promoted = PromotedPathGuard {
-            paths: Vec::with_capacity(self.entries.len() * 2),
+            links: Vec::with_capacity(self.entries.len() * 2),
             armed: true,
         };
         for entry in &self.entries {
-            std::fs::rename(&entry.staged_image_path, &entry.final_image_path)
+            std::fs::hard_link(&entry.staged_image_path, &entry.final_image_path)
                 .map_err(|error| format!("Promote image failed: {error}"))?;
-            promoted.paths.push(entry.final_image_path.clone());
+            promoted.links.push(OwnedFinalLink {
+                ownership_path: entry.staged_image_path.clone(),
+                final_path: entry.final_image_path.clone(),
+            });
 
-            std::fs::rename(&entry.staged_thumbnail_path, &entry.final_thumbnail_path)
+            std::fs::hard_link(&entry.staged_thumbnail_path, &entry.final_thumbnail_path)
                 .map_err(|error| format!("Promote thumbnail failed: {error}"))?;
-            promoted.paths.push(entry.final_thumbnail_path.clone());
+            promoted.links.push(OwnedFinalLink {
+                ownership_path: entry.staged_thumbnail_path.clone(),
+                final_path: entry.final_thumbnail_path.clone(),
+            });
         }
 
         let mut synced_directories = std::collections::HashSet::new();
-        for path in &promoted.paths {
-            if let Some(parent) = path.parent() {
+        for link in &promoted.links {
+            if let Some(parent) = link.final_path.parent() {
                 synced_directories.insert(parent.to_path_buf());
             }
         }
         for directory in synced_directories {
-            File::open(directory)
-                .and_then(|file| file.sync_all())
+            sync_directory(&directory)
                 .map_err(|error| format!("Sync promoted image directory failed: {error}"))?;
         }
 
         let entries = std::mem::take(&mut self.entries);
-        let _ = std::fs::remove_dir_all(&self.staging_dir);
+        let ownership_dir = self.staging_dir.clone();
+        self.cleanup_armed = false;
         promoted.armed = false;
         Ok(PromotedGenerationFiles {
             entries,
+            ownership_dir,
             cleanup_armed: true,
         })
     }
@@ -107,11 +230,13 @@ impl StagedGenerationFiles {
 
 impl Drop for StagedGenerationFiles {
     fn drop(&mut self) {
-        for entry in &self.entries {
-            let _ = std::fs::remove_file(&entry.staged_image_path);
-            let _ = std::fs::remove_file(&entry.staged_thumbnail_path);
+        if self.cleanup_armed {
+            for entry in &self.entries {
+                let _ = remove_file_durable(&entry.staged_image_path);
+                let _ = remove_file_durable(&entry.staged_thumbnail_path);
+            }
+            let _ = remove_dir_all_durable(&self.staging_dir);
         }
-        let _ = std::fs::remove_dir_all(&self.staging_dir);
     }
 }
 
@@ -144,6 +269,11 @@ impl PromotedGenerationFiles {
     }
 
     pub(crate) fn disarm_cleanup(&mut self) {
+        for entry in &self.entries {
+            let _ = remove_file_durable(&entry.staged_image_path);
+            let _ = remove_file_durable(&entry.staged_thumbnail_path);
+        }
+        let _ = remove_dir_all_durable(&self.ownership_dir);
         self.cleanup_armed = false;
     }
 }
@@ -151,10 +281,16 @@ impl PromotedGenerationFiles {
 impl Drop for PromotedGenerationFiles {
     fn drop(&mut self) {
         if self.cleanup_armed {
-            for path in self.final_paths() {
-                let _ = std::fs::remove_file(path);
+            for entry in &self.entries {
+                remove_final_if_owned(&entry.staged_image_path, &entry.final_image_path);
+                remove_final_if_owned(&entry.staged_thumbnail_path, &entry.final_thumbnail_path);
             }
         }
+        for entry in &self.entries {
+            let _ = remove_file_durable(&entry.staged_image_path);
+            let _ = remove_file_durable(&entry.staged_thumbnail_path);
+        }
+        let _ = remove_dir_all_durable(&self.ownership_dir);
     }
 }
 
@@ -272,9 +408,9 @@ impl FileManager {
             .to_string();
         let image_dir = self.base_dir.join("images").join(&date_path);
         let thumbnail_dir = self.base_dir.join("thumbnails").join(&date_path);
-        std::fs::create_dir_all(&image_dir)
+        create_dir_all_durable(&image_dir)
             .map_err(|error| format!("Create image output directory failed: {error}"))?;
-        std::fs::create_dir_all(&thumbnail_dir)
+        create_dir_all_durable(&thumbnail_dir)
             .map_err(|error| format!("Create thumbnail output directory failed: {error}"))?;
 
         let staging_dir = self
@@ -282,12 +418,14 @@ impl FileManager {
             .join(".generation-staging")
             .join(generation_id)
             .join(uuid::Uuid::new_v4().to_string());
-        std::fs::create_dir_all(&staging_dir)
+        create_dir_all_durable(&staging_dir)
             .map_err(|error| format!("Create generation staging directory failed: {error}"))?;
         let mut staged = StagedGenerationFiles {
             entries: Vec::with_capacity(images_data.len()),
             staging_dir,
+            cleanup_armed: true,
         };
+        let attempt_token = uuid::Uuid::new_v4().simple().to_string();
 
         for (index, data) in images_data.iter().enumerate() {
             let image = image::load_from_memory(data)
@@ -298,8 +436,10 @@ impl FileManager {
             let image_id = format!("{generation_id}_{index}");
             let staged_image_path = staged.staging_dir.join(format!("{image_id}.{extension}"));
             let staged_thumbnail_path = staged.staging_dir.join(format!("{image_id}_thumb.png"));
-            let final_image_path = image_dir.join(format!("{image_id}.{extension}"));
-            let final_thumbnail_path = thumbnail_dir.join(format!("{image_id}_thumb.png"));
+            let final_image_path =
+                image_dir.join(format!("{image_id}_{attempt_token}.{extension}"));
+            let final_thumbnail_path =
+                thumbnail_dir.join(format!("{image_id}_{attempt_token}_thumb.png"));
 
             staged.entries.push(StagedImageFile {
                 image_id,
@@ -334,8 +474,7 @@ impl FileManager {
                 .map_err(|error| format!("Sync staged thumbnail failed: {error}"))?;
         }
 
-        File::open(&staged.staging_dir)
-            .and_then(|file| file.sync_all())
+        sync_directory(&staged.staging_dir)
             .map_err(|error| format!("Sync generation staging directory failed: {error}"))?;
         Ok(staged)
     }
@@ -516,6 +655,73 @@ mod tests {
         drop(promoted);
         assert!(committed_paths.iter().all(|path| path.exists()));
 
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn promoted_cleanup_never_deletes_a_replacement_file_it_does_not_own() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let staged = manager
+            .stage_generation_images(
+                "generation-race",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage generation image");
+        let promoted = staged.promote().expect("promote generation image");
+        let image_path = promoted.saved_images("generation-race")[0]
+            .file_path
+            .clone();
+        std::fs::remove_file(&image_path).expect("remove owned image");
+        std::fs::write(&image_path, b"replacement-owned-by-another-attempt")
+            .expect("write replacement image");
+
+        drop(promoted);
+        assert_eq!(
+            std::fs::read(&image_path).expect("replacement must remain"),
+            b"replacement-owned-by-another-attempt"
+        );
+
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn concurrent_attempts_use_disjoint_non_overwriting_final_names() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let first = manager
+            .stage_generation_images(
+                "generation-concurrent",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage first attempt")
+            .promote()
+            .expect("promote first attempt");
+        let second = manager
+            .stage_generation_images(
+                "generation-concurrent",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage second attempt")
+            .promote()
+            .expect("promote second attempt");
+        let first_paths = first.final_paths();
+        let second_paths = second.final_paths();
+        assert!(first_paths.iter().all(|path| path.exists()));
+        assert!(second_paths.iter().all(|path| path.exists()));
+        assert!(first_paths
+            .iter()
+            .all(|path| !second_paths.iter().any(|other| other == path)));
+
+        drop(first);
+        assert!(second_paths.iter().all(|path| path.exists()));
+        drop(second);
         std::fs::remove_dir_all(base_dir).ok();
     }
 }

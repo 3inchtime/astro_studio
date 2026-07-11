@@ -168,6 +168,7 @@ pub trait ImageEngine: Send + Sync {
     ) -> Result<ProviderAttemptBody, EngineCallError>;
 }
 
+#[derive(Clone)]
 pub struct GptImageEngine {
     client: reqwest::Client,
     edit_client: reqwest::Client,
@@ -313,10 +314,14 @@ impl GptImageEngine {
     pub(crate) async fn decode_images_from_response(
         &self,
         body_text: &str,
+        is_cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<Vec<u8>>, String> {
         if let Ok(api_response) = serde_json::from_str::<OpenAiImageResponse>(body_text) {
             let mut images = Vec::new();
             for data in &api_response.data {
+                if is_cancelled() {
+                    return Err("Image response decoding was cancelled".to_string());
+                }
                 if let Some(encoded) = &data.b64_json {
                     let bytes =
                         base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
@@ -326,7 +331,7 @@ impl GptImageEngine {
                 }
 
                 if let Some(image_url) = &data.url {
-                    images.push(self.download_image(image_url).await?);
+                    images.push(self.download_image(image_url, is_cancelled).await?);
                 }
             }
             if !images.is_empty() {
@@ -336,7 +341,7 @@ impl GptImageEngine {
 
         let value: Value = serde_json::from_str(body_text)
             .map_err(|_| "Provider response was not valid JSON".to_string())?;
-        gemini::parse_images(&value)
+        gemini::parse_images_with_cancellation(&value, is_cancelled)
             .map_err(|_| "Provider response did not include decodable image data".to_string())
     }
 
@@ -479,7 +484,14 @@ impl GptImageEngine {
             || (bytes.len() >= 12 && &bytes[4..12] == b"ftypavif")
     }
 
-    async fn download_image(&self, url: &str) -> Result<Vec<u8>, String> {
+    async fn download_image(
+        &self,
+        url: &str,
+        is_cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<u8>, String> {
+        if is_cancelled() {
+            return Err("Image response decoding was cancelled".to_string());
+        }
         let url = Self::validate_download_url(url)?;
         let mut response = self
             .download_client
@@ -508,10 +520,16 @@ impl GptImageEngine {
             .await
             .map_err(|_| "Image download failed".to_string())?
         {
+            if is_cancelled() {
+                return Err("Image response decoding was cancelled".to_string());
+            }
             bytes.extend_from_slice(&chunk);
             if bytes.len() as u64 > Self::MAX_DOWNLOAD_IMAGE_BYTES {
                 return Err("Downloaded image is too large".to_string());
             }
+        }
+        if is_cancelled() {
+            return Err("Image response decoding was cancelled".to_string());
         }
         Self::validate_downloaded_image(&bytes, content_type.as_deref(), bytes.len() as u64)?;
         Ok(bytes)
@@ -935,10 +953,16 @@ mod tests {
     async fn http_status_attempts_preserve_retry_policy_without_resubmission() {
         use tokio::io::AsyncWriteExt;
 
-        for (status, retry_after, code, retryable) in [
-            (429, Some("4"), "rate_limited", true),
-            (503, None, "provider_unavailable", true),
-            (400, None, "request_rejected", false),
+        for (status, retry_after, code, retryable, expected_retry_after) in [
+            (
+                429,
+                Some("4"),
+                "rate_limited",
+                true,
+                Some(RetryAfterHint::DelaySeconds(4)),
+            ),
+            (503, None, "provider_unavailable", true, None),
+            (400, None, "request_rejected", false, None),
         ] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
                 .await
@@ -975,6 +999,8 @@ mod tests {
             );
             assert_eq!(error.code, code);
             assert_eq!(error.safe_to_retry, retryable);
+            assert_eq!(error.retry_after, expected_retry_after);
+            assert!(!error.outcome_ambiguous);
             task.await.expect("join status server");
             assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
@@ -1064,5 +1090,24 @@ mod tests {
             png.len() as u64
         )
         .is_ok());
+    }
+
+    #[tokio::test]
+    async fn response_decoder_checks_cancellation_between_image_items() {
+        let engine = local_test_engine(Some(2));
+        let body = serde_json::json!({
+            "data": [
+                { "b64_json": "aW1hZ2UtMQ==" },
+                { "b64_json": "aW1hZ2UtMg==" }
+            ]
+        })
+        .to_string();
+        let checks = AtomicUsize::new(0);
+        let result = engine
+            .decode_images_from_response(&body, &|| checks.fetch_add(1, Ordering::SeqCst) >= 1)
+            .await;
+
+        assert!(result.is_err());
+        assert!(checks.load(Ordering::SeqCst) >= 2);
     }
 }

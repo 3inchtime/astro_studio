@@ -68,16 +68,29 @@ pub(crate) fn build_request_body(
 }
 
 pub(crate) fn parse_images(response: &Value) -> Result<Vec<Vec<u8>>, String> {
+    parse_images_with_cancellation(response, &|| false)
+}
+
+pub(crate) fn parse_images_with_cancellation(
+    response: &Value,
+    is_cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> Result<Vec<Vec<u8>>, String> {
     let mut images = Vec::new();
 
     if let Some(candidates) = response.get("candidates").and_then(Value::as_array) {
         for candidate in candidates {
+            if is_cancelled() {
+                return Err("Image response decoding was cancelled".to_string());
+            }
             if let Some(parts) = candidate
                 .get("content")
                 .and_then(|content| content.get("parts"))
                 .and_then(Value::as_array)
             {
                 for part in parts {
+                    if is_cancelled() {
+                        return Err("Image response decoding was cancelled".to_string());
+                    }
                     if let Some(data) = part
                         .get("inlineData")
                         .and_then(|inline| inline.get("data"))
