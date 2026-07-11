@@ -4,7 +4,11 @@ use crate::current_timestamp;
 use crate::db::Database;
 use crate::error::AppError;
 use crate::file_manager::{self, StagedGenerationFiles};
-use crate::generation_jobs::{GenerationJobRequest, GenerationJobRequestKind};
+use crate::generation_jobs::{
+    begin_generation_job_write_transaction, finish_job_in_transaction, get_job_in_transaction,
+    load_generation_execution_snapshot_in_transaction, set_actual_image_count_in_transaction,
+    GenerationJobRequest, GenerationJobRequestKind, GenerationJobTerminalUpdate,
+};
 use crate::image_engines::{provider_for_model, ImageProvider};
 use crate::model_registry::{
     image_endpoint_url_for_model_settings, normalize_image_model,
@@ -12,8 +16,9 @@ use crate::model_registry::{
 };
 use crate::models::*;
 use cap_fs_ext::DirExt;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension, Transaction};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +26,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
+const RECOVERY_STATE_RESPONSE_READY: &str = "response_ready";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum GenerationLifecycleKind {
@@ -121,6 +127,22 @@ impl GenerationExecutionError {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenerationTerminalDisposition {
+    pub(crate) status: GenerationJobStatus,
+    pub(crate) error_code: String,
+    pub(crate) retryable: bool,
+    pub(crate) preserve_response_ready: bool,
+}
+
+#[derive(Debug)]
+pub(crate) enum GenerationSuccessTransition {
+    Completed(GenerateResult),
+    CancelRequested,
+}
+
+pub(crate) type PrecreatedLocalOutcome = GenerationSuccessTransition;
 
 /// Verified response envelope. Raw bodies are deliberately not serializable or
 /// debuggable outside the app-owned response store.
@@ -594,7 +616,7 @@ impl FileResponseArtifactStore {
         if bytes.len() as u64 > maximum_envelope_size {
             return Err(GenerationExecutionError::response_artifact());
         }
-        Self::decode_verified_envelope(&canonical_expected_path, &bytes)
+        Self::decode_verified_envelope(path, &bytes)
     }
 
     fn load_verified_response_sync(
@@ -652,7 +674,6 @@ impl FileResponseArtifactStore {
             .and_then(|value| value.to_str())
             .ok_or_else(GenerationExecutionError::response_artifact)?;
         let prepared = Self::prepare_response_directory(root_dir, context)?;
-        let response_path = prepared.absolute_directory.join(file_name);
         let temporary_name = format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4());
         let mut options = cap_std::fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -758,6 +779,104 @@ impl ResponseArtifactStore for FileResponseArtifactStore {
     }
 }
 
+fn source_image_invalid() -> GenerationExecutionError {
+    GenerationExecutionError::Local {
+        code: "source_image_invalid".to_string(),
+        sanitized_message: "A source image is unavailable or invalid".to_string(),
+        stage: "source_image_revalidation".to_string(),
+    }
+}
+
+fn revalidate_persisted_source_image(path_text: &str) -> Result<(), GenerationExecutionError> {
+    use crate::commands::generation::{
+        source_image_media_type_for_path, validate_source_image_data, MAX_SOURCE_IMAGE_BYTES,
+    };
+
+    let path = Path::new(path_text);
+    if path_text.is_empty() || path_text.chars().any(char::is_control) || !path.is_absolute() {
+        return Err(source_image_invalid());
+    }
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| source_image_invalid())?;
+    if metadata.file_type().is_symlink()
+        || !metadata.file_type().is_file()
+        || metadata.len() == 0
+        || metadata.len() > MAX_SOURCE_IMAGE_BYTES
+    {
+        return Err(source_image_invalid());
+    }
+    let canonical_path = path.canonicalize().map_err(|_| source_image_invalid())?;
+    if canonical_path != path {
+        return Err(source_image_invalid());
+    }
+    source_image_media_type_for_path(&canonical_path).map_err(|_| source_image_invalid())?;
+
+    let mut file = std::fs::File::open(&canonical_path).map_err(|_| source_image_invalid())?;
+    let mut header = [0_u8; 16];
+    let bytes_read = file.read(&mut header).map_err(|_| source_image_invalid())?;
+    validate_source_image_data(&canonical_path, &header[..bytes_read])
+        .map_err(|_| source_image_invalid())?;
+
+    let metadata_after = std::fs::symlink_metadata(path).map_err(|_| source_image_invalid())?;
+    let canonical_after = path.canonicalize().map_err(|_| source_image_invalid())?;
+    if metadata_after.file_type().is_symlink()
+        || !metadata_after.file_type().is_file()
+        || metadata_after.len() != metadata.len()
+        || canonical_after != canonical_path
+    {
+        return Err(source_image_invalid());
+    }
+    Ok(())
+}
+
+fn revalidate_edit_source_images(
+    snapshot: &GenerationExecutionSnapshot,
+) -> Result<(), GenerationExecutionError> {
+    if snapshot.request.source_image_paths.is_empty() {
+        return Err(source_image_invalid());
+    }
+    for path in &snapshot.request.source_image_paths {
+        revalidate_persisted_source_image(path)?;
+    }
+    Ok(())
+}
+
+fn response_path_is_valid(path: &Path) -> bool {
+    let value = path.to_string_lossy();
+    !value.is_empty() && value.len() <= 32_768 && !value.chars().any(char::is_control)
+}
+
+fn response_path_matches_expected(expected: &Path, actual: &Path) -> bool {
+    if !response_path_is_valid(expected) || !response_path_is_valid(actual) {
+        return false;
+    }
+    let Ok(metadata) = std::fs::symlink_metadata(actual) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() == 0
+        || metadata.len() > FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES.saturating_mul(2)
+    {
+        return false;
+    }
+    expected == actual
+}
+
+fn verified_response_shape_matches(
+    response: &ProviderAttemptResponse,
+    requested_image_count: u8,
+    expected_path: Option<&Path>,
+) -> bool {
+    let actual_path = Path::new(&response.response_file);
+    response.requested_image_count == requested_image_count
+        && (1..=4).contains(&response.requested_image_count)
+        && response.response_size == response.body_text.len() as u64
+        && response.response_size <= FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES
+        && response.response_sha256.len() == 64
+        && response.response_sha256 == FileResponseArtifactStore::response_hash(&response.body_text)
+        && response_path_matches_expected(expected_path.unwrap_or(actual_path), actual_path)
+}
+
 pub(crate) async fn perform_provider_http_attempt(
     engine: &dyn ImageEngine,
     snapshot: &GenerationExecutionSnapshot,
@@ -793,6 +912,7 @@ pub(crate) async fn perform_provider_http_attempt(
                 .await
         }
         GenerationJobRequestKind::Edit => {
+            revalidate_edit_source_images(snapshot)?;
             engine
                 .edit(
                     &snapshot.context.model,
@@ -818,13 +938,419 @@ pub(crate) async fn persist_provider_attempt_response(
     snapshot: &GenerationExecutionSnapshot,
     body: ProviderAttemptBody,
 ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+    if body.requested_image_count != snapshot.runtime_options.image_count
+        || !(1..=4).contains(&body.requested_image_count)
+        || body.body_text.len() as u64 > FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES
+    {
+        return Err(GenerationExecutionError::response_artifact());
+    }
+    let expected_path = artifact_store.expected_response_path(&snapshot.context)?;
+    let expected_size = body.body_text.len() as u64;
+    let expected_hash = FileResponseArtifactStore::response_hash(&body.body_text);
     let response = artifact_store
         .persist_verified_response(&snapshot.context, body)
         .await?;
-    if response.requested_image_count != snapshot.runtime_options.image_count {
+    if !verified_response_shape_matches(
+        &response,
+        snapshot.runtime_options.image_count,
+        Some(&expected_path),
+    ) || response.response_size != expected_size
+        || response.response_sha256 != expected_hash
+    {
         return Err(GenerationExecutionError::response_artifact());
     }
     Ok(response)
+}
+
+fn lifecycle_database_error(context: &str, error: rusqlite::Error) -> AppError {
+    AppError::Database {
+        message: format!("{context}: {error}"),
+    }
+}
+
+fn lifecycle_lock_error() -> AppError {
+    AppError::Database {
+        message: "Lock generation lifecycle database failed".to_string(),
+    }
+}
+
+fn repository_execution_error(error: &AppError, stage: &str) -> GenerationExecutionError {
+    let sanitized_message = match error.stable_code() {
+        "database_error" => "The generation state could not be updated",
+        "file_system_error" => "Generated images could not be saved",
+        "generation_job_invalid_transition" => "The generation state changed before completion",
+        "generation_job_invalid_snapshot" | "generation_job_corrupt_persisted_data" => {
+            "The generation state is invalid"
+        }
+        _ => "The generation could not be completed",
+    };
+    GenerationExecutionError::Local {
+        code: error.stable_code().to_string(),
+        sanitized_message: sanitized_message.to_string(),
+        stage: stage.to_string(),
+    }
+}
+
+fn load_matching_execution_snapshot(
+    tx: &Transaction<'_>,
+    context: &GenerationExecutionContext,
+) -> Result<GenerationExecutionSnapshot, AppError> {
+    let snapshot = load_generation_execution_snapshot_in_transaction(tx, &context.job_id)?;
+    if snapshot.context != *context {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    Ok(snapshot)
+}
+
+pub(crate) fn promote_verified_response_in_transaction(
+    tx: &Transaction<'_>,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+) -> Result<(), AppError> {
+    let snapshot = load_matching_execution_snapshot(tx, context)?;
+    if !verified_response_shape_matches(response, snapshot.runtime_options.image_count, None) {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    let (request_state, response_file): (String, Option<String>) = tx
+        .query_row(
+            "SELECT request_state, response_file FROM generation_recoveries
+             WHERE generation_id = ?1",
+            params![context.generation_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| lifecycle_database_error("Read generation recovery failed", error))?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    if request_state != RECOVERY_STATE_REQUESTING || response_file.is_some() {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+
+    let updated = tx
+        .execute(
+            "UPDATE generation_recoveries
+             SET request_state = ?1, response_file = ?2, updated_at = ?3
+             WHERE generation_id = ?4 AND request_state = ?5 AND response_file IS NULL",
+            params![
+                RECOVERY_STATE_RESPONSE_READY,
+                response.response_file,
+                current_timestamp(),
+                context.generation_id,
+                RECOVERY_STATE_REQUESTING,
+            ],
+        )
+        .map_err(|error| lifecycle_database_error("Promote verified response failed", error))?;
+    if updated != 1 {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let job = get_job_in_transaction(tx, &context.job_id)?;
+    if job.status != GenerationJobStatus::Running || job.generation_id != context.generation_id {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    Ok(())
+}
+
+pub(crate) fn promote_verified_response(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+) -> Result<(), AppError> {
+    let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+    let tx = begin_generation_job_write_transaction(&mut conn)?;
+    promote_verified_response_in_transaction(&tx, context, response)?;
+    tx.commit()
+        .map_err(|error| lifecycle_database_error("Commit verified response failed", error))
+}
+
+pub(crate) fn finalize_generation_failure_in_transaction(
+    tx: &Transaction<'_>,
+    context: &GenerationExecutionContext,
+    error: &GenerationExecutionError,
+    disposition: &GenerationTerminalDisposition,
+) -> Result<(), AppError> {
+    if error.code() != disposition.error_code
+        || !matches!(
+            disposition.status,
+            GenerationJobStatus::Failed
+                | GenerationJobStatus::Interrupted
+                | GenerationJobStatus::Cancelled
+        )
+        || (disposition.status == GenerationJobStatus::Cancelled
+            && (disposition.error_code != "cancelled_by_user" || disposition.retryable))
+    {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    load_matching_execution_snapshot(tx, context)?;
+    let (request_state, response_file): (String, Option<String>) = tx
+        .query_row(
+            "SELECT request_state, response_file FROM generation_recoveries
+             WHERE generation_id = ?1",
+            params![context.generation_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|query_error| {
+            lifecycle_database_error("Read terminal generation recovery failed", query_error)
+        })?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let response_ready = request_state == RECOVERY_STATE_RESPONSE_READY && response_file.is_some();
+    let requesting = request_state == RECOVERY_STATE_REQUESTING && response_file.is_none();
+    if !response_ready && !requesting {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+    if disposition.preserve_response_ready {
+        if !response_ready {
+            return Err(AppError::GenerationJobInvalidTransition);
+        }
+    } else {
+        let deleted = tx
+            .execute(
+                "DELETE FROM generation_recoveries WHERE generation_id = ?1",
+                params![context.generation_id],
+            )
+            .map_err(|query_error| {
+                lifecycle_database_error("Delete terminal generation recovery failed", query_error)
+            })?;
+        if deleted != 1 {
+            return Err(AppError::GenerationJobCorruptPersistedData);
+        }
+    }
+
+    finish_job_in_transaction(
+        tx,
+        &GenerationJobTerminalUpdate {
+            job_id: context.job_id.clone(),
+            expected_status: GenerationJobStatus::Running,
+            status: disposition.status.clone(),
+            finished_at: current_timestamp(),
+            error_code: Some(disposition.error_code.clone()),
+            error_message: None,
+            retryable: disposition.retryable,
+        },
+    )?;
+    Ok(())
+}
+
+pub(crate) fn finalize_generation_failure(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    error: &GenerationExecutionError,
+    disposition: &GenerationTerminalDisposition,
+) -> Result<(), AppError> {
+    let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+    let tx = begin_generation_job_write_transaction(&mut conn)?;
+    finalize_generation_failure_in_transaction(&tx, context, error, disposition)?;
+    tx.commit().map_err(|query_error| {
+        lifecycle_database_error("Commit generation failure failed", query_error)
+    })
+}
+
+fn generation_image_projection_is_valid(image: &GeneratedImage, generation_id: &str) -> bool {
+    let id_is_valid = !image.id.is_empty()
+        && image.id.len() <= 128
+        && image
+            .id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+    let path_is_valid = |path: &str| {
+        !path.is_empty() && path.len() <= 32_768 && !path.chars().any(char::is_control)
+    };
+    image.generation_id == generation_id
+        && id_is_valid
+        && path_is_valid(&image.file_path)
+        && path_is_valid(&image.thumbnail_path)
+        && image.width > 0
+        && image.height > 0
+        && image.file_size > 0
+}
+
+pub(crate) fn commit_generation_success_in_transaction(
+    tx: &Transaction<'_>,
+    context: &GenerationExecutionContext,
+    request: &GenerationJobRequest,
+    images: &[GeneratedImage],
+) -> Result<GenerationSuccessTransition, AppError> {
+    let snapshot = load_matching_execution_snapshot(tx, context)?;
+    if snapshot.request != *request {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    let job = get_job_in_transaction(tx, &context.job_id)?;
+    if job.generation_id != context.generation_id {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    if job.cancel_requested_at.is_some() {
+        return Ok(GenerationSuccessTransition::CancelRequested);
+    }
+    let requested_image_count = snapshot.runtime_options.image_count;
+    let actual_image_count =
+        u8::try_from(images.len()).map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
+    let mut image_ids = HashSet::with_capacity(images.len());
+    if !(1..=requested_image_count).contains(&actual_image_count)
+        || images.iter().any(|image| {
+            !generation_image_projection_is_valid(image, &context.generation_id)
+                || !image_ids.insert(image.id.as_str())
+        })
+    {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+
+    let (request_state, response_file): (String, Option<String>) = tx
+        .query_row(
+            "SELECT request_state, response_file FROM generation_recoveries
+             WHERE generation_id = ?1",
+            params![context.generation_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| {
+            lifecycle_database_error("Read successful generation recovery failed", error)
+        })?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    if request_state != RECOVERY_STATE_RESPONSE_READY || response_file.is_none() {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let existing_images: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
+            params![context.generation_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| {
+            lifecycle_database_error("Count existing generation images failed", error)
+        })?;
+    if existing_images != 0 {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+
+    for image in images {
+        tx.execute(
+            "INSERT INTO images (
+                id, generation_id, file_path, thumbnail_path, width, height, file_size, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                image.id,
+                image.generation_id,
+                image.file_path,
+                image.thumbnail_path,
+                image.width,
+                image.height,
+                image.file_size,
+                snapshot.created_at,
+            ],
+        )
+        .map_err(|error| {
+            lifecycle_database_error("Insert completed generation image failed", error)
+        })?;
+    }
+    set_actual_image_count_in_transaction(tx, &context.generation_id, actual_image_count)?;
+    let deleted_recovery = tx
+        .execute(
+            "DELETE FROM generation_recoveries
+             WHERE generation_id = ?1 AND request_state = ?2 AND response_file IS NOT NULL",
+            params![context.generation_id, RECOVERY_STATE_RESPONSE_READY],
+        )
+        .map_err(|error| {
+            lifecycle_database_error("Delete completed generation recovery failed", error)
+        })?;
+    if deleted_recovery != 1 {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+    finish_job_in_transaction(
+        tx,
+        &GenerationJobTerminalUpdate {
+            job_id: context.job_id.clone(),
+            expected_status: GenerationJobStatus::Running,
+            status: GenerationJobStatus::Completed,
+            finished_at: current_timestamp(),
+            error_code: None,
+            error_message: None,
+            retryable: false,
+        },
+    )?;
+    Ok(GenerationSuccessTransition::Completed(GenerateResult {
+        generation_id: context.generation_id.clone(),
+        conversation_id: context.conversation_id.clone(),
+        images: images.to_vec(),
+    }))
+}
+
+fn commit_precreated_generation_success(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    request: &GenerationJobRequest,
+    images: &[GeneratedImage],
+) -> Result<GenerationSuccessTransition, AppError> {
+    let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+    let tx = begin_generation_job_write_transaction(&mut conn)?;
+    match commit_generation_success_in_transaction(&tx, context, request, images) {
+        Ok(GenerationSuccessTransition::Completed(result)) => {
+            tx.commit().map_err(|error| {
+                lifecycle_database_error("Commit successful generation failed", error)
+            })?;
+            Ok(GenerationSuccessTransition::Completed(result))
+        }
+        Ok(GenerationSuccessTransition::CancelRequested) => {
+            tx.rollback().map_err(|error| {
+                lifecycle_database_error("Rollback cancelled generation success failed", error)
+            })?;
+            Ok(GenerationSuccessTransition::CancelRequested)
+        }
+        Err(error) => {
+            drop(tx);
+            Err(error)
+        }
+    }
+}
+
+pub(crate) async fn continue_precreated_generation_after_provider(
+    db: &Database,
+    artifact_store: &dyn ResponseArtifactStore,
+    decoder: &dyn ImageResponseDecoder,
+    file_store: &dyn GenerationFileStore,
+    snapshot: &GenerationExecutionSnapshot,
+    body: ProviderAttemptBody,
+    cancellation: &CancellationProbe,
+) -> Result<PrecreatedLocalOutcome, GenerationExecutionError> {
+    let response = persist_provider_attempt_response(artifact_store, snapshot, body).await?;
+    promote_verified_response(db, &snapshot.context, &response)
+        .map_err(|error| repository_execution_error(&error, "response_ready_commit"))?;
+    let staged =
+        resume_verified_response(decoder, file_store, snapshot, &response, cancellation).await?;
+    cancellation.checkpoint("image_promotion")?;
+    let mut promoted = staged
+        .promote()
+        .map_err(|_| GenerationExecutionError::Local {
+            code: "image_save_failed".to_string(),
+            sanitized_message: "Generated images could not be saved".to_string(),
+            stage: "image_promotion".to_string(),
+        })?;
+    if !promoted.matches_generation(&snapshot.context.generation_id) {
+        drop(promoted);
+        return Err(repository_execution_error(
+            &AppError::GenerationJobInvalidSnapshot,
+            "success_commit",
+        ));
+    }
+    let saved_images = promoted.saved_images();
+    let transition = commit_precreated_generation_success(
+        db,
+        &snapshot.context,
+        &snapshot.request,
+        &saved_images,
+    );
+    match transition {
+        Ok(GenerationSuccessTransition::Completed(result)) => {
+            promoted.disarm_cleanup();
+            Ok(GenerationSuccessTransition::Completed(result))
+        }
+        Ok(GenerationSuccessTransition::CancelRequested) => {
+            drop(promoted);
+            Ok(GenerationSuccessTransition::CancelRequested)
+        }
+        Err(error) => {
+            drop(promoted);
+            Err(repository_execution_error(&error, "success_commit"))
+        }
+    }
 }
 
 pub(crate) async fn resume_verified_response(
@@ -1310,14 +1836,17 @@ pub(crate) async fn run_generation_lifecycle(
 mod tests {
     use super::*;
     use crate::api_gateway::{ProviderAttemptBody, RetryAfterHint};
+    use crate::file_manager::GenerationFileLifecycleObserver;
     use crate::generation_jobs::{
-        GenerationJobOptions, GenerationJobRequest, GenerationJobRequestKind,
+        begin_generation_job_write_transaction, claim_job_in_transaction, enqueue_job, get_job,
+        load_generation_execution_snapshot, GenerationJobOptions, GenerationJobRequest,
+        GenerationJobRequestKind, PreparedGenerationJob,
     };
-    use crate::models::DEFAULT_IMAGE_COUNT;
+    use crate::models::{GenerationJobStatus, DEFAULT_IMAGE_COUNT};
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
     use std::io::Cursor;
     use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
     fn fixture_execution_context() -> GenerationExecutionContext {
@@ -1411,6 +1940,7 @@ mod tests {
 
     struct FakeArtifactStore {
         calls: Arc<AtomicUsize>,
+        root: PathBuf,
     }
 
     #[async_trait::async_trait]
@@ -1419,10 +1949,7 @@ mod tests {
             &self,
             context: &GenerationExecutionContext,
         ) -> Result<PathBuf, GenerationExecutionError> {
-            Ok(PathBuf::from(format!(
-                "/safe/{}.response.json",
-                context.job_id
-            )))
+            Ok(self.root.join(format!("{}.response.json", context.job_id)))
         }
 
         async fn persist_verified_response(
@@ -1432,10 +1959,96 @@ mod tests {
         ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
             assert_eq!(context.job_id, "job-1");
             self.calls.fetch_add(1, Ordering::SeqCst);
+            std::fs::create_dir_all(&self.root)
+                .map_err(|_| GenerationExecutionError::response_artifact())?;
+            let response_path = self.root.join("job-1.response.json");
+            std::fs::write(&response_path, body.body_text.as_bytes())
+                .map_err(|_| GenerationExecutionError::response_artifact())?;
             Ok(ProviderAttemptResponse {
                 response_size: body.body_text.len() as u64,
                 response_sha256: FileResponseArtifactStore::response_hash(&body.body_text),
-                response_file: "/safe/job-1.response.json".to_string(),
+                response_file: response_path.to_string_lossy().to_string(),
+                body_text: body.body_text,
+                requested_image_count: body.requested_image_count,
+            })
+        }
+
+        async fn load_verified_response(
+            &self,
+            _context: &GenerationExecutionContext,
+            _path: &Path,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            Err(GenerationExecutionError::response_artifact())
+        }
+    }
+
+    struct MissingFileArtifactStore {
+        path: PathBuf,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponseArtifactStore for MissingFileArtifactStore {
+        fn expected_response_path(
+            &self,
+            _context: &GenerationExecutionContext,
+        ) -> Result<PathBuf, GenerationExecutionError> {
+            Ok(self.path.clone())
+        }
+
+        async fn persist_verified_response(
+            &self,
+            _context: &GenerationExecutionContext,
+            body: ProviderAttemptBody,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            Ok(ProviderAttemptResponse {
+                response_size: body.body_text.len() as u64,
+                response_sha256: FileResponseArtifactStore::response_hash(&body.body_text),
+                response_file: self.path.to_string_lossy().to_string(),
+                body_text: body.body_text,
+                requested_image_count: body.requested_image_count,
+            })
+        }
+
+        async fn load_verified_response(
+            &self,
+            _context: &GenerationExecutionContext,
+            _path: &Path,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            Err(GenerationExecutionError::response_artifact())
+        }
+    }
+
+    struct CanonicalAliasArtifactStore {
+        root: PathBuf,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponseArtifactStore for CanonicalAliasArtifactStore {
+        fn expected_response_path(
+            &self,
+            _context: &GenerationExecutionContext,
+        ) -> Result<PathBuf, GenerationExecutionError> {
+            Ok(self
+                .root
+                .join("alias-component")
+                .join("..")
+                .join("artifact.response.json"))
+        }
+
+        async fn persist_verified_response(
+            &self,
+            _context: &GenerationExecutionContext,
+            body: ProviderAttemptBody,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            std::fs::create_dir_all(self.root.join("alias-component"))
+                .map_err(|_| GenerationExecutionError::response_artifact())?;
+            let actual_path = self.root.join("artifact.response.json");
+            std::fs::write(&actual_path, body.body_text.as_bytes())
+                .map_err(|_| GenerationExecutionError::response_artifact())?;
+            Ok(ProviderAttemptResponse {
+                response_size: body.body_text.len() as u64,
+                response_sha256: FileResponseArtifactStore::response_hash(&body.body_text),
+                response_file: actual_path.to_string_lossy().to_string(),
                 body_text: body.body_text,
                 requested_image_count: body.requested_image_count,
             })
@@ -1453,6 +2066,1242 @@ mod tests {
     struct FakeLocalDecoder {
         calls: Arc<AtomicUsize>,
         images: Vec<Vec<u8>>,
+    }
+
+    struct PrecreatedTestFixture {
+        db: Arc<Database>,
+        db_path: PathBuf,
+        snapshot: GenerationExecutionSnapshot,
+        root: PathBuf,
+    }
+
+    impl PrecreatedTestFixture {
+        fn new(requested_image_count: u8) -> Self {
+            Self::new_with_request(
+                requested_image_count,
+                GenerationJobRequestKind::Generate,
+                Vec::new(),
+            )
+        }
+
+        fn new_with_request(
+            requested_image_count: u8,
+            kind: GenerationJobRequestKind,
+            source_image_paths: Vec<String>,
+        ) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "astro-studio-precreated-lifecycle-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).expect("create lifecycle fixture root");
+            let db_path = root.join("astro_studio.db");
+            let db = Arc::new(Database::open(&db_path).expect("open test db"));
+            db.run_migrations().expect("migrate test db");
+            let request_kind = kind.as_str().to_string();
+            let source_kind = request_kind.clone();
+            let prepared = PreparedGenerationJob {
+                job_id: uuid::Uuid::new_v4().to_string(),
+                client_request_id: uuid::Uuid::new_v4().to_string(),
+                generation_id: uuid::Uuid::new_v4().to_string(),
+                requested_conversation_id: None,
+                requested_project_id: Some("default".to_string()),
+                prompt: "draw a nebula".to_string(),
+                model: "gpt-image-2".to_string(),
+                request_kind,
+                size: "1024x1024".to_string(),
+                quality: "high".to_string(),
+                background: "auto".to_string(),
+                output_format: "png".to_string(),
+                output_compression: 100,
+                moderation: "auto".to_string(),
+                input_fidelity: "high".to_string(),
+                image_count: i32::from(requested_image_count),
+                stream: false,
+                partial_images: 0,
+                source_image_paths,
+                request_options: GenerationJobOptions {
+                    size: Some("1024x1024".to_string()),
+                    quality: Some("high".to_string()),
+                    background: Some("auto".to_string()),
+                    output_format: Some("png".to_string()),
+                    output_compression: Some(100),
+                    moderation: Some("auto".to_string()),
+                    input_fidelity: Some("high".to_string()),
+                    stream: Some(false),
+                    partial_images: Some(0),
+                    image_count: Some(requested_image_count),
+                },
+                parent_job_id: None,
+                source_kind,
+                source_ref: serde_json::json!({ "id": "precreated-test" }),
+                provider_kind: "openai".to_string(),
+                provider_profile_id: "profile-1".to_string(),
+                endpoint_snapshot: "https://example.test/images/generations".to_string(),
+                status: GenerationJobStatus::Queued,
+                chain_attempt: 1,
+                auto_attempt: 0,
+                max_auto_attempts: 2,
+                queued_at: "2026-07-10T00:00:00Z".to_string(),
+                finished_at: None,
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            };
+            let enqueue = {
+                let mut conn = db.conn.lock().expect("lock fixture db");
+                enqueue_job(&mut conn, &prepared).expect("enqueue fixture job")
+            };
+            {
+                let mut conn = db.conn.lock().expect("lock fixture db");
+                let tx =
+                    begin_generation_job_write_transaction(&mut conn).expect("begin fixture claim");
+                claim_job_in_transaction(&tx, &enqueue.job_id).expect("claim fixture job");
+                tx.commit().expect("commit fixture claim");
+            }
+            let snapshot = {
+                let conn = db.conn.lock().expect("lock fixture db");
+                load_generation_execution_snapshot(&conn, &enqueue.job_id)
+                    .expect("load fixture execution snapshot")
+            };
+            Self {
+                db,
+                db_path,
+                snapshot,
+                root,
+            }
+        }
+
+        fn response_store(&self) -> FileResponseArtifactStore {
+            FileResponseArtifactStore::new(self.root.join("responses"))
+        }
+
+        fn file_root(&self) -> PathBuf {
+            self.root.join("app-data")
+        }
+
+        fn row_count(&self, table: &str) -> i64 {
+            assert!(matches!(
+                table,
+                "conversations"
+                    | "generations"
+                    | "generation_jobs"
+                    | "generation_recoveries"
+                    | "images"
+            ));
+            let conn = self.db.conn.lock().expect("lock fixture db");
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count lifecycle fixture rows")
+        }
+
+        fn cleanup(self) {
+            let root = self.root.clone();
+            drop(self);
+            std::fs::remove_dir_all(root).ok();
+        }
+    }
+
+    enum CoreEngineOutcome {
+        Success,
+        Error(EngineCallError),
+    }
+
+    struct FakeCoreEngine {
+        calls: Arc<AtomicUsize>,
+        outcome: CoreEngineOutcome,
+    }
+
+    impl FakeCoreEngine {
+        fn respond(
+            &self,
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match &self.outcome {
+                CoreEngineOutcome::Success => Ok(ProviderAttemptBody {
+                    body_text: r#"{"data":[{"b64_json":"unused"}]}"#.to_string(),
+                    requested_image_count: options.image_count,
+                }),
+                CoreEngineOutcome::Error(error) => Err(error.clone()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ImageEngine for FakeCoreEngine {
+        async fn generate(
+            &self,
+            _model: &str,
+            _api_key: &str,
+            _endpoint_url: &str,
+            _prompt: &str,
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.respond(options)
+        }
+
+        async fn edit(
+            &self,
+            _model: &str,
+            _api_key: &str,
+            _endpoint_url: &str,
+            _prompt: &str,
+            _source_image_paths: &[String],
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.respond(options)
+        }
+    }
+
+    struct OrderedDatabaseDecoder {
+        db: Arc<Database>,
+        db_path: PathBuf,
+        job_id: String,
+        generation_id: String,
+        engine_calls: Arc<AtomicUsize>,
+        decoder_calls: Arc<AtomicUsize>,
+        images: Vec<Vec<u8>>,
+        request_cancel: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl ImageResponseDecoder for OrderedDatabaseDecoder {
+        async fn decode_and_download(
+            &self,
+            response: &ProviderAttemptResponse,
+            cancellation: &CancellationProbe,
+        ) -> Result<Vec<Vec<u8>>, GenerationExecutionError> {
+            cancellation.checkpoint("response_decode")?;
+            assert!(self.db.conn.try_lock().is_ok(), "decoder must run unlocked");
+            let conn = rusqlite::Connection::open(&self.db_path)
+                .expect("open independent decoder connection");
+            let (state, response_file, job_status, generation_status): (
+                String,
+                Option<String>,
+                String,
+                String,
+            ) = conn
+                .query_row(
+                    "SELECT r.request_state, r.response_file, j.status, g.status
+                     FROM generation_recoveries r
+                     JOIN generation_jobs j ON j.generation_id = r.generation_id
+                     JOIN generations g ON g.id = r.generation_id
+                     WHERE r.generation_id = ?1 AND j.id = ?2",
+                    params![self.generation_id, self.job_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("read committed response-ready projection");
+            assert_eq!(state, "response_ready");
+            assert_eq!(
+                response_file.as_deref(),
+                Some(response.response_file.as_str())
+            );
+            assert_eq!(job_status, "running");
+            assert_eq!(generation_status, "running");
+            if self.request_cancel {
+                crate::generation_jobs::request_cancel(&conn, &self.job_id)
+                    .expect("commit cancel before success");
+            }
+            assert_eq!(self.engine_calls.load(Ordering::SeqCst), 1);
+            self.decoder_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.images.clone())
+        }
+    }
+
+    struct DbLockFileObserver {
+        db: Arc<Database>,
+        promote_calls: AtomicUsize,
+        disarm_calls: AtomicUsize,
+        cleanup_calls: AtomicUsize,
+        all_unlocked: AtomicBool,
+        expected_final_paths: std::sync::OnceLock<Vec<PathBuf>>,
+        cleanup_saw_all_promoted_paths: AtomicBool,
+    }
+
+    impl DbLockFileObserver {
+        fn new(db: Arc<Database>) -> Self {
+            Self {
+                db,
+                promote_calls: AtomicUsize::new(0),
+                disarm_calls: AtomicUsize::new(0),
+                cleanup_calls: AtomicUsize::new(0),
+                all_unlocked: AtomicBool::new(true),
+                expected_final_paths: std::sync::OnceLock::new(),
+                cleanup_saw_all_promoted_paths: AtomicBool::new(true),
+            }
+        }
+
+        fn set_expected_final_paths(&self, paths: Vec<PathBuf>) {
+            let _ = self.expected_final_paths.set(paths);
+        }
+
+        fn record(&self, counter: &AtomicUsize) {
+            let unlocked = self.db.conn.try_lock().is_ok();
+            if !unlocked {
+                self.all_unlocked.store(false, Ordering::SeqCst);
+            }
+            counter.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl GenerationFileLifecycleObserver for DbLockFileObserver {
+        fn before_promote_io(&self) {
+            self.record(&self.promote_calls);
+        }
+
+        fn before_disarm_io(&self) {
+            self.record(&self.disarm_calls);
+        }
+
+        fn before_cleanup_io(&self) {
+            if let Some(paths) = self.expected_final_paths.get() {
+                if !paths.is_empty() && !paths.iter().all(|path| path.is_file()) {
+                    self.cleanup_saw_all_promoted_paths
+                        .store(false, Ordering::SeqCst);
+                }
+            }
+            self.record(&self.cleanup_calls);
+        }
+    }
+
+    struct ObservedLocalFileStore {
+        root: PathBuf,
+        observer: Arc<dyn GenerationFileLifecycleObserver>,
+        path_observer: Arc<DbLockFileObserver>,
+    }
+
+    #[async_trait::async_trait]
+    impl GenerationFileStore for ObservedLocalFileStore {
+        async fn stage_images(
+            &self,
+            snapshot: &GenerationExecutionSnapshot,
+            images: Vec<Vec<u8>>,
+            cancellation: &CancellationProbe,
+        ) -> Result<StagedGenerationFiles, GenerationExecutionError> {
+            cancellation.checkpoint("image_staging")?;
+            let root = self.root.clone();
+            let generation_id = snapshot.context.generation_id.clone();
+            let output_format = snapshot.output_format.clone();
+            let created_at = snapshot.created_at.clone();
+            let observer = Arc::clone(&self.observer);
+            let staged = tokio::task::spawn_blocking(move || {
+                file_manager::FileManager::new(root).stage_generation_images_with_observer(
+                    &generation_id,
+                    &images,
+                    &output_format,
+                    &created_at,
+                    observer,
+                )
+            })
+            .await
+            .map_err(|_| GenerationExecutionError::Local {
+                code: "image_save_failed".to_string(),
+                sanitized_message: "The generated images could not be staged".to_string(),
+                stage: "image_staging".to_string(),
+            })?
+            .map_err(|_| GenerationExecutionError::Local {
+                code: "image_save_failed".to_string(),
+                sanitized_message: "The generated images could not be staged".to_string(),
+                stage: "image_staging".to_string(),
+            })?;
+            self.path_observer
+                .set_expected_final_paths(staged.final_paths());
+            Ok(staged)
+        }
+    }
+
+    #[tokio::test]
+    async fn precreated_local_continuation_commits_ready_before_decoder_and_short_success() {
+        let fixture = PrecreatedTestFixture::new(3);
+        let identity_counts_before = [
+            fixture.row_count("conversations"),
+            fixture.row_count("generations"),
+            fixture.row_count("generation_jobs"),
+        ];
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let engine = FakeCoreEngine {
+            calls: Arc::clone(&engine_calls),
+            outcome: CoreEngineOutcome::Success,
+        };
+        let body = perform_provider_http_attempt(
+            &engine,
+            &fixture.snapshot,
+            &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+        )
+        .await
+        .expect("one paid provider phase");
+        let response_store = fixture.response_store();
+        let file_observer = Arc::new(DbLockFileObserver::new(Arc::clone(&fixture.db)));
+        let file_observer_trait: Arc<dyn GenerationFileLifecycleObserver> = file_observer.clone();
+        let outcome = continue_precreated_generation_after_provider(
+            fixture.db.as_ref(),
+            &response_store,
+            &OrderedDatabaseDecoder {
+                db: Arc::clone(&fixture.db),
+                db_path: fixture.db_path.clone(),
+                job_id: fixture.snapshot.context.job_id.clone(),
+                generation_id: fixture.snapshot.context.generation_id.clone(),
+                engine_calls: Arc::clone(&engine_calls),
+                decoder_calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+                request_cancel: false,
+            },
+            &ObservedLocalFileStore {
+                root: fixture.file_root(),
+                observer: file_observer_trait,
+                path_observer: Arc::clone(&file_observer),
+            },
+            &fixture.snapshot,
+            body,
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect("complete precreated local continuation");
+        let result = match outcome {
+            PrecreatedLocalOutcome::Completed(result) => result,
+            PrecreatedLocalOutcome::CancelRequested => panic!("success must not cancel"),
+        };
+
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(result.generation_id, fixture.snapshot.context.generation_id);
+        assert_eq!(
+            result.conversation_id,
+            fixture.snapshot.context.conversation_id
+        );
+        assert_eq!(result.images.len(), 1, "short response must remain short");
+        assert!(result
+            .images
+            .iter()
+            .all(|image| Path::new(&image.file_path).is_file()));
+        assert_eq!(file_observer.promote_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.disarm_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.cleanup_calls.load(Ordering::SeqCst), 0);
+        assert!(file_observer.all_unlocked.load(Ordering::SeqCst));
+        assert_eq!(
+            identity_counts_before,
+            [
+                fixture.row_count("conversations"),
+                fixture.row_count("generations"),
+                fixture.row_count("generation_jobs"),
+            ]
+        );
+        assert_eq!(fixture.row_count("generation_recoveries"), 0);
+        assert_eq!(fixture.row_count("images"), 1);
+        let conn = fixture.db.conn.lock().expect("lock completed fixture");
+        let (status, requested, metadata): (String, i32, String) = conn
+            .query_row(
+                "SELECT status, image_count, request_metadata FROM generations WHERE id = ?1",
+                params![fixture.snapshot.context.generation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read completed generation");
+        assert_eq!(status, "completed");
+        assert_eq!(requested, 3);
+        let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(metadata["image_count"], serde_json::json!(3));
+        assert_eq!(metadata["actual_image_count"], serde_json::json!(1));
+        drop(conn);
+        let completed_status = {
+            let conn = fixture.db.conn.lock().unwrap();
+            get_job(&conn, &fixture.snapshot.context.job_id)
+                .unwrap()
+                .status
+        };
+        assert_eq!(completed_status, GenerationJobStatus::Completed);
+        let late_cancel = {
+            let conn = fixture.db.conn.lock().unwrap();
+            crate::generation_jobs::request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect_err("completion-first must reject a late cancel")
+        };
+        assert_eq!(
+            late_cancel.stable_code(),
+            "generation_job_invalid_transition"
+        );
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn provider_error_stays_running_until_explicit_finalizer() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let raw_secret = "sk-provider-secret-must-not-persist";
+        let error = match perform_provider_http_attempt(
+            &FakeCoreEngine {
+                calls: Arc::clone(&engine_calls),
+                outcome: CoreEngineOutcome::Error(EngineCallError {
+                    code: "rate_limited".to_string(),
+                    sanitized_message: raw_secret.to_string(),
+                    retry_after: Some(RetryAfterHint::DelaySeconds(3)),
+                    safe_to_retry: true,
+                    outcome_ambiguous: false,
+                }),
+            },
+            &fixture.snapshot,
+            &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("provider error must remain structured"),
+        };
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(error.code(), "rate_limited");
+        assert!(matches!(
+            error,
+            GenerationExecutionError::Engine(EngineCallError {
+                safe_to_retry: true,
+                retry_after: Some(RetryAfterHint::DelaySeconds(3)),
+                ..
+            })
+        ));
+        let running_status = {
+            let conn = fixture.db.conn.lock().unwrap();
+            get_job(&conn, &fixture.snapshot.context.job_id)
+                .unwrap()
+                .status
+        };
+        assert_eq!(running_status, GenerationJobStatus::Running);
+        assert_eq!(fixture.row_count("generation_recoveries"), 1);
+
+        finalize_generation_failure(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "rate_limited".to_string(),
+                retryable: true,
+                preserve_response_ready: false,
+            },
+        )
+        .expect("explicit policy finalizer");
+        let conn = fixture.db.conn.lock().expect("lock failed fixture");
+        let (job_status, job_message, generation_status, generation_message): (
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT j.status, j.error_message, g.status, g.error_message
+                 FROM generation_jobs j JOIN generations g ON g.id = j.generation_id
+                 WHERE j.id = ?1",
+                params![fixture.snapshot.context.job_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(job_status, "failed");
+        assert_eq!(generation_status, "failed");
+        assert_eq!(
+            job_message.as_deref(),
+            Some("The provider rate limit was reached")
+        );
+        assert_eq!(generation_message, job_message);
+        let persisted = format!("{job_message:?}{generation_message:?}");
+        assert!(!persisted.contains(raw_secret));
+        drop(conn);
+        assert_eq!(fixture.row_count("generation_recoveries"), 0);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn failure_disposition_matrix_preserves_or_deletes_recovery_without_secret() {
+        for (initial_ready, preserve, should_succeed, recovery_after) in [
+            (false, false, true, 0),
+            (true, true, true, 1),
+            (true, false, true, 0),
+            (false, true, false, 1),
+        ] {
+            let fixture = PrecreatedTestFixture::new(1);
+            let response_store = fixture.response_store();
+            let response = if initial_ready {
+                let response = response_store
+                    .persist_verified_response(
+                        &fixture.snapshot.context,
+                        ProviderAttemptBody {
+                            body_text: r#"{"data":[]}"#.to_string(),
+                            requested_image_count: 1,
+                        },
+                    )
+                    .await
+                    .expect("persist matrix response");
+                promote_verified_response(
+                    fixture.db.as_ref(),
+                    &fixture.snapshot.context,
+                    &response,
+                )
+                .expect("promote matrix response");
+                Some(response)
+            } else {
+                None
+            };
+            let raw_secret = "sk-local-secret-must-not-persist";
+            let error = GenerationExecutionError::Local {
+                code: "response_decode_failed".to_string(),
+                sanitized_message: raw_secret.to_string(),
+                stage: "response_decode".to_string(),
+            };
+            let result = finalize_generation_failure(
+                fixture.db.as_ref(),
+                &fixture.snapshot.context,
+                &error,
+                &GenerationTerminalDisposition {
+                    status: GenerationJobStatus::Failed,
+                    error_code: "response_decode_failed".to_string(),
+                    retryable: false,
+                    preserve_response_ready: preserve,
+                },
+            );
+            assert_eq!(result.is_ok(), should_succeed);
+            let conn = fixture.db.conn.lock().expect("lock matrix fixture");
+            let job = get_job(&conn, &fixture.snapshot.context.job_id).unwrap();
+            assert_eq!(
+                job.status,
+                if should_succeed {
+                    GenerationJobStatus::Failed
+                } else {
+                    GenerationJobStatus::Running
+                }
+            );
+            assert!(!format!("{job:?}").contains(raw_secret));
+            let recovery_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM generation_recoveries WHERE generation_id = ?1",
+                    params![fixture.snapshot.context.generation_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(recovery_count, recovery_after);
+            if !should_succeed {
+                let state: String = conn
+                    .query_row(
+                        "SELECT request_state FROM generation_recoveries WHERE generation_id = ?1",
+                        params![fixture.snapshot.context.generation_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(state, "requesting");
+            }
+            drop(conn);
+            if let Some(response) = response {
+                assert!(Path::new(&response.response_file).is_file());
+                response_store
+                    .load_verified_response(
+                        &fixture.snapshot.context,
+                        Path::new(&response.response_file),
+                    )
+                    .await
+                    .expect("failure finalizer never deletes artifact");
+            }
+            fixture.cleanup();
+        }
+    }
+
+    #[tokio::test]
+    async fn response_promotion_failure_keeps_verified_artifact_and_skips_decoder() {
+        let fixture = PrecreatedTestFixture::new(1);
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("lock promotion failure fixture");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_response_ready
+                 BEFORE UPDATE OF request_state ON generation_recoveries
+                 WHEN NEW.request_state = 'response_ready'
+                 BEGIN SELECT RAISE(ABORT, 'injected response-ready failure'); END;",
+            )
+            .expect("install response-ready fault");
+        }
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let body = perform_provider_http_attempt(
+            &FakeCoreEngine {
+                calls: Arc::clone(&engine_calls),
+                outcome: CoreEngineOutcome::Success,
+            },
+            &fixture.snapshot,
+            &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+        )
+        .await
+        .unwrap();
+        let response_store = fixture.response_store();
+        let error = continue_precreated_generation_after_provider(
+            fixture.db.as_ref(),
+            &response_store,
+            &FakeLocalDecoder {
+                calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+            },
+            &LocalGenerationFileStore::new(fixture.file_root()),
+            &fixture.snapshot,
+            body,
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect_err("response-ready SQL fault must stop local continuation");
+        assert!(matches!(
+            &error,
+            GenerationExecutionError::Local { code, stage, .. }
+                if code == "database_error" && stage == "response_ready_commit"
+        ));
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 0);
+        let response_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
+            .expect("expected persisted response path");
+        assert!(response_path.is_file());
+        response_store
+            .load_verified_response(&fixture.snapshot.context, &response_path)
+            .await
+            .expect("verified artifact survives DB promotion failure");
+        let conn = fixture
+            .db
+            .conn
+            .lock()
+            .expect("lock promotion failure state");
+        let (state, response_file, job_status, generation_status): (
+            String,
+            Option<String>,
+            String,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT r.request_state, r.response_file, j.status, g.status
+                 FROM generation_recoveries r
+                 JOIN generation_jobs j ON j.generation_id = r.generation_id
+                 JOIN generations g ON g.id = r.generation_id
+                 WHERE j.id = ?1",
+                params![fixture.snapshot.context.job_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), response_file), ("requesting", None));
+        assert_eq!(
+            (job_status.as_str(), generation_status.as_str()),
+            ("running", "running")
+        );
+        drop(conn);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn missing_expected_response_artifact_never_promotes_or_calls_decoder() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let body = perform_provider_http_attempt(
+            &FakeCoreEngine {
+                calls: Arc::clone(&engine_calls),
+                outcome: CoreEngineOutcome::Success,
+            },
+            &fixture.snapshot,
+            &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+        )
+        .await
+        .unwrap();
+        let missing_path = fixture.root.join("missing.response.json");
+        let error = continue_precreated_generation_after_provider(
+            fixture.db.as_ref(),
+            &MissingFileArtifactStore {
+                path: missing_path.clone(),
+            },
+            &FakeLocalDecoder {
+                calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+            },
+            &LocalGenerationFileStore::new(fixture.file_root()),
+            &fixture.snapshot,
+            body,
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect_err("a trait claim cannot replace a real verified artifact");
+        assert_eq!(error.code(), "recovery_failed");
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 0);
+        assert!(!missing_path.exists());
+        let conn = fixture.db.conn.lock().unwrap();
+        let (state, response_file, job_status, generation_status): (
+            String,
+            Option<String>,
+            String,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT r.request_state, r.response_file, j.status, g.status
+                 FROM generation_recoveries r
+                 JOIN generation_jobs j ON j.generation_id = r.generation_id
+                 JOIN generations g ON g.id = r.generation_id
+                 WHERE j.id = ?1",
+                params![fixture.snapshot.context.job_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), response_file), ("requesting", None));
+        assert_eq!(
+            (job_status.as_str(), generation_status.as_str()),
+            ("running", "running")
+        );
+        drop(conn);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn canonical_alias_response_path_is_not_the_exact_expected_artifact_identity() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let alias_root = fixture.root.join("malicious-alias-store");
+        let error = continue_precreated_generation_after_provider(
+            fixture.db.as_ref(),
+            &CanonicalAliasArtifactStore {
+                root: alias_root.clone(),
+            },
+            &FakeLocalDecoder {
+                calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+            },
+            &LocalGenerationFileStore::new(fixture.file_root()),
+            &fixture.snapshot,
+            ProviderAttemptBody {
+                body_text: r#"{"data":[]}"#.to_string(),
+                requested_image_count: 1,
+            },
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect_err("canonical aliases must not replace exact artifact identity");
+        assert_eq!(error.code(), "recovery_failed");
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 0);
+        assert!(alias_root.join("artifact.response.json").is_file());
+        let conn = fixture.db.conn.lock().unwrap();
+        let (state, response_file): (String, Option<String>) = conn
+            .query_row(
+                "SELECT request_state, response_file FROM generation_recoveries
+                 WHERE generation_id = ?1",
+                params![fixture.snapshot.context.generation_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), response_file), ("requesting", None));
+        drop(conn);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn success_sql_failure_rolls_back_projection_then_cleans_promoted_files_unlocked() {
+        let fixture = PrecreatedTestFixture::new(2);
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_late_success_projection
+                 BEFORE UPDATE OF status ON generations
+                 WHEN NEW.status = 'completed'
+                 BEGIN SELECT RAISE(ABORT, 'injected late success failure'); END;",
+            )
+            .unwrap();
+        }
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let body = perform_provider_http_attempt(
+            &FakeCoreEngine {
+                calls: Arc::clone(&engine_calls),
+                outcome: CoreEngineOutcome::Success,
+            },
+            &fixture.snapshot,
+            &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+        )
+        .await
+        .unwrap();
+        let response_store = fixture.response_store();
+        let file_observer = Arc::new(DbLockFileObserver::new(Arc::clone(&fixture.db)));
+        let file_observer_trait: Arc<dyn GenerationFileLifecycleObserver> = file_observer.clone();
+        let error = continue_precreated_generation_after_provider(
+            fixture.db.as_ref(),
+            &response_store,
+            &FakeLocalDecoder {
+                calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes(), jpeg_bytes()],
+            },
+            &ObservedLocalFileStore {
+                root: fixture.file_root(),
+                observer: file_observer_trait,
+                path_observer: Arc::clone(&file_observer),
+            },
+            &fixture.snapshot,
+            body,
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect_err("injected SQL fault must roll back the whole success projection");
+        assert!(matches!(
+            &error,
+            GenerationExecutionError::Local { code, stage, .. }
+                if code == "database_error" && stage == "success_commit"
+        ));
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.promote_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.disarm_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(file_observer.cleanup_calls.load(Ordering::SeqCst), 1);
+        assert!(file_observer.all_unlocked.load(Ordering::SeqCst));
+        assert!(
+            file_observer
+                .cleanup_saw_all_promoted_paths
+                .load(Ordering::SeqCst),
+            "cleanup hook must see files that were promoted before SQL"
+        );
+        let promoted_paths = file_observer
+            .expected_final_paths
+            .get()
+            .expect("staging records immutable final paths")
+            .clone();
+        assert_eq!(promoted_paths.len(), 4);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+
+        let conn = fixture.db.conn.lock().unwrap();
+        let (job_status, generation_status, state, response_file, metadata): (
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT j.status, g.status, r.request_state, r.response_file, g.request_metadata
+                 FROM generation_jobs j
+                 JOIN generations g ON g.id = j.generation_id
+                 JOIN generation_recoveries r ON r.generation_id = g.id
+                 WHERE j.id = ?1",
+                params![fixture.snapshot.context.job_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        let image_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
+                params![fixture.snapshot.context.generation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            (job_status.as_str(), generation_status.as_str()),
+            ("running", "running")
+        );
+        assert_eq!(state, "response_ready");
+        assert!(response_file.is_some());
+        assert_eq!(image_count, 0);
+        let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert!(metadata.get("actual_image_count").is_none());
+        drop(conn);
+        let response_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
+            .unwrap();
+        response_store
+            .load_verified_response(&fixture.snapshot.context, &response_path)
+            .await
+            .expect("paid response remains available for local recovery");
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn finalizer_sql_failure_rolls_back_recovery_and_both_terminal_rows() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let response_store = fixture.response_store();
+        let response = response_store
+            .persist_verified_response(
+                &fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .unwrap();
+        promote_verified_response(fixture.db.as_ref(), &fixture.snapshot.context, &response)
+            .unwrap();
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_terminal_generation
+                 BEFORE UPDATE OF status ON generations
+                 WHEN NEW.status = 'failed'
+                 BEGIN SELECT RAISE(ABORT, 'injected terminal failure'); END;",
+            )
+            .unwrap();
+        }
+        let raw_secret = "sk-finalizer-rollback-secret";
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: raw_secret.to_string(),
+            stage: "response_decode".to_string(),
+        };
+        let error = finalize_generation_failure(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: false,
+            },
+        )
+        .expect_err("terminal SQL fault must roll back recovery deletion and job update");
+        assert_eq!(error.stable_code(), "database_error");
+
+        let conn = fixture.db.conn.lock().unwrap();
+        let (job_status, job_error, generation_status, generation_error, state, path): (
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT j.status, j.error_message, g.status, g.error_message,
+                        r.request_state, r.response_file
+                 FROM generation_jobs j
+                 JOIN generations g ON g.id = j.generation_id
+                 JOIN generation_recoveries r ON r.generation_id = g.id
+                 WHERE j.id = ?1",
+                params![fixture.snapshot.context.job_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            (job_status.as_str(), generation_status.as_str()),
+            ("running", "running")
+        );
+        assert_eq!((job_error, generation_error), (None, None));
+        assert_eq!(state, "response_ready");
+        assert_eq!(path.as_deref(), Some(response.response_file.as_str()));
+        assert!(!format!("{path:?}").contains(raw_secret));
+        drop(conn);
+        response_store
+            .load_verified_response(
+                &fixture.snapshot.context,
+                Path::new(&response.response_file),
+            )
+            .await
+            .expect("finalizer rollback never deletes the response artifact");
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn cancel_first_rejects_success_cleans_files_then_explicitly_acknowledges() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let engine_calls = Arc::new(AtomicUsize::new(0));
+        let decoder_calls = Arc::new(AtomicUsize::new(0));
+        let body = perform_provider_http_attempt(
+            &FakeCoreEngine {
+                calls: Arc::clone(&engine_calls),
+                outcome: CoreEngineOutcome::Success,
+            },
+            &fixture.snapshot,
+            &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+        )
+        .await
+        .unwrap();
+        let file_observer = Arc::new(DbLockFileObserver::new(Arc::clone(&fixture.db)));
+        let file_observer_trait: Arc<dyn GenerationFileLifecycleObserver> = file_observer.clone();
+        let outcome = continue_precreated_generation_after_provider(
+            fixture.db.as_ref(),
+            &fixture.response_store(),
+            &OrderedDatabaseDecoder {
+                db: Arc::clone(&fixture.db),
+                db_path: fixture.db_path.clone(),
+                job_id: fixture.snapshot.context.job_id.clone(),
+                generation_id: fixture.snapshot.context.generation_id.clone(),
+                engine_calls: Arc::clone(&engine_calls),
+                decoder_calls: Arc::clone(&decoder_calls),
+                images: vec![jpeg_bytes()],
+                request_cancel: true,
+            },
+            &ObservedLocalFileStore {
+                root: fixture.file_root(),
+                observer: file_observer_trait,
+                path_observer: Arc::clone(&file_observer),
+            },
+            &fixture.snapshot,
+            body,
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect("cancel-first is a typed local outcome");
+        assert!(matches!(outcome, PrecreatedLocalOutcome::CancelRequested));
+        assert_eq!(engine_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decoder_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.promote_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.disarm_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(file_observer.cleanup_calls.load(Ordering::SeqCst), 1);
+        assert!(file_observer.all_unlocked.load(Ordering::SeqCst));
+        assert_eq!(fixture.row_count("images"), 0);
+        let cancel_error = GenerationExecutionError::Local {
+            code: "cancelled_by_user".to_string(),
+            sanitized_message: "The generation was cancelled".to_string(),
+            stage: "cancellation".to_string(),
+        };
+        finalize_generation_failure(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &cancel_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Cancelled,
+                error_code: "cancelled_by_user".to_string(),
+                retryable: false,
+                preserve_response_ready: false,
+            },
+        )
+        .expect("acknowledge cancel after file cleanup");
+        let conn = fixture.db.conn.lock().unwrap();
+        let job = get_job(&conn, &fixture.snapshot.context.job_id).unwrap();
+        assert_eq!(job.status, GenerationJobStatus::Cancelled);
+        drop(conn);
+        assert_eq!(fixture.row_count("generation_recoveries"), 0);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn edit_source_revalidation_rejects_deleted_replaced_and_symlinked_inputs_before_engine()
+    {
+        enum Mutation {
+            Delete,
+            Replace,
+            #[cfg(unix)]
+            Symlink,
+        }
+
+        let mutations = [
+            Mutation::Delete,
+            Mutation::Replace,
+            #[cfg(unix)]
+            Mutation::Symlink,
+        ];
+        for mutation in mutations {
+            let source_root = std::env::temp_dir().join(format!(
+                "astro-studio-edit-revalidation-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&source_root).unwrap();
+            let source = source_root.join("source.jpg");
+            std::fs::write(&source, jpeg_bytes()).unwrap();
+            let persisted_path = match mutation {
+                #[cfg(unix)]
+                Mutation::Symlink => {
+                    use std::os::unix::fs::symlink;
+                    let link = source_root.join("source-link.jpg");
+                    symlink(&source, &link).unwrap();
+                    link.to_string_lossy().to_string()
+                }
+                _ => source.canonicalize().unwrap().to_string_lossy().to_string(),
+            };
+            let fixture = PrecreatedTestFixture::new_with_request(
+                1,
+                GenerationJobRequestKind::Edit,
+                vec![persisted_path],
+            );
+            match mutation {
+                Mutation::Delete => std::fs::remove_file(&source).unwrap(),
+                Mutation::Replace => std::fs::write(&source, b"not an image").unwrap(),
+                #[cfg(unix)]
+                Mutation::Symlink => {}
+            }
+            let calls = Arc::new(AtomicUsize::new(0));
+            let error = match perform_provider_http_attempt(
+                &FakeCoreEngine {
+                    calls: Arc::clone(&calls),
+                    outcome: CoreEngineOutcome::Success,
+                },
+                &fixture.snapshot,
+                &ProviderExecutionCredentials::new("ephemeral-secret".to_string()),
+            )
+            .await
+            {
+                Err(error) => error,
+                Ok(_) => panic!("invalid persisted edit source must fail before provider"),
+            };
+            assert_eq!(error.code(), "source_image_invalid");
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            fixture.cleanup();
+            std::fs::remove_dir_all(source_root).ok();
+        }
+    }
+
+    #[tokio::test]
+    async fn cross_wired_success_images_are_rejected_without_mutation() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let other = PrecreatedTestFixture::new(1);
+        let response = fixture
+            .response_store()
+            .persist_verified_response(
+                &fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .unwrap();
+        promote_verified_response(fixture.db.as_ref(), &fixture.snapshot.context, &response)
+            .unwrap();
+        let image = GeneratedImage {
+            id: "cross-wired-image".to_string(),
+            generation_id: other.snapshot.context.generation_id.clone(),
+            file_path: "/managed/cross-wired.png".to_string(),
+            thumbnail_path: "/managed/cross-wired-thumb.png".to_string(),
+            width: 4,
+            height: 4,
+            file_size: 128,
+        };
+        let error = {
+            let mut conn = fixture.db.conn.lock().unwrap();
+            let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+            let error = commit_generation_success_in_transaction(
+                &tx,
+                &fixture.snapshot.context,
+                &fixture.snapshot.request,
+                &[image],
+            )
+            .expect_err("cross-wired image projection must fail");
+            tx.rollback().unwrap();
+            error
+        };
+        assert_eq!(error.stable_code(), "generation_job_invalid_snapshot");
+        assert_eq!(fixture.row_count("images"), 0);
+        assert_eq!(fixture.row_count("generation_recoveries"), 1);
+        let conn = fixture.db.conn.lock().unwrap();
+        assert_eq!(
+            get_job(&conn, &fixture.snapshot.context.job_id)
+                .unwrap()
+                .status,
+            GenerationJobStatus::Running
+        );
+        drop(conn);
+        fixture.cleanup();
+        other.cleanup();
     }
 
     #[async_trait::async_trait]
@@ -1522,9 +3371,7 @@ mod tests {
 
         assert_eq!(
             Path::new(&response.response_file),
-            root.canonicalize()
-                .expect("canonical response root")
-                .join("generation-jobs")
+            root.join("generation-jobs")
                 .join("job-1")
                 .join("generation-1.response.json")
         );
@@ -1845,6 +3692,10 @@ mod tests {
     async fn provider_attempt_uses_snapshot_once_then_hands_raw_body_to_artifact_store() {
         let engine_calls = Arc::new(AtomicUsize::new(0));
         let artifact_calls = Arc::new(AtomicUsize::new(0));
+        let artifact_root = std::env::temp_dir().join(format!(
+            "astro-studio-fake-artifact-store-{}",
+            uuid::Uuid::new_v4()
+        ));
         let body = perform_provider_http_attempt(
             &FakeSingleAttemptEngine {
                 calls: Arc::clone(&engine_calls),
@@ -1860,6 +3711,7 @@ mod tests {
         let response = persist_provider_attempt_response(
             &FakeArtifactStore {
                 calls: Arc::clone(&artifact_calls),
+                root: artifact_root.clone(),
             },
             &fixture_execution_snapshot(),
             body,
@@ -1869,6 +3721,7 @@ mod tests {
 
         assert_eq!(artifact_calls.load(Ordering::SeqCst), 1);
         assert_eq!(response.requested_image_count, 2);
+        std::fs::remove_dir_all(artifact_root).ok();
     }
 
     #[tokio::test]

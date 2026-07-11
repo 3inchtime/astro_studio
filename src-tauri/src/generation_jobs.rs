@@ -2333,6 +2333,63 @@ pub(crate) fn load_generation_execution_snapshot_in_transaction(
     })
 }
 
+/// Records the actual number of persisted images without weakening the typed
+/// canonical metadata contract. Callers must insert every image row first and
+/// keep the surrounding transaction open until the terminal job transition
+/// validates the completed projection.
+pub(crate) fn set_actual_image_count_in_transaction(
+    tx: &Transaction<'_>,
+    generation_id: &str,
+    actual_image_count: u8,
+) -> Result<(), AppError> {
+    let (status, requested_image_count, raw_metadata): (String, i32, String) = tx
+        .query_row(
+            "SELECT status, image_count, request_metadata
+             FROM generations WHERE id = ?1",
+            params![generation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|error| persisted_row_error("Read generation metadata failed", error))?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let mut metadata: CanonicalGenerationMetadata = serde_json::from_str(&raw_metadata)
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    let requested_image_count = u8::try_from(requested_image_count)
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    if status != "running"
+        || metadata.image_count != requested_image_count
+        || metadata.actual_image_count.is_some()
+        || !(1..=requested_image_count).contains(&actual_image_count)
+    {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    let stored_image_count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
+            params![generation_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| database_error("Count completed generation images failed", error))?;
+    if stored_image_count != i64::from(actual_image_count) {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+
+    metadata.actual_image_count = Some(actual_image_count);
+    let encoded_metadata =
+        serde_json::to_string(&metadata).map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
+    let updated = tx
+        .execute(
+            "UPDATE generations SET request_metadata = ?1
+             WHERE id = ?2 AND status = 'running' AND request_metadata = ?3",
+            params![encoded_metadata, generation_id, raw_metadata],
+        )
+        .map_err(|error| database_error("Record actual generation image count failed", error))?;
+    if updated != 1 {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    Ok(())
+}
+
 pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJob, AppError> {
     let tx = conn
         .unchecked_transaction()
