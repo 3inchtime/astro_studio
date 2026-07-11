@@ -65,7 +65,12 @@ impl AutomaticRetryPolicy {
         now: DateTime<Utc>,
         jitter: Duration,
     ) -> Option<Duration> {
-        if !error.safe_to_retry
+        let code_is_automatically_retryable = matches!(
+            error.code.as_str(),
+            "rate_limited" | "provider_unavailable" | "network_before_response"
+        );
+        if !code_is_automatically_retryable
+            || !error.safe_to_retry
             || error.outcome_ambiguous
             || auto_attempt < 0
             || max_auto_attempts < 0
@@ -99,6 +104,46 @@ impl AutomaticRetryPolicy {
         };
 
         (delay <= self.max_delay).then_some(delay)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProviderFailureAction {
+    RetryAfter(Duration),
+    Terminal {
+        status: GenerationJobStatus,
+        retryable: bool,
+    },
+}
+
+pub(crate) fn provider_failure_action(
+    policy: &AutomaticRetryPolicy,
+    error: &EngineCallError,
+    auto_attempt: i32,
+    max_auto_attempts: i32,
+    now: DateTime<Utc>,
+    jitter: Duration,
+) -> ProviderFailureAction {
+    if let Some(delay) = policy.delay(error, auto_attempt, max_auto_attempts, now, jitter) {
+        return ProviderFailureAction::RetryAfter(delay);
+    }
+
+    let retryable = error.safe_to_retry
+        || error.outcome_ambiguous
+        || matches!(
+            error.code.as_str(),
+            "rate_limited"
+                | "provider_unavailable"
+                | "network_before_response"
+                | "provider_outcome_unknown"
+        );
+    ProviderFailureAction::Terminal {
+        status: if error.outcome_ambiguous {
+            GenerationJobStatus::Interrupted
+        } else {
+            GenerationJobStatus::Failed
+        },
+        retryable,
     }
 }
 
@@ -257,6 +302,18 @@ mod tests {
             ),
             None
         );
+        let future_safe_classification = EngineCallError {
+            code: "future_safe_classification".to_string(),
+            sanitized_message: "A future provider failure".to_string(),
+            retry_after: None,
+            safe_to_retry: true,
+            outcome_ambiguous: false,
+        };
+        assert_eq!(
+            retry_policy().delay(&future_safe_classification, 0, 2, now, Duration::ZERO,),
+            None,
+            "new error codes require an explicit automatic-retry policy decision"
+        );
     }
 
     #[test]
@@ -284,6 +341,62 @@ mod tests {
                 Duration::from_nanos(1),
             ),
             None
+        );
+    }
+
+    #[test]
+    fn provider_failure_policy_separates_auto_retry_from_manual_retryability() {
+        let now = fixed_now();
+        let automatic =
+            EngineCallError::from_http_status(429, Some(RetryAfterHint::DelaySeconds(3)));
+        assert_eq!(
+            provider_failure_action(&retry_policy(), &automatic, 0, 2, now, Duration::ZERO,),
+            ProviderFailureAction::RetryAfter(Duration::from_secs(3))
+        );
+
+        let ambiguous = EngineCallError::provider_outcome_unknown("closed after send");
+        assert_eq!(
+            provider_failure_action(&retry_policy(), &ambiguous, 0, 2, now, Duration::ZERO,),
+            ProviderFailureAction::Terminal {
+                status: GenerationJobStatus::Interrupted,
+                retryable: true,
+            }
+        );
+
+        for manually_retryable in [
+            EngineCallError::from_http_status(429, Some(RetryAfterHint::Invalid)),
+            EngineCallError::from_http_status(503, Some(RetryAfterHint::DelaySeconds(61))),
+            EngineCallError::network_before_response(),
+        ] {
+            assert_eq!(
+                provider_failure_action(
+                    &retry_policy(),
+                    &manually_retryable,
+                    2,
+                    2,
+                    now,
+                    Duration::ZERO,
+                ),
+                ProviderFailureAction::Terminal {
+                    status: GenerationJobStatus::Failed,
+                    retryable: true,
+                }
+            );
+        }
+
+        assert_eq!(
+            provider_failure_action(
+                &retry_policy(),
+                &EngineCallError::request_rejected(),
+                0,
+                2,
+                now,
+                Duration::ZERO,
+            ),
+            ProviderFailureAction::Terminal {
+                status: GenerationJobStatus::Failed,
+                retryable: false,
+            }
         );
     }
 }
