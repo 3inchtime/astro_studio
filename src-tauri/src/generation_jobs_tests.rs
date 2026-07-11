@@ -193,6 +193,42 @@ fn count_table(conn: &Connection, table: &str) -> i64 {
     .expect("count fixture table")
 }
 
+fn move_generation_conversation(
+    fixture: &JobFixture,
+    generation_id: &str,
+    moved_project_id: &str,
+    delete_original_project: bool,
+) -> String {
+    let conn = fixture.database.conn.lock().expect("lock database");
+    conn.execute(
+        "INSERT INTO projects (id, name) VALUES (?1, 'Moved Project')",
+        params![moved_project_id],
+    )
+    .expect("insert moved project");
+    let conversation_id = conn
+        .query_row(
+            "SELECT conversation_id FROM generations WHERE id = ?1",
+            params![generation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("read generation conversation");
+    conn.execute(
+        "UPDATE conversations SET project_id = ?1, updated_at = '2026-07-10T00:00:01Z'
+         WHERE id = ?2 AND deleted_at IS NULL",
+        params![moved_project_id, conversation_id],
+    )
+    .expect("move conversation");
+    if delete_original_project {
+        conn.execute(
+            "UPDATE projects SET deleted_at = '2026-07-10T00:00:01Z'
+             WHERE id = 'default'",
+            [],
+        )
+        .expect("soft-delete original project");
+    }
+    conversation_id
+}
+
 fn stable_code(error: &AppError) -> &'static str {
     error.stable_code()
 }
@@ -477,6 +513,176 @@ fn existing_conversation_project_overrides_mismatched_requested_project_everywhe
     let metadata: Value = serde_json::from_str(&metadata_json).expect("parse metadata");
     assert_eq!(metadata["conversation_id"], json!("conversation-1"));
     assert_eq!(metadata["project_id"], json!("actual-project"));
+}
+
+#[test]
+fn moving_conversation_preserves_immutable_job_snapshot_across_repository_operations() {
+    let queued_fixture = JobFixture::new();
+    let queued_request = queued_fixture.prepared("move-queued", "move-queued");
+    let queued_result = queued_fixture
+        .enqueue_prepared(&queued_request)
+        .expect("enqueue queued move fixture");
+    let conversation_id = move_generation_conversation(
+        &queued_fixture,
+        &queued_result.generation_id,
+        "moved-project",
+        true,
+    );
+
+    {
+        let conn = queued_fixture.database.conn.lock().expect("lock database");
+        let job = get_job(&conn, &queued_result.job_id).expect("get moved queued job");
+        assert_eq!(job.request["conversation_id"], json!(conversation_id));
+        assert_eq!(job.request["project_id"], json!("default"));
+        assert_eq!(job.source_ref["project_id"], json!("default"));
+        assert_eq!(
+            list_jobs(
+                &conn,
+                &GenerationJobFilter {
+                    generation_id: Some(queued_result.generation_id.clone()),
+                    ..GenerationJobFilter::default()
+                },
+            )
+            .expect("list moved queued job")
+            .items
+            .len(),
+            1
+        );
+        assert_eq!(
+            find_enqueue_result_by_client_request_id(&conn, "move-queued")
+                .expect("ack moved queued job")
+                .expect("moved enqueue result")
+                .conversation_id,
+            conversation_id
+        );
+    }
+
+    let replay = queued_fixture
+        .enqueue_prepared(&queued_request)
+        .expect("idempotently replay moved queued job");
+    assert_eq!(replay.job_id, queued_result.job_id);
+    assert_eq!(
+        queued_fixture.claim().expect("claim moved queued job").id,
+        queued_result.job_id
+    );
+
+    let cancelled_fixture = JobFixture::new();
+    let cancelled = cancelled_fixture.enqueue("move-cancel", "move-cancel");
+    move_generation_conversation(
+        &cancelled_fixture,
+        &cancelled.generation_id,
+        "cancelled-moved-project",
+        false,
+    );
+    let cancelled_job = {
+        let conn = cancelled_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock database");
+        request_cancel(&conn, &cancelled.id).expect("cancel moved queued job")
+    };
+    assert_eq!(cancelled_job.status, GenerationJobStatus::Cancelled);
+
+    let running_fixture = JobFixture::new();
+    let running = running_fixture.enqueue("move-running", "move-running");
+    running_fixture.claim().expect("claim running move fixture");
+    move_generation_conversation(
+        &running_fixture,
+        &running.generation_id,
+        "running-moved-project",
+        false,
+    );
+    let finished = {
+        let conn = running_fixture.database.conn.lock().expect("lock database");
+        finish_job(
+            &conn,
+            &GenerationJobTerminalUpdate {
+                job_id: running.id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Failed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: Some("provider_unavailable".to_string()),
+                error_message: Some("raw provider detail must be ignored".to_string()),
+                retryable: true,
+            },
+        )
+        .expect("finish moved running job")
+    };
+    assert_eq!(finished.status, GenerationJobStatus::Failed);
+
+    let retry = {
+        let mut conn = running_fixture.database.conn.lock().expect("lock database");
+        create_retry_job(&mut conn, &finished.id, "move-running-retry")
+            .expect("retry moved terminal job")
+    };
+    let retry_job = running_fixture.get(&retry.job_id);
+    assert_eq!(retry_job.request["project_id"], json!("default"));
+    assert_eq!(retry_job.source_ref["project_id"], json!("default"));
+
+    let running_cancel_fixture = JobFixture::new();
+    let running_cancel =
+        running_cancel_fixture.enqueue("move-running-cancel", "move-running-cancel");
+    running_cancel_fixture
+        .claim()
+        .expect("claim running cancellation fixture");
+    move_generation_conversation(
+        &running_cancel_fixture,
+        &running_cancel.generation_id,
+        "running-cancel-moved-project",
+        false,
+    );
+    let cancel_requested = {
+        let conn = running_cancel_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock database");
+        request_cancel(&conn, &running_cancel.id).expect("request moved running cancellation")
+    };
+    assert_eq!(cancel_requested.status, GenerationJobStatus::Running);
+    assert!(cancel_requested.cancel_requested_at.is_some());
+    let cancelled = {
+        let conn = running_cancel_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock database");
+        finish_job(
+            &conn,
+            &GenerationJobTerminalUpdate {
+                job_id: running_cancel.id,
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Cancelled,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            },
+        )
+        .expect("acknowledge moved running cancellation")
+    };
+    assert_eq!(cancelled.status, GenerationJobStatus::Cancelled);
+
+    let deleted_conversation_fixture = JobFixture::new();
+    let deleted_conversation =
+        deleted_conversation_fixture.enqueue("deleted-conversation", "deleted-conversation");
+    {
+        let conn = deleted_conversation_fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock database");
+        conn.execute(
+            "UPDATE conversations SET deleted_at = '2026-07-10T00:00:03Z'
+             WHERE id = (SELECT conversation_id FROM generations WHERE id = ?1)",
+            params![deleted_conversation.generation_id],
+        )
+        .expect("soft-delete linked conversation");
+        let error = get_job(&conn, &deleted_conversation.id)
+            .expect_err("deleted linked conversation remains corrupt");
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+    }
 }
 
 #[test]
@@ -1135,7 +1341,6 @@ fn claim_rejects_every_linked_generation_and_requesting_recovery_mismatch() {
         "UPDATE generations SET status = 'pending' WHERE id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1')",
         "UPDATE generations SET created_at = '2026-07-10T00:00:01Z' WHERE id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1')",
         "UPDATE generations SET deleted_at = '2026-07-10T00:00:01Z' WHERE id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1')",
-        "INSERT INTO projects (id, name) VALUES ('other-project', 'Other'); UPDATE conversations SET project_id = 'other-project' WHERE id = (SELECT conversation_id FROM generations WHERE id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1'))",
         "INSERT INTO conversations (id, project_id, title) VALUES ('other-conversation', 'default', 'Other'); UPDATE generations SET conversation_id = 'other-conversation' WHERE id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1')",
         "DELETE FROM generation_recoveries WHERE generation_id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1')",
         "UPDATE generation_recoveries SET request_kind = 'edit' WHERE generation_id = (SELECT generation_id FROM generation_jobs WHERE client_request_id = 'request-1')",

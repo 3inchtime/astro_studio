@@ -669,10 +669,27 @@ fn resolved_conversation_identity(
     })
 }
 
-fn conversation_identity_for_generation(
+fn live_conversation_id(conn: &Connection, conversation_id: &str) -> Result<String, AppError> {
+    let conversation = conn
+        .query_row(
+            "SELECT id, typeof(id) FROM conversations
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![conversation_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| persisted_row_error("Read live conversation failed", error))?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    if conversation.1 != "text" || !source_reference_id_valid(&conversation.0) {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+    Ok(conversation.0)
+}
+
+fn conversation_id_for_generation(
     conn: &Connection,
     generation_id: &str,
-) -> Result<ResolvedConversationIdentity, AppError> {
+) -> Result<String, AppError> {
     let conversation = conn
         .query_row(
             "SELECT conversation_id, typeof(conversation_id) FROM generations WHERE id = ?1",
@@ -689,7 +706,7 @@ fn conversation_identity_for_generation(
         .0
         .filter(|conversation_id| nonempty(conversation_id))
         .ok_or(AppError::GenerationJobCorruptPersistedData)?;
-    resolved_conversation_identity(conn, &conversation_id)
+    live_conversation_id(conn, &conversation_id)
 }
 
 fn load_linked_generation(
@@ -796,7 +813,7 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
         .as_deref()
         .filter(|value| nonempty(value) && public_string_is_safe(value))
         .ok_or(AppError::GenerationJobCorruptPersistedData)?;
-    let identity = resolved_conversation_identity(conn, conversation_id)?;
+    let linked_conversation_id = live_conversation_id(conn, conversation_id)?;
     let source_image_paths: Vec<String> = serde_json::from_str(&generation.source_image_paths_json)
         .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
     let metadata: CanonicalGenerationMetadata = generation
@@ -829,8 +846,8 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
             .iter()
             .all(|path| nonempty(path) && public_string_is_safe(path));
     let metadata_matches = metadata.request_kind == request.kind
-        && metadata.conversation_id == identity.conversation_id
-        && metadata.project_id == identity.project_id
+        && metadata.conversation_id == linked_conversation_id
+        && metadata.project_id == request.project_id
         && metadata.model == generation.model
         && metadata.size == generation.size
         && metadata.quality == generation.quality
@@ -849,8 +866,7 @@ fn validate_job_projection(conn: &Connection, job: &GenerationJob) -> Result<(),
             .options
             .partial_images
             .is_none_or(|value| metadata.partial_images == value);
-    let request_matches = request.conversation_id == identity.conversation_id
-        && request.project_id == identity.project_id
+    let request_matches = request.conversation_id == linked_conversation_id
         && request.prompt == generation.prompt
         && request.model == generation.model
         && request.kind.as_str() == generation.request_kind
@@ -936,16 +952,14 @@ fn enqueue_result_for_job(
 ) -> Result<EnqueueGenerationResult, AppError> {
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
         .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
-    let identity = conversation_identity_for_generation(conn, &job.generation_id)?;
-    if request.conversation_id != identity.conversation_id
-        || request.project_id != identity.project_id
-    {
+    let conversation_id = conversation_id_for_generation(conn, &job.generation_id)?;
+    if request.conversation_id != conversation_id {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
     Ok(EnqueueGenerationResult {
         job_id: job.id.clone(),
         generation_id: job.generation_id.clone(),
-        conversation_id: identity.conversation_id,
+        conversation_id,
         status: job.status.clone(),
         retryable: job.retryable,
         cancel_requested_at: job.cancel_requested_at.clone(),
@@ -2072,10 +2086,10 @@ fn load_retry_generation(
         .14
         .filter(|conversation_id| nonempty(conversation_id))
         .ok_or(AppError::GenerationJobCorruptPersistedData)?;
-    let identity = resolved_conversation_identity(conn, &conversation_id)?;
+    let linked_conversation_id = live_conversation_id(conn, &conversation_id)?;
     let metadata_matches_generation = request_metadata.request_kind.as_str() == raw.2
-        && request_metadata.conversation_id == conversation_id
-        && request_metadata.project_id == identity.project_id
+        && request_metadata.conversation_id == linked_conversation_id
+        && source_reference_id_valid(&request_metadata.project_id)
         && request_metadata.model == raw.1
         && request_metadata.size == raw.3
         && request_metadata.quality == raw.4
@@ -2106,7 +2120,7 @@ fn load_retry_generation(
         source_image_paths,
         status: raw.13,
         conversation_id,
-        project_id: identity.project_id,
+        project_id: request_metadata.project_id,
     })
 }
 
