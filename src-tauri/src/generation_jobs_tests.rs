@@ -1,11 +1,154 @@
 use super::*;
 use crate::db::Database;
 use crate::error::AppError;
+use crate::generation_worker_lease::{
+    acquire_worker_lease, WorkerLeaseAcquireOutcome, WorkerLeaseError, WorkerTransitionAuthority,
+};
 use crate::models::{GenerationJobFilter, GenerationJobStage, GenerationJobStatus};
 use rusqlite::{params, Connection};
 use serde_json::json;
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+const WORKER_NOW_MS: i64 = 1_783_872_000_000;
+const WORKER_NOW_TIMESTAMP: &str = "2026-07-12T16:00:00Z";
+
+fn acquire_test_worker(
+    conn: &Connection,
+    owner_id: &str,
+    now_ms: i64,
+    ttl: Duration,
+) -> WorkerTransitionAuthority {
+    match acquire_worker_lease(conn, owner_id, now_ms, ttl).expect("acquire test worker lease") {
+        WorkerLeaseAcquireOutcome::Acquired { authority, .. } => authority,
+        WorkerLeaseAcquireOutcome::Held { expires } => {
+            panic!("expected worker lease acquisition, held until {expires}")
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WorkerDatabaseSnapshot {
+    jobs: Vec<WorkerJobSnapshot>,
+    generations: Vec<(String, String)>,
+    recoveries: Vec<WorkerRecoverySnapshot>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WorkerJobSnapshot {
+    id: String,
+    status: String,
+    stage: String,
+    auto_attempt: i32,
+    started_at: Option<String>,
+    last_heartbeat_at: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WorkerRecoverySnapshot {
+    generation_id: String,
+    request_state: String,
+    expected_response_file: Option<String>,
+    response_file: Option<String>,
+    response_size: Option<i64>,
+    response_sha256: Option<String>,
+}
+
+fn worker_database_snapshot(conn: &Connection) -> WorkerDatabaseSnapshot {
+    let jobs = conn
+        .prepare(
+            "SELECT id, status, stage, auto_attempt, started_at, last_heartbeat_at
+               FROM generation_jobs ORDER BY id",
+        )
+        .expect("prepare worker job snapshot")
+        .query_map([], |row| {
+            Ok(WorkerJobSnapshot {
+                id: row.get(0)?,
+                status: row.get(1)?,
+                stage: row.get(2)?,
+                auto_attempt: row.get(3)?,
+                started_at: row.get(4)?,
+                last_heartbeat_at: row.get(5)?,
+            })
+        })
+        .expect("query worker job snapshot")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("decode worker job snapshot");
+    let generations = conn
+        .prepare("SELECT id, status FROM generations ORDER BY id")
+        .expect("prepare worker generation snapshot")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query worker generation snapshot")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("decode worker generation snapshot");
+    let recoveries = conn
+        .prepare(
+            "SELECT generation_id, request_state, expected_response_file, response_file,
+                    response_size, response_sha256
+               FROM generation_recoveries ORDER BY generation_id",
+        )
+        .expect("prepare worker recovery snapshot")
+        .query_map([], |row| {
+            Ok(WorkerRecoverySnapshot {
+                generation_id: row.get(0)?,
+                request_state: row.get(1)?,
+                expected_response_file: row.get(2)?,
+                response_file: row.get(3)?,
+                response_size: row.get(4)?,
+                response_sha256: row.get(5)?,
+            })
+        })
+        .expect("query worker recovery snapshot")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("decode worker recovery snapshot");
+    WorkerDatabaseSnapshot {
+        jobs,
+        generations,
+        recoveries,
+    }
+}
+
+fn assert_worker_transition_lease_lost<T>(result: Result<T, WorkerTransitionError>) {
+    assert!(matches!(
+        result,
+        Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+    ));
+}
+
+fn prepare_fenced_retry_backoff(
+    conn: &Connection,
+    job: &crate::models::GenerationJob,
+    authority: &WorkerTransitionAuthority,
+) {
+    let claimed = claim_next_job_fenced_with_event(conn, authority, WORKER_NOW_MS)
+        .expect("claim retry fixture")
+        .expect("retry fixture exists");
+    assert_eq!(claimed.value.id, job.id);
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", job.generation_id));
+    transition_running_job_stage_with_event(
+        conn,
+        &job.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("begin provider request for retry fixture");
+    transition_running_job_stage_with_event(
+        conn,
+        &job.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("enter retry backoff fixture");
+}
 
 struct TestDatabaseDirectory(PathBuf);
 
@@ -1384,6 +1527,1180 @@ fn persisted_generation_matches_normalized_snapshot_and_job_timestamp() {
     );
     assert_eq!(persisted.16, request.queued_at);
     assert_eq!(result.queued_at, request.queued_at);
+}
+
+#[test]
+fn fenced_claim_uses_explicit_time_and_returns_the_committed_fifo_event() {
+    let fixture = JobFixture::new();
+    let first = fixture.enqueue("fenced-claim-first", "fenced-claim-first");
+    let second = fixture.enqueue("fenced-claim-second", "fenced-claim-second");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "fenced-claim-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+
+    let transition = claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim with current fenced authority")
+        .expect("queued job must be claimed");
+
+    assert_eq!(transition.value.id, first.id);
+    assert_eq!(transition.value.status, GenerationJobStatus::Running);
+    assert_eq!(transition.value.stage, GenerationJobStage::Preparing);
+    assert_eq!(
+        transition.value.started_at.as_deref(),
+        Some(WORKER_NOW_TIMESTAMP)
+    );
+    assert_eq!(
+        transition.value.last_heartbeat_at.as_deref(),
+        Some(WORKER_NOW_TIMESTAMP)
+    );
+    let event = transition
+        .event
+        .expect("claim must return a committed event");
+    assert_eq!(event.job_id, first.id);
+    assert_eq!(event.status, GenerationJobStatus::Running);
+    assert_eq!(event.stage, GenerationJobStage::Preparing);
+    assert_eq!(event.started_at.as_deref(), Some(WORKER_NOW_TIMESTAMP));
+    drop(conn);
+    assert_eq!(fixture.generation_status(&first.generation_id), "running");
+    assert_eq!(fixture.get(&second.id).status, GenerationJobStatus::Queued);
+}
+
+#[test]
+fn fenced_claim_rejects_a_worker_time_before_the_queued_timestamp_without_mutation() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("claim-time-regression", "claim-time-regression");
+    let before_queue_ms = chrono::DateTime::parse_from_rfc3339("2026-07-09T23:59:59Z")
+        .expect("parse before-queue timestamp")
+        .timestamp_millis();
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "claim-time-worker",
+        before_queue_ms,
+        Duration::from_secs(60),
+    );
+
+    let error = claim_next_job_fenced_with_event(&conn, &authority, before_queue_ms)
+        .expect_err("claim time before queue must fail");
+    assert!(matches!(
+        error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    let persisted: (String, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT j.status, g.status, j.started_at, j.last_heartbeat_at
+               FROM generation_jobs j
+               JOIN generations g ON g.id = j.generation_id
+              WHERE j.id = ?1",
+            params![queued.id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read claim time-regression state");
+    assert_eq!(persisted, ("queued".into(), "queued".into(), None, None));
+}
+
+#[test]
+fn fenced_transition_time_rejects_negative_and_out_of_chrono_range_values_fail_closed() {
+    let fixture = JobFixture::new();
+    fixture.enqueue("invalid-worker-time", "invalid-worker-time");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "invalid-time-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    let baseline = worker_database_snapshot(&conn);
+
+    assert!(matches!(
+        claim_next_job_fenced_with_event(&conn, &authority, -1),
+        Err(WorkerTransitionError::Lease(
+            WorkerLeaseError::InvalidTiming
+        ))
+    ));
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+    assert!(matches!(
+        claim_next_job_fenced_with_event(&conn, &authority, i64::MAX),
+        Err(WorkerTransitionError::Lease(WorkerLeaseError::TimeOverflow))
+    ));
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
+fn begin_provider_request_atomically_persists_expected_response_path_and_stage_event() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("provider-stage", "provider-stage");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "provider-stage-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim provider-stage job")
+        .expect("provider-stage job exists");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+
+    let transition = transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path.clone(),
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("begin fenced provider request");
+
+    assert_eq!(transition.value.stage, GenerationJobStage::ProviderRequest);
+    assert_eq!(
+        transition.value.last_heartbeat_at.as_deref(),
+        Some("2026-07-12T16:00:01Z")
+    );
+    let event = transition
+        .event
+        .expect("provider stage change must return an event");
+    assert_eq!(event.stage, GenerationJobStage::ProviderRequest);
+    let recovery: (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT request_state, expected_response_file, response_file,
+                    response_size, response_sha256
+               FROM generation_recoveries WHERE generation_id = ?1",
+            params![queued.generation_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .expect("read provider recovery metadata");
+    assert_eq!(recovery.0, "requesting");
+    assert_eq!(recovery.1.as_deref(), expected_path.to_str());
+    assert_eq!((recovery.2, recovery.3, recovery.4), (None, None, None));
+}
+
+#[test]
+fn fenced_claim_and_provider_begin_require_empty_requesting_recovery_metadata() {
+    let claim_fixture = JobFixture::new();
+    let queued = claim_fixture.enqueue("claim-recovery-empty", "claim-recovery-empty");
+    let claim_conn = claim_fixture
+        .database
+        .conn
+        .lock()
+        .expect("lock claim recovery database");
+    let injected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+    claim_conn
+        .execute(
+            "UPDATE generation_recoveries SET expected_response_file = ?1
+              WHERE generation_id = ?2",
+            params![injected_path.to_str(), queued.generation_id],
+        )
+        .expect("inject queued expected path");
+    let claim_authority = acquire_test_worker(
+        &claim_conn,
+        "claim-recovery-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    let claim_baseline = worker_database_snapshot(&claim_conn);
+    let claim_error =
+        claim_next_job_fenced_with_event(&claim_conn, &claim_authority, WORKER_NOW_MS)
+            .expect_err("queued recovery metadata must be empty before fenced claim");
+    assert!(matches!(
+        claim_error,
+        WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+    ));
+    assert_eq!(worker_database_snapshot(&claim_conn), claim_baseline);
+
+    let provider_fixture = JobFixture::new();
+    let provider_job = provider_fixture.enqueue("provider-recovery-empty", "provider-empty");
+    let provider_conn = provider_fixture
+        .database
+        .conn
+        .lock()
+        .expect("lock provider recovery database");
+    let provider_authority = acquire_test_worker(
+        &provider_conn,
+        "provider-recovery-empty-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&provider_conn, &provider_authority, WORKER_NOW_MS)
+        .expect("claim provider-empty fixture")
+        .expect("provider-empty fixture exists");
+    provider_conn
+        .execute(
+            "UPDATE generation_recoveries SET response_size = 1 WHERE generation_id = ?1",
+            params![provider_job.generation_id],
+        )
+        .expect("inject requesting response metadata");
+    let provider_baseline = worker_database_snapshot(&provider_conn);
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", provider_job.generation_id));
+    let provider_error = transition_running_job_stage_with_event(
+        &provider_conn,
+        &provider_job.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &provider_authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect_err("requesting recovery metadata must be empty before provider begin");
+    assert!(matches!(
+        provider_error,
+        WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+    ));
+    assert_eq!(worker_database_snapshot(&provider_conn), provider_baseline);
+}
+
+#[test]
+fn fenced_stage_transition_rejects_time_before_the_last_job_heartbeat_and_rolls_back_recovery() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("stage-time-regression", "stage-time-regression");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "stage-time-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS + 5_000)
+        .expect("claim stage-time job")
+        .expect("stage-time job exists");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+
+    let error = transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        WORKER_NOW_MS + 4_000,
+    )
+    .expect_err("stage time before heartbeat must fail");
+    assert!(matches!(
+        error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    let persisted: (String, Option<String>, String) = conn
+        .query_row(
+            "SELECT j.stage, r.expected_response_file, j.last_heartbeat_at
+               FROM generation_jobs j
+               JOIN generation_recoveries r ON r.generation_id = j.generation_id
+              WHERE j.id = ?1",
+            params![queued.id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read stage-time rollback state");
+    assert_eq!(
+        persisted,
+        (
+            "preparing".to_string(),
+            None,
+            "2026-07-12T16:00:05Z".to_string()
+        )
+    );
+}
+
+#[test]
+fn begin_provider_request_rejects_noncanonical_paths_without_mutation() {
+    for index in 0..6 {
+        let fixture = JobFixture::new();
+        let queued = fixture.enqueue(
+            &format!("invalid-provider-path-{index}"),
+            "invalid-provider-path",
+        );
+        let conn = fixture.database.conn.lock().expect("lock database");
+        let authority = acquire_test_worker(
+            &conn,
+            &format!("invalid-path-worker-{index}"),
+            WORKER_NOW_MS,
+            Duration::from_secs(60),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim invalid-path fixture")
+            .expect("invalid-path fixture exists");
+        let expected_filename = format!("{}.response.json", queued.generation_id);
+        let invalid_path = match index {
+            0 => PathBuf::from(&expected_filename),
+            1 => PathBuf::from(format!("/tmp/./{expected_filename}")),
+            2 => PathBuf::from(format!("/tmp/../{expected_filename}")),
+            3 => PathBuf::from(format!("/tmp/control\n/{expected_filename}")),
+            4 => PathBuf::from("/tmp/wrong-generation.response.json"),
+            5 => PathBuf::from(format!("/{}/{expected_filename}", "a".repeat(32_768))),
+            _ => unreachable!(),
+        };
+        let before: (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT j.stage, r.expected_response_file, r.response_file,
+                        r.response_size, r.response_sha256
+                   FROM generation_jobs j
+                   JOIN generation_recoveries r ON r.generation_id = j.generation_id
+                  WHERE j.id = ?1",
+                params![queued.id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("read invalid-path state before transition");
+
+        let error = transition_running_job_stage_with_event(
+            &conn,
+            &queued.id,
+            GenerationJobStage::Preparing,
+            WorkerStageTransition::BeginProviderRequest {
+                expected_response_file: invalid_path,
+            },
+            &authority,
+            WORKER_NOW_MS + 1_000,
+        )
+        .expect_err("noncanonical response path must fail closed");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidSnapshot)
+        ));
+        let after: (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT j.stage, r.expected_response_file, r.response_file,
+                        r.response_size, r.response_sha256
+                   FROM generation_jobs j
+                   JOIN generation_recoveries r ON r.generation_id = j.generation_id
+                  WHERE j.id = ?1",
+                params![queued.id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("read invalid-path state after transition");
+        assert_eq!(after, before, "invalid path case {index} mutated state");
+    }
+}
+
+#[test]
+fn fenced_stage_transitions_allow_only_retry_backoff_and_known_response_local_processing_edges() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("stage-edges", "stage-edges");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "stage-edge-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim stage-edge job")
+        .expect("stage-edge job exists");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("enter provider request");
+
+    let wrong_edge = transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterLocalProcessing,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect_err("provider request cannot skip to local processing");
+    assert!(matches!(
+        wrong_edge,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    let backoff = transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("provider request may enter retry backoff");
+    assert_eq!(backoff.value.stage, GenerationJobStage::RetryBackoff);
+    assert_eq!(
+        backoff.event.expect("backoff stage event").stage,
+        GenerationJobStage::RetryBackoff
+    );
+
+    let recovery_fixture = JobFixture::new();
+    let response_ready = recovery_fixture.enqueue("local-stage", "local-stage");
+    let recovery_conn = recovery_fixture
+        .database
+        .conn
+        .lock()
+        .expect("lock recovery database");
+    let recovery_authority = acquire_test_worker(
+        &recovery_conn,
+        "local-stage-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&recovery_conn, &recovery_authority, WORKER_NOW_MS)
+        .expect("claim local-stage job")
+        .expect("local-stage job exists");
+    let response_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", response_ready.generation_id));
+    recovery_conn
+        .execute(
+            "UPDATE generation_recoveries
+                SET request_state = 'response_ready', expected_response_file = ?1,
+                    response_file = ?1, response_size = 12, response_sha256 = ?2
+              WHERE generation_id = ?3",
+            params![
+                response_path.to_str(),
+                "a".repeat(64),
+                response_ready.generation_id
+            ],
+        )
+        .expect("prepare response-ready recovery");
+    recovery_conn
+        .execute(
+            "UPDATE generation_jobs SET stage = 'response_ready' WHERE id = ?1",
+            params![response_ready.id],
+        )
+        .expect("prepare response-ready job");
+    request_cancel(&recovery_conn, &response_ready.id).expect("persist late cancellation");
+
+    let local = transition_running_job_stage_with_event(
+        &recovery_conn,
+        &response_ready.id,
+        GenerationJobStage::ResponseReady,
+        WorkerStageTransition::EnterLocalProcessing,
+        &recovery_authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("known response must win over late cancellation");
+    assert_eq!(local.value.stage, GenerationJobStage::LocalProcessing);
+    assert!(local.value.cancel_requested_at.is_some());
+}
+
+#[test]
+fn retry_backoff_stage_rejects_a_durable_cancellation_request_without_mutation() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("cancelled-backoff", "cancelled-backoff");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "cancelled-backoff-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim cancelled-backoff job")
+        .expect("cancelled-backoff job exists");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("begin provider request before cancellation");
+    request_cancel(&conn, &queued.id).expect("persist provider cancellation");
+    let baseline = worker_database_snapshot(&conn);
+
+    let error = transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect_err("cancelled provider request cannot enter retry backoff");
+    assert!(matches!(
+        error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
+fn local_processing_rejects_incomplete_or_unbound_response_ready_metadata_even_with_late_cancel() {
+    for (index, mutation) in [
+        "UPDATE generation_recoveries SET expected_response_file = NULL WHERE generation_id = ?1",
+        "UPDATE generation_recoveries SET expected_response_file = '/tmp/wrong.response.json' WHERE generation_id = ?1",
+        "UPDATE generation_recoveries SET response_file = '/tmp/wrong.response.json' WHERE generation_id = ?1",
+        "UPDATE generation_recoveries SET response_size = 0 WHERE generation_id = ?1",
+        "UPDATE generation_recoveries SET response_size = 67108865 WHERE generation_id = ?1",
+        "UPDATE generation_recoveries SET response_sha256 = 'g' || substr(printf('%064d', 0), 2) WHERE generation_id = ?1",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fixture = JobFixture::new();
+        let queued = fixture.enqueue(
+            &format!("invalid-response-ready-{index}"),
+            "invalid-response-ready",
+        );
+        let conn = fixture.database.conn.lock().expect("lock database");
+        let authority = acquire_test_worker(
+            &conn,
+            &format!("invalid-response-worker-{index}"),
+            WORKER_NOW_MS,
+            Duration::from_secs(60),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim invalid response fixture")
+            .expect("invalid response fixture exists");
+        let response_path = std::env::temp_dir()
+            .join("astro-studio-responses")
+            .join(format!("{}.response.json", queued.generation_id));
+        conn.execute(
+            "UPDATE generation_recoveries
+                SET request_state = 'response_ready', expected_response_file = ?1,
+                    response_file = ?1, response_size = 12, response_sha256 = ?2
+              WHERE generation_id = ?3",
+            params![response_path.to_str(), "a".repeat(64), queued.generation_id],
+        )
+        .expect("prepare response metadata");
+        conn.execute(
+            "UPDATE generation_jobs SET stage = 'response_ready' WHERE id = ?1",
+            params![queued.id],
+        )
+        .expect("prepare response stage");
+        conn.execute(mutation, params![queued.generation_id])
+            .expect("invalidate response metadata");
+        request_cancel(&conn, &queued.id).expect("persist late cancellation");
+
+        let error = transition_running_job_stage_with_event(
+            &conn,
+            &queued.id,
+            GenerationJobStage::ResponseReady,
+            WorkerStageTransition::EnterLocalProcessing,
+            &authority,
+            WORKER_NOW_MS + 1_000,
+        )
+        .expect_err("unverified response metadata must block local processing");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(
+                AppError::GenerationJobCorruptPersistedData
+                    | AppError::GenerationJobInvalidTransition
+            )
+        ));
+        let stage: String = conn
+            .query_row(
+                "SELECT stage FROM generation_jobs WHERE id = ?1",
+                params![queued.id],
+                |row| row.get(0),
+            )
+            .expect("read unchanged response stage");
+        assert_eq!(stage, "response_ready", "invalid case {index} advanced");
+    }
+}
+
+#[test]
+fn provider_and_retry_transitions_recheck_their_stage_aware_requesting_recovery() {
+    for reserve_retry in [false, true] {
+        let fixture = JobFixture::new();
+        let queued = fixture.enqueue(
+            if reserve_retry {
+                "retry-recovery-recheck"
+            } else {
+                "provider-recovery-recheck"
+            },
+            "recovery-recheck",
+        );
+        let conn = fixture.database.conn.lock().expect("lock database");
+        let authority = acquire_test_worker(
+            &conn,
+            if reserve_retry {
+                "retry-recovery-worker"
+            } else {
+                "provider-recovery-worker"
+            },
+            WORKER_NOW_MS,
+            Duration::from_secs(60),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim recovery recheck fixture")
+            .expect("recovery recheck fixture exists");
+        let expected_path = std::env::temp_dir()
+            .join("astro-studio-responses")
+            .join(format!("{}.response.json", queued.generation_id));
+        transition_running_job_stage_with_event(
+            &conn,
+            &queued.id,
+            GenerationJobStage::Preparing,
+            WorkerStageTransition::BeginProviderRequest {
+                expected_response_file: expected_path,
+            },
+            &authority,
+            WORKER_NOW_MS + 1_000,
+        )
+        .expect("begin provider request before recovery corruption");
+        if reserve_retry {
+            transition_running_job_stage_with_event(
+                &conn,
+                &queued.id,
+                GenerationJobStage::ProviderRequest,
+                WorkerStageTransition::EnterRetryBackoff,
+                &authority,
+                WORKER_NOW_MS + 2_000,
+            )
+            .expect("enter retry backoff before recovery corruption");
+        }
+        conn.execute(
+            "UPDATE generation_recoveries SET expected_response_file = NULL
+              WHERE generation_id = ?1",
+            params![queued.generation_id],
+        )
+        .expect("remove expected response binding");
+
+        let error = if reserve_retry {
+            reserve_automatic_retry_with_event(
+                &conn,
+                &queued.id,
+                0,
+                &authority,
+                WORKER_NOW_MS + 3_000,
+            )
+            .map(|_| ())
+            .expect_err("retry reservation requires bound requesting recovery")
+        } else {
+            transition_running_job_stage_with_event(
+                &conn,
+                &queued.id,
+                GenerationJobStage::ProviderRequest,
+                WorkerStageTransition::EnterRetryBackoff,
+                &authority,
+                WORKER_NOW_MS + 2_000,
+            )
+            .map(|_| ())
+            .expect_err("retry backoff requires bound requesting recovery")
+        };
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+        ));
+        let persisted = get_job(&conn, &queued.id).expect("reload recovery recheck job");
+        assert_eq!(persisted.auto_attempt, 0);
+        assert_eq!(
+            persisted.stage,
+            if reserve_retry {
+                GenerationJobStage::RetryBackoff
+            } else {
+                GenerationJobStage::ProviderRequest
+            }
+        );
+    }
+}
+
+#[test]
+fn fenced_heartbeat_updates_only_the_exact_running_stage_without_time_regression_or_event() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("heartbeat-job", "heartbeat-job");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "heartbeat-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim heartbeat job")
+        .expect("heartbeat job exists");
+
+    let heartbeat: crate::models::GenerationJob = heartbeat_running_job(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("write fenced heartbeat");
+    assert_eq!(heartbeat.stage, GenerationJobStage::Preparing);
+    assert_eq!(
+        heartbeat.last_heartbeat_at.as_deref(),
+        Some("2026-07-12T16:00:02Z")
+    );
+
+    for (stage, now_ms) in [
+        (GenerationJobStage::ProviderRequest, WORKER_NOW_MS + 3_000),
+        (GenerationJobStage::Preparing, WORKER_NOW_MS + 1_000),
+    ] {
+        let error = heartbeat_running_job(&conn, &queued.id, stage, &authority, now_ms)
+            .expect_err("wrong stage or regressing heartbeat must fail");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        let persisted = get_job(&conn, &queued.id).expect("reload heartbeat job");
+        assert_eq!(
+            persisted.last_heartbeat_at.as_deref(),
+            Some("2026-07-12T16:00:02Z")
+        );
+    }
+}
+
+#[test]
+fn fenced_retry_reservation_increments_exact_ordinal_after_backoff_and_returns_event_snapshot() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("retry-reservation", "retry-reservation");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "retry-reservation-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim retry reservation job")
+        .expect("retry reservation job exists");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("begin retry provider request");
+    transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("enter retry backoff");
+
+    let reserved =
+        reserve_automatic_retry_with_event(&conn, &queued.id, 0, &authority, WORKER_NOW_MS + 3_000)
+            .expect("reserve first automatic retry");
+
+    assert_eq!(reserved.value.auto_attempt, 1);
+    assert_eq!(reserved.value.stage, GenerationJobStage::ProviderRequest);
+    assert_eq!(
+        reserved.value.last_heartbeat_at.as_deref(),
+        Some("2026-07-12T16:00:03Z")
+    );
+    let event = reserved.event.expect("retry reservation event");
+    assert_eq!(event.auto_attempt, 1);
+    assert_eq!(event.stage, GenerationJobStage::ProviderRequest);
+    transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority,
+        WORKER_NOW_MS + 4_000,
+    )
+    .expect("advance persisted state after event snapshot");
+    assert_eq!(event.stage, GenerationJobStage::ProviderRequest);
+    assert_eq!(event.auto_attempt, 1);
+}
+
+#[test]
+fn retry_reservation_failures_never_change_attempt_stage_or_heartbeat() {
+    let fixture = JobFixture::new();
+    let retry = fixture.enqueue("retry-guards", "retry-guards");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "retry-guard-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    prepare_fenced_retry_backoff(&conn, &retry, &authority);
+    let baseline = worker_database_snapshot(&conn);
+
+    for (expected_attempt, now_ms) in [(1, WORKER_NOW_MS + 3_000), (0, WORKER_NOW_MS + 1_000)] {
+        let error = reserve_automatic_retry_with_event(
+            &conn,
+            &retry.id,
+            expected_attempt,
+            &authority,
+            now_ms,
+        )
+        .expect_err("wrong ordinal or regressing time must reject retry reservation");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(worker_database_snapshot(&conn), baseline);
+    }
+    request_cancel(&conn, &retry.id).expect("persist retry cancellation");
+    let cancelled_baseline = worker_database_snapshot(&conn);
+    let cancelled_error =
+        reserve_automatic_retry_with_event(&conn, &retry.id, 0, &authority, WORKER_NOW_MS + 3_000)
+            .expect_err("cancelled backoff must not reserve retry");
+    assert!(matches!(
+        cancelled_error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    assert_eq!(worker_database_snapshot(&conn), cancelled_baseline);
+    drop(conn);
+
+    let max_fixture = JobFixture::new();
+    let mut max_request = max_fixture.prepared("retry-max", "retry-max");
+    max_request.max_auto_attempts = 0;
+    let max_result = max_fixture
+        .enqueue_prepared(&max_request)
+        .expect("enqueue max retry fixture");
+    let max_job = max_fixture.get(&max_result.job_id);
+    let max_conn = max_fixture.database.conn.lock().expect("lock max database");
+    let max_authority = acquire_test_worker(
+        &max_conn,
+        "retry-max-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    prepare_fenced_retry_backoff(&max_conn, &max_job, &max_authority);
+    let max_baseline = worker_database_snapshot(&max_conn);
+    let max_error = reserve_automatic_retry_with_event(
+        &max_conn,
+        &max_job.id,
+        0,
+        &max_authority,
+        WORKER_NOW_MS + 3_000,
+    )
+    .expect_err("reached retry maximum must fail");
+    assert!(matches!(
+        max_error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    assert_eq!(worker_database_snapshot(&max_conn), max_baseline);
+    drop(max_conn);
+
+    let overflow_fixture = JobFixture::new();
+    let overflow_job = overflow_fixture.enqueue("retry-overflow", "retry-overflow");
+    let overflow_conn = overflow_fixture
+        .database
+        .conn
+        .lock()
+        .expect("lock overflow database");
+    let overflow_authority = acquire_test_worker(
+        &overflow_conn,
+        "retry-overflow-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    prepare_fenced_retry_backoff(&overflow_conn, &overflow_job, &overflow_authority);
+    overflow_conn
+        .execute(
+            "UPDATE generation_jobs
+                SET auto_attempt = 2147483647, max_auto_attempts = 2147483647
+              WHERE id = ?1",
+            params![overflow_job.id],
+        )
+        .expect("prepare checked-add overflow row");
+    let overflow_baseline = worker_database_snapshot(&overflow_conn);
+    let overflow_error = reserve_automatic_retry_with_event(
+        &overflow_conn,
+        &overflow_job.id,
+        i32::MAX,
+        &overflow_authority,
+        WORKER_NOW_MS + 3_000,
+    )
+    .expect_err("retry ordinal overflow must fail closed");
+    assert!(matches!(
+        overflow_error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    assert_eq!(worker_database_snapshot(&overflow_conn), overflow_baseline);
+}
+
+#[test]
+fn lease_takeover_fences_claim_path_stage_retry_and_heartbeat_before_any_state_mutation() {
+    let fixture = JobFixture::new();
+    let path_job = fixture.enqueue("stale-path", "stale-path");
+    let stage_job = fixture.enqueue("stale-stage", "stale-stage");
+    let retry_job = fixture.enqueue("stale-retry", "stale-retry");
+    let heartbeat_job = fixture.enqueue("stale-heartbeat", "stale-heartbeat");
+    let queued_for_claim = fixture.enqueue("stale-claim", "stale-claim");
+    let a = fixture
+        .database
+        .conn
+        .lock()
+        .expect("lock worker A database");
+    let b = fixture.open_connection();
+    let authority_a = acquire_test_worker(
+        &a,
+        "transition-worker-a",
+        WORKER_NOW_MS,
+        Duration::from_secs(10),
+    );
+
+    let claimed_path = claim_next_job_fenced_with_event(&a, &authority_a, WORKER_NOW_MS + 1_000)
+        .expect("worker A claim path job")
+        .expect("path job exists");
+    assert_eq!(claimed_path.value.id, path_job.id);
+    let claimed_stage = claim_next_job_fenced_with_event(&a, &authority_a, WORKER_NOW_MS + 2_000)
+        .expect("worker A claim stage job")
+        .expect("stage job exists");
+    assert_eq!(claimed_stage.value.id, stage_job.id);
+    let stage_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", stage_job.generation_id));
+    transition_running_job_stage_with_event(
+        &a,
+        &stage_job.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: stage_path,
+        },
+        &authority_a,
+        WORKER_NOW_MS + 3_000,
+    )
+    .expect("worker A prepare stage job");
+    let claimed_retry = claim_next_job_fenced_with_event(&a, &authority_a, WORKER_NOW_MS + 4_000)
+        .expect("worker A claim retry job")
+        .expect("retry job exists");
+    assert_eq!(claimed_retry.value.id, retry_job.id);
+    let retry_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", retry_job.generation_id));
+    transition_running_job_stage_with_event(
+        &a,
+        &retry_job.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: retry_path,
+        },
+        &authority_a,
+        WORKER_NOW_MS + 5_000,
+    )
+    .expect("worker A prepare retry job");
+    transition_running_job_stage_with_event(
+        &a,
+        &retry_job.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority_a,
+        WORKER_NOW_MS + 6_000,
+    )
+    .expect("worker A back off retry job");
+    let claimed_heartbeat =
+        claim_next_job_fenced_with_event(&a, &authority_a, WORKER_NOW_MS + 7_000)
+            .expect("worker A claim heartbeat job")
+            .expect("heartbeat job exists");
+    assert_eq!(claimed_heartbeat.value.id, heartbeat_job.id);
+
+    let expires_a = WORKER_NOW_MS + 10_000;
+    let before_expiry_rejection = worker_database_snapshot(&a);
+    assert_worker_transition_lease_lost(heartbeat_running_job(
+        &a,
+        &heartbeat_job.id,
+        GenerationJobStage::Preparing,
+        &authority_a,
+        expires_a,
+    ));
+    assert_eq!(worker_database_snapshot(&a), before_expiry_rejection);
+
+    let authority_b = acquire_test_worker(
+        &b,
+        "transition-worker-b",
+        expires_a,
+        Duration::from_secs(60),
+    );
+    let stale_baseline = worker_database_snapshot(&a);
+    let stale_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", path_job.generation_id));
+
+    assert_worker_transition_lease_lost(claim_next_job_fenced_with_event(
+        &a,
+        &authority_a,
+        expires_a,
+    ));
+    assert_eq!(worker_database_snapshot(&a), stale_baseline);
+    assert_worker_transition_lease_lost(transition_running_job_stage_with_event(
+        &a,
+        &path_job.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: stale_path.clone(),
+        },
+        &authority_a,
+        expires_a,
+    ));
+    assert_eq!(worker_database_snapshot(&a), stale_baseline);
+    assert_worker_transition_lease_lost(transition_running_job_stage_with_event(
+        &a,
+        &stage_job.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority_a,
+        expires_a,
+    ));
+    assert_eq!(worker_database_snapshot(&a), stale_baseline);
+    assert_worker_transition_lease_lost(reserve_automatic_retry_with_event(
+        &a,
+        &retry_job.id,
+        0,
+        &authority_a,
+        expires_a,
+    ));
+    assert_eq!(worker_database_snapshot(&a), stale_baseline);
+    assert_worker_transition_lease_lost(heartbeat_running_job(
+        &a,
+        &heartbeat_job.id,
+        GenerationJobStage::Preparing,
+        &authority_a,
+        expires_a,
+    ));
+    assert_eq!(worker_database_snapshot(&a), stale_baseline);
+
+    let claimed_by_b = claim_next_job_fenced_with_event(&b, &authority_b, expires_a)
+        .expect("worker B claim succeeds")
+        .expect("queued claim job remains");
+    assert_eq!(claimed_by_b.value.id, queued_for_claim.id);
+    transition_running_job_stage_with_event(
+        &b,
+        &path_job.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: stale_path,
+        },
+        &authority_b,
+        expires_a + 1_000,
+    )
+    .expect("worker B expected-path transition succeeds");
+    transition_running_job_stage_with_event(
+        &b,
+        &stage_job.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority_b,
+        expires_a + 2_000,
+    )
+    .expect("worker B stage transition succeeds");
+    reserve_automatic_retry_with_event(&b, &retry_job.id, 0, &authority_b, expires_a + 3_000)
+        .expect("worker B retry reservation succeeds");
+    heartbeat_running_job(
+        &b,
+        &heartbeat_job.id,
+        GenerationJobStage::Preparing,
+        &authority_b,
+        expires_a + 4_000,
+    )
+    .expect("worker B heartbeat succeeds");
+}
+
+#[test]
+fn fenced_stage_commit_failure_returns_no_event_and_rolls_back_job_and_recovery() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("fenced-event-rollback", "fenced-event-rollback");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "fenced-event-rollback-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim fenced rollback fixture")
+        .expect("fenced rollback fixture exists");
+    conn.execute_batch(
+        "CREATE TRIGGER fail_fenced_stage_at_commit
+         AFTER UPDATE OF stage ON generation_jobs
+         WHEN NEW.stage = 'provider_request'
+         BEGIN
+             INSERT INTO images (id, generation_id, file_path)
+             VALUES ('fenced-event-rollback-image', 'missing-generation', '/tmp/rollback.png');
+         END;
+         PRAGMA defer_foreign_keys=ON;",
+    )
+    .expect("install fenced deferred commit failure");
+    let baseline = worker_database_snapshot(&conn);
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+
+    let result = transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    );
+
+    assert!(matches!(
+        result,
+        Err(WorkerTransitionError::Repository(AppError::Database { .. }))
+    ));
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+    assert_eq!(count_table(&conn, "images"), 0);
 }
 
 #[test]

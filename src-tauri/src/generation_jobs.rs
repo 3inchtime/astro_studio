@@ -1,6 +1,9 @@
 use crate::commands::conversations;
 use crate::error::AppError;
 use crate::generation_lifecycle::{GenerationExecutionContext, GenerationExecutionSnapshot};
+use crate::generation_worker_lease::{
+    assert_worker_transition_authority_in_transaction, WorkerLeaseError, WorkerTransitionAuthority,
+};
 use crate::models::{
     EnqueueGenerationResult, GenerationJob, GenerationJobEvent, GenerationJobFilter,
     GenerationJobPage, GenerationJobStage, GenerationJobStatus, GptImageRequestOptions,
@@ -15,6 +18,7 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 
 const JOB_COLUMNS: &str = "id, client_request_id, generation_id, parent_job_id, source_kind,
     source_ref_json, status, stage, request_json, provider_kind, provider_profile_id,
@@ -28,6 +32,26 @@ const ALIASED_JOB_COLUMNS: &str = "g.id, g.client_request_id, g.generation_id, g
     g.last_heartbeat_at, g.error_code, g.error_message, g.retryable";
 
 const GENERATION_JOB_WRITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+// Keep this repository-side recovery bound aligned with
+// `FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES` without widening the
+// current two-file worker-transition slice into lifecycle ownership.
+const MAX_WORKER_RESPONSE_BODY_BYTES: i64 = 64 * 1024 * 1024;
+const MAX_PERSISTED_RESPONSE_PATH_BYTES: usize = 32_768;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum WorkerTransitionError {
+    #[error(transparent)]
+    Lease(#[from] WorkerLeaseError),
+    #[error(transparent)]
+    Repository(#[from] AppError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WorkerStageTransition {
+    BeginProviderRequest { expected_response_file: PathBuf },
+    EnterRetryBackoff,
+    EnterLocalProcessing,
+}
 
 #[derive(Clone)]
 pub(crate) struct PreparedGenerationJob {
@@ -1752,6 +1776,100 @@ fn canonical_timestamp(value: &str) -> bool {
     })
 }
 
+fn timestamp_is_not_before(value: &str, floor: &str) -> bool {
+    canonical_timestamp(value) && canonical_timestamp(floor) && value >= floor
+}
+
+fn canonical_worker_timestamp(now_ms: i64) -> Result<String, WorkerTransitionError> {
+    if now_ms < 0 {
+        return Err(WorkerLeaseError::InvalidTiming.into());
+    }
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(now_ms)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .ok_or_else(|| WorkerLeaseError::TimeOverflow.into())
+}
+
+fn expected_response_path_is_valid(path: &Path, generation_id: &str) -> bool {
+    let Some(path_text) = path.to_str() else {
+        return false;
+    };
+    path.is_absolute()
+        && path_text.len() <= MAX_PERSISTED_RESPONSE_PATH_BYTES
+        && !path_text.chars().any(char::is_control)
+        && !path_text
+            .split(['/', '\\'])
+            .any(|component| matches!(component, "." | ".."))
+        && path
+            .components()
+            .all(|component| !matches!(component, Component::CurDir | Component::ParentDir))
+        && path.file_name().and_then(|name| name.to_str())
+            == Some(format!("{generation_id}.response.json").as_str())
+}
+
+fn validate_worker_recovery_for_stage(
+    tx: &Transaction<'_>,
+    generation_id: &str,
+    stage: GenerationJobStage,
+) -> Result<(), AppError> {
+    let recovery = tx
+        .query_row(
+            "SELECT request_state, expected_response_file, response_file,
+                    response_size, response_sha256
+               FROM generation_recoveries WHERE generation_id = ?1",
+            params![generation_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persisted_row_error("Read worker generation recovery failed", error))?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let (request_state, expected_file, response_file, response_size, response_sha256) = recovery;
+    let requesting_empty = request_state == "requesting"
+        && expected_file.is_none()
+        && response_file.is_none()
+        && response_size.is_none()
+        && response_sha256.is_none();
+    let requesting_bound = request_state == "requesting"
+        && expected_file
+            .as_deref()
+            .is_some_and(|path| expected_response_path_is_valid(Path::new(path), generation_id))
+        && response_file.is_none()
+        && response_size.is_none()
+        && response_sha256.is_none();
+    let response_ready_bound = request_state == "response_ready"
+        && expected_file.as_deref().is_some_and(|expected| {
+            response_file.as_deref() == Some(expected)
+                && expected_response_path_is_valid(Path::new(expected), generation_id)
+        })
+        && response_size.is_some_and(|size| (1..=MAX_WORKER_RESPONSE_BODY_BYTES).contains(&size))
+        && response_sha256.as_deref().is_some_and(|sha256| {
+            sha256.len() == 64
+                && sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        });
+    let valid = match stage {
+        GenerationJobStage::Preparing => requesting_empty,
+        GenerationJobStage::ProviderRequest | GenerationJobStage::RetryBackoff => requesting_bound,
+        GenerationJobStage::ResponseReady | GenerationJobStage::LocalProcessing => {
+            response_ready_bound
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(AppError::GenerationJobCorruptPersistedData)
+    }
+}
+
 fn source_reference_id_valid(value: &str) -> bool {
     nonempty(value)
         && value.len() <= 256
@@ -2456,6 +2574,248 @@ pub(crate) fn claim_next_job_with_event(
     }))
 }
 
+pub(crate) fn claim_next_job_fenced_with_event(
+    conn: &Connection,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<Option<GenerationJobTransition<GenerationJob>>, WorkerTransitionError> {
+    let timestamp = canonical_worker_timestamp(now_ms)?;
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let candidate_id = tx
+        .query_row(
+            "SELECT id
+             FROM generation_jobs
+             WHERE status = 'queued' AND stage = 'queued'
+             ORDER BY queued_at ASC, rowid ASC
+             LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| persisted_row_error("Select next fenced generation job failed", error))?;
+    let Some(candidate_id) = candidate_id else {
+        tx.commit()
+            .map_err(|error| database_error("Commit empty fenced job claim failed", error))?;
+        return Ok(None);
+    };
+    let candidate = get_job_in_transaction(&tx, &candidate_id)?;
+    validate_worker_recovery_for_stage(
+        &tx,
+        &candidate.generation_id,
+        GenerationJobStage::Preparing,
+    )?;
+    let job = claim_job_at_in_transaction(&tx, &candidate_id, &timestamp)?;
+    let event = get_job_event_in_transaction(&tx, &candidate_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit fenced job claim failed", error))?;
+    Ok(Some(GenerationJobTransition {
+        value: job,
+        event: Some(event),
+    }))
+}
+
+pub(crate) fn transition_running_job_stage_with_event(
+    conn: &Connection,
+    job_id: &str,
+    expected_stage: GenerationJobStage,
+    transition: WorkerStageTransition,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJobTransition<GenerationJob>, WorkerTransitionError> {
+    let timestamp = canonical_worker_timestamp(now_ms)?;
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let current = get_job_in_transaction(&tx, job_id)?;
+    if current.status != GenerationJobStatus::Running || current.stage != expected_stage {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    if !current
+        .started_at
+        .as_deref()
+        .is_some_and(|started_at| timestamp_is_not_before(&timestamp, started_at))
+        || !current
+            .last_heartbeat_at
+            .as_deref()
+            .is_some_and(|heartbeat_at| timestamp_is_not_before(&timestamp, heartbeat_at))
+    {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    validate_worker_recovery_for_stage(&tx, &current.generation_id, current.stage)?;
+
+    let (next_stage, requires_no_cancel) = match transition {
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file,
+        } if expected_stage == GenerationJobStage::Preparing => {
+            if !expected_response_path_is_valid(&expected_response_file, &current.generation_id) {
+                return Err(AppError::GenerationJobInvalidSnapshot.into());
+            }
+            let expected_response_file = expected_response_file
+                .to_str()
+                .ok_or(AppError::GenerationJobInvalidSnapshot)?;
+            let updated_recovery = tx
+                .execute(
+                    "UPDATE generation_recoveries
+                        SET expected_response_file = ?1, updated_at = ?2
+                      WHERE generation_id = ?3
+                        AND request_state = 'requesting'
+                        AND expected_response_file IS NULL
+                        AND response_file IS NULL
+                        AND response_size IS NULL
+                        AND response_sha256 IS NULL",
+                    params![expected_response_file, timestamp, current.generation_id],
+                )
+                .map_err(|error| {
+                    database_error("Record expected generation response path failed", error)
+                })?;
+            if updated_recovery != 1 {
+                return Err(AppError::GenerationJobInvalidTransition.into());
+            }
+            (GenerationJobStage::ProviderRequest, true)
+        }
+        WorkerStageTransition::EnterRetryBackoff
+            if expected_stage == GenerationJobStage::ProviderRequest =>
+        {
+            (GenerationJobStage::RetryBackoff, true)
+        }
+        WorkerStageTransition::EnterLocalProcessing
+            if expected_stage == GenerationJobStage::ResponseReady =>
+        {
+            (GenerationJobStage::LocalProcessing, false)
+        }
+        _ => return Err(AppError::GenerationJobInvalidTransition.into()),
+    };
+
+    let updated = tx
+        .execute(
+            "UPDATE generation_jobs
+                SET stage = ?1, last_heartbeat_at = ?2
+              WHERE id = ?3 AND status = 'running' AND stage = ?4
+                AND (?5 = 0 OR cancel_requested_at IS NULL)
+                AND started_at IS NOT NULL AND started_at <= ?2
+                AND last_heartbeat_at IS NOT NULL AND last_heartbeat_at <= ?2",
+            params![
+                stage_as_str(next_stage),
+                timestamp,
+                job_id,
+                stage_as_str(expected_stage),
+                i64::from(requires_no_cancel),
+            ],
+        )
+        .map_err(|error| database_error("Transition generation job stage failed", error))?;
+    if updated != 1 {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    validate_worker_recovery_for_stage(&tx, &current.generation_id, next_stage)?;
+    let job = get_job_in_transaction(&tx, job_id)?;
+    let event = get_job_event_in_transaction(&tx, job_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit generation job stage failed", error))?;
+    Ok(GenerationJobTransition {
+        value: job,
+        event: Some(event),
+    })
+}
+
+pub(crate) fn heartbeat_running_job(
+    conn: &Connection,
+    job_id: &str,
+    expected_stage: GenerationJobStage,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJob, WorkerTransitionError> {
+    let timestamp = canonical_worker_timestamp(now_ms)?;
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let updated = tx
+        .execute(
+            "UPDATE generation_jobs
+                SET last_heartbeat_at = ?1
+              WHERE id = ?2 AND status = 'running' AND stage = ?3
+                AND started_at IS NOT NULL AND started_at <= ?1
+                AND last_heartbeat_at IS NOT NULL
+                AND last_heartbeat_at <= ?1",
+            params![timestamp, job_id, stage_as_str(expected_stage)],
+        )
+        .map_err(|error| database_error("Heartbeat generation job failed", error))?;
+    if updated != 1 {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    let job = get_job_in_transaction(&tx, job_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit generation job heartbeat failed", error))?;
+    Ok(job)
+}
+
+pub(crate) fn reserve_automatic_retry_with_event(
+    conn: &Connection,
+    job_id: &str,
+    expected_auto_attempt: i32,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJobTransition<GenerationJob>, WorkerTransitionError> {
+    let timestamp = canonical_worker_timestamp(now_ms)?;
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let current = get_job_in_transaction(&tx, job_id)?;
+    if current.status != GenerationJobStatus::Running
+        || current.stage != GenerationJobStage::RetryBackoff
+        || current.cancel_requested_at.is_some()
+        || current.auto_attempt != expected_auto_attempt
+    {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    if !current
+        .started_at
+        .as_deref()
+        .is_some_and(|started_at| timestamp_is_not_before(&timestamp, started_at))
+        || !current
+            .last_heartbeat_at
+            .as_deref()
+            .is_some_and(|heartbeat_at| timestamp_is_not_before(&timestamp, heartbeat_at))
+    {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    validate_worker_recovery_for_stage(&tx, &current.generation_id, current.stage)?;
+    let next_auto_attempt = current
+        .auto_attempt
+        .checked_add(1)
+        .ok_or(AppError::GenerationJobInvalidTransition)?;
+    if next_auto_attempt > current.max_auto_attempts {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+
+    let updated = tx
+        .execute(
+            "UPDATE generation_jobs
+                SET auto_attempt = ?1, stage = 'provider_request', last_heartbeat_at = ?2
+              WHERE id = ?3 AND status = 'running' AND stage = 'retry_backoff'
+                AND auto_attempt = ?4 AND max_auto_attempts >= ?1
+                AND cancel_requested_at IS NULL
+                AND started_at IS NOT NULL AND started_at <= ?2
+                AND last_heartbeat_at IS NOT NULL
+                AND last_heartbeat_at <= ?2",
+            params![next_auto_attempt, timestamp, job_id, expected_auto_attempt],
+        )
+        .map_err(|error| database_error("Reserve automatic generation retry failed", error))?;
+    if updated != 1 {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    validate_worker_recovery_for_stage(
+        &tx,
+        &current.generation_id,
+        GenerationJobStage::ProviderRequest,
+    )?;
+    let job = get_job_in_transaction(&tx, job_id)?;
+    let event = get_job_event_in_transaction(&tx, job_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit automatic generation retry failed", error))?;
+    Ok(GenerationJobTransition {
+        value: job,
+        event: Some(event),
+    })
+}
+
 pub(crate) fn claim_next_job(conn: &mut Connection) -> Result<Option<GenerationJob>, AppError> {
     claim_next_job_with_event(conn)
         .map(|transition| transition.map(GenerationJobTransition::into_value))
@@ -2465,20 +2825,33 @@ pub(crate) fn claim_job_in_transaction(
     tx: &Transaction<'_>,
     job_id: &str,
 ) -> Result<GenerationJob, AppError> {
+    let timestamp = crate::current_timestamp();
+    claim_job_at_in_transaction(tx, job_id, &timestamp)
+}
+
+fn claim_job_at_in_transaction(
+    tx: &Transaction<'_>,
+    job_id: &str,
+    timestamp: &str,
+) -> Result<GenerationJob, AppError> {
+    if !canonical_timestamp(timestamp) {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
     let candidate = get_job_in_transaction(tx, job_id)?;
     if candidate.status != GenerationJobStatus::Queued
         || candidate.stage != GenerationJobStage::Queued
+        || !timestamp_is_not_before(timestamp, &candidate.queued_at)
     {
         return Err(AppError::GenerationJobInvalidTransition);
     }
     let generation_id = candidate.generation_id;
-    let timestamp = crate::current_timestamp();
     let updated_job = tx
         .execute(
             "UPDATE generation_jobs
              SET status = 'running', stage = 'preparing', started_at = ?1,
                  last_heartbeat_at = ?1
-             WHERE id = ?2 AND status = 'queued' AND stage = 'queued'",
+             WHERE id = ?2 AND status = 'queued' AND stage = 'queued'
+               AND queued_at <= ?1",
             params![timestamp, job_id],
         )
         .map_err(|error| database_error("Claim generation job failed", error))?;
