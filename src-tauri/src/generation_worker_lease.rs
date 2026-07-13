@@ -21,6 +21,14 @@ impl WorkerTransitionAuthority {
     pub(crate) fn fencing_epoch(&self) -> i64 {
         self.fencing_epoch
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(owner_id: impl Into<String>, fencing_epoch: i64) -> Self {
+        Self {
+            owner_id: owner_id.into(),
+            fencing_epoch,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
