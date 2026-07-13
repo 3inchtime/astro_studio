@@ -204,6 +204,21 @@ pub enum GenerationJobStatus {
     Interrupted,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationJobStage {
+    MigrationUnknown,
+    Queued,
+    Preparing,
+    ProviderRequest,
+    RetryBackoff,
+    ResponseReady,
+    LocalProcessing,
+    StartupReconciliation,
+    LegacyResponseRecovery,
+    Terminal,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct GenerationJob {
@@ -214,6 +229,7 @@ pub struct GenerationJob {
     pub source_kind: String,
     pub source_ref: serde_json::Value,
     pub status: GenerationJobStatus,
+    pub stage: GenerationJobStage,
     pub request: serde_json::Value,
     pub provider_kind: String,
     pub provider_profile_id: String,
@@ -229,6 +245,29 @@ pub struct GenerationJob {
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub retryable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJobEvent {
+    pub job_id: String,
+    pub generation_id: String,
+    pub conversation_id: String,
+    pub source_kind: String,
+    pub source_ref: serde_json::Value,
+    pub status: GenerationJobStatus,
+    pub stage: GenerationJobStage,
+    pub queue_position: Option<i64>,
+    pub chain_attempt: i32,
+    pub auto_attempt: i32,
+    pub max_auto_attempts: i32,
+    pub cancel_requested_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+    pub queued_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -471,6 +510,43 @@ mod tests {
     }
 
     #[test]
+    fn generation_job_stage_uses_strict_snake_case_json() {
+        for (stage, expected) in [
+            (GenerationJobStage::MigrationUnknown, "migration_unknown"),
+            (GenerationJobStage::Queued, "queued"),
+            (GenerationJobStage::Preparing, "preparing"),
+            (GenerationJobStage::ProviderRequest, "provider_request"),
+            (GenerationJobStage::RetryBackoff, "retry_backoff"),
+            (GenerationJobStage::ResponseReady, "response_ready"),
+            (GenerationJobStage::LocalProcessing, "local_processing"),
+            (
+                GenerationJobStage::StartupReconciliation,
+                "startup_reconciliation",
+            ),
+            (
+                GenerationJobStage::LegacyResponseRecovery,
+                "legacy_response_recovery",
+            ),
+            (GenerationJobStage::Terminal, "terminal"),
+        ] {
+            assert_eq!(serde_json::to_value(stage).unwrap(), json!(expected));
+            assert_eq!(
+                serde_json::from_value::<GenerationJobStage>(json!(expected)).unwrap(),
+                stage
+            );
+        }
+
+        for invalid in [
+            "ProviderRequest",
+            "providerRequest",
+            "provider-request",
+            "unknown",
+        ] {
+            assert!(serde_json::from_value::<GenerationJobStage>(json!(invalid)).is_err());
+        }
+    }
+
+    #[test]
     fn generation_job_serializes_retryable_as_boolean() {
         let job = GenerationJob {
             id: "job-1".to_string(),
@@ -480,6 +556,7 @@ mod tests {
             source_kind: "generate".to_string(),
             source_ref: json!({}),
             status: GenerationJobStatus::Failed,
+            stage: GenerationJobStage::Terminal,
             request: json!({ "prompt": "a nebula" }),
             provider_kind: "openai".to_string(),
             provider_profile_id: "default".to_string(),
@@ -498,7 +575,76 @@ mod tests {
         };
 
         let value = serde_json::to_value(job).expect("serialize generation job");
+        assert_eq!(value["stage"], json!("terminal"));
         assert_eq!(value["retryable"], json!(true));
         assert!(value["retryable"].is_boolean());
+    }
+
+    #[test]
+    fn generation_job_event_serializes_complete_secret_free_shape() {
+        let event = GenerationJobEvent {
+            job_id: "job-1".to_string(),
+            generation_id: "generation-1".to_string(),
+            conversation_id: "conversation-1".to_string(),
+            source_kind: "generate".to_string(),
+            source_ref: json!({ "id": "source-1" }),
+            status: GenerationJobStatus::Running,
+            stage: GenerationJobStage::ProviderRequest,
+            queue_position: None,
+            chain_attempt: 1,
+            auto_attempt: 0,
+            max_auto_attempts: 2,
+            cancel_requested_at: None,
+            error_code: None,
+            error_message: None,
+            retryable: false,
+            queued_at: "2026-07-10T00:00:00Z".to_string(),
+            started_at: Some("2026-07-10T00:00:01Z".to_string()),
+            finished_at: None,
+        };
+
+        let value = serde_json::to_value(event).expect("serialize generation job event");
+        let keys = value
+            .as_object()
+            .expect("event object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "auto_attempt",
+                "cancel_requested_at",
+                "chain_attempt",
+                "conversation_id",
+                "error_code",
+                "error_message",
+                "finished_at",
+                "generation_id",
+                "job_id",
+                "max_auto_attempts",
+                "queue_position",
+                "queued_at",
+                "retryable",
+                "source_kind",
+                "source_ref",
+                "stage",
+                "started_at",
+                "status",
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(value["stage"], json!("provider_request"));
+        let encoded = serde_json::to_string(&value).expect("encode event JSON");
+        for secret in [
+            "api_key",
+            "request_json",
+            "endpoint_snapshot",
+            "provider_profile_id",
+            "secret-key",
+        ] {
+            assert!(!encoded.contains(secret), "event leaked {secret}");
+        }
     }
 }

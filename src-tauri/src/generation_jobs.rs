@@ -2,9 +2,9 @@ use crate::commands::conversations;
 use crate::error::AppError;
 use crate::generation_lifecycle::{GenerationExecutionContext, GenerationExecutionSnapshot};
 use crate::models::{
-    EnqueueGenerationResult, GenerationJob, GenerationJobFilter, GenerationJobPage,
-    GenerationJobStatus, GptImageRequestOptions, DEFAULT_GENERATION_JOB_PAGE_LIMIT,
-    MAX_GENERATION_JOB_PAGE_LIMIT,
+    EnqueueGenerationResult, GenerationJob, GenerationJobEvent, GenerationJobFilter,
+    GenerationJobPage, GenerationJobStage, GenerationJobStatus, GptImageRequestOptions,
+    DEFAULT_GENERATION_JOB_PAGE_LIMIT, MAX_GENERATION_JOB_PAGE_LIMIT,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -17,12 +17,12 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 const JOB_COLUMNS: &str = "id, client_request_id, generation_id, parent_job_id, source_kind,
-    source_ref_json, status, request_json, provider_kind, provider_profile_id, endpoint_snapshot,
-    chain_attempt, auto_attempt, max_auto_attempts, queued_at, started_at, finished_at,
-    cancel_requested_at, last_heartbeat_at, error_code, error_message, retryable";
+    source_ref_json, status, stage, request_json, provider_kind, provider_profile_id,
+    endpoint_snapshot, chain_attempt, auto_attempt, max_auto_attempts, queued_at, started_at,
+    finished_at, cancel_requested_at, last_heartbeat_at, error_code, error_message, retryable";
 
 const ALIASED_JOB_COLUMNS: &str = "g.id, g.client_request_id, g.generation_id, g.parent_job_id,
-    g.source_kind, g.source_ref_json, g.status, g.request_json, g.provider_kind,
+    g.source_kind, g.source_ref_json, g.status, g.stage, g.request_json, g.provider_kind,
     g.provider_profile_id, g.endpoint_snapshot, g.chain_attempt, g.auto_attempt,
     g.max_auto_attempts, g.queued_at, g.started_at, g.finished_at, g.cancel_requested_at,
     g.last_heartbeat_at, g.error_code, g.error_message, g.retryable";
@@ -80,6 +80,23 @@ pub(crate) struct GenerationJobTerminalUpdate {
 }
 
 #[derive(Debug)]
+pub(crate) struct GenerationJobTransition<T> {
+    pub(crate) value: T,
+    /// Present only when this call committed a new durable state transition.
+    /// Idempotent enqueue/retry acknowledgements intentionally carry no event
+    /// so a future command adapter cannot rebroadcast an old transition.
+    pub(crate) event: Option<GenerationJobEvent>,
+}
+
+impl<T> GenerationJobTransition<T> {
+    fn into_value(self) -> T {
+        let Self { value, event } = self;
+        drop(event);
+        value
+    }
+}
+
+#[derive(Debug)]
 struct StoredGenerationJob {
     id: String,
     client_request_id: String,
@@ -88,6 +105,7 @@ struct StoredGenerationJob {
     source_kind: String,
     source_ref_json: String,
     status: String,
+    stage: String,
     request_json: String,
     provider_kind: String,
     provider_profile_id: String,
@@ -365,6 +383,56 @@ fn parse_status(value: &str) -> Result<GenerationJobStatus, AppError> {
     }
 }
 
+fn stage_as_str(stage: GenerationJobStage) -> &'static str {
+    match stage {
+        GenerationJobStage::MigrationUnknown => "migration_unknown",
+        GenerationJobStage::Queued => "queued",
+        GenerationJobStage::Preparing => "preparing",
+        GenerationJobStage::ProviderRequest => "provider_request",
+        GenerationJobStage::RetryBackoff => "retry_backoff",
+        GenerationJobStage::ResponseReady => "response_ready",
+        GenerationJobStage::LocalProcessing => "local_processing",
+        GenerationJobStage::StartupReconciliation => "startup_reconciliation",
+        GenerationJobStage::LegacyResponseRecovery => "legacy_response_recovery",
+        GenerationJobStage::Terminal => "terminal",
+    }
+}
+
+fn parse_stage(value: &str) -> Result<GenerationJobStage, AppError> {
+    match value {
+        "migration_unknown" => Ok(GenerationJobStage::MigrationUnknown),
+        "queued" => Ok(GenerationJobStage::Queued),
+        "preparing" => Ok(GenerationJobStage::Preparing),
+        "provider_request" => Ok(GenerationJobStage::ProviderRequest),
+        "retry_backoff" => Ok(GenerationJobStage::RetryBackoff),
+        "response_ready" => Ok(GenerationJobStage::ResponseReady),
+        "local_processing" => Ok(GenerationJobStage::LocalProcessing),
+        "startup_reconciliation" => Ok(GenerationJobStage::StartupReconciliation),
+        "legacy_response_recovery" => Ok(GenerationJobStage::LegacyResponseRecovery),
+        "terminal" => Ok(GenerationJobStage::Terminal),
+        _ => Err(AppError::GenerationJobCorruptPersistedData),
+    }
+}
+
+fn status_stage_valid(status: &GenerationJobStatus, stage: GenerationJobStage) -> bool {
+    match status {
+        GenerationJobStatus::Queued => stage == GenerationJobStage::Queued,
+        GenerationJobStatus::Running => matches!(
+            stage,
+            GenerationJobStage::Preparing
+                | GenerationJobStage::ProviderRequest
+                | GenerationJobStage::RetryBackoff
+                | GenerationJobStage::ResponseReady
+                | GenerationJobStage::LocalProcessing
+                | GenerationJobStage::StartupReconciliation
+        ),
+        GenerationJobStatus::Completed
+        | GenerationJobStatus::Failed
+        | GenerationJobStatus::Cancelled
+        | GenerationJobStatus::Interrupted => stage == GenerationJobStage::Terminal,
+    }
+}
+
 fn is_terminal(status: &GenerationJobStatus) -> bool {
     matches!(
         status,
@@ -399,21 +467,22 @@ fn stored_job_from_row(row: &Row<'_>) -> rusqlite::Result<StoredGenerationJob> {
         source_kind: row.get(4)?,
         source_ref_json: row.get(5)?,
         status: row.get(6)?,
-        request_json: row.get(7)?,
-        provider_kind: row.get(8)?,
-        provider_profile_id: row.get(9)?,
-        endpoint_snapshot: row.get(10)?,
-        chain_attempt: row.get(11)?,
-        auto_attempt: row.get(12)?,
-        max_auto_attempts: row.get(13)?,
-        queued_at: row.get(14)?,
-        started_at: row.get(15)?,
-        finished_at: row.get(16)?,
-        cancel_requested_at: row.get(17)?,
-        last_heartbeat_at: row.get(18)?,
-        error_code: row.get(19)?,
-        error_message: row.get(20)?,
-        retryable: row.get(21)?,
+        stage: row.get(7)?,
+        request_json: row.get(8)?,
+        provider_kind: row.get(9)?,
+        provider_profile_id: row.get(10)?,
+        endpoint_snapshot: row.get(11)?,
+        chain_attempt: row.get(12)?,
+        auto_attempt: row.get(13)?,
+        max_auto_attempts: row.get(14)?,
+        queued_at: row.get(15)?,
+        started_at: row.get(16)?,
+        finished_at: row.get(17)?,
+        cancel_requested_at: row.get(18)?,
+        last_heartbeat_at: row.get(19)?,
+        error_code: row.get(20)?,
+        error_message: row.get(21)?,
+        retryable: row.get(22)?,
     })
 }
 
@@ -475,6 +544,7 @@ fn decode_stored_job(stored: StoredGenerationJob) -> Result<GenerationJob, AppEr
         .all(|value| nonempty(value) && public_string_is_safe(value))
         && request_options_shape_valid(&canonical_request.options);
     let status = parse_status(&stored.status)?;
+    let stage = parse_stage(&stored.stage)?;
     let timestamps_valid = canonical_timestamp(&stored.queued_at)
         && [
             stored.started_at.as_deref(),
@@ -600,6 +670,8 @@ fn decode_stored_job(stored: StoredGenerationJob) -> Result<GenerationJob, AppEr
         || stored.auto_attempt < 0
         || stored.max_auto_attempts < 0
         || stored.auto_attempt > stored.max_auto_attempts
+        || stage == GenerationJobStage::MigrationUnknown
+        || !status_stage_valid(&status, stage)
     {
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
@@ -611,6 +683,7 @@ fn decode_stored_job(stored: StoredGenerationJob) -> Result<GenerationJob, AppEr
         source_kind: stored.source_kind,
         source_ref,
         status,
+        stage,
         request,
         provider_kind: stored.provider_kind,
         provider_profile_id: stored.provider_profile_id,
@@ -683,6 +756,74 @@ pub(crate) fn get_job_in_transaction(
     id: &str,
 ) -> Result<GenerationJob, AppError> {
     query_job_in_transaction(tx, "id", id)?.ok_or(AppError::GenerationJobNotFound)
+}
+
+pub(crate) fn get_job_event_in_transaction(
+    tx: &Transaction<'_>,
+    id: &str,
+) -> Result<GenerationJobEvent, AppError> {
+    let job = get_job_in_transaction(tx, id)?;
+    let (conversation_id, queue_position) = tx
+        .query_row(
+            "SELECT generation.conversation_id,
+                    CASE
+                        WHEN current.status = 'queued' AND current.stage = 'queued' THEN (
+                            SELECT COUNT(*)
+                              FROM generation_jobs queued
+                             WHERE queued.status = 'queued'
+                               AND queued.stage = 'queued'
+                               AND (
+                                   queued.queued_at < current.queued_at
+                                   OR (
+                                       queued.queued_at = current.queued_at
+                                       AND queued.rowid <= current.rowid
+                                   )
+                               )
+                        )
+                        ELSE NULL
+                    END
+               FROM generation_jobs current
+               JOIN generations generation ON generation.id = current.generation_id
+              WHERE current.id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persisted_row_error("Read generation job event failed", error))?
+        .ok_or(AppError::GenerationJobNotFound)?;
+    let conversation_id = conversation_id
+        .filter(|value| source_reference_id_valid(value))
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+
+    Ok(GenerationJobEvent {
+        job_id: job.id,
+        generation_id: job.generation_id,
+        conversation_id,
+        source_kind: job.source_kind,
+        source_ref: job.source_ref,
+        status: job.status,
+        stage: job.stage,
+        queue_position,
+        chain_attempt: job.chain_attempt,
+        auto_attempt: job.auto_attempt,
+        max_auto_attempts: job.max_auto_attempts,
+        cancel_requested_at: job.cancel_requested_at,
+        error_code: job.error_code,
+        error_message: job.error_message,
+        retryable: job.retryable,
+        queued_at: job.queued_at,
+        started_at: job.started_at,
+        finished_at: job.finished_at,
+    })
+}
+
+pub(crate) fn get_job_event(conn: &Connection, id: &str) -> Result<GenerationJobEvent, AppError> {
+    with_generation_job_read_transaction(conn, "event", |tx| get_job_event_in_transaction(tx, id))
 }
 
 pub(crate) fn find_job_by_client_request_id(
@@ -1884,6 +2025,11 @@ fn insert_prepared_rows_in_transaction(
     let request_json = serde_json::to_string(&canonical_request)
         .map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
     let status = status_as_str(&request.status);
+    let stage = match request.status {
+        GenerationJobStatus::Queued => GenerationJobStage::Queued,
+        GenerationJobStatus::Failed => GenerationJobStage::Terminal,
+        _ => return Err(AppError::GenerationJobInvalidSnapshot),
+    };
     let persisted_error_message = request.error_code.as_deref().map(terminal_message_for_code);
 
     tx.execute(
@@ -1938,12 +2084,12 @@ fn insert_prepared_rows_in_transaction(
     tx.execute(
         "INSERT INTO generation_jobs (
             id, client_request_id, generation_id, parent_job_id, source_kind, source_ref_json,
-            status, request_json, provider_kind, provider_profile_id, endpoint_snapshot,
+            status, stage, request_json, provider_kind, provider_profile_id, endpoint_snapshot,
             chain_attempt, auto_attempt, max_auto_attempts, queued_at, started_at, finished_at,
             cancel_requested_at, last_heartbeat_at, error_code, error_message, retryable
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            NULL, ?16, NULL, NULL, ?17, ?18, ?19
+            ?16, NULL, ?17, NULL, NULL, ?18, ?19, ?20
          )",
         params![
             request.job_id,
@@ -1953,6 +2099,7 @@ fn insert_prepared_rows_in_transaction(
             request.source_kind,
             source_ref_json,
             status,
+            stage_as_str(stage),
             request_json,
             request.provider_kind,
             request.provider_profile_id,
@@ -2000,30 +2147,57 @@ pub(crate) fn insert_job_in_transaction(
     insert_prepared_rows_in_transaction(tx, request, &identity)
 }
 
-pub(crate) fn enqueue_job(
+pub(crate) fn enqueue_job_with_event(
     conn: &mut Connection,
     request: &PreparedGenerationJob,
-) -> Result<EnqueueGenerationResult, AppError> {
+) -> Result<GenerationJobTransition<EnqueueGenerationResult>, AppError> {
     if let Some(existing) = find_job_by_client_request_id(conn, &request.client_request_id)? {
         if existing_matches_prepared(&existing, request) {
-            return enqueue_result_for_validated_job(&existing);
+            return Ok(GenerationJobTransition {
+                value: enqueue_result_for_validated_job(&existing)?,
+                event: None,
+            });
         }
         return Err(AppError::GenerationJobIdempotencyConflict);
     }
 
     let tx = begin_generation_job_write_transaction(conn)?;
-    let result = insert_job_in_transaction(&tx, request)?;
+    let (value, event) = if let Some(existing) =
+        find_job_by_client_request_id_in_transaction(&tx, &request.client_request_id)?
+    {
+        if !existing_matches_prepared(&existing, request) {
+            return Err(AppError::GenerationJobIdempotencyConflict);
+        }
+        (enqueue_result_for_validated_job(&existing)?, None)
+    } else {
+        let value = insert_job_in_transaction(&tx, request)?;
+        let event = get_job_event_in_transaction(&tx, &value.job_id)?;
+        (value, Some(event))
+    };
     tx.commit()
         .map_err(|error| database_error("Commit generation job transaction failed", error))?;
-    Ok(result)
+    Ok(GenerationJobTransition { value, event })
+}
+
+pub(crate) fn enqueue_job(
+    conn: &mut Connection,
+    request: &PreparedGenerationJob,
+) -> Result<EnqueueGenerationResult, AppError> {
+    enqueue_job_with_event(conn, request).map(GenerationJobTransition::into_value)
 }
 
 pub(crate) fn begin_generation_job_write_transaction(
     conn: &mut Connection,
 ) -> Result<Transaction<'_>, AppError> {
+    begin_generation_job_write_transaction_unchecked(conn)
+}
+
+fn begin_generation_job_write_transaction_unchecked(
+    conn: &Connection,
+) -> Result<Transaction<'_>, AppError> {
     conn.busy_timeout(GENERATION_JOB_WRITE_BUSY_TIMEOUT)
         .map_err(|error| database_error("Configure generation job writer wait failed", error))?;
-    conn.transaction_with_behavior(TransactionBehavior::Immediate)
+    Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|error| database_error("Begin generation job write transaction failed", error))
 }
 
@@ -2232,31 +2406,34 @@ fn stored_job_from_row_offset(
         source_kind: row.get(offset + 4)?,
         source_ref_json: row.get(offset + 5)?,
         status: row.get(offset + 6)?,
-        request_json: row.get(offset + 7)?,
-        provider_kind: row.get(offset + 8)?,
-        provider_profile_id: row.get(offset + 9)?,
-        endpoint_snapshot: row.get(offset + 10)?,
-        chain_attempt: row.get(offset + 11)?,
-        auto_attempt: row.get(offset + 12)?,
-        max_auto_attempts: row.get(offset + 13)?,
-        queued_at: row.get(offset + 14)?,
-        started_at: row.get(offset + 15)?,
-        finished_at: row.get(offset + 16)?,
-        cancel_requested_at: row.get(offset + 17)?,
-        last_heartbeat_at: row.get(offset + 18)?,
-        error_code: row.get(offset + 19)?,
-        error_message: row.get(offset + 20)?,
-        retryable: row.get(offset + 21)?,
+        stage: row.get(offset + 7)?,
+        request_json: row.get(offset + 8)?,
+        provider_kind: row.get(offset + 9)?,
+        provider_profile_id: row.get(offset + 10)?,
+        endpoint_snapshot: row.get(offset + 11)?,
+        chain_attempt: row.get(offset + 12)?,
+        auto_attempt: row.get(offset + 13)?,
+        max_auto_attempts: row.get(offset + 14)?,
+        queued_at: row.get(offset + 15)?,
+        started_at: row.get(offset + 16)?,
+        finished_at: row.get(offset + 17)?,
+        cancel_requested_at: row.get(offset + 18)?,
+        last_heartbeat_at: row.get(offset + 19)?,
+        error_code: row.get(offset + 20)?,
+        error_message: row.get(offset + 21)?,
+        retryable: row.get(offset + 22)?,
     })
 }
 
-pub(crate) fn claim_next_job(conn: &mut Connection) -> Result<Option<GenerationJob>, AppError> {
+pub(crate) fn claim_next_job_with_event(
+    conn: &mut Connection,
+) -> Result<Option<GenerationJobTransition<GenerationJob>>, AppError> {
     let tx = begin_generation_job_write_transaction(conn)?;
     let candidate_id = tx
         .query_row(
             "SELECT id
              FROM generation_jobs
-             WHERE status = 'queued'
+             WHERE status = 'queued' AND stage = 'queued'
              ORDER BY queued_at ASC, rowid ASC
              LIMIT 1",
             [],
@@ -2270,9 +2447,18 @@ pub(crate) fn claim_next_job(conn: &mut Connection) -> Result<Option<GenerationJ
         return Ok(None);
     };
     let job = claim_job_in_transaction(&tx, &candidate_id)?;
+    let event = get_job_event_in_transaction(&tx, &candidate_id)?;
     tx.commit()
         .map_err(|error| database_error("Commit job claim failed", error))?;
-    Ok(Some(job))
+    Ok(Some(GenerationJobTransition {
+        value: job,
+        event: Some(event),
+    }))
+}
+
+pub(crate) fn claim_next_job(conn: &mut Connection) -> Result<Option<GenerationJob>, AppError> {
+    claim_next_job_with_event(conn)
+        .map(|transition| transition.map(GenerationJobTransition::into_value))
 }
 
 pub(crate) fn claim_job_in_transaction(
@@ -2280,7 +2466,9 @@ pub(crate) fn claim_job_in_transaction(
     job_id: &str,
 ) -> Result<GenerationJob, AppError> {
     let candidate = get_job_in_transaction(tx, job_id)?;
-    if candidate.status != GenerationJobStatus::Queued {
+    if candidate.status != GenerationJobStatus::Queued
+        || candidate.stage != GenerationJobStage::Queued
+    {
         return Err(AppError::GenerationJobInvalidTransition);
     }
     let generation_id = candidate.generation_id;
@@ -2288,8 +2476,9 @@ pub(crate) fn claim_job_in_transaction(
     let updated_job = tx
         .execute(
             "UPDATE generation_jobs
-             SET status = 'running', started_at = ?1, last_heartbeat_at = ?1
-             WHERE id = ?2 AND status = 'queued'",
+             SET status = 'running', stage = 'preparing', started_at = ?1,
+                 last_heartbeat_at = ?1
+             WHERE id = ?2 AND status = 'queued' AND stage = 'queued'",
             params![timestamp, job_id],
         )
         .map_err(|error| database_error("Claim generation job failed", error))?;
@@ -2334,7 +2523,7 @@ pub(crate) fn load_generation_execution_snapshot_in_transaction(
     job_id: &str,
 ) -> Result<GenerationExecutionSnapshot, AppError> {
     let job = get_job_in_transaction(tx, job_id)?;
-    if job.status != GenerationJobStatus::Running {
+    if job.status != GenerationJobStatus::Running || job.stage != GenerationJobStage::Preparing {
         return Err(AppError::GenerationJobInvalidTransition);
     }
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
@@ -2435,20 +2624,22 @@ pub(crate) fn set_actual_image_count_in_transaction(
     Ok(())
 }
 
-pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJob, AppError> {
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|error| database_error("Begin job cancellation transaction failed", error))?;
+pub(crate) fn request_cancel_with_event(
+    conn: &Connection,
+    id: &str,
+) -> Result<GenerationJobTransition<GenerationJob>, AppError> {
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
     let current = get_job_in_transaction(&tx, id)?;
     let timestamp = crate::current_timestamp();
-    match current.status {
+    let changed = match current.status {
         GenerationJobStatus::Queued => {
             let updated_job = tx
                 .execute(
                     "UPDATE generation_jobs
-                     SET status = 'cancelled', cancel_requested_at = ?1, finished_at = ?1,
-                         error_code = 'cancelled_by_user', error_message = ?2, retryable = 0
-                     WHERE id = ?3 AND status = 'queued'",
+                     SET status = 'cancelled', stage = 'terminal', cancel_requested_at = ?1,
+                         finished_at = ?1, error_code = 'cancelled_by_user', error_message = ?2,
+                         retryable = 0
+                     WHERE id = ?3 AND status = 'queued' AND stage = 'queued'",
                     params![
                         timestamp,
                         terminal_message_for_code("cancelled_by_user"),
@@ -2485,28 +2676,44 @@ pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJo
             if deleted_recovery != 1 {
                 return Err(AppError::GenerationJobCorruptPersistedData);
             }
+            true
         }
         GenerationJobStatus::Running => {
-            let updated = tx
-                .execute(
-                    "UPDATE generation_jobs
-                     SET cancel_requested_at = COALESCE(cancel_requested_at, ?1)
-                     WHERE id = ?2 AND status = 'running'",
-                    params![timestamp, id],
-                )
-                .map_err(|error| {
-                    database_error("Request generation job cancellation failed", error)
-                })?;
-            if updated != 1 {
-                return Err(AppError::GenerationJobInvalidTransition);
+            if current.cancel_requested_at.is_some() {
+                false
+            } else {
+                let updated = tx
+                    .execute(
+                        "UPDATE generation_jobs
+                         SET cancel_requested_at = ?1
+                         WHERE id = ?2 AND status = 'running'
+                           AND cancel_requested_at IS NULL",
+                        params![timestamp, id],
+                    )
+                    .map_err(|error| {
+                        database_error("Request generation job cancellation failed", error)
+                    })?;
+                if updated != 1 {
+                    return Err(AppError::GenerationJobInvalidTransition);
+                }
+                true
             }
         }
         _ => return Err(AppError::GenerationJobInvalidTransition),
-    }
+    };
     let job = get_job_in_transaction(&tx, id)?;
+    let event = if changed {
+        Some(get_job_event_in_transaction(&tx, id)?)
+    } else {
+        None
+    };
     tx.commit()
         .map_err(|error| database_error("Commit job cancellation failed", error))?;
-    Ok(job)
+    Ok(GenerationJobTransition { value: job, event })
+}
+
+pub(crate) fn request_cancel(conn: &Connection, id: &str) -> Result<GenerationJob, AppError> {
+    request_cancel_with_event(conn, id).map(GenerationJobTransition::into_value)
 }
 
 pub(crate) fn finish_job_in_transaction(
@@ -2543,14 +2750,26 @@ pub(crate) fn finish_job_in_transaction(
     let persisted_error_message = persisted_error_code.map(terminal_message_for_code);
     let current = tx
         .query_row(
-            "SELECT generation_id, status FROM generation_jobs WHERE id = ?1",
+            "SELECT generation_id, status, stage FROM generation_jobs WHERE id = ?1",
             params![update.job_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()
         .map_err(|error| persisted_row_error("Read terminal generation job failed", error))?
         .ok_or(AppError::GenerationJobNotFound)?;
     if parse_status(&current.1)? != update.expected_status {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let current_stage = parse_stage(&current.2)?;
+    if current_stage == GenerationJobStage::MigrationUnknown
+        || !status_stage_valid(&update.expected_status, current_stage)
+    {
         return Err(AppError::GenerationJobInvalidTransition);
     }
     if !source_reference_id_valid(&current.0) {
@@ -2561,9 +2780,10 @@ pub(crate) fn finish_job_in_transaction(
     let updated = tx
         .execute(
             "UPDATE generation_jobs
-             SET status = ?1, finished_at = ?2, error_code = ?3, error_message = ?4,
-                 retryable = ?5
+             SET status = ?1, stage = 'terminal', finished_at = ?2, error_code = ?3,
+                 error_message = ?4, retryable = ?5
              WHERE id = ?6 AND status = ?7
+               AND stage = ?8
                AND ((?1 = 'cancelled' AND cancel_requested_at IS NOT NULL)
                     OR (?1 <> 'cancelled' AND cancel_requested_at IS NULL))",
             params![
@@ -2574,6 +2794,7 @@ pub(crate) fn finish_job_in_transaction(
                 i64::from(update.retryable),
                 update.job_id,
                 status_as_str(&update.expected_status),
+                stage_as_str(current_stage),
             ],
         )
         .map_err(|error| database_error("Finish generation job failed", error))?;
@@ -2611,17 +2832,26 @@ pub(crate) fn finish_job_in_transaction(
     get_job_in_transaction(tx, &update.job_id)
 }
 
+pub(crate) fn finish_job_with_event(
+    conn: &Connection,
+    update: &GenerationJobTerminalUpdate,
+) -> Result<GenerationJobTransition<GenerationJob>, AppError> {
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let job = finish_job_in_transaction(&tx, update)?;
+    let event = get_job_event_in_transaction(&tx, &update.job_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit job finish failed", error))?;
+    Ok(GenerationJobTransition {
+        value: job,
+        event: Some(event),
+    })
+}
+
 pub(crate) fn finish_job(
     conn: &Connection,
     update: &GenerationJobTerminalUpdate,
 ) -> Result<GenerationJob, AppError> {
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|error| database_error("Begin job finish transaction failed", error))?;
-    let job = finish_job_in_transaction(&tx, update)?;
-    tx.commit()
-        .map_err(|error| database_error("Commit job finish failed", error))?;
-    Ok(job)
+    finish_job_with_event(conn, update).map(GenerationJobTransition::into_value)
 }
 
 fn load_retry_generation(
@@ -2849,11 +3079,11 @@ pub(crate) fn insert_retry_job_in_transaction(
     insert_prepared_rows_in_transaction(tx, &request, &identity)
 }
 
-pub(crate) fn create_retry_job(
+pub(crate) fn create_retry_job_with_event(
     conn: &mut Connection,
     parent_id: &str,
     client_request_id: &str,
-) -> Result<EnqueueGenerationResult, AppError> {
+) -> Result<GenerationJobTransition<EnqueueGenerationResult>, AppError> {
     let existing_result = with_generation_job_read_transaction(conn, "find retry", |tx| {
         find_job_by_client_request_id_in_transaction(tx, client_request_id)?
             .as_ref()
@@ -2861,13 +3091,36 @@ pub(crate) fn create_retry_job(
             .transpose()
     })?;
     if let Some(existing_result) = existing_result {
-        return Ok(existing_result);
+        return Ok(GenerationJobTransition {
+            value: existing_result,
+            event: None,
+        });
     }
     let tx = begin_generation_job_write_transaction(conn)?;
-    let result = insert_retry_job_in_transaction(&tx, parent_id, client_request_id, None)?;
+    let (value, event) = if let Some(existing) =
+        find_job_by_client_request_id_in_transaction(&tx, client_request_id)?
+    {
+        (
+            retry_existing_result_in_transaction(&tx, parent_id, &existing, None)?,
+            None,
+        )
+    } else {
+        let value = insert_retry_job_in_transaction(&tx, parent_id, client_request_id, None)?;
+        let event = get_job_event_in_transaction(&tx, &value.job_id)?;
+        (value, Some(event))
+    };
     tx.commit()
         .map_err(|error| database_error("Commit retry transaction failed", error))?;
-    Ok(result)
+    Ok(GenerationJobTransition { value, event })
+}
+
+pub(crate) fn create_retry_job(
+    conn: &mut Connection,
+    parent_id: &str,
+    client_request_id: &str,
+) -> Result<EnqueueGenerationResult, AppError> {
+    create_retry_job_with_event(conn, parent_id, client_request_id)
+        .map(GenerationJobTransition::into_value)
 }
 
 #[cfg(test)]

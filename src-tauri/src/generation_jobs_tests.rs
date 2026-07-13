@@ -1,7 +1,7 @@
 use super::*;
 use crate::db::Database;
 use crate::error::AppError;
-use crate::models::{GenerationJobFilter, GenerationJobStatus};
+use crate::models::{GenerationJobFilter, GenerationJobStage, GenerationJobStatus};
 use rusqlite::{params, Connection};
 use serde_json::json;
 use std::cell::Cell;
@@ -955,6 +955,7 @@ fn initial_provider_configuration_failure_is_inserted_atomically_as_terminal() {
     let job = fixture.get(&result.job_id);
     assert_eq!(result.status, GenerationJobStatus::Failed);
     assert_eq!(job.status, GenerationJobStatus::Failed);
+    assert_eq!(job.stage, GenerationJobStage::Terminal);
     assert_eq!(job.finished_at.as_deref(), Some(request.queued_at.as_str()));
     assert_eq!(job.error_code.as_deref(), Some("provider_profile_missing"));
     assert_eq!(
@@ -1391,6 +1392,8 @@ fn claim_and_list_use_stable_same_second_fifo_and_update_generation() {
     let first = fixture.enqueue("request-1", "first");
     let second = fixture.enqueue("request-2", "second");
     assert_eq!(first.queued_at, second.queued_at);
+    assert_eq!(first.stage, GenerationJobStage::Queued);
+    assert_eq!(second.stage, GenerationJobStage::Queued);
 
     let listed = fixture.list(&GenerationJobFilter::default());
     assert_eq!(
@@ -1405,10 +1408,399 @@ fn claim_and_list_use_stable_same_second_fifo_and_update_generation() {
     let claimed = fixture.claim().expect("claim first job");
     assert_eq!(claimed.id, first.id);
     assert_eq!(claimed.status, GenerationJobStatus::Running);
+    assert_eq!(claimed.stage, GenerationJobStage::Preparing);
     assert_eq!(fixture.generation_status(&first.generation_id), "running");
 
     let claimed_second = fixture.claim().expect("claim second job");
     assert_eq!(claimed_second.id, second.id);
+}
+
+#[test]
+fn generic_reads_and_claim_fail_closed_for_unknown_or_mismatched_stages() {
+    for (index, stage) in ["migration_unknown", "future_stage", "terminal"]
+        .into_iter()
+        .enumerate()
+    {
+        let fixture = JobFixture::new();
+        let queued = fixture.enqueue(&format!("request-{index}"), "stage-sentinel");
+        let conn = fixture.database.conn.lock().expect("lock database");
+        conn.execute(
+            "UPDATE generation_jobs SET stage = ?1 WHERE id = ?2",
+            params![stage, queued.id],
+        )
+        .expect("mutate persisted stage");
+
+        let get_error = get_job(&conn, &queued.id).expect_err("generic get must reject stage");
+        assert_eq!(
+            stable_code(&get_error),
+            "generation_job_corrupt_persisted_data"
+        );
+        let list_error = list_jobs(&conn, &GenerationJobFilter::default())
+            .expect_err("generic list must reject stage");
+        assert_eq!(
+            stable_code(&list_error),
+            "generation_job_corrupt_persisted_data"
+        );
+        drop(conn);
+
+        let mut conn = fixture.database.conn.lock().expect("lock database");
+        assert!(claim_next_job(&mut conn)
+            .expect("non-claimable stage must remain untouched")
+            .is_none());
+        let tx = conn.transaction().expect("begin exact claim transaction");
+        let claim_error = claim_job_in_transaction(&tx, &queued.id)
+            .expect_err("exact claim must reject non-queued stage");
+        assert!(matches!(
+            stable_code(&claim_error),
+            "generation_job_corrupt_persisted_data" | "generation_job_invalid_transition"
+        ));
+        tx.rollback().expect("rollback rejected exact claim");
+    }
+}
+
+#[test]
+fn legacy_response_recovery_is_reserved_and_invalid_for_every_generic_status_projection() {
+    for (index, status) in [
+        GenerationJobStatus::Queued,
+        GenerationJobStatus::Running,
+        GenerationJobStatus::Failed,
+        GenerationJobStatus::Cancelled,
+        GenerationJobStatus::Interrupted,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fixture = JobFixture::new();
+        let job = transition_fixture_job(&fixture, status, &format!("legacy-reserved-{index}"));
+        let conn = fixture.database.conn.lock().expect("lock database");
+        conn.execute(
+            "UPDATE generation_jobs SET stage = 'legacy_response_recovery' WHERE id = ?1",
+            params![job.id],
+        )
+        .expect("inject reserved legacy stage");
+
+        for error in [
+            get_job(&conn, &job.id).expect_err("generic get must reject reserved stage"),
+            list_jobs(&conn, &GenerationJobFilter::default())
+                .expect_err("generic list must reject reserved stage"),
+            get_job_event(&conn, &job.id).expect_err("generic event must reject reserved stage"),
+        ] {
+            assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+        }
+        let execution_error = load_generation_execution_snapshot(&conn, &job.id)
+            .expect_err("generic execution must reject reserved stage");
+        assert!(matches!(
+            stable_code(&execution_error),
+            "generation_job_corrupt_persisted_data" | "generation_job_invalid_transition"
+        ));
+    }
+
+    let (fixture, completed) = completed_projection_fixture(1, 1, "legacy-reserved-completed");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    conn.execute(
+        "UPDATE generation_jobs SET stage = 'legacy_response_recovery' WHERE id = ?1",
+        params![completed.id],
+    )
+    .expect("inject completed reserved legacy stage");
+    for error in [
+        get_job(&conn, &completed.id).expect_err("completed get must reject reserved stage"),
+        list_jobs(&conn, &GenerationJobFilter::default())
+            .expect_err("completed list must reject reserved stage"),
+        get_job_event(&conn, &completed.id)
+            .expect_err("completed event must reject reserved stage"),
+    ] {
+        assert_eq!(stable_code(&error), "generation_job_corrupt_persisted_data");
+    }
+    let execution_error = load_generation_execution_snapshot(&conn, &completed.id)
+        .expect_err("completed execution must reject reserved stage");
+    assert!(matches!(
+        stable_code(&execution_error),
+        "generation_job_corrupt_persisted_data" | "generation_job_invalid_transition"
+    ));
+}
+
+#[test]
+fn only_preparing_stage_can_use_generic_execution_snapshot() {
+    for (index, (persisted_stage, expected_stage)) in [
+        ("provider_request", GenerationJobStage::ProviderRequest),
+        ("retry_backoff", GenerationJobStage::RetryBackoff),
+        ("response_ready", GenerationJobStage::ResponseReady),
+        ("local_processing", GenerationJobStage::LocalProcessing),
+        (
+            "startup_reconciliation",
+            GenerationJobStage::StartupReconciliation,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fixture = JobFixture::new();
+        let queued = fixture.enqueue(&format!("request-stage-{index}"), "non-provider-stage");
+        fixture.claim().expect("claim stage fixture");
+        let conn = fixture.database.conn.lock().expect("lock database");
+        conn.execute(
+            "UPDATE generation_jobs SET stage = ?1 WHERE id = ?2",
+            params![persisted_stage, queued.id],
+        )
+        .expect("mark non-preparing stage");
+        assert_eq!(
+            get_job(&conn, &queued.id)
+                .expect("read non-preparing job")
+                .stage,
+            expected_stage
+        );
+
+        let error = load_generation_execution_snapshot(&conn, &queued.id)
+            .expect_err("generic provider snapshot must reject every non-preparing stage");
+        assert_eq!(stable_code(&error), "generation_job_invalid_transition");
+    }
+}
+
+#[test]
+fn job_event_projects_committed_conversation_and_secret_free_public_fields() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("event-request", "decoy-source-id");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let conversation_id = conn
+        .query_row(
+            "SELECT conversation_id FROM generations WHERE id = ?1",
+            params![queued.generation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("read committed generation conversation");
+    assert_ne!(
+        queued.source_ref["id"].as_str(),
+        Some(conversation_id.as_str()),
+        "fixture must distinguish source JSON from committed conversation"
+    );
+
+    let event = get_job_event(&conn, &queued.id).expect("project committed job event");
+    assert_eq!(event.job_id, queued.id);
+    assert_eq!(event.generation_id, queued.generation_id);
+    assert_eq!(event.conversation_id, conversation_id);
+    assert_eq!(event.source_kind, queued.source_kind);
+    assert_eq!(event.source_ref, queued.source_ref);
+    assert_eq!(event.status, GenerationJobStatus::Queued);
+    assert_eq!(event.stage, GenerationJobStage::Queued);
+    assert_eq!(event.queue_position, Some(1));
+    assert_eq!(event.chain_attempt, queued.chain_attempt);
+    assert_eq!(event.auto_attempt, queued.auto_attempt);
+    assert_eq!(event.max_auto_attempts, queued.max_auto_attempts);
+    assert_eq!(event.cancel_requested_at, queued.cancel_requested_at);
+    assert_eq!(event.error_code, queued.error_code);
+    assert_eq!(event.error_message, queued.error_message);
+    assert_eq!(event.retryable, queued.retryable);
+    assert_eq!(event.queued_at, queued.queued_at);
+    assert_eq!(event.started_at, queued.started_at);
+    assert_eq!(event.finished_at, queued.finished_at);
+
+    let encoded = serde_json::to_string(&event).expect("serialize committed event");
+    for private in [
+        queued.request["prompt"].as_str().expect("queued prompt"),
+        queued.endpoint_snapshot.as_str(),
+        "request_json",
+        "endpoint_snapshot",
+        "api_key",
+        "secret-key",
+    ] {
+        assert!(!encoded.contains(private), "event leaked {private}");
+    }
+}
+
+#[test]
+fn queued_event_position_uses_queued_at_then_rowid_and_reflows_after_claim() {
+    let fixture = JobFixture::new();
+    let first = fixture.enqueue("event-position-1", "event-first");
+    let second = fixture.enqueue("event-position-2", "event-second");
+    assert_eq!(first.queued_at, second.queued_at);
+    {
+        let conn = fixture.database.conn.lock().expect("lock database");
+        assert_eq!(
+            get_job_event(&conn, &first.id)
+                .expect("project first queued event")
+                .queue_position,
+            Some(1)
+        );
+        assert_eq!(
+            get_job_event(&conn, &second.id)
+                .expect("project second queued event")
+                .queue_position,
+            Some(2)
+        );
+    }
+
+    fixture.claim().expect("claim first queued event job");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    assert_eq!(
+        get_job_event(&conn, &first.id)
+            .expect("project running event")
+            .queue_position,
+        None
+    );
+    assert_eq!(
+        get_job_event(&conn, &second.id)
+            .expect("project remaining queued event")
+            .queue_position,
+        Some(1)
+    );
+}
+
+#[test]
+fn transition_variants_return_owned_committed_events_and_suppress_idempotent_replays() {
+    let fixture = JobFixture::new();
+    let first = fixture.enqueue("event-transition-first", "event-transition-first");
+    let second_request = fixture.prepared("event-transition-second", "event-transition-second");
+
+    let mut conn = fixture.database.conn.lock().expect("lock database");
+    let enqueued = enqueue_job_with_event(&mut conn, &second_request)
+        .expect("enqueue transition with committed event");
+    let enqueued_event = enqueued
+        .event
+        .as_ref()
+        .expect("new enqueue must publish one event");
+    assert_eq!(enqueued.value.job_id, second_request.job_id);
+    assert_eq!(enqueued_event.status, GenerationJobStatus::Queued);
+    assert_eq!(enqueued_event.stage, GenerationJobStage::Queued);
+    assert_eq!(enqueued_event.queue_position, Some(2));
+
+    let replayed = enqueue_job_with_event(&mut conn, &second_request)
+        .expect("idempotent enqueue acknowledgement");
+    assert_eq!(replayed.value.job_id, enqueued.value.job_id);
+    assert!(
+        replayed.event.is_none(),
+        "idempotent enqueue must not masquerade as a new transition"
+    );
+
+    let claimed_first = claim_next_job_with_event(&mut conn)
+        .expect("claim first transition")
+        .expect("first queued job");
+    assert_eq!(claimed_first.value.id, first.id);
+    assert_eq!(
+        claimed_first
+            .event
+            .as_ref()
+            .expect("claim must publish one event")
+            .stage,
+        GenerationJobStage::Preparing
+    );
+    assert_eq!(
+        get_job_event(&conn, &second_request.job_id)
+            .expect("project reflowed second job")
+            .queue_position,
+        Some(1)
+    );
+    assert_eq!(
+        enqueued
+            .event
+            .as_ref()
+            .expect("owned enqueue event remains present")
+            .queue_position,
+        Some(2),
+        "a committed event must remain an immutable historical snapshot"
+    );
+
+    let claimed_second = claim_next_job_with_event(&mut conn)
+        .expect("claim second transition")
+        .expect("second queued job");
+    assert_eq!(claimed_second.value.id, second_request.job_id);
+    let cancel_requested = request_cancel_with_event(&conn, &second_request.job_id)
+        .expect("request running cancellation with committed event");
+    let cancel_event = cancel_requested
+        .event
+        .as_ref()
+        .expect("new cancellation request must publish one event");
+    assert_eq!(cancel_event.status, GenerationJobStatus::Running);
+    assert_eq!(cancel_event.stage, GenerationJobStage::Preparing);
+    assert!(cancel_event.cancel_requested_at.is_some());
+
+    let finished = finish_job_with_event(
+        &conn,
+        &GenerationJobTerminalUpdate {
+            job_id: second_request.job_id.clone(),
+            expected_status: GenerationJobStatus::Running,
+            status: GenerationJobStatus::Cancelled,
+            finished_at: "2026-07-10T00:00:03Z".to_string(),
+            error_code: None,
+            error_message: None,
+            retryable: false,
+        },
+    )
+    .expect("finish cancelled job with committed event");
+    let finished_event = finished
+        .event
+        .as_ref()
+        .expect("terminal transition must publish one event");
+    assert_eq!(finished.value.status, GenerationJobStatus::Cancelled);
+    assert_eq!(finished_event.status, GenerationJobStatus::Cancelled);
+    assert_eq!(finished_event.stage, GenerationJobStage::Terminal);
+    assert_eq!(
+        cancel_requested
+            .event
+            .as_ref()
+            .expect("owned cancellation event remains present")
+            .status,
+        GenerationJobStatus::Running,
+        "a later terminal transition must not rewrite an earlier event snapshot"
+    );
+    drop(conn);
+
+    let failed = fixture.fail_retryable("event-transition-parent", "event-transition-parent");
+    let mut conn = fixture.database.conn.lock().expect("lock database");
+    let retry = create_retry_job_with_event(&mut conn, &failed.id, "event-transition-retry")
+        .expect("retry transition with committed event");
+    let retry_event = retry
+        .event
+        .as_ref()
+        .expect("new retry must publish one event");
+    assert_eq!(retry.value.status, GenerationJobStatus::Queued);
+    assert_eq!(retry_event.job_id, retry.value.job_id);
+    assert_eq!(retry_event.status, GenerationJobStatus::Queued);
+    assert_eq!(retry_event.stage, GenerationJobStage::Queued);
+
+    let retry_replay = create_retry_job_with_event(&mut conn, &failed.id, "event-transition-retry")
+        .expect("idempotent retry acknowledgement");
+    assert_eq!(retry_replay.value.job_id, retry.value.job_id);
+    assert!(
+        retry_replay.event.is_none(),
+        "idempotent retry must not masquerade as a new transition"
+    );
+}
+
+#[test]
+fn transition_variant_returns_no_event_when_commit_rolls_back() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("event-rollback", "event-rollback");
+    fixture.claim().expect("claim rollback fixture");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    conn.execute_batch(
+        "CREATE TRIGGER fail_generation_job_finish_at_commit
+         AFTER UPDATE OF status ON generation_jobs
+         WHEN NEW.status = 'failed'
+         BEGIN
+             INSERT INTO images (id, generation_id, file_path)
+             VALUES ('event-rollback-image', 'missing-generation', '/tmp/event-rollback.png');
+         END;
+         PRAGMA defer_foreign_keys=ON;",
+    )
+    .expect("install deferred commit failure");
+
+    let result = finish_job_with_event(
+        &conn,
+        &GenerationJobTerminalUpdate {
+            job_id: queued.id.clone(),
+            expected_status: GenerationJobStatus::Running,
+            status: GenerationJobStatus::Failed,
+            finished_at: "2026-07-10T00:00:02Z".to_string(),
+            error_code: Some("provider_unavailable".to_string()),
+            error_message: None,
+            retryable: true,
+        },
+    );
+    assert!(result.is_err(), "failed commit must not return an event");
+    let current = get_job(&conn, &queued.id).expect("read rolled-back job");
+    assert_eq!(current.status, GenerationJobStatus::Running);
+    assert_eq!(current.stage, GenerationJobStage::Preparing);
+    assert_eq!(count_table(&conn, "images"), 0);
 }
 
 #[test]
@@ -2473,6 +2865,7 @@ fn composable_finish_allows_recovery_cleanup_earlier_in_the_same_transaction() {
     )
     .expect("finish inside outer transaction after recovery cleanup");
     assert_eq!(completed.status, GenerationJobStatus::Completed);
+    assert_eq!(completed.stage, GenerationJobStage::Terminal);
     tx.commit().expect("commit terminal outer transaction");
 
     assert_eq!(
@@ -2491,6 +2884,7 @@ fn queued_cancel_updates_job_and_generation_while_running_cancel_only_stamps_req
         request_cancel(&conn, &queued.id).expect("cancel queued job")
     };
     assert_eq!(cancelled.status, GenerationJobStatus::Cancelled);
+    assert_eq!(cancelled.stage, GenerationJobStage::Terminal);
     assert!(cancelled.cancel_requested_at.is_some());
     assert!(cancelled.finished_at.is_some());
     assert_eq!(
@@ -2507,10 +2901,66 @@ fn queued_cancel_updates_job_and_generation_while_running_cancel_only_stamps_req
         request_cancel(&conn, &running.id).expect("request running cancellation")
     };
     assert_eq!(requested.status, GenerationJobStatus::Running);
+    assert_eq!(requested.stage, GenerationJobStage::Preparing);
     assert!(requested.cancel_requested_at.is_some());
     assert!(requested.finished_at.is_none());
     assert_eq!(fixture.generation_status(&running.generation_id), "running");
     assert_eq!(fixture.count("generation_recoveries"), 1);
+}
+
+#[test]
+fn concurrent_claim_and_cancel_never_lose_the_durable_cancel_request() {
+    const ROUNDS: usize = 64;
+    let fixture = JobFixture::new();
+
+    for round in 0..ROUNDS {
+        let queued = fixture.enqueue(&format!("claim-cancel-{round}"), "claim-cancel-race");
+        let mut claim_conn = fixture.open_connection();
+        let cancel_conn = fixture.open_connection();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+
+        let claim_barrier = std::sync::Arc::clone(&barrier);
+        let claim = std::thread::spawn(move || {
+            claim_barrier.wait();
+            claim_next_job(&mut claim_conn)
+        });
+        let cancel_barrier = std::sync::Arc::clone(&barrier);
+        let job_id = queued.id.clone();
+        let cancel = std::thread::spawn(move || {
+            cancel_barrier.wait();
+            request_cancel(&cancel_conn, &job_id)
+        });
+
+        barrier.wait();
+        let claim_result = claim.join().expect("claim thread must not panic");
+        let cancel_result = cancel.join().expect("cancel thread must not panic");
+        assert!(
+            claim_result.is_ok(),
+            "round {round} claim returned database error: {claim_result:?}"
+        );
+        assert!(
+            cancel_result.is_ok(),
+            "round {round} cancel returned database error: {cancel_result:?}"
+        );
+
+        let final_job = fixture.get(&queued.id);
+        match final_job.status {
+            GenerationJobStatus::Cancelled => {
+                assert_eq!(final_job.stage, GenerationJobStage::Terminal);
+                assert!(final_job.cancel_requested_at.is_some());
+                assert!(final_job.finished_at.is_some());
+            }
+            GenerationJobStatus::Running => {
+                assert_eq!(final_job.stage, GenerationJobStage::Preparing);
+                assert!(
+                    final_job.cancel_requested_at.is_some(),
+                    "round {round} lost the durable cancellation request"
+                );
+                assert!(final_job.finished_at.is_none());
+            }
+            status => panic!("round {round} ended in unexpected status {status:?}"),
+        }
+    }
 }
 
 #[test]
@@ -2615,6 +3065,7 @@ fn failed_retry_creates_immutable_child_with_fresh_generation_and_reset_attempts
     assert_eq!(retry.chain_attempt, failed.chain_attempt + 1);
     assert_eq!(retry.auto_attempt, 0);
     assert_eq!(retry.status, GenerationJobStatus::Queued);
+    assert_eq!(retry.stage, GenerationJobStage::Queued);
     assert_eq!(retry.request, failed.request);
     assert_eq!(retry.provider_kind, failed.provider_kind);
     assert_eq!(retry.provider_profile_id, failed.provider_profile_id);
