@@ -139,6 +139,16 @@ mod tests {
             != 0
     }
 
+    fn trigger_exists(conn: &Connection, trigger: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?1)",
+            params![trigger],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query trigger existence")
+            != 0
+    }
+
     fn index_columns(conn: &Connection, index: &str) -> Vec<String> {
         let mut stmt = conn
             .prepare(&format!("PRAGMA index_info({index})"))
@@ -1046,6 +1056,10 @@ mod tests {
     fn generation_worker_v17_lease_enforces_singleton_key_and_nonnegative_epoch() {
         let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v17-lease-test");
         let conn = fixture.database.conn.lock().expect("lock db");
+        for trigger in V18_LEASE_TRIGGER_NAMES {
+            conn.execute(&format!("DROP TRIGGER {trigger}"), [])
+                .expect("isolate v17 lease constraints from v18 transition guards");
+        }
 
         let wrong_key = conn
             .execute(
@@ -1204,6 +1218,414 @@ mod tests {
         drop(database);
         drop(directory);
     }
+
+    const V18_LEASE_TRIGGER_NAMES: [&str; 3] = [
+        "prevent_generation_worker_lease_delete",
+        "prevent_generation_worker_lease_insert",
+        "enforce_generation_worker_lease_transition",
+    ];
+
+    fn remove_v18_lease_migration_state(database: &Database) {
+        let conn = database.conn.lock().expect("lock v18 reset db");
+        for trigger in V18_LEASE_TRIGGER_NAMES {
+            conn.execute(&format!("DROP TRIGGER IF EXISTS {trigger}"), [])
+                .expect("drop v18 lease trigger");
+        }
+        conn.execute("DELETE FROM schema_migrations WHERE version = 18", [])
+            .expect("remove v18 migration record");
+    }
+
+    fn lease_row(
+        conn: &Connection,
+    ) -> (
+        i64,
+        Option<String>,
+        i64,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+    ) {
+        conn.query_row(
+            "SELECT id, owner_id, fencing_epoch, acquired_at, heartbeat_at, expires_at
+               FROM generation_worker_lease",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .expect("read generation worker lease row")
+    }
+
+    #[test]
+    fn generation_worker_v18_installs_sealed_transition_guards() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v18-fresh-test");
+        let conn = fixture.database.conn.lock().expect("lock v18 db");
+
+        assert!(migration_version_exists(&conn, 18));
+        for trigger in V18_LEASE_TRIGGER_NAMES {
+            assert!(trigger_exists(&conn, trigger), "missing trigger {trigger}");
+        }
+        assert!(trigger_exists(
+            &conn,
+            "prevent_generation_worker_lease_epoch_decrease"
+        ));
+        assert_eq!(lease_row(&conn), (1, None, 0, None, None, None));
+    }
+
+    #[test]
+    fn generation_worker_v18_allows_only_renew_release_and_next_epoch_takeover() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v18-legal-test");
+        let conn = fixture.database.conn.lock().expect("lock v18 db");
+
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = 'worker-a', fencing_epoch = 1,
+                    acquired_at = 1000, heartbeat_at = 1000, expires_at = 1100
+              WHERE id = 1",
+            [],
+        )
+        .expect("acquire released lease at exact next epoch");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET heartbeat_at = 1050, expires_at = 1150
+              WHERE id = 1",
+            [],
+        )
+        .expect("renew active lease monotonically");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = NULL, acquired_at = NULL, heartbeat_at = NULL, expires_at = NULL
+              WHERE id = 1",
+            [],
+        )
+        .expect("release while retaining epoch");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = 'worker-b', fencing_epoch = 2,
+                    acquired_at = 1150, heartbeat_at = 1150, expires_at = 1250
+              WHERE id = 1",
+            [],
+        )
+        .expect("acquire released lease at next epoch");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = 'worker-c', fencing_epoch = 3,
+                    acquired_at = 1250, heartbeat_at = 1250, expires_at = 1350
+              WHERE id = 1",
+            [],
+        )
+        .expect("take over exactly at expiry with next epoch");
+
+        assert_eq!(
+            lease_row(&conn),
+            (
+                1,
+                Some("worker-c".to_string()),
+                3,
+                Some(1250),
+                Some(1250),
+                Some(1350)
+            )
+        );
+    }
+
+    #[test]
+    fn generation_worker_v18_rejects_adversarial_lease_writes() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-worker-v18-adversarial-test");
+        let conn = fixture.database.conn.lock().expect("lock v18 db");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = 'worker-a', fencing_epoch = 1,
+                    acquired_at = 1000, heartbeat_at = 1000, expires_at = 1100
+              WHERE id = 1",
+            [],
+        )
+        .expect("seed active lease");
+        let expected = lease_row(&conn);
+
+        for (sql, label) in [
+            (
+                "UPDATE generation_worker_lease SET owner_id = 'worker-b' WHERE id = 1",
+                "same-epoch owner swap",
+            ),
+            (
+                "UPDATE generation_worker_lease
+                    SET owner_id = 'worker-b', fencing_epoch = 2,
+                        acquired_at = 1099, heartbeat_at = 1099, expires_at = 1199
+                  WHERE id = 1",
+                "pre-expiry takeover",
+            ),
+            (
+                "UPDATE generation_worker_lease SET heartbeat_at = 999, expires_at = 1200 WHERE id = 1",
+                "heartbeat rollback",
+            ),
+            (
+                "UPDATE generation_worker_lease SET heartbeat_at = 1050, expires_at = 1099 WHERE id = 1",
+                "expiry shortening",
+            ),
+            (
+                "UPDATE generation_worker_lease SET heartbeat_at = 1100, expires_at = 1200 WHERE id = 1",
+                "renew at old expiry",
+            ),
+            (
+                "UPDATE generation_worker_lease SET fencing_epoch = 2 WHERE id = 1",
+                "partial epoch increment",
+            ),
+        ] {
+            let error = conn.execute(sql, []).expect_err(label);
+            assert_constraint_violation(error, "invalid generation worker lease transition");
+            assert_eq!(lease_row(&conn), expected, "{label} changed the lease row");
+        }
+
+        let delete = conn
+            .execute("DELETE FROM generation_worker_lease WHERE id = 1", [])
+            .expect_err("singleton deletion must be sealed");
+        assert_constraint_violation(delete, "generation worker lease row cannot be deleted");
+        let replace = conn
+            .execute(
+                "INSERT OR REPLACE INTO generation_worker_lease (
+                    id, owner_id, fencing_epoch, acquired_at, heartbeat_at, expires_at
+                 ) VALUES (1, NULL, 0, NULL, NULL, NULL)",
+                [],
+            )
+            .expect_err("replace must not bypass epoch fencing");
+        assert_constraint_violation(replace, "generation worker lease row is sealed");
+        conn.execute_batch("PRAGMA recursive_triggers=ON;")
+            .expect("enable recursive triggers");
+        let recursive_replace = conn
+            .execute(
+                "INSERT OR REPLACE INTO generation_worker_lease (
+                    id, owner_id, fencing_epoch, acquired_at, heartbeat_at, expires_at
+                 ) VALUES (1, NULL, 0, NULL, NULL, NULL)",
+                [],
+            )
+            .expect_err("replace must also fail with recursive triggers enabled");
+        assert_constraint_violation(recursive_replace, "generation worker lease row is sealed");
+        assert_eq!(lease_row(&conn), expected);
+    }
+
+    #[test]
+    fn generation_worker_v18_preserves_recorded_v17_active_lease_exactly() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-worker-v18-active-upgrade-test");
+        remove_v18_lease_migration_state(&fixture.database);
+        let expected = (
+            1,
+            Some("worker-before-upgrade".to_string()),
+            7,
+            Some(10_000),
+            Some(10_050),
+            Some(10_100),
+        );
+        {
+            let conn = fixture.database.conn.lock().expect("lock active v17 db");
+            conn.execute(
+                "UPDATE generation_worker_lease
+                    SET owner_id = 'worker-before-upgrade', fencing_epoch = 7,
+                        acquired_at = 10000, heartbeat_at = 10050, expires_at = 10100
+                  WHERE id = 1",
+                [],
+            )
+            .expect("seed recorded-v17 active lease");
+            assert_eq!(lease_row(&conn), expected);
+        }
+
+        fixture
+            .database
+            .run_migrations()
+            .expect("upgrade active recorded-v17 lease");
+        let conn = fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock upgraded active db");
+        assert!(migration_version_exists(&conn, 18));
+        assert_eq!(lease_row(&conn), expected);
+    }
+
+    #[test]
+    fn generation_worker_v18_allows_final_epoch_but_never_wraps_it() {
+        let fixture =
+            MigratedTestDatabase::new("astro-studio-generation-worker-v18-max-epoch-test");
+        remove_v18_lease_migration_state(&fixture.database);
+        {
+            let conn = fixture.database.conn.lock().expect("lock max epoch v17 db");
+            conn.execute(
+                "UPDATE generation_worker_lease SET fencing_epoch = ?1 WHERE id = 1",
+                params![i64::MAX - 1],
+            )
+            .expect("seed penultimate recorded-v17 epoch");
+        }
+        fixture
+            .database
+            .run_migrations()
+            .expect("upgrade penultimate epoch row to v18");
+
+        let conn = fixture.database.conn.lock().expect("lock max epoch v18 db");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = 'worker-max', fencing_epoch = ?1,
+                    acquired_at = 1000, heartbeat_at = 1000, expires_at = 1100
+              WHERE id = 1",
+            params![i64::MAX],
+        )
+        .expect("acquire the final representable epoch");
+        conn.execute(
+            "UPDATE generation_worker_lease
+                SET owner_id = NULL, acquired_at = NULL, heartbeat_at = NULL, expires_at = NULL
+              WHERE id = 1",
+            [],
+        )
+        .expect("release final epoch");
+        let overflow = conn
+            .execute(
+                "UPDATE generation_worker_lease
+                    SET owner_id = 'worker-overflow', fencing_epoch = CAST(fencing_epoch AS REAL) + 1,
+                        acquired_at = 1200, heartbeat_at = 1200, expires_at = 1300
+                  WHERE id = 1",
+                [],
+            )
+            .expect_err("no transition may advance past the final integer epoch");
+        assert_constraint_violation(overflow, "invalid generation worker lease transition");
+        assert_eq!(lease_row(&conn), (1, None, i64::MAX, None, None, None));
+    }
+
+    #[test]
+    fn generation_worker_v18_missing_singleton_fails_without_recording_or_repairing() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v18-missing-test");
+        remove_v18_lease_migration_state(&fixture.database);
+        {
+            let conn = fixture.database.conn.lock().expect("lock missing row db");
+            conn.execute("DELETE FROM generation_worker_lease", [])
+                .expect("remove v17 singleton before v18");
+        }
+
+        let error = fixture
+            .database
+            .run_migrations()
+            .expect_err("v18 must fail-stop when the recorded-v17 singleton is missing");
+        assert!(
+            format!("{error:?}").contains("exactly one generation worker lease row"),
+            "unexpected missing singleton error: {error:?}"
+        );
+        let conn = fixture.database.conn.lock().expect("lock failed v18 db");
+        assert!(!migration_version_exists(&conn, 18));
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM generation_worker_lease", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count missing singleton"),
+            0
+        );
+        for trigger in V18_LEASE_TRIGGER_NAMES {
+            assert!(!trigger_exists(&conn, trigger));
+        }
+    }
+
+    #[test]
+    fn generation_worker_v18_rolls_back_triggers_when_recording_fails() {
+        let fixture = MigratedTestDatabase::new("astro-studio-generation-worker-v18-atomic-test");
+        remove_v18_lease_migration_state(&fixture.database);
+        {
+            let conn = fixture.database.conn.lock().expect("lock v18 atomic db");
+            conn.execute_batch(
+                "CREATE TRIGGER suppress_v18_migration_record
+                 BEFORE INSERT ON schema_migrations
+                 WHEN NEW.version = 18
+                 BEGIN
+                     SELECT RAISE(IGNORE);
+                 END;",
+            )
+            .expect("install migration-record suppression");
+        }
+
+        fixture
+            .database
+            .run_migrations()
+            .expect_err("v18 record failure must fail the migration");
+        let conn = fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock rolled back v18 db");
+        assert!(!migration_version_exists(&conn, 18));
+        assert!(trigger_exists(
+            &conn,
+            "prevent_generation_worker_lease_epoch_decrease"
+        ));
+        for trigger in V18_LEASE_TRIGGER_NAMES {
+            assert!(
+                !trigger_exists(&conn, trigger),
+                "failed v18 left trigger {trigger} behind"
+            );
+        }
+    }
+
+    #[test]
+    fn generation_worker_v18_is_idempotent_and_concurrent() {
+        let db_path = test_db_path("astro-studio-generation-worker-v18-concurrent-test");
+        let directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let setup = Database::open(&db_path).expect("open v18 setup db");
+        setup.run_migrations().expect("run initial migrations");
+        remove_v18_lease_migration_state(&setup);
+        drop(setup);
+
+        let databases = [
+            Database::open(&db_path).expect("open first v18 migrator"),
+            Database::open(&db_path).expect("open second v18 migrator"),
+        ];
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let handles = databases.map(|database| {
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                database
+                    .run_migrations()
+                    .map_err(|error| format!("{error:?}"))
+            })
+        });
+        barrier.wait();
+        for handle in handles {
+            handle
+                .join()
+                .expect("v18 migration thread panicked")
+                .expect("concurrent v18 migration must succeed");
+        }
+
+        let database = Database::open(&db_path).expect("reopen v18 db");
+        database
+            .run_migrations()
+            .expect("repeated v18 migration must be idempotent");
+        let conn = database.conn.lock().expect("lock concurrent v18 db");
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 18",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count v18 migration records"),
+            1
+        );
+        for trigger in V18_LEASE_TRIGGER_NAMES {
+            assert!(trigger_exists(&conn, trigger));
+        }
+        drop(conn);
+        drop(database);
+        drop(directory);
+    }
 }
 
 fn ensure_schema_migrations(conn: &Connection) -> Result<(), AppError> {
@@ -1306,6 +1728,35 @@ fn apply_migration(
             return Ok(());
         }
         execute_migration_sql(conn, sql)?;
+        record_migration(conn, version)
+    })();
+    if let Err(error) = result {
+        rollback_migration(conn);
+        return Err(error);
+    }
+    commit_migration(conn)
+}
+
+fn apply_migration_batch<F>(
+    conn: &Connection,
+    version: i32,
+    _description: &str,
+    guard: F,
+    sql: &str,
+) -> Result<(), AppError>
+where
+    F: FnOnce(&Connection) -> Result<(), AppError>,
+{
+    begin_migration(conn)?;
+    let result = (|| {
+        if migration_applied(conn, version)? {
+            return Ok(());
+        }
+        guard(conn)?;
+        conn.execute_batch(sql)
+            .map_err(|error| AppError::Database {
+                message: format!("Migration {version} SQL batch failed: {error}"),
+            })?;
         record_migration(conn, version)
     })();
     if let Err(error) = result {
@@ -1787,6 +2238,95 @@ impl Database {
         .map_err(|error| AppError::Database {
             message: format!("Create generation worker lease fence trigger failed: {error}"),
         })?;
+
+        // v18: Seal the singleton lease row and constrain every update to one
+        // of the three legal fencing transitions. This uses execute_batch in
+        // its own immediate transaction because trigger bodies contain
+        // semicolons and cannot pass through the legacy statement splitter.
+        apply_migration_batch(
+            &conn,
+            18,
+            "seal generation worker lease transitions",
+            |conn| {
+                let (row_count, minimum_id, maximum_id) = conn
+                    .query_row(
+                        "SELECT COUNT(*), MIN(id), MAX(id) FROM generation_worker_lease",
+                        [],
+                        |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, Option<i64>>(1)?,
+                                row.get::<_, Option<i64>>(2)?,
+                            ))
+                        },
+                    )
+                    .map_err(|error| AppError::Database {
+                        message: format!(
+                            "Validate generation worker lease singleton before migration 18: {error}"
+                        ),
+                    })?;
+                if (row_count, minimum_id, maximum_id) != (1, Some(1), Some(1)) {
+                    return Err(AppError::Database {
+                        message: format!(
+                            "migration 18 requires exactly one generation worker lease row with id 1; found count={row_count}, min_id={minimum_id:?}, max_id={maximum_id:?}"
+                        ),
+                    });
+                }
+                Ok(())
+            },
+            "CREATE TRIGGER prevent_generation_worker_lease_delete
+             BEFORE DELETE ON generation_worker_lease
+             BEGIN
+                 SELECT RAISE(ABORT, 'generation worker lease row cannot be deleted');
+             END;
+
+             CREATE TRIGGER prevent_generation_worker_lease_insert
+             BEFORE INSERT ON generation_worker_lease
+             BEGIN
+                 SELECT RAISE(ABORT, 'generation worker lease row is sealed');
+             END;
+
+             CREATE TRIGGER enforce_generation_worker_lease_transition
+             BEFORE UPDATE ON generation_worker_lease
+             WHEN CASE
+                 WHEN OLD.owner_id IS NOT NULL
+                      AND NEW.id = OLD.id
+                      AND NEW.owner_id = OLD.owner_id
+                      AND NEW.fencing_epoch = OLD.fencing_epoch
+                      AND NEW.acquired_at = OLD.acquired_at
+                      AND NEW.heartbeat_at >= OLD.heartbeat_at
+                      AND NEW.heartbeat_at < OLD.expires_at
+                      AND NEW.expires_at >= OLD.expires_at
+                 THEN 0
+                 WHEN OLD.owner_id IS NOT NULL
+                      AND NEW.id = OLD.id
+                      AND NEW.owner_id IS NULL
+                      AND NEW.fencing_epoch = OLD.fencing_epoch
+                      AND NEW.acquired_at IS NULL
+                      AND NEW.heartbeat_at IS NULL
+                      AND NEW.expires_at IS NULL
+                 THEN 0
+                 WHEN NEW.id = OLD.id
+                      AND NEW.owner_id IS NOT NULL
+                      AND OLD.fencing_epoch < 9223372036854775807
+                      AND NEW.fencing_epoch = OLD.fencing_epoch + 1
+                      AND NEW.acquired_at = NEW.heartbeat_at
+                      AND (
+                          (
+                              OLD.owner_id IS NULL
+                              AND OLD.acquired_at IS NULL
+                              AND OLD.heartbeat_at IS NULL
+                              AND OLD.expires_at IS NULL
+                          )
+                          OR OLD.expires_at <= NEW.acquired_at
+                      )
+                 THEN 0
+                 ELSE 1
+             END = 1
+             BEGIN
+                 SELECT RAISE(ABORT, 'invalid generation worker lease transition');
+             END;",
+        )?;
 
         ensure_migration_compatibility(&conn)?;
 

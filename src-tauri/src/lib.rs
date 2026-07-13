@@ -8,6 +8,7 @@ mod gallery;
 mod generation_job_worker;
 mod generation_jobs;
 mod generation_lifecycle;
+mod generation_worker_lease;
 mod image_engines;
 mod llm;
 mod model_registry;
