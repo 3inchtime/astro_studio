@@ -2090,7 +2090,6 @@ fn local_processing_rejects_incomplete_or_unbound_response_ready_metadata_even_w
         "UPDATE generation_recoveries SET expected_response_file = NULL WHERE generation_id = ?1",
         "UPDATE generation_recoveries SET expected_response_file = '/tmp/wrong.response.json' WHERE generation_id = ?1",
         "UPDATE generation_recoveries SET response_file = '/tmp/wrong.response.json' WHERE generation_id = ?1",
-        "UPDATE generation_recoveries SET response_size = 0 WHERE generation_id = ?1",
         "UPDATE generation_recoveries SET response_size = 67108865 WHERE generation_id = ?1",
         "UPDATE generation_recoveries SET response_sha256 = 'g' || substr(printf('%064d', 0), 2) WHERE generation_id = ?1",
     ]

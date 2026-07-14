@@ -6,10 +6,15 @@ use crate::error::AppError;
 use crate::file_manager::{self, PromotedGenerationFiles, StagedGenerationFiles};
 use crate::generation_jobs::{
     begin_generation_job_write_transaction, enqueue_job, executable_provider_snapshot_is_valid,
-    finish_job_in_transaction, get_job_in_transaction, insert_and_claim_exact_job,
+    finish_job_in_transaction, get_job_event_in_transaction, get_job_in_transaction,
+    insert_and_claim_exact_job, load_generation_execution_snapshot_for_stage_in_transaction,
     load_generation_execution_snapshot_in_transaction, set_actual_image_count_in_transaction,
-    GenerationJobOptions, GenerationJobRequest, GenerationJobRequestKind,
-    GenerationJobTerminalUpdate, PreparedGenerationJob,
+    validate_worker_recovery_for_stage, GenerationJobOptions, GenerationJobRequest,
+    GenerationJobRequestKind, GenerationJobTerminalUpdate, PreparedGenerationJob,
+    WorkerTransitionError,
+};
+use crate::generation_worker_lease::{
+    assert_worker_transition_authority_in_transaction, WorkerLeaseError, WorkerTransitionAuthority,
 };
 use crate::image_engines::{provider_for_model, ImageProvider};
 use crate::model_registry::{
@@ -206,9 +211,23 @@ pub(crate) struct ProviderAttemptResponse {
 /// Private fields ensure callers cannot bypass response artifact verification.
 pub(crate) struct VerifiedResponseCommit {
     response_file: String,
+    response_size: u64,
+    response_sha256: String,
     requested_image_count: u8,
     job_id: String,
     generation_id: String,
+}
+
+struct PersistedFencedResponseProjection {
+    request_state: String,
+    expected_response_file: Option<String>,
+    response_file: Option<String>,
+    response_size: Option<i64>,
+    response_sha256: Option<String>,
+    recovery_updated_at: String,
+    job_status: String,
+    job_stage: String,
+    last_heartbeat_at: Option<String>,
 }
 
 /// Sealed, pure-data success projection derived from a live promoted-file
@@ -1076,6 +1095,39 @@ impl VerifiedResponseCommit {
         response: &ProviderAttemptResponse,
         observer: Option<&dyn ResponseVerificationObserver>,
     ) -> Result<Self, AppError> {
+        let response_root = expected_path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .ok_or(AppError::GenerationJobInvalidSnapshot)?;
+        Self::verify_at_store_root(context, expected_path, response_root, response, observer)
+    }
+
+    fn verify_with_store(
+        context: &GenerationExecutionContext,
+        artifact_store: &FileResponseArtifactStore,
+        response: &ProviderAttemptResponse,
+        observer: Option<&dyn ResponseVerificationObserver>,
+    ) -> Result<Self, AppError> {
+        let expected_path = artifact_store
+            .response_path(context)
+            .map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
+        Self::verify_at_store_root(
+            context,
+            &expected_path,
+            &artifact_store.root_dir,
+            response,
+            observer,
+        )
+    }
+
+    fn verify_at_store_root(
+        context: &GenerationExecutionContext,
+        expected_path: &Path,
+        response_root: &Path,
+        response: &ProviderAttemptResponse,
+        observer: Option<&dyn ResponseVerificationObserver>,
+    ) -> Result<Self, AppError> {
         if !response_path_matches_context(expected_path, context)
             || !verified_response_shape_matches(
                 response,
@@ -1086,9 +1138,25 @@ impl VerifiedResponseCommit {
         {
             return Err(AppError::GenerationJobInvalidSnapshot);
         }
+        let verified_file = FileResponseArtifactStore::load_verified_response_sync(
+            response_root,
+            context,
+            expected_path,
+        )
+        .map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
+        if verified_file.response_file != response.response_file
+            || verified_file.response_size != response.response_size
+            || verified_file.response_sha256 != response.response_sha256
+            || verified_file.requested_image_count != response.requested_image_count
+            || verified_file.body_text != response.body_text
+        {
+            return Err(AppError::GenerationJobInvalidSnapshot);
+        }
         Ok(Self {
-            response_file: response.response_file.clone(),
-            requested_image_count: response.requested_image_count,
+            response_file: verified_file.response_file,
+            response_size: verified_file.response_size,
+            response_sha256: verified_file.response_sha256,
+            requested_image_count: verified_file.requested_image_count,
             job_id: context.job_id.clone(),
             generation_id: context.generation_id.clone(),
         })
@@ -1303,6 +1371,15 @@ fn load_matching_execution_snapshot(
     Ok(snapshot)
 }
 
+fn lifecycle_worker_timestamp(now_ms: i64) -> Result<String, WorkerTransitionError> {
+    if now_ms < 0 {
+        return Err(WorkerLeaseError::InvalidTiming.into());
+    }
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(now_ms)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .ok_or_else(|| WorkerLeaseError::TimeOverflow.into())
+}
+
 pub(crate) fn promote_verified_response_in_transaction(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
@@ -1390,6 +1467,164 @@ fn promote_verified_response_with_optional_observer(
     promote_verified_response_in_transaction(&tx, context, &response)?;
     tx.commit()
         .map_err(|error| lifecycle_database_error("Commit verified response failed", error))
+}
+
+fn promote_verified_response_fenced_with_optional_observer(
+    db: &Database,
+    artifact_store: &FileResponseArtifactStore,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+    observer: Option<&dyn ResponseVerificationObserver>,
+) -> Result<GenerationJobEvent, WorkerTransitionError> {
+    let response =
+        VerifiedResponseCommit::verify_with_store(context, artifact_store, response, observer)?;
+    let timestamp = lifecycle_worker_timestamp(now_ms)?;
+    let response_size = i64::try_from(response.response_size)
+        .map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
+    let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+    let tx = begin_generation_job_write_transaction(&mut conn)?;
+
+    // This must remain the first database operation after BEGIN IMMEDIATE.
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+
+    let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
+        &tx,
+        &context.job_id,
+        GenerationJobStage::ProviderRequest,
+    )?;
+    if snapshot.context != *context
+        || !response.matches_context(context)
+        || response.requested_image_count != snapshot.runtime_options.image_count
+    {
+        return Err(AppError::GenerationJobInvalidSnapshot.into());
+    }
+
+    let expected_response_file = response.response_file.as_str();
+    let updated_recovery = tx
+        .execute(
+            "UPDATE generation_recoveries
+                SET request_state = ?1,
+                    response_file = ?2,
+                    response_size = ?3,
+                    response_sha256 = ?4,
+                    updated_at = ?5
+              WHERE generation_id = ?6
+                AND request_state = ?7
+                AND expected_response_file = ?2
+                AND response_file IS NULL
+                AND response_size IS NULL
+                AND response_sha256 IS NULL
+                AND updated_at <= ?5",
+            params![
+                RECOVERY_STATE_RESPONSE_READY,
+                response.response_file,
+                response_size,
+                response.response_sha256,
+                timestamp,
+                context.generation_id,
+                RECOVERY_STATE_REQUESTING,
+            ],
+        )
+        .map_err(|error| {
+            lifecycle_database_error("Promote fenced verified response failed", error)
+        })?;
+    if updated_recovery != 1 {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+
+    let updated_job = tx
+        .execute(
+            "UPDATE generation_jobs
+                SET stage = 'response_ready', last_heartbeat_at = ?1
+              WHERE id = ?2
+                AND generation_id = ?3
+                AND status = 'running'
+                AND stage = 'provider_request'
+                AND started_at IS NOT NULL
+                AND started_at <= ?1
+                AND last_heartbeat_at IS NOT NULL
+                AND last_heartbeat_at <= ?1",
+            params![timestamp, context.job_id, context.generation_id],
+        )
+        .map_err(|error| lifecycle_database_error("Advance fenced response stage failed", error))?;
+    if updated_job != 1 {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+
+    let persisted = tx
+        .query_row(
+            "SELECT r.request_state, r.expected_response_file, r.response_file,
+                    r.response_size, r.response_sha256, r.updated_at,
+                    j.status, j.stage, j.last_heartbeat_at
+               FROM generation_recoveries r
+               JOIN generation_jobs j ON j.generation_id = r.generation_id
+              WHERE r.generation_id = ?1 AND j.id = ?2",
+            params![context.generation_id, context.job_id],
+            |row| {
+                Ok(PersistedFencedResponseProjection {
+                    request_state: row.get(0)?,
+                    expected_response_file: row.get(1)?,
+                    response_file: row.get(2)?,
+                    response_size: row.get(3)?,
+                    response_sha256: row.get(4)?,
+                    recovery_updated_at: row.get(5)?,
+                    job_status: row.get(6)?,
+                    job_stage: row.get(7)?,
+                    last_heartbeat_at: row.get(8)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| {
+            lifecycle_database_error("Verify fenced response promotion failed", error)
+        })?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    if persisted.request_state != RECOVERY_STATE_RESPONSE_READY
+        || persisted.expected_response_file.as_deref() != Some(expected_response_file)
+        || persisted.response_file.as_deref() != Some(response.response_file.as_str())
+        || persisted.response_size != Some(response_size)
+        || persisted.response_sha256.as_deref() != Some(response.response_sha256.as_str())
+        || persisted.recovery_updated_at != timestamp
+        || persisted.job_status != "running"
+        || persisted.job_stage != "response_ready"
+        || persisted.last_heartbeat_at.as_deref() != Some(timestamp.as_str())
+    {
+        return Err(AppError::GenerationJobCorruptPersistedData.into());
+    }
+    validate_worker_recovery_for_stage(
+        &tx,
+        &context.generation_id,
+        GenerationJobStage::ResponseReady,
+    )?;
+
+    let event = get_job_event_in_transaction(&tx, &context.job_id)?;
+    tx.commit().map_err(|error| {
+        lifecycle_database_error("Commit fenced verified response failed", error)
+    })?;
+    Ok(event)
+}
+
+pub(crate) fn promote_verified_response_fenced(
+    db: &Database,
+    artifact_store: &FileResponseArtifactStore,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJobEvent, WorkerTransitionError> {
+    // The production adapter must pass its managed app-owned store. Unlike the
+    // compatibility API, this fenced path never accepts a caller-selected path.
+    promote_verified_response_fenced_with_optional_observer(
+        db,
+        artifact_store,
+        context,
+        response,
+        authority,
+        now_ms,
+        None,
+    )
 }
 
 pub(crate) fn finalize_generation_failure_in_transaction(
@@ -2397,8 +2632,12 @@ mod tests {
     use crate::file_manager::GenerationFileLifecycleObserver;
     use crate::generation_jobs::{
         begin_generation_job_write_transaction, claim_job_in_transaction, enqueue_job, get_job,
-        load_generation_execution_snapshot, GenerationJobOptions, GenerationJobRequest,
-        GenerationJobRequestKind, PreparedGenerationJob,
+        load_generation_execution_snapshot, request_cancel,
+        transition_running_job_stage_with_event, GenerationJobOptions, GenerationJobRequest,
+        GenerationJobRequestKind, PreparedGenerationJob, WorkerStageTransition,
+    };
+    use crate::generation_worker_lease::{
+        acquire_worker_lease, WorkerLeaseAcquireOutcome, WorkerTransitionAuthority,
     };
     use crate::model_registry::default_endpoint_settings_for_model;
     use crate::models::GenerationJobStatus;
@@ -2407,6 +2646,7 @@ mod tests {
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     fn fixture_execution_context() -> GenerationExecutionContext {
         GenerationExecutionContext {
@@ -3927,6 +4167,21 @@ mod tests {
         root: PathBuf,
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct FencedResponseProjection {
+        request_state: String,
+        expected_response_file: Option<String>,
+        response_file: Option<String>,
+        response_size: Option<i64>,
+        response_sha256: Option<String>,
+        recovery_updated_at: String,
+        job_status: String,
+        job_stage: String,
+        last_heartbeat_at: Option<String>,
+        generation_status: String,
+        image_count: i64,
+    }
+
     impl PrecreatedTestFixture {
         fn new(requested_image_count: u8) -> Self {
             Self::new_with_request(
@@ -4025,6 +4280,119 @@ mod tests {
 
         fn response_store(&self) -> FileResponseArtifactStore {
             FileResponseArtifactStore::new(self.root.join("responses"))
+        }
+
+        fn enter_provider_request(
+            &self,
+            owner_id: &str,
+            now_ms: i64,
+            expected_response_file: PathBuf,
+        ) -> WorkerTransitionAuthority {
+            let conn = self.db.conn.lock().expect("lock fixture worker state");
+            let authority = Self::acquire_worker(&conn, owner_id, now_ms);
+            transition_running_job_stage_with_event(
+                &conn,
+                &self.snapshot.context.job_id,
+                GenerationJobStage::Preparing,
+                WorkerStageTransition::BeginProviderRequest {
+                    expected_response_file,
+                },
+                &authority,
+                now_ms,
+            )
+            .expect("enter fixture provider request stage");
+            authority
+        }
+
+        fn acquire_worker(
+            conn: &rusqlite::Connection,
+            owner_id: &str,
+            now_ms: i64,
+        ) -> WorkerTransitionAuthority {
+            match acquire_worker_lease(conn, owner_id, now_ms, Duration::from_millis(100))
+                .expect("acquire fixture worker lease")
+            {
+                WorkerLeaseAcquireOutcome::Acquired { authority, .. } => authority,
+                WorkerLeaseAcquireOutcome::Held { .. } => panic!("fixture lease unexpectedly held"),
+            }
+        }
+
+        fn fenced_response_projection(&self) -> FencedResponseProjection {
+            let conn = self.db.conn.lock().expect("read fenced response state");
+            conn.query_row(
+                "SELECT r.request_state, r.expected_response_file, r.response_file,
+                        r.response_size, r.response_sha256, r.updated_at,
+                        j.status, j.stage, j.last_heartbeat_at, g.status,
+                        (SELECT COUNT(*) FROM images)
+                   FROM generation_recoveries r
+                   JOIN generation_jobs j ON j.generation_id = r.generation_id
+                   JOIN generations g ON g.id = r.generation_id
+                  WHERE r.generation_id = ?1 AND j.id = ?2",
+                params![
+                    self.snapshot.context.generation_id,
+                    self.snapshot.context.job_id
+                ],
+                |row| {
+                    Ok(FencedResponseProjection {
+                        request_state: row.get(0)?,
+                        expected_response_file: row.get(1)?,
+                        response_file: row.get(2)?,
+                        response_size: row.get(3)?,
+                        response_sha256: row.get(4)?,
+                        recovery_updated_at: row.get(5)?,
+                        job_status: row.get(6)?,
+                        job_stage: row.get(7)?,
+                        last_heartbeat_at: row.get(8)?,
+                        generation_status: row.get(9)?,
+                        image_count: row.get(10)?,
+                    })
+                },
+            )
+            .expect("read fenced response projection")
+        }
+
+        async fn prepare_fenced_response(
+            &self,
+            owner_id: &str,
+            now_ms: i64,
+        ) -> (
+            FileResponseArtifactStore,
+            PathBuf,
+            WorkerTransitionAuthority,
+            ProviderAttemptResponse,
+        ) {
+            let response_store = self.response_store();
+            let expected_path = response_store
+                .expected_response_path(&self.snapshot.context)
+                .expect("derive fenced response path");
+            let authority = self.enter_provider_request(owner_id, now_ms, expected_path.clone());
+            let response = response_store
+                .persist_verified_response(
+                    &self.snapshot.context,
+                    ProviderAttemptBody {
+                        body_text: r#"{"data":[]}"#.to_string(),
+                        requested_image_count: 1,
+                    },
+                )
+                .await
+                .expect("persist fenced response");
+            (response_store, expected_path, authority, response)
+        }
+
+        fn assert_pristine_provider_request(&self, expected_path: &Path) {
+            let projection = self.fenced_response_projection();
+            assert_eq!(projection.request_state, "requesting");
+            assert_eq!(
+                projection.expected_response_file.as_deref(),
+                expected_path.to_str()
+            );
+            assert!(projection.response_file.is_none());
+            assert!(projection.response_size.is_none());
+            assert!(projection.response_sha256.is_none());
+            assert_eq!(projection.job_status, "running");
+            assert_eq!(projection.job_stage, "provider_request");
+            assert_eq!(projection.generation_status, "running");
+            assert_eq!(projection.image_count, 0);
         }
 
         fn file_root(&self) -> PathBuf {
@@ -4793,6 +5161,556 @@ mod tests {
                 Some(response.response_file.as_str())
             );
         }
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_verifies_artifact_before_database_lock() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-lock-oracle", now_ms)
+            .await;
+        let observer = DbLockResponseVerificationObserver::new(Arc::clone(&fixture.db));
+
+        let event = promote_verified_response_fenced_with_optional_observer(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+            Some(&observer),
+        )
+        .expect("promote fenced response after unlocked verification");
+
+        assert_eq!(event.stage, GenerationJobStage::ResponseReady);
+        assert_eq!(observer.hash_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(observer.metadata_calls.load(Ordering::SeqCst), 1);
+        assert!(observer.all_unlocked.load(Ordering::SeqCst));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_commits_verified_metadata_and_event_despite_late_cancel() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, expected_path, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-worker", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("request late cancellation");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("persist late cancellation");
+        }
+
+        let event = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect("promote verified response under worker fence");
+
+        assert_eq!(event.job_id, fixture.snapshot.context.job_id);
+        assert_eq!(event.generation_id, fixture.snapshot.context.generation_id);
+        assert_eq!(event.status, GenerationJobStatus::Running);
+        assert_eq!(event.stage, GenerationJobStage::ResponseReady);
+        assert!(event.cancel_requested_at.is_some());
+        let projection = fixture.fenced_response_projection();
+        assert_eq!(projection.request_state, "response_ready");
+        assert_eq!(
+            projection.expected_response_file.as_deref(),
+            expected_path.to_str()
+        );
+        assert_eq!(projection.response_file.as_deref(), expected_path.to_str());
+        assert_eq!(
+            projection.response_size,
+            Some(response.response_size as i64)
+        );
+        assert_eq!(
+            projection.response_sha256.as_deref(),
+            Some(response.response_sha256.as_str())
+        );
+        assert_eq!(projection.job_stage, "response_ready");
+        let expected_timestamp = lifecycle_worker_timestamp(now_ms + 1).unwrap();
+        assert_eq!(projection.recovery_updated_at, expected_timestamp);
+        assert_eq!(
+            projection.last_heartbeat_at.as_deref(),
+            Some(expected_timestamp.as_str())
+        );
+        let conn = fixture.db.conn.lock().expect("reread fenced event");
+        let tx = conn.unchecked_transaction().expect("begin event reread");
+        let persisted_event = get_job_event_in_transaction(&tx, &event.job_id)
+            .expect("reread committed fenced event");
+        tx.commit().expect("commit event reread");
+        assert_eq!(event, persisted_event);
+        drop(conn);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_commits_verified_empty_raw_body() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let response_store = fixture.response_store();
+        let expected_path = response_store
+            .expected_response_path(&fixture.snapshot.context)
+            .expect("derive empty-response path");
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let authority = fixture.enter_provider_request(
+            "fenced-response-empty-body",
+            now_ms,
+            expected_path.clone(),
+        );
+        let response = response_store
+            .persist_verified_response(
+                &fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: String::new(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist empty raw response envelope");
+        let empty_hash = FileResponseArtifactStore::response_hash("");
+        assert_eq!(response.response_size, 0);
+        assert_eq!(response.response_sha256, empty_hash);
+
+        let event = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect("promote verified empty raw response");
+
+        assert_eq!(event.job_id, fixture.snapshot.context.job_id);
+        assert_eq!(event.status, GenerationJobStatus::Running);
+        assert_eq!(event.stage, GenerationJobStage::ResponseReady);
+        let projection = fixture.fenced_response_projection();
+        assert_eq!(projection.request_state, "response_ready");
+        assert_eq!(
+            projection.expected_response_file.as_deref(),
+            expected_path.to_str()
+        );
+        assert_eq!(projection.response_file.as_deref(), expected_path.to_str());
+        assert_eq!(projection.response_size, Some(0));
+        assert_eq!(
+            projection.response_sha256.as_deref(),
+            Some(empty_hash.as_str())
+        );
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_rejects_artifact_changed_after_verified_load() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, expected_path, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-file-check", now_ms)
+            .await;
+        std::fs::write(
+            &expected_path,
+            br#"{"version":1,"body_text":"changed","body_size":7,"body_sha256":"d67e2e944994496c8d5f83c7e8fb8a29d4db6d9be4d9a0a0f16b1eaf39f2f318","requested_image_count":1}"#,
+        )
+        .expect("replace response after verified load");
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("changed artifact must not reach response-ready state");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidSnapshot)
+        ));
+        fixture.assert_pristine_provider_request(&expected_path);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_rejects_response_from_an_unconfigured_store() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let configured_store = fixture.response_store();
+        let configured_path = configured_store
+            .expected_response_path(&fixture.snapshot.context)
+            .expect("derive configured response path");
+        let alternate_store = FileResponseArtifactStore::new(fixture.root.join("alternate"));
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let authority = fixture.enter_provider_request(
+            "fenced-response-store-capability",
+            now_ms,
+            configured_path.clone(),
+        );
+        let alternate_response = alternate_store
+            .persist_verified_response(
+                &fixture.snapshot.context,
+                ProviderAttemptBody {
+                    body_text: r#"{"data":[]}"#.to_string(),
+                    requested_image_count: 1,
+                },
+            )
+            .await
+            .expect("persist response in alternate store");
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &configured_store,
+            &fixture.snapshot.context,
+            &alternate_response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("unconfigured store response must not be promoted");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidSnapshot)
+        ));
+        fixture.assert_pristine_provider_request(&configured_path);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_rejects_stale_owner_without_side_effects_then_allows_takeover(
+    ) {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority_a, response) = fixture
+            .prepare_fenced_response("fenced-response-worker-a", now_ms)
+            .await;
+        let authority_b = {
+            let conn = fixture.db.conn.lock().expect("acquire takeover lease");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-response-worker-b", now_ms + 100)
+        };
+        let before = fixture.fenced_response_projection();
+
+        let stale_error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority_a,
+            now_ms + 101,
+        )
+        .expect_err("stale worker A must lose fencing race");
+        assert!(matches!(
+            stale_error,
+            WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost)
+        ));
+        assert_eq!(fixture.fenced_response_projection(), before);
+
+        let event = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority_b,
+            now_ms + 101,
+        )
+        .expect("takeover worker B promotes response");
+        assert_eq!(event.stage, GenerationJobStage::ResponseReady);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_rejects_authority_at_exact_expiry_without_mutation() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, expected_path, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-expiry", now_ms)
+            .await;
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 100,
+        )
+        .expect_err("authority is stale at its exact expiry");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost)
+        ));
+        fixture.assert_pristine_provider_request(&expected_path);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_never_moves_job_heartbeat_backwards() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-monotonic", now_ms)
+            .await;
+        let future_heartbeat = lifecycle_worker_timestamp(now_ms + 10_000).unwrap();
+        {
+            let conn = fixture.db.conn.lock().expect("install future heartbeat");
+            conn.execute(
+                "UPDATE generation_jobs SET last_heartbeat_at = ?1 WHERE id = ?2",
+                params![future_heartbeat, fixture.snapshot.context.job_id],
+            )
+            .expect("install future heartbeat");
+        }
+        let baseline = fixture.fenced_response_projection();
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("response promotion must not move heartbeat backwards");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(fixture.fenced_response_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_requires_provider_request_stage() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-wrong-stage", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("enter retry backoff");
+            transition_running_job_stage_with_event(
+                &conn,
+                &fixture.snapshot.context.job_id,
+                GenerationJobStage::ProviderRequest,
+                WorkerStageTransition::EnterRetryBackoff,
+                &authority,
+                now_ms + 1,
+            )
+            .expect("enter retry backoff before promotion");
+        }
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 2,
+        )
+        .expect_err("retry-backoff job cannot promote a provider response");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        let projection = fixture.fenced_response_projection();
+        assert_eq!(projection.request_state, "requesting");
+        assert!(projection.response_file.is_none());
+        assert!(projection.response_size.is_none());
+        assert!(projection.response_sha256.is_none());
+        assert_eq!(projection.job_stage, "retry_backoff");
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_requires_pristine_recovery_metadata() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-partial-metadata", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("install partial metadata");
+            conn.execute(
+                "UPDATE generation_recoveries SET response_size = 1 WHERE generation_id = ?1",
+                params![fixture.snapshot.context.generation_id],
+            )
+            .expect("install partial response metadata");
+        }
+        let baseline = fixture.fenced_response_projection();
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("partial recovery metadata must not be overwritten");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(fixture.fenced_response_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_requires_persisted_expected_path_to_match_store() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-expected-path", now_ms)
+            .await;
+        let mismatched_path = fixture.root.join("unexpected-store").join(format!(
+            "{}.response.json",
+            fixture.snapshot.context.generation_id
+        ));
+        let mismatched_path = mismatched_path.to_string_lossy().to_string();
+        {
+            let conn = fixture.db.conn.lock().expect("install mismatched path");
+            conn.execute(
+                "UPDATE generation_recoveries SET expected_response_file = ?1
+                  WHERE generation_id = ?2",
+                params![mismatched_path, fixture.snapshot.context.generation_id],
+            )
+            .expect("install mismatched expected path");
+        }
+        let baseline = fixture.fenced_response_projection();
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("persisted expected path must match configured store");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(fixture.fenced_response_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_rejects_duplicate_without_rebroadcast_or_mutation() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-duplicate", now_ms)
+            .await;
+        promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect("first response promotion commits");
+        let baseline = fixture.fenced_response_projection();
+
+        let duplicate = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 2,
+        );
+        assert!(matches!(
+            duplicate,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        assert_eq!(fixture.fenced_response_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_rolls_back_if_persisted_hash_is_changed_after_update() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, expected_path, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-postcheck", now_ms)
+            .await;
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install hash mutation trigger");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER mutate_fenced_response_hash
+                 AFTER UPDATE OF request_state ON generation_recoveries
+                 WHEN NEW.request_state = 'response_ready'
+                 BEGIN
+                     UPDATE generation_recoveries
+                        SET response_sha256 = '0000000000000000000000000000000000000000000000000000000000000000'
+                      WHERE generation_id = NEW.generation_id;
+                 END;",
+            )
+            .expect("install hash mutation trigger");
+        }
+
+        let error = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("post-update metadata corruption must roll back");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+        ));
+        fixture.assert_pristine_provider_request(&expected_path);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_commit_failure_returns_no_event_and_rolls_back_both_rows() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("fenced-response-commit-failure", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("install deferred failure");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_fenced_response_at_commit
+                 AFTER UPDATE OF stage ON generation_jobs
+                 WHEN NEW.stage = 'response_ready'
+                 BEGIN
+                     INSERT INTO images (id, generation_id, file_path)
+                     VALUES ('fenced-response-invalid-image', 'missing-generation', '/tmp/rollback.png');
+                 END;
+                 PRAGMA defer_foreign_keys=ON;",
+            )
+            .expect("install deferred commit failure");
+        }
+        let baseline = fixture.fenced_response_projection();
+
+        let result = promote_verified_response_fenced(
+            fixture.db.as_ref(),
+            &response_store,
+            &fixture.snapshot.context,
+            &response,
+            &authority,
+            now_ms + 1,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(AppError::Database { .. }))
+        ));
+        assert_eq!(fixture.fenced_response_projection(), baseline);
         fixture.cleanup();
     }
 

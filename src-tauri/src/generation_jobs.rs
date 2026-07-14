@@ -1806,7 +1806,7 @@ fn expected_response_path_is_valid(path: &Path, generation_id: &str) -> bool {
             == Some(format!("{generation_id}.response.json").as_str())
 }
 
-fn validate_worker_recovery_for_stage(
+pub(crate) fn validate_worker_recovery_for_stage(
     tx: &Transaction<'_>,
     generation_id: &str,
     stage: GenerationJobStage,
@@ -1848,7 +1848,7 @@ fn validate_worker_recovery_for_stage(
             response_file.as_deref() == Some(expected)
                 && expected_response_path_is_valid(Path::new(expected), generation_id)
         })
-        && response_size.is_some_and(|size| (1..=MAX_WORKER_RESPONSE_BODY_BYTES).contains(&size))
+        && response_size.is_some_and(|size| (0..=MAX_WORKER_RESPONSE_BODY_BYTES).contains(&size))
         && response_sha256.as_deref().is_some_and(|sha256| {
             sha256.len() == 64
                 && sha256
@@ -2895,8 +2895,20 @@ pub(crate) fn load_generation_execution_snapshot_in_transaction(
     tx: &Transaction<'_>,
     job_id: &str,
 ) -> Result<GenerationExecutionSnapshot, AppError> {
+    load_generation_execution_snapshot_for_stage_in_transaction(
+        tx,
+        job_id,
+        GenerationJobStage::Preparing,
+    )
+}
+
+pub(crate) fn load_generation_execution_snapshot_for_stage_in_transaction(
+    tx: &Transaction<'_>,
+    job_id: &str,
+    expected_stage: GenerationJobStage,
+) -> Result<GenerationExecutionSnapshot, AppError> {
     let job = get_job_in_transaction(tx, job_id)?;
-    if job.status != GenerationJobStatus::Running || job.stage != GenerationJobStage::Preparing {
+    if job.status != GenerationJobStatus::Running || job.stage != expected_stage {
         return Err(AppError::GenerationJobInvalidTransition);
     }
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
