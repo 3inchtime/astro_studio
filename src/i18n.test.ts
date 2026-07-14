@@ -29,6 +29,31 @@ const providerSettingsKeys = [
   "settings.addOptimizationService",
 ] as const;
 
+const canvasEditorKeys = [
+  "canvas.copySelection",
+  "canvas.pasteSelection",
+  "canvas.deleteSelection",
+  "canvas.bringForward",
+  "canvas.sendBackward",
+  "canvas.bringToFront",
+  "canvas.sendToBack",
+  "canvas.fitFrame",
+  "canvas.fitSelection",
+  "canvas.selectionCount",
+  "canvas.zoomStatus",
+] as const;
+
+type CanvasEditorKey = (typeof canvasEditorKeys)[number];
+
+const canvasEditorLocalizedKeys = canvasEditorKeys.filter(
+  (key) => key !== "canvas.zoomStatus",
+);
+
+const canvasEditorPlaceholders = {
+  "canvas.selectionCount": "{{count}}",
+  "canvas.zoomStatus": "{{zoom}}",
+} as const;
+
 const noEnglishFallbackKeys = [
   "sidebar.projects",
   "sidebar.allProjects",
@@ -100,6 +125,18 @@ function getNestedValue(
   }, resources);
 }
 
+function getOwnCanvasEditorValue(
+  resources: Record<string, unknown>,
+  key: CanvasEditorKey,
+): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(resources, key)) {
+    return undefined;
+  }
+
+  const value = resources[key];
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
 function flattenKeys(
   resources: Record<string, unknown>,
   prefix = "",
@@ -136,6 +173,45 @@ describe("i18n resources", () => {
     for (const [locale, resources] of Object.entries(localeResources)) {
       for (const key of providerSettingsKeys) {
         expect(resources, `${locale} should define ${key}`).toHaveProperty(key);
+      }
+    }
+  });
+
+  it("defines every canvas editor key and preserves its interpolation placeholders", () => {
+    for (const [locale, resources] of Object.entries(localeResources)) {
+      for (const key of canvasEditorKeys) {
+        const value = getOwnCanvasEditorValue(resources, key);
+
+        expect(
+          value,
+          `${locale} should define ${key} as a top-level flat key`,
+        ).toBeTypeOf("string");
+        expect(value, `${locale} should not leave ${key} empty`).not.toBe("");
+      }
+
+      for (const key of Object.keys(canvasEditorPlaceholders) as Array<
+        keyof typeof canvasEditorPlaceholders
+      >) {
+        const placeholder = canvasEditorPlaceholders[key];
+        expect(
+          getOwnCanvasEditorValue(resources, key),
+          `${locale} should preserve ${placeholder} in ${key}`,
+        ).toContain(placeholder);
+      }
+    }
+  });
+
+  it("localizes canvas editor labels in every non-English locale", () => {
+    const nonEnglishLocales = Object.entries(localeResources).filter(
+      ([locale]) => locale !== "en",
+    );
+
+    for (const [locale, resources] of nonEnglishLocales) {
+      for (const key of canvasEditorLocalizedKeys) {
+        expect(
+          getOwnCanvasEditorValue(resources, key),
+          `${locale} should translate ${key} instead of reusing English`,
+        ).not.toBe(getOwnCanvasEditorValue(en, key));
       }
     }
   });

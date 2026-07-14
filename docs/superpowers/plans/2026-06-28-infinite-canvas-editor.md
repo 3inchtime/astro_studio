@@ -8,6 +8,10 @@
 
 **Tech Stack:** React 19, TypeScript, Vitest, React Testing Library, react-konva/Konva, lucide-react, Tailwind CSS v4, Tauri IPC wrappers.
 
+**2026-07-10 execution checkpoint:** Tasks 1-3 are implemented and reviewed in
+commits through `4d60b51`. Resume at Task 4. Do not repeat or rewrite the helper
+foundation unless a failing integration test proves a defect.
+
 ---
 
 ## File Structure
@@ -901,6 +905,7 @@ Append to `src/lib/canvas/frame.test.ts`:
 
 ```ts
 import { fitViewportToCanvasRect } from "./frame";
+import type { CanvasRect } from "./bounds";
 
 it("fits a canvas rect into a stage with padding", () => {
   expect(
@@ -911,7 +916,7 @@ it("fits a canvas rect into a stage with padding", () => {
     ),
   ).toEqual({
     x: 40,
-    y: 100,
+    y: 70,
     scale: 0.5078125,
   });
 });
@@ -924,6 +929,15 @@ it("keeps fit camera scale within zoom limits", () => {
       40,
     ).scale,
   ).toBe(4);
+});
+
+it("fits a canvas-space rect with a nonzero origin", () => {
+  const rect: CanvasRect = { x: 100, y: 50, width: 200, height: 100 };
+  expect(fitViewportToCanvasRect(rect, { width: 600, height: 400 }, 40)).toEqual({
+    x: -220,
+    y: -60,
+    scale: 2.6,
+  });
 });
 ```
 
@@ -943,7 +957,7 @@ Add to `src/lib/canvas/frame.ts`:
 
 ```ts
 export function fitViewportToCanvasRect(
-  rect: CanvasScreenRect,
+  rect: CanvasRect,
   stageSize: { width: number; height: number },
   padding = 64,
 ): CanvasViewport {
@@ -977,6 +991,7 @@ Expected: PASS.
 - Modify: `src/pages/CanvasPage.tsx`
 - Modify: `src/pages/CanvasPage.test.tsx`
 - Modify: `src/components/canvas/CanvasToolbar.tsx`
+- Modify: `src/components/canvas/CanvasStage.tsx` (props contract only; interaction remains Task 6)
 - Modify: `src/locales/en.json`
 - Modify: `src/locales/de.json`
 - Modify: `src/locales/es.json`
@@ -1085,13 +1100,14 @@ it("deletes the selected canvas object with the keyboard", async () => {
 it("ignores canvas shortcuts while typing in the generation prompt", async () => {
   render(<CanvasPage />, { wrapper: TestWrapper });
 
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
   const promptEditor = await screen.findByPlaceholderText(
     "Describe how to develop this framed sketch...",
   );
   promptEditor.focus();
   fireEvent.keyDown(promptEditor, { key: "b" });
 
-  expect(screen.getByText("Active tool: brush")).toBeInTheDocument();
+  expect(screen.getByText("Active tool: select")).toBeInTheDocument();
 });
 
 it("copies and pastes selected objects with toolbar commands", async () => {
@@ -1129,7 +1145,72 @@ it("moves selected objects from the stage callback", async () => {
     expect(saveCanvasDocument).toHaveBeenCalled();
   });
 });
+
+it("fits the selected object using the reported stage size", async () => {
+  getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+
+  fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+  fireEvent.click(screen.getByRole("button", { name: "resize stage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fit Selection" }));
+
+  expect(await screen.findByText("1 selected")).toBeInTheDocument();
+  expect(screen.getByText(/%$/)).toBeInTheDocument();
+  await waitFor(() => {
+    expect(saveCanvasDocument).toHaveBeenCalledWith(
+      "canvas-1",
+      expect.objectContaining({
+        viewport: expect.objectContaining({ scale: 4 }),
+      }),
+      expect.any(String),
+    );
+  });
+});
+
+it("brings a selected object to the front", async () => {
+  getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithTwoImages());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+
+  fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bring to Front" }));
+
+  await waitFor(() => {
+    const savedContent = saveCanvasDocument.mock.calls.at(-1)?.[1];
+    expect(savedContent.layers[0].objects.map((object: { id: string }) => object.id)).toEqual([
+      "image-2",
+      "image-1",
+    ]);
+  });
+});
+
+it("reconciles selection when its layer becomes locked", async () => {
+  getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+
+  fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+  expect(screen.getByText("Selected objects: image-1")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Lock Layer" }));
+
+  expect(await screen.findByText("Selected objects: none")).toBeInTheDocument();
+});
 ```
+
+Also add deferred-promise regressions for document lifecycle safety:
+
+- Start loading A, select B, resolve B first, then A; assert the late A result
+  never replaces B content.
+- Copy on loaded A, switch to unresolved B, issue paste, advance the autosave
+  debounce, and assert no A-derived content is written to B before B loads.
+- Resolve an older A save after B becomes dirty and assert the A completion does
+  not clear B's dirty/saving state.
+- Start save 1 for A, edit again, and prove save 2 does not call the backend
+  until save 1 settles; save 2 must carry the newest snapshot.
+- Remove dirty A through a canvas-documents query refresh before its debounce;
+  assert the automatic transition flushes A to A before selecting B/null.
+- Reject autosave and switch-flush saves; assert dirty content remains, no
+  unhandled rejection occurs, Retry Save succeeds, and failed switch stays on A.
+- Reject a B load, show a load error, retry the same selected ID, and reach the
+  ready B editor after a successful retry.
 
 Before appending the tests above, add this local factory near the existing mock setup:
 
@@ -1176,6 +1257,24 @@ function canvasDocumentWithImage() {
     },
   };
 }
+
+function canvasDocumentWithTwoImages() {
+  const document = canvasDocumentWithImage();
+  const firstImage = document.content.layers[0].objects[0];
+  return {
+    ...document,
+    content: {
+      ...document.content,
+      layers: [{
+        ...document.content.layers[0],
+        objects: [
+          firstImage,
+          { ...firstImage, id: "image-2", x: 200 },
+        ],
+      }],
+    },
+  };
+}
 ```
 
 Use it in tests with:
@@ -1200,6 +1299,7 @@ Modify `CanvasToolbarProps` in `src/components/canvas/CanvasToolbar.tsx`:
 
 ```ts
 selectedObjectCount: number;
+zoomPercent: number;
 canPaste: boolean;
 onDeleteSelection: () => void;
 onCopySelection: () => void;
@@ -1213,6 +1313,8 @@ Import additional icons:
 
 ```ts
 import {
+  ArrowDown,
+  ArrowUp,
   BringToFront,
   Brush,
   Clipboard,
@@ -1245,9 +1347,15 @@ Add icon buttons after import image:
   <Trash2 size={16} strokeWidth={1.8} />
 </button>
 <button type="button" aria-label={t("canvas.bringForward")} title={t("canvas.bringForward")} onClick={() => onReorderSelection("forward")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
-  <BringToFront size={16} strokeWidth={1.8} />
+  <ArrowUp size={16} strokeWidth={1.8} />
 </button>
 <button type="button" aria-label={t("canvas.sendBackward")} title={t("canvas.sendBackward")} onClick={() => onReorderSelection("backward")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
+  <ArrowDown size={16} strokeWidth={1.8} />
+</button>
+<button type="button" aria-label={t("canvas.bringToFront")} title={t("canvas.bringToFront")} onClick={() => onReorderSelection("front")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
+  <BringToFront size={16} strokeWidth={1.8} />
+</button>
+<button type="button" aria-label={t("canvas.sendToBack")} title={t("canvas.sendToBack")} onClick={() => onReorderSelection("back")} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
   <SendToBack size={16} strokeWidth={1.8} />
 </button>
 <button type="button" aria-label={t("canvas.fitFrame")} title={t("canvas.fitFrame")} onClick={onFitFrame} className={TOOL_BUTTON_CLASS}>
@@ -1256,6 +1364,8 @@ Add icon buttons after import image:
 <button type="button" aria-label={t("canvas.fitSelection")} title={t("canvas.fitSelection")} onClick={onFitSelection} disabled={selectedObjectCount === 0} className={TOOL_BUTTON_CLASS}>
   <MousePointer2 size={16} strokeWidth={1.8} />
 </button>
+<span>{t("canvas.selectionCount", { count: selectedObjectCount })}</span>
+<span>{t("canvas.zoomStatus", { zoom: zoomPercent })}</span>
 ```
 
 - [ ] **Step 5: Add English locale keys first**
@@ -1275,6 +1385,12 @@ Add these keys to `src/locales/en.json` under the canvas section:
 "selectionCount": "{{count}} selected",
 "zoomStatus": "{{zoom}}%"
 ```
+
+Add save/load recovery labels to every locale as English fallbacks in this
+task: `canvas.saveStatus.error = "Save failed"`,
+`canvas.retrySave = "Retry save"`,
+`canvas.loadError = "Couldn't load this canvas."`, and
+`canvas.retryLoad = "Retry load"`.
 
 Add these exact fallback keys to every other locale file first, then improve translations after tests pass:
 
@@ -1314,6 +1430,26 @@ Add state:
 const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
 const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null);
 const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
+const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
+```
+
+Use a monotonically increasing load-request token and selected-ID ref. Set
+`loadedDocumentId` to null and clear selection immediately on a switch; apply a
+load result/finally block only when its token and selected ID are still current.
+The stage/editor is ready only when `loadedDocumentId === selectedDocumentId`.
+
+Reconcile stale selection whenever document content changes (document switch,
+undo/redo, layer visibility/lock, delete, or external load):
+
+```ts
+useEffect(() => {
+  setSelectedObjectIds((current) => {
+    const next = reconcileSelectedObjectIds(content, current);
+    return next.length === current.length && next.every((id, index) => id === current[index])
+      ? current
+      : next;
+  });
+}, [content]);
 ```
 
 Add handlers:
@@ -1360,12 +1496,35 @@ function handleFitSelection() {
 }
 ```
 
+Gate editor mutations, keyboard commands, and autosave while the selected
+document is not the loaded document. Change persistence to
+`persistDocument(documentId, snapshot)` so the write target is captured, not
+read from a later render. Use a save-operation token plus current document and
+snapshot refs so an older save cannot clear dirty/saving state for a newer
+document or snapshot. When a user switches away with a pending dirty snapshot,
+flush it to the old loaded document ID without delaying the switch.
+
+The readiness gate applies to every keyboard-owned editor mutation, including
+Escape selection clearing and `v`/`b`/`e`/`h` tool changes. Add a deferred-load
+test that presses a tool shortcut while B is unresolved and proves the tool is
+unchanged after B loads.
+
+Serialize/coalesce backend saves so same-document snapshots cannot overtake;
+the newest queued snapshot must eventually persist. Route both sidebar and
+query-driven document transitions through one async routine that waits for the
+old dirty snapshot to save to its old ID before switching. A failed flush keeps
+the old document ready and dirty. Catch every fire-and-forget save rejection,
+retain the latest snapshot, and expose a sanitized Retry Save action. Track
+token-guarded load errors and expose Retry Load for the same selected ID.
+
 Add keyboard effect:
 
 ```ts
 useEffect(() => {
   function isTypingTarget(target: EventTarget | null) {
-    return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+    return target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || (target instanceof HTMLElement && target.isContentEditable);
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -1414,7 +1573,15 @@ useEffect(() => {
 }, [content, selectedObjectIds, clipboard, activeLayer?.id]);
 ```
 
-Wire props into `CanvasStage` and `CanvasToolbar`.
+Before wiring the page, extend `CanvasStageProps` with
+`selectedObjectIds`, `onSelectionChange`, `onMoveSelection`, and
+`onStageSizeChange` so the production component accepts the new page contract.
+Do not consume those props or change stage interaction in Task 5; Task 6 owns
+that behavior. Then wire `selectedObjectIds`, `onSelectionChange`, `onMoveSelection`, and
+`onStageSizeChange` into `CanvasStage`. Wire every command plus
+`selectedObjectCount={selectedObjectIds.length}`,
+`zoomPercent={Math.round(content.viewport.scale * 100)}`, and
+`canPaste={Boolean(clipboard?.entries.length)}` into `CanvasToolbar`.
 
 - [ ] **Step 7: Run page tests and fix compile failures**
 
@@ -1426,233 +1593,178 @@ npx vitest run src/pages/CanvasPage.test.tsx
 
 Expected: PASS after import/type issues are fixed.
 
+Mock `exportCanvasFrame` and `readImageSize` at the module boundary in the page
+tests. For debounce cases, enable fake timers only after initial loading,
+advance 500 ms inside async `act`, flush promises, and restore real timers in
+teardown. Task 5 tests must not add jsdom `getContext` or React `act` warnings.
+
+- [ ] **Step 8: Run page typecheck and commit Task 5**
+
+Run:
+
+```bash
+npx tsc --noEmit --pretty false
+git diff --check
+git add src/pages/CanvasPage.tsx src/pages/CanvasPage.test.tsx src/components/canvas/CanvasToolbar.tsx src/components/canvas/CanvasStage.tsx src/locales
+git commit -m "feat: wire canvas editor commands"
+```
+
+Expected: typecheck and diff check pass; commit contains only Task 5 files.
+
 ---
 
 ## Task 6: CanvasStage Selection, Marquee, And Group Movement
 
 **Files:**
 - Modify: `src/components/canvas/CanvasStage.tsx`
+- Create: `src/components/canvas/CanvasStage.test.tsx`
 
-- [ ] **Step 1: Extend `CanvasStageProps`**
+- [ ] **Step 1: Build a failing Konva façade test harness**
 
-Add props:
+Mock `react-konva` locally in `CanvasStage.test.tsx`:
 
-```ts
-selectedObjectIds: string[];
-onSelectionChange: (objectIds: string[]) => void;
-onMoveSelection: (delta: { dx: number; dy: number }) => void;
-onStageSizeChange: (size: { width: number; height: number }) => void;
-```
+- `Stage` uses `forwardRef`, captures its pointer handlers, and exposes a
+  controlled `getPointerPosition()` result.
+- `Transformer` exposes `nodes()` and `getLayer().batchDraw()` spies.
+- `Image` exposes a stable imperative node with position/scale/rotation methods.
+- `Rect`, `Line`, and `Group` render filtered DOM elements with geometry in
+  `data-*` attributes. Production nodes use stable Konva `id`/`name` props for
+  object, selection outline, marquee, and generation frame identification.
+- A local controllable `ResizeObserver` exposes `triggerResize(width, height)`.
+- A controlled wrapper writes `onSelectionChange` back into
+  `selectedObjectIds`. Mock `window.Image` so image `onload` is deterministic.
 
-- [ ] **Step 2: Add stage refs for marquee and group drag**
+Add RED tests for:
 
-Add refs/state near existing refs:
+1. Resize `799.6 x 280.2` reports/renders `{ width: 800, height: 320 }`.
+2. Click selects the topmost visible/unlocked object; empty click clears.
+3. Shift-click adds/removes exact IDs and never arms a drag for that toggle.
+4. Down/move/up in one `act` marquee-selects intersecting visible/unlocked
+   image and stroke IDs, proving pointer-up does not read stale React state.
+5. Marquee chrome uses projected screen geometry while moving and disappears
+   at completion.
+6. Group drag previews every selected object locally, calls
+   `onMoveSelection` zero times during movement and exactly once on pointer-up
+   with total delta, and never calls `onTransformImage`.
+7. Space from textarea/contenteditable does nothing. Space outside typing
+   controls prevents default, pans from the original viewport anchor, and
+   keyup/window blur disables temporary pan.
+8. One external image attaches exactly its node to `Transformer` and shows
+   Reset Aspect. One stroke and multi-selection show bounds chrome without a
+   transformer. Hidden/locked/stale IDs show neither.
+9. A transformer-anchor pointer-down does not start selection movement.
+10. A batched down/move/up sequence whose pointer is unavailable on pointer-up
+    still commits the latest group delta from a synchronous ref.
+11. Window blur, touch cancel, an external selection change during group drag,
+    and an external content change during marquee or draft drawing cancel the
+    active gesture without committing stale edits.
 
-```ts
-const selectionDragRef = useRef<{
-  pointer: { x: number; y: number };
-  canvasPoint: { x: number; y: number };
-} | null>(null);
-const marqueeAnchorRef = useRef<{ x: number; y: number } | null>(null);
-const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
-const [spacePanActive, setSpacePanActive] = useState(false);
-```
-
-Import helpers:
-
-```ts
-import type { CanvasRect } from "../../lib/canvas/bounds";
-import { canvasRectToScreenRect, getCombinedCanvasBounds } from "../../lib/canvas/bounds";
-import { hitTestCanvasObjectId, selectCanvasObjectsInRect, toggleSelectedObjectId } from "../../lib/canvas/selection";
-```
-
-- [ ] **Step 3: Report stage size to the page**
-
-Inside the `ResizeObserver` callback, after `setStageSize(nextSize)`, call:
-
-```ts
-onStageSizeChange(nextSize);
-```
-
-- [ ] **Step 4: Add spacebar temporary pan**
-
-Add an effect in `CanvasStage.tsx`:
-
-```ts
-useEffect(() => {
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.code === "Space") setSpacePanActive(true);
-  }
-
-  function handleKeyUp(event: KeyboardEvent) {
-    if (event.code === "Space") setSpacePanActive(false);
-  }
-
-  window.addEventListener("keydown", handleKeyDown);
-  window.addEventListener("keyup", handleKeyUp);
-  return () => {
-    window.removeEventListener("keydown", handleKeyDown);
-    window.removeEventListener("keyup", handleKeyUp);
-  };
-}, []);
-```
-
-- [ ] **Step 5: Update pointer down behavior**
-
-In `handlePointerDown`:
-
-```ts
-const shouldPan = activeTool === "pan" || spacePanActive;
-if (shouldPan || ("button" in event.evt && isSecondaryButtonPan(event.evt.button))) {
-  // existing pan-anchor setup
-  return;
-}
-
-if (activeTool === "select") {
-  const point = getCanvasPoint();
-  if (!point) return;
-  const hitId = hitTestCanvasObjectId(content, point);
-
-  if (hitId) {
-    const nextSelection = event.evt.shiftKey
-      ? toggleSelectedObjectId(selectedObjectIds, hitId)
-      : selectedObjectIds.includes(hitId)
-        ? selectedObjectIds
-        : [hitId];
-    onSelectionChange(nextSelection);
-    selectionDragRef.current = {
-      pointer: stageRef.current?.getPointerPosition() ?? { x: 0, y: 0 },
-      canvasPoint: point,
-    };
-    return;
-  }
-
-  onSelectionChange([]);
-  marqueeAnchorRef.current = point;
-  setMarqueeRect({ x: point.x, y: point.y, width: 0, height: 0 });
-  return;
-}
-```
-
-- [ ] **Step 6: Update pointer move behavior**
-
-Before drawing logic in `handlePointerMove`:
-
-```ts
-if (selectionDragRef.current && selectedObjectIds.length) {
-  const point = getCanvasPoint();
-  if (!point) return;
-  const dx = point.x - selectionDragRef.current.canvasPoint.x;
-  const dy = point.y - selectionDragRef.current.canvasPoint.y;
-  if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
-    onMoveSelection({ dx, dy });
-    selectionDragRef.current = {
-      pointer: stageRef.current?.getPointerPosition() ?? selectionDragRef.current.pointer,
-      canvasPoint: point,
-    };
-  }
-  return;
-}
-
-if (marqueeAnchorRef.current) {
-  const point = getCanvasPoint();
-  if (!point) return;
-  setMarqueeRect(normalizeCanvasRect(marqueeAnchorRef.current, point));
-  return;
-}
-```
-
-Add helper at bottom:
-
-```ts
-function normalizeCanvasRect(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-): CanvasRect {
-  return {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.abs(end.x - start.x),
-    height: Math.abs(end.y - start.y),
-  };
-}
-```
-
-- [ ] **Step 7: Update pointer up behavior**
-
-At the start of `handlePointerUp`:
-
-```ts
-selectionDragRef.current = null;
-if (marqueeAnchorRef.current && marqueeRect) {
-  onSelectionChange(selectCanvasObjectsInRect(content, marqueeRect));
-}
-marqueeAnchorRef.current = null;
-setMarqueeRect(null);
-```
-
-- [ ] **Step 8: Render selection chrome**
-
-Compute:
-
-```ts
-const combinedSelectionBounds = getCombinedCanvasBounds(content, selectedObjectIds);
-const combinedSelectionRect = combinedSelectionBounds
-  ? canvasRectToScreenRect(combinedSelectionBounds, content.viewport)
-  : null;
-const marqueeScreenRect = marqueeRect ? canvasRectToScreenRect(marqueeRect, content.viewport) : null;
-```
-
-Render after objects and before `Transformer`:
-
-```tsx
-{combinedSelectionRect && selectedObjectIds.length > 1 ? (
-  <Rect
-    x={combinedSelectionRect.x}
-    y={combinedSelectionRect.y}
-    width={combinedSelectionRect.width}
-    height={combinedSelectionRect.height}
-    stroke="#4f6aff"
-    strokeWidth={1.5}
-    dash={[8, 5]}
-    listening={false}
-  />
-) : null}
-
-{marqueeScreenRect ? (
-  <Rect
-    x={marqueeScreenRect.x}
-    y={marqueeScreenRect.y}
-    width={marqueeScreenRect.width}
-    height={marqueeScreenRect.height}
-    fill="rgba(79,106,255,0.08)"
-    stroke="rgba(79,106,255,0.78)"
-    strokeWidth={1}
-    dash={[6, 4]}
-    listening={false}
-  />
-) : null}
-```
-
-- [ ] **Step 9: Use external selected ids for image selection**
-
-Replace local `selectedObjectId` with `selectedObjectIds[0]` for single-image transformer behavior. Keep `Transformer` active only when exactly one selected image exists:
-
-```ts
-const selectedObjectId = selectedObjectIds.length === 1 ? selectedObjectIds[0] : null;
-```
-
-Remove local `useState<string | null>` selection ownership from `CanvasStage`.
-
-- [ ] **Step 10: Run canvas page tests**
-
-Run:
+- [ ] **Step 2: Run stage tests and verify RED**
 
 ```bash
-npx vitest run src/pages/CanvasPage.test.tsx
+npx vitest run src/components/canvas/CanvasStage.test.tsx
 ```
 
-Expected: PASS.
+Expected: FAIL because external selection, marquee, group preview, resize
+reporting, and temporary pan are not implemented.
+
+- [ ] **Step 3: Consume the external selection contract**
+
+Destructure the four Task 5 props. Remove local selection state. Derive
+effective IDs with `reconcileSelectedObjectIds(content, selectedObjectIds)` so
+hidden, locked, missing, and duplicate IDs cannot render chrome or attach a
+transformer. A selected image is transformable only when it is the sole
+effective selection on a visible/unlocked layer.
+
+Add refs/state:
+
+```ts
+const selectionDragRef = useRef<{ canvasPoint: { x: number; y: number } } | null>(null);
+const marqueeAnchorRef = useRef<{ x: number; y: number } | null>(null);
+const marqueeRectRef = useRef<CanvasRect | null>(null);
+const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
+const [selectionPreviewDelta, setSelectionPreviewDelta] = useState({ dx: 0, dy: 0 });
+const selectionPreviewDeltaRef = useRef({ dx: 0, dy: 0 });
+const spacePanActiveRef = useRef(false);
+```
+
+Import and reuse `normalizeCanvasRect` from `bounds.ts`; do not add a duplicate
+normalizer.
+
+- [ ] **Step 4: Report size and implement safe temporary pan**
+
+Inside `ResizeObserver`, compute the clamped/rounded `nextSize`, then call both
+`setStageSize(nextSize)` and `onStageSizeChange(nextSize)`.
+
+Space handlers must ignore input, textarea, and contenteditable targets,
+prevent default for accepted Space events, update the ref synchronously, reset
+on keyup, and clean up all listeners. Window blur invokes the centralized
+gesture cancellation path rather than only clearing temporary pan state.
+Space/right-click/pan-tool pointer-down creates the existing pan anchor without
+clearing external selection.
+
+- [ ] **Step 5: Implement click, Shift toggle, and synchronous marquee**
+
+Before generic hit testing, ignore events whose target parent class is
+`Transformer`. In select mode use `hitTestCanvasObjectId` and the effective
+selection:
+
+- Normal click selects one object, while clicking any member of an existing
+  multi-selection preserves the group.
+- Shift-click uses `toggleSelectedObjectId`; it never arms group movement.
+- Empty click clears and starts marquee.
+- Pointer move writes the normalized rectangle to both `marqueeRectRef` and
+  state. Pointer-up reads the ref, calls `selectCanvasObjectsInRect`, then
+  clears anchor/ref/state. This remains correct when down/move/up are batched.
+
+- [ ] **Step 6: Preview group movement and commit once**
+
+On non-Shift pointer-down for a selected/hit object, store the starting canvas
+point plus the current content identity and exact effective-selection identity.
+Pointer move computes the total delta from that fixed origin and updates both
+`selectionPreviewDeltaRef` and `selectionPreviewDelta`. Apply the delta while
+rendering every effective selected image/stroke and the combined bounds.
+Disable/remove native Konva image dragging and `onDragEnd` so movement cannot
+apply twice. Pointer-up uses the current pointer when available and otherwise
+falls back to `selectionPreviewDeltaRef`; it calls `onMoveSelection` once when
+the total delta is non-zero, then clears the preview.
+
+Add one centralized cancellation routine that clears pan, group drag, marquee,
+selection preview, and draft gesture refs/state without invoking parent commit
+callbacks. Invoke it from window blur and Stage `onTouchCancel`. If content or
+the exact effective-selection identity changes during a group drag, cancel that
+drag. If content changes during marquee or draft drawing, cancel those gestures.
+Do not cancel temporary pan merely because its own viewport update produced a
+new content object.
+
+- [ ] **Step 7: Render external selection chrome and transformer**
+
+Use stable names `canvas-selection-outline` and `canvas-marquee`. Render the
+combined outline for multi-selection and for a single non-image object; a sole
+image uses the existing Transformer. Include `loadedImages` in transformer
+attachment dependencies so late image loading attaches the node. One hidden,
+locked, or stale ID attaches no node. Preserve image transform/reset-aspect
+behavior and the existing blue-violet, dashed, non-listening visual language.
+
+- [ ] **Step 8: Run focused integration checks GREEN**
+
+```bash
+npx vitest run src/components/canvas/CanvasStage.test.tsx src/pages/CanvasPage.test.tsx
+npx tsc --noEmit --pretty false
+git diff --check
+```
+
+Expected: Stage tests and all 26 CanvasPage tests pass with no canvas/act
+warnings; typecheck/diff check pass.
+
+- [ ] **Step 9: Commit Task 6**
+
+```bash
+git add src/components/canvas/CanvasStage.tsx src/components/canvas/CanvasStage.test.tsx
+git commit -m "feat: add canvas stage multi-selection"
+```
+
+Expected: commit contains only the Stage implementation and focused test file.
 
 ---
 
@@ -1674,23 +1786,28 @@ Expected: PASS if all new keys exist in every locale; otherwise FAIL listing mis
 
 - [ ] **Step 2: Add missing locale keys**
 
-For every locale, ensure the `canvas` object includes:
+For every locale, preserve the repository's flat resource schema and ensure it
+includes these `canvas.*` keys:
 
 ```json
-"copySelection": "Copy",
-"pasteSelection": "Paste",
-"deleteSelection": "Delete",
-"bringForward": "Bring Forward",
-"sendBackward": "Send Backward",
-"bringToFront": "Bring to Front",
-"sendToBack": "Send to Back",
-"fitFrame": "Fit Frame",
-"fitSelection": "Fit Selection",
-"selectionCount": "{{count}} selected",
-"zoomStatus": "{{zoom}}%"
+"canvas.copySelection": "Copy",
+"canvas.pasteSelection": "Paste",
+"canvas.deleteSelection": "Delete",
+"canvas.bringForward": "Bring Forward",
+"canvas.sendBackward": "Send Backward",
+"canvas.bringToFront": "Bring to Front",
+"canvas.sendToBack": "Send to Back",
+"canvas.fitFrame": "Fit Frame",
+"canvas.fitSelection": "Fit Selection",
+"canvas.selectionCount": "{{count}} selected",
+"canvas.zoomStatus": "{{zoom}}%"
 ```
 
-Use localized equivalents where practical. The key requirement is that all eight locale files have identical key coverage.
+Use localized equivalents where practical. The key requirement is that all
+eight locale files have identical key coverage. Extend `i18n.test.ts` so
+non-English locales cannot silently reuse the English labels for the ten
+translatable command/status strings, and so every locale retains the
+`{{count}}` and `{{zoom}}` interpolation variables.
 
 - [ ] **Step 3: Run i18n tests and verify GREEN**
 
@@ -1704,7 +1821,7 @@ Expected: PASS.
 
 ---
 
-## Task 8: Full Verification And Commit
+## Task 8: Full Verification And Acceptance
 
 **Files:**
 - All files touched by Tasks 1-7
@@ -1714,7 +1831,7 @@ Expected: PASS.
 Run:
 
 ```bash
-npx vitest run src/lib/canvas/bounds.test.ts src/lib/canvas/selection.test.ts src/lib/canvas/transforms.test.ts src/lib/canvas/clipboard.test.ts src/lib/canvas/ordering.test.ts src/lib/canvas/document.test.ts src/lib/canvas/frame.test.ts src/pages/CanvasPage.test.tsx src/i18n.test.ts
+npx vitest run src/lib/canvas/bounds.test.ts src/lib/canvas/selection.test.ts src/lib/canvas/transforms.test.ts src/lib/canvas/clipboard.test.ts src/lib/canvas/ordering.test.ts src/lib/canvas/document.test.ts src/lib/canvas/frame.test.ts src/components/canvas/CanvasStage.test.tsx src/pages/CanvasPage.test.tsx src/i18n.test.ts
 ```
 
 Expected: PASS.
@@ -1750,16 +1867,17 @@ git diff -- src/lib/canvas src/components/canvas src/pages/CanvasPage.tsx src/pa
 
 Expected: no whitespace errors; diff shows only the infinite canvas editor changes.
 
-- [ ] **Step 5: Commit implementation**
+- [ ] **Step 5: Confirm the reviewed implementation history**
 
 Run:
 
 ```bash
-git add src/lib/canvas src/components/canvas src/pages/CanvasPage.tsx src/pages/CanvasPage.test.tsx src/locales src/i18n.test.ts
-git commit -m "feat: improve infinite canvas editor controls"
+git status --short
+git log --oneline --decorate -20
 ```
 
-Expected: commit succeeds.
+Expected: the worktree is clean and every Task 1-7 change is already captured
+by its focused, reviewed commit. Do not create an empty aggregate commit.
 
 ---
 

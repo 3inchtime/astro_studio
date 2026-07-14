@@ -5,7 +5,12 @@ mod db;
 mod error;
 mod file_manager;
 mod gallery;
+mod generation_job_execution;
+mod generation_job_worker;
+mod generation_job_worker_deps;
+mod generation_jobs;
 mod generation_lifecycle;
+mod generation_worker_lease;
 mod image_engines;
 mod llm;
 mod model_registry;
@@ -168,6 +173,64 @@ struct PendingGenerationRecovery {
     response_file: Option<String>,
 }
 
+fn cleanup_stale_legacy_generation_recoveries(conn: &Connection) -> Result<usize, AppError> {
+    conn.execute(
+        "DELETE FROM generation_recoveries
+         WHERE generation_id IN (
+             SELECT g.id
+             FROM generations g
+             WHERE g.status != 'processing'
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM generation_jobs j
+                   WHERE j.generation_id = g.id
+               )
+         )",
+        [],
+    )
+    .map_err(|e| AppError::Database {
+        message: format!("Clean stale recoveries failed: {}", e),
+    })
+}
+
+fn load_pending_legacy_generation_recoveries(
+    conn: &Connection,
+) -> Result<Vec<PendingGenerationRecovery>, AppError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT g.id, g.created_at, COALESCE(r.output_format, ?1), r.request_state, r.response_file
+             FROM generations g
+             LEFT JOIN generation_recoveries r ON r.generation_id = g.id
+             WHERE g.status = 'processing'
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM generation_jobs j
+                   WHERE j.generation_id = g.id
+               )",
+        )
+        .map_err(|e| AppError::Database {
+            message: format!("Prepare recovery query failed: {}", e),
+        })?;
+    let rows = stmt
+        .query_map(params![DEFAULT_OUTPUT_FORMAT], |row| {
+            Ok(PendingGenerationRecovery {
+                generation_id: row.get(0)?,
+                created_at: row.get(1)?,
+                output_format: row.get(2)?,
+                request_state: row.get(3)?,
+                response_file: row.get(4)?,
+            })
+        })
+        .map_err(|e| AppError::Database {
+            message: format!("Query pending recoveries failed: {}", e),
+        })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Database {
+            message: format!("Read pending recovery row failed: {}", e),
+        })
+}
+
 fn set_generation_failed(
     conn: &Connection,
     generation_id: &str,
@@ -286,43 +349,14 @@ async fn recover_interrupted_generations(
         let conn = db.conn.lock().map_err(|e| AppError::Database {
             message: format!("Lock failed: {}", e),
         })?;
-        conn.execute(
-            "DELETE FROM generation_recoveries WHERE generation_id IN (SELECT id FROM generations WHERE status != 'processing')",
-            [],
-        )
-        .map_err(|e| AppError::Database {
-            message: format!("Clean stale recoveries failed: {}", e),
-        })?;
+        cleanup_stale_legacy_generation_recoveries(&conn)?;
     }
 
     let pending = {
         let conn = db.conn.lock().map_err(|e| AppError::Database {
             message: format!("Lock failed: {}", e),
         })?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT g.id, g.created_at, COALESCE(r.output_format, ?1), r.request_state, r.response_file
-                 FROM generations g
-                 LEFT JOIN generation_recoveries r ON r.generation_id = g.id
-                 WHERE g.status = 'processing'",
-            )
-            .map_err(|e| AppError::Database {
-                message: format!("Prepare recovery query failed: {}", e),
-            })?;
-        let rows = stmt
-            .query_map(params![DEFAULT_OUTPUT_FORMAT], |row| {
-                Ok(PendingGenerationRecovery {
-                    generation_id: row.get(0)?,
-                    created_at: row.get(1)?,
-                    output_format: row.get(2)?,
-                    request_state: row.get(3)?,
-                    response_file: row.get(4)?,
-                })
-            })
-            .map_err(|e| AppError::Database {
-                message: format!("Query pending recoveries failed: {}", e),
-            })?;
-        rows.filter_map(|row| row.ok()).collect::<Vec<_>>()
+        load_pending_legacy_generation_recoveries(&conn)?
     };
 
     for recovery in pending {
@@ -372,7 +406,10 @@ async fn recover_interrupted_generations(
                 }
             };
 
-            let decoded_images = match engine.decode_images_from_response(&body_text).await {
+            let decoded_images = match engine
+                .decode_images_from_response(&body_text, &|| false)
+                .await
+            {
                 Ok(decoded_images) => decoded_images,
                 Err(error) => {
                     let conn = db.conn.lock().map_err(|e| AppError::Database {
@@ -691,6 +728,201 @@ mod tests {
 
         assert_eq!(format_log_clear_cutoff(now, 0), "2026-04-28T12:30:45Z");
         assert_eq!(format_log_clear_cutoff(now, 7), "2026-04-21T12:30:45Z");
+    }
+}
+
+#[cfg(test)]
+mod legacy_recovery_guard_tests {
+    use super::*;
+
+    fn temp_test_db(prefix: &str) -> (Database, std::path::PathBuf) {
+        let db_path =
+            std::env::temp_dir().join(format!("{prefix}-{}.sqlite", uuid::Uuid::new_v4()));
+        let db = Database::open(&db_path).expect("open test database");
+        db.run_migrations().expect("run real database migrations");
+        (db, db_path)
+    }
+
+    fn remove_temp_test_db(db_path: std::path::PathBuf) {
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+    }
+
+    fn insert_generation(conn: &Connection, generation_id: &str, status: &str) {
+        conn.execute(
+            "INSERT INTO generations (id, prompt, status, created_at)
+             VALUES (?1, 'legacy recovery fixture', ?2, '2026-07-10T00:00:00Z')",
+            params![generation_id, status],
+        )
+        .expect("insert generation fixture");
+    }
+
+    fn insert_recovery(conn: &Connection, generation_id: &str) {
+        conn.execute(
+            "INSERT INTO generation_recoveries (
+                generation_id, request_kind, request_state, output_format, response_file,
+                created_at, updated_at
+             ) VALUES (
+                ?1, 'generate', 'requesting', 'png', NULL,
+                '2026-07-10T00:00:00Z', '2026-07-10T00:00:00Z'
+             )",
+            params![generation_id],
+        )
+        .expect("insert recovery fixture");
+    }
+
+    fn insert_job(conn: &Connection, job_id: &str, generation_id: &str) {
+        conn.execute(
+            "INSERT INTO generation_jobs (
+                id, client_request_id, generation_id, source_kind, status, request_json,
+                provider_kind, provider_profile_id, endpoint_snapshot, queued_at
+             ) VALUES (
+                ?1, ?2, ?3, 'generate', 'queued', '{}', 'openai', 'provider-a',
+                'https://api.example.test/v1/images/generations', '2026-07-10T00:00:00Z'
+             )",
+            params![job_id, format!("request-{job_id}"), generation_id],
+        )
+        .expect("insert generation job fixture");
+    }
+
+    fn insert_running_job_with_response_ready_recovery(
+        conn: &Connection,
+        job_id: &str,
+        generation_id: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO generation_recoveries (
+                generation_id, request_kind, request_state, output_format, response_file,
+                created_at, updated_at
+             ) VALUES (
+                ?1, 'generate', 'response_ready', 'png', '/tmp/verified-response.json',
+                '2026-07-10T00:00:00Z', '2026-07-10T00:00:01Z'
+             )",
+            params![generation_id],
+        )
+        .expect("insert response-ready recovery fixture");
+        conn.execute(
+            "INSERT INTO generation_jobs (
+                id, client_request_id, generation_id, source_kind, status, request_json,
+                provider_kind, provider_profile_id, endpoint_snapshot, queued_at, started_at,
+                last_heartbeat_at
+             ) VALUES (
+                ?1, ?2, ?3, 'generate', 'running', '{}', 'openai', 'provider-a',
+                'https://api.example.test/v1/images/generations',
+                '2026-07-10T00:00:00Z', '2026-07-10T00:00:01Z',
+                '2026-07-10T00:00:01Z'
+             )",
+            params![job_id, format!("request-{job_id}"), generation_id],
+        )
+        .expect("insert running generation job fixture");
+    }
+
+    fn recovery_exists(conn: &Connection, generation_id: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM generation_recoveries WHERE generation_id = ?1
+             )",
+            params![generation_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("query recovery fixture")
+    }
+
+    #[test]
+    fn legacy_recovery_helpers_ignore_processing_and_nonprocessing_job_generations() {
+        let (db, db_path) = temp_test_db("astro-studio-legacy-recovery-job-guard-test");
+        {
+            let conn = db.conn.lock().expect("lock test database");
+            insert_generation(&conn, "job-processing", "processing");
+            insert_recovery(&conn, "job-processing");
+            insert_job(&conn, "job-processing-id", "job-processing");
+
+            insert_generation(&conn, "job-completed", "completed");
+            insert_recovery(&conn, "job-completed");
+            insert_job(&conn, "job-completed-id", "job-completed");
+
+            assert_eq!(
+                cleanup_stale_legacy_generation_recoveries(&conn).unwrap(),
+                0
+            );
+            assert!(load_pending_legacy_generation_recoveries(&conn)
+                .unwrap()
+                .is_empty());
+            assert!(recovery_exists(&conn, "job-processing"));
+            assert!(recovery_exists(&conn, "job-completed"));
+        }
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn legacy_recovery_helpers_ignore_running_job_response_ready_recovery() {
+        let (db, db_path) = temp_test_db("astro-studio-legacy-response-ready-job-guard-test");
+        {
+            let conn = db.conn.lock().expect("lock test database");
+            insert_generation(&conn, "job-response-ready", "processing");
+            insert_running_job_with_response_ready_recovery(
+                &conn,
+                "job-response-ready-id",
+                "job-response-ready",
+            );
+
+            assert!(load_pending_legacy_generation_recoveries(&conn)
+                .unwrap()
+                .is_empty());
+            conn.execute(
+                "UPDATE generations SET status = 'running' WHERE id = ?1",
+                params!["job-response-ready"],
+            )
+            .expect("move linked generation outside legacy processing status");
+            assert_eq!(
+                cleanup_stale_legacy_generation_recoveries(&conn).unwrap(),
+                0
+            );
+            assert!(recovery_exists(&conn, "job-response-ready"));
+        }
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn pending_legacy_recovery_scan_includes_processing_generation_without_job() {
+        let (db, db_path) = temp_test_db("astro-studio-legacy-recovery-pending-test");
+        {
+            let conn = db.conn.lock().expect("lock test database");
+            insert_generation(&conn, "legacy-processing", "processing");
+
+            let pending = load_pending_legacy_generation_recoveries(&conn).unwrap();
+
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].generation_id, "legacy-processing");
+            assert!(pending[0].request_state.is_none());
+        }
+
+        drop(db);
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn stale_legacy_recovery_cleanup_deletes_nonprocessing_generation_without_job() {
+        let (db, db_path) = temp_test_db("astro-studio-legacy-recovery-cleanup-test");
+        {
+            let conn = db.conn.lock().expect("lock test database");
+            insert_generation(&conn, "legacy-completed", "completed");
+            insert_recovery(&conn, "legacy-completed");
+
+            assert_eq!(
+                cleanup_stale_legacy_generation_recoveries(&conn).unwrap(),
+                1
+            );
+            assert!(!recovery_exists(&conn, "legacy-completed"));
+        }
+
+        drop(db);
+        remove_temp_test_db(db_path);
     }
 }
 

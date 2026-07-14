@@ -3,6 +3,7 @@ import type {
   CanvasImageObject,
   CanvasStrokeObject,
 } from "../../types";
+import { getCanvasLayersBackToFront } from "./document";
 
 const FALLBACK_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
@@ -25,7 +26,7 @@ export async function exportCanvasFrame(
   context.fillStyle = "#f8f7f4";
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (const layer of content.layers) {
+  for (const layer of getCanvasLayersBackToFront(content.layers)) {
     if (!layer.visible) {
       continue;
     }

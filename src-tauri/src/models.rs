@@ -43,6 +43,8 @@ pub const DEFAULT_IMAGE_STREAM: bool = false;
 pub const DEFAULT_PARTIAL_IMAGES: u8 = 0;
 pub const DEFAULT_IMAGE_COUNT: u8 = 1;
 pub const DEFAULT_PAGE_SIZE: i32 = 20;
+pub const DEFAULT_GENERATION_JOB_PAGE_LIMIT: i32 = 50;
+pub const MAX_GENERATION_JOB_PAGE_LIMIT: i32 = 100;
 pub const SETTING_LOG_ENABLED: &str = "log_enabled";
 pub const SETTING_LOG_RETENTION_DAYS: &str = "log_retention_days";
 pub const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -189,6 +191,118 @@ pub struct GenerateResult {
     pub generation_id: String,
     pub conversation_id: String,
     pub images: Vec<GeneratedImage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationJobStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationJobStage {
+    MigrationUnknown,
+    Queued,
+    Preparing,
+    ProviderRequest,
+    RetryBackoff,
+    ResponseReady,
+    LocalProcessing,
+    StartupReconciliation,
+    LegacyResponseRecovery,
+    Terminal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJob {
+    pub id: String,
+    pub client_request_id: String,
+    pub generation_id: String,
+    pub parent_job_id: Option<String>,
+    pub source_kind: String,
+    pub source_ref: serde_json::Value,
+    pub status: GenerationJobStatus,
+    pub stage: GenerationJobStage,
+    pub request: serde_json::Value,
+    pub provider_kind: String,
+    pub provider_profile_id: String,
+    pub endpoint_snapshot: String,
+    pub chain_attempt: i32,
+    pub auto_attempt: i32,
+    pub max_auto_attempts: i32,
+    pub queued_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub cancel_requested_at: Option<String>,
+    pub last_heartbeat_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJobEvent {
+    pub job_id: String,
+    pub generation_id: String,
+    pub conversation_id: String,
+    pub source_kind: String,
+    pub source_ref: serde_json::Value,
+    pub status: GenerationJobStatus,
+    pub stage: GenerationJobStage,
+    pub queue_position: Option<i64>,
+    pub chain_attempt: i32,
+    pub auto_attempt: i32,
+    pub max_auto_attempts: i32,
+    pub cancel_requested_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+    pub queued_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct EnqueueGenerationResult {
+    pub job_id: String,
+    pub generation_id: String,
+    pub conversation_id: String,
+    pub status: GenerationJobStatus,
+    pub retryable: bool,
+    pub cancel_requested_at: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub queued_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJobFilter {
+    pub statuses: Option<Vec<GenerationJobStatus>>,
+    pub source_kind: Option<String>,
+    pub source_ref_id: Option<String>,
+    pub generation_id: Option<String>,
+    pub limit: Option<i32>,
+    /// Short-lived pagination token. It is invalidated by rowid-changing maintenance such as VACUUM.
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct GenerationJobPage {
+    pub items: Vec<GenerationJob>,
+    /// Short-lived pagination token. It is not a durable job or database identifier.
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -355,4 +469,182 @@ pub struct LlmConfig {
     pub base_url: String,
     pub capability: String,
     pub enabled: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn generation_job_status_uses_snake_case_json() {
+        for (status, expected) in [
+            (GenerationJobStatus::Queued, "queued"),
+            (GenerationJobStatus::Running, "running"),
+            (GenerationJobStatus::Completed, "completed"),
+            (GenerationJobStatus::Failed, "failed"),
+            (GenerationJobStatus::Cancelled, "cancelled"),
+            (GenerationJobStatus::Interrupted, "interrupted"),
+        ] {
+            assert_eq!(serde_json::to_value(&status).unwrap(), json!(expected));
+            assert_eq!(
+                serde_json::from_value::<GenerationJobStatus>(json!(expected)).unwrap(),
+                status
+            );
+        }
+
+        let result = EnqueueGenerationResult {
+            job_id: "job-1".to_string(),
+            generation_id: "generation-1".to_string(),
+            conversation_id: "conversation-1".to_string(),
+            status: GenerationJobStatus::Queued,
+            retryable: false,
+            cancel_requested_at: None,
+            error_code: None,
+            error_message: None,
+            queued_at: "2026-07-10T00:00:00Z".to_string(),
+            finished_at: None,
+        };
+        let value = serde_json::to_value(result).expect("serialize enqueue result");
+        assert_eq!(value["status"], json!("queued"));
+    }
+
+    #[test]
+    fn generation_job_stage_uses_strict_snake_case_json() {
+        for (stage, expected) in [
+            (GenerationJobStage::MigrationUnknown, "migration_unknown"),
+            (GenerationJobStage::Queued, "queued"),
+            (GenerationJobStage::Preparing, "preparing"),
+            (GenerationJobStage::ProviderRequest, "provider_request"),
+            (GenerationJobStage::RetryBackoff, "retry_backoff"),
+            (GenerationJobStage::ResponseReady, "response_ready"),
+            (GenerationJobStage::LocalProcessing, "local_processing"),
+            (
+                GenerationJobStage::StartupReconciliation,
+                "startup_reconciliation",
+            ),
+            (
+                GenerationJobStage::LegacyResponseRecovery,
+                "legacy_response_recovery",
+            ),
+            (GenerationJobStage::Terminal, "terminal"),
+        ] {
+            assert_eq!(serde_json::to_value(stage).unwrap(), json!(expected));
+            assert_eq!(
+                serde_json::from_value::<GenerationJobStage>(json!(expected)).unwrap(),
+                stage
+            );
+        }
+
+        for invalid in [
+            "ProviderRequest",
+            "providerRequest",
+            "provider-request",
+            "unknown",
+        ] {
+            assert!(serde_json::from_value::<GenerationJobStage>(json!(invalid)).is_err());
+        }
+    }
+
+    #[test]
+    fn generation_job_serializes_retryable_as_boolean() {
+        let job = GenerationJob {
+            id: "job-1".to_string(),
+            client_request_id: "request-1".to_string(),
+            generation_id: "generation-1".to_string(),
+            parent_job_id: None,
+            source_kind: "generate".to_string(),
+            source_ref: json!({}),
+            status: GenerationJobStatus::Failed,
+            stage: GenerationJobStage::Terminal,
+            request: json!({ "prompt": "a nebula" }),
+            provider_kind: "openai".to_string(),
+            provider_profile_id: "default".to_string(),
+            endpoint_snapshot: "https://api.example.com/v1/images/generations".to_string(),
+            chain_attempt: 1,
+            auto_attempt: 2,
+            max_auto_attempts: 2,
+            queued_at: "2026-07-10T00:00:00Z".to_string(),
+            started_at: Some("2026-07-10T00:00:01Z".to_string()),
+            finished_at: Some("2026-07-10T00:00:02Z".to_string()),
+            cancel_requested_at: None,
+            last_heartbeat_at: Some("2026-07-10T00:00:01Z".to_string()),
+            error_code: Some("provider_unavailable".to_string()),
+            error_message: Some("try again later".to_string()),
+            retryable: true,
+        };
+
+        let value = serde_json::to_value(job).expect("serialize generation job");
+        assert_eq!(value["stage"], json!("terminal"));
+        assert_eq!(value["retryable"], json!(true));
+        assert!(value["retryable"].is_boolean());
+    }
+
+    #[test]
+    fn generation_job_event_serializes_complete_secret_free_shape() {
+        let event = GenerationJobEvent {
+            job_id: "job-1".to_string(),
+            generation_id: "generation-1".to_string(),
+            conversation_id: "conversation-1".to_string(),
+            source_kind: "generate".to_string(),
+            source_ref: json!({ "id": "source-1" }),
+            status: GenerationJobStatus::Running,
+            stage: GenerationJobStage::ProviderRequest,
+            queue_position: None,
+            chain_attempt: 1,
+            auto_attempt: 0,
+            max_auto_attempts: 2,
+            cancel_requested_at: None,
+            error_code: None,
+            error_message: None,
+            retryable: false,
+            queued_at: "2026-07-10T00:00:00Z".to_string(),
+            started_at: Some("2026-07-10T00:00:01Z".to_string()),
+            finished_at: None,
+        };
+
+        let value = serde_json::to_value(event).expect("serialize generation job event");
+        let keys = value
+            .as_object()
+            .expect("event object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "auto_attempt",
+                "cancel_requested_at",
+                "chain_attempt",
+                "conversation_id",
+                "error_code",
+                "error_message",
+                "finished_at",
+                "generation_id",
+                "job_id",
+                "max_auto_attempts",
+                "queue_position",
+                "queued_at",
+                "retryable",
+                "source_kind",
+                "source_ref",
+                "stage",
+                "started_at",
+                "status",
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(value["stage"], json!("provider_request"));
+        let encoded = serde_json::to_string(&value).expect("encode event JSON");
+        for secret in [
+            "api_key",
+            "request_json",
+            "endpoint_snapshot",
+            "provider_profile_id",
+            "secret-key",
+        ] {
+            assert!(!encoded.contains(secret), "event leaked {secret}");
+        }
+    }
 }

@@ -4,11 +4,370 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 const THUMBNAIL_SIZE: u32 = 256;
 
 pub struct FileManager {
     base_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GenerationFileLifecycleEvent {
+    PromoteBeforeIo,
+    PromoteRollbackBeforeIo,
+    StagedDropBeforeIo,
+    DisarmBeforeIo,
+    PromotedDropBeforeIo,
+}
+
+/// Observes the exact boundary immediately before generation-file lifecycle I/O.
+/// Implementations must be non-blocking and must not panic; Drop paths invoke it.
+pub(crate) trait GenerationFileLifecycleObserver: Send + Sync {
+    fn observe(&self, event: GenerationFileLifecycleEvent) {
+        match event {
+            GenerationFileLifecycleEvent::PromoteBeforeIo => self.before_promote_io(),
+            GenerationFileLifecycleEvent::DisarmBeforeIo => self.before_disarm_io(),
+            GenerationFileLifecycleEvent::PromoteRollbackBeforeIo
+            | GenerationFileLifecycleEvent::StagedDropBeforeIo
+            | GenerationFileLifecycleEvent::PromotedDropBeforeIo => self.before_cleanup_io(),
+        }
+    }
+
+    fn before_promote_io(&self) {}
+
+    fn before_disarm_io(&self) {}
+
+    fn before_cleanup_io(&self) {}
+}
+
+type GenerationFileObserver = Option<Arc<dyn GenerationFileLifecycleObserver>>;
+
+fn observe_generation_file_event(
+    observer: &GenerationFileObserver,
+    event: GenerationFileLifecycleEvent,
+) {
+    if let Some(observer) = observer {
+        observer.observe(event);
+    }
+}
+
+struct StagedImageFile {
+    image_id: String,
+    staged_image_path: PathBuf,
+    staged_thumbnail_path: PathBuf,
+    final_image_path: PathBuf,
+    final_thumbnail_path: PathBuf,
+    width: i32,
+    height: i32,
+    file_size: i64,
+}
+
+pub(crate) struct StagedGenerationFiles {
+    generation_id: String,
+    entries: Vec<StagedImageFile>,
+    staging_dir: PathBuf,
+    cleanup_armed: bool,
+    observer: GenerationFileObserver,
+}
+
+pub(crate) struct PromotedGenerationFiles {
+    generation_id: String,
+    entries: Vec<StagedImageFile>,
+    ownership_dir: PathBuf,
+    cleanup_armed: bool,
+    observer: GenerationFileObserver,
+}
+
+struct OwnedFinalLink {
+    ownership_path: PathBuf,
+    final_path: PathBuf,
+}
+
+struct PromotedPathGuard {
+    links: Vec<OwnedFinalLink>,
+    armed: bool,
+    observer: GenerationFileObserver,
+}
+
+fn remove_final_if_owned(ownership_path: &Path, final_path: &Path) {
+    if same_file::is_same_file(ownership_path, final_path).unwrap_or(false) {
+        let _ = remove_file_durable(final_path);
+    }
+}
+
+pub(crate) fn sync_directory(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FlushFileBuffers, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        };
+
+        let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Windows does not document directory FlushFileBuffers as a portable
+        // durability primitive. Attempt it where supported, but keep directory
+        // publication functional when the filesystem rejects the operation.
+        // SAFETY: `path` is a live, NUL-terminated UTF-16 buffer for the duration
+        // of the calls. Any valid returned handle is closed exactly once.
+        unsafe {
+            let handle = CreateFileW(
+                path.as_ptr(),
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                0,
+            );
+            if handle != INVALID_HANDLE_VALUE {
+                let _ = FlushFileBuffers(handle);
+                let _ = CloseHandle(handle);
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+pub(crate) fn create_dir_all_durable(path: &Path) -> std::io::Result<()> {
+    let mut missing = Vec::new();
+    let mut cursor = path;
+    while !cursor.exists() {
+        missing.push(cursor.to_path_buf());
+        cursor = cursor.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory path has no existing ancestor",
+            )
+        })?;
+    }
+    let existing = std::fs::symlink_metadata(cursor)?;
+    if existing.file_type().is_symlink() || !existing.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "directory ancestor is not a plain directory",
+        ));
+    }
+
+    for directory in missing.into_iter().rev() {
+        match std::fs::create_dir(&directory) {
+            Ok(()) => {
+                if let Some(parent) = directory.parent() {
+                    sync_directory(parent)?;
+                }
+                sync_directory(&directory)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = std::fs::symlink_metadata(&directory)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "directory component is not a plain directory",
+                    ));
+                }
+                if let Some(parent) = directory.parent() {
+                    sync_directory(parent)?;
+                }
+                sync_directory(&directory)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_file_durable(path: &Path) -> std::io::Result<()> {
+    std::fs::remove_file(path)?;
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_dir_all_durable(path: &Path) -> std::io::Result<()> {
+    std::fs::remove_dir_all(path)?;
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+fn open_staged_thumbnail_for_sync(path: &Path) -> std::io::Result<File> {
+    std::fs::OpenOptions::new().write(true).open(path)
+}
+
+impl Drop for PromotedPathGuard {
+    fn drop(&mut self) {
+        if self.armed && !self.links.is_empty() {
+            observe_generation_file_event(
+                &self.observer,
+                GenerationFileLifecycleEvent::PromoteRollbackBeforeIo,
+            );
+            for link in self.links.iter().rev() {
+                remove_final_if_owned(&link.ownership_path, &link.final_path);
+            }
+        }
+    }
+}
+
+impl StagedGenerationFiles {
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(crate) fn final_paths(&self) -> Vec<PathBuf> {
+        self.entries
+            .iter()
+            .flat_map(|entry| {
+                [
+                    entry.final_image_path.clone(),
+                    entry.final_thumbnail_path.clone(),
+                ]
+            })
+            .collect()
+    }
+
+    pub(crate) fn promote(mut self) -> Result<PromotedGenerationFiles, String> {
+        observe_generation_file_event(
+            &self.observer,
+            GenerationFileLifecycleEvent::PromoteBeforeIo,
+        );
+        let mut promoted = PromotedPathGuard {
+            links: Vec::with_capacity(self.entries.len() * 2),
+            armed: true,
+            observer: self.observer.clone(),
+        };
+        for entry in &self.entries {
+            std::fs::hard_link(&entry.staged_image_path, &entry.final_image_path)
+                .map_err(|error| format!("Promote image failed: {error}"))?;
+            promoted.links.push(OwnedFinalLink {
+                ownership_path: entry.staged_image_path.clone(),
+                final_path: entry.final_image_path.clone(),
+            });
+
+            std::fs::hard_link(&entry.staged_thumbnail_path, &entry.final_thumbnail_path)
+                .map_err(|error| format!("Promote thumbnail failed: {error}"))?;
+            promoted.links.push(OwnedFinalLink {
+                ownership_path: entry.staged_thumbnail_path.clone(),
+                final_path: entry.final_thumbnail_path.clone(),
+            });
+        }
+
+        let mut synced_directories = std::collections::HashSet::new();
+        for link in &promoted.links {
+            if let Some(parent) = link.final_path.parent() {
+                synced_directories.insert(parent.to_path_buf());
+            }
+        }
+        for directory in synced_directories {
+            sync_directory(&directory)
+                .map_err(|error| format!("Sync promoted image directory failed: {error}"))?;
+        }
+
+        let entries = std::mem::take(&mut self.entries);
+        let generation_id = std::mem::take(&mut self.generation_id);
+        let ownership_dir = self.staging_dir.clone();
+        self.cleanup_armed = false;
+        promoted.armed = false;
+        Ok(PromotedGenerationFiles {
+            generation_id,
+            entries,
+            ownership_dir,
+            cleanup_armed: true,
+            observer: self.observer.take(),
+        })
+    }
+}
+
+impl Drop for StagedGenerationFiles {
+    fn drop(&mut self) {
+        if self.cleanup_armed {
+            observe_generation_file_event(
+                &self.observer,
+                GenerationFileLifecycleEvent::StagedDropBeforeIo,
+            );
+            for entry in &self.entries {
+                let _ = remove_file_durable(&entry.staged_image_path);
+                let _ = remove_file_durable(&entry.staged_thumbnail_path);
+            }
+            let _ = remove_dir_all_durable(&self.staging_dir);
+        }
+    }
+}
+
+impl PromotedGenerationFiles {
+    pub(crate) fn matches_generation(&self, generation_id: &str) -> bool {
+        self.generation_id == generation_id
+    }
+
+    pub(crate) fn final_paths(&self) -> Vec<PathBuf> {
+        self.entries
+            .iter()
+            .flat_map(|entry| {
+                [
+                    entry.final_image_path.clone(),
+                    entry.final_thumbnail_path.clone(),
+                ]
+            })
+            .collect()
+    }
+
+    pub(crate) fn saved_images(&self) -> Vec<crate::models::GeneratedImage> {
+        self.entries
+            .iter()
+            .map(|entry| crate::models::GeneratedImage {
+                id: entry.image_id.clone(),
+                generation_id: self.generation_id.clone(),
+                file_path: entry.final_image_path.to_string_lossy().to_string(),
+                thumbnail_path: entry.final_thumbnail_path.to_string_lossy().to_string(),
+                width: entry.width,
+                height: entry.height,
+                file_size: entry.file_size,
+            })
+            .collect()
+    }
+
+    pub(crate) fn disarm_cleanup(&mut self) {
+        self.cleanup_armed = false;
+        observe_generation_file_event(&self.observer, GenerationFileLifecycleEvent::DisarmBeforeIo);
+        for entry in &self.entries {
+            let _ = remove_file_durable(&entry.staged_image_path);
+            let _ = remove_file_durable(&entry.staged_thumbnail_path);
+        }
+        let _ = remove_dir_all_durable(&self.ownership_dir);
+    }
+}
+
+impl Drop for PromotedGenerationFiles {
+    fn drop(&mut self) {
+        if !self.cleanup_armed {
+            return;
+        }
+        observe_generation_file_event(
+            &self.observer,
+            GenerationFileLifecycleEvent::PromotedDropBeforeIo,
+        );
+        for entry in &self.entries {
+            remove_final_if_owned(&entry.staged_image_path, &entry.final_image_path);
+            remove_final_if_owned(&entry.staged_thumbnail_path, &entry.final_thumbnail_path);
+        }
+        for entry in &self.entries {
+            let _ = remove_file_durable(&entry.staged_image_path);
+            let _ = remove_file_durable(&entry.staged_thumbnail_path);
+        }
+        let _ = remove_dir_all_durable(&self.ownership_dir);
+    }
 }
 
 pub fn extension_for_output_format(output_format: &str) -> &'static str {
@@ -99,6 +458,139 @@ impl FileManager {
         Ok(())
     }
 
+    pub(crate) fn stage_generation_images(
+        &self,
+        generation_id: &str,
+        images_data: &[Vec<u8>],
+        output_format: &str,
+        created_at: &str,
+    ) -> Result<StagedGenerationFiles, String> {
+        self.stage_generation_images_internal(
+            generation_id,
+            images_data,
+            output_format,
+            created_at,
+            None,
+        )
+    }
+
+    pub(crate) fn stage_generation_images_with_observer(
+        &self,
+        generation_id: &str,
+        images_data: &[Vec<u8>],
+        output_format: &str,
+        created_at: &str,
+        observer: Arc<dyn GenerationFileLifecycleObserver>,
+    ) -> Result<StagedGenerationFiles, String> {
+        self.stage_generation_images_internal(
+            generation_id,
+            images_data,
+            output_format,
+            created_at,
+            Some(observer),
+        )
+    }
+
+    fn stage_generation_images_internal(
+        &self,
+        generation_id: &str,
+        images_data: &[Vec<u8>],
+        output_format: &str,
+        created_at: &str,
+        observer: GenerationFileObserver,
+    ) -> Result<StagedGenerationFiles, String> {
+        if generation_id.is_empty()
+            || generation_id.len() > 128
+            || !generation_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err("Generation output identity is invalid".to_string());
+        }
+        if images_data.is_empty() || images_data.len() > 4 {
+            return Err("Generation response must contain between one and four images".to_string());
+        }
+
+        let date_path = chrono::DateTime::parse_from_rfc3339(created_at)
+            .map_err(|_| "Generation creation timestamp is invalid".to_string())?
+            .with_timezone(&chrono::Local)
+            .format("%Y/%m/%d")
+            .to_string();
+        let image_dir = self.base_dir.join("images").join(&date_path);
+        let thumbnail_dir = self.base_dir.join("thumbnails").join(&date_path);
+        create_dir_all_durable(&image_dir)
+            .map_err(|error| format!("Create image output directory failed: {error}"))?;
+        create_dir_all_durable(&thumbnail_dir)
+            .map_err(|error| format!("Create thumbnail output directory failed: {error}"))?;
+
+        let staging_dir = self
+            .base_dir
+            .join(".generation-staging")
+            .join(generation_id)
+            .join(uuid::Uuid::new_v4().to_string());
+        create_dir_all_durable(&staging_dir)
+            .map_err(|error| format!("Create generation staging directory failed: {error}"))?;
+        let mut staged = StagedGenerationFiles {
+            generation_id: generation_id.to_string(),
+            entries: Vec::with_capacity(images_data.len()),
+            staging_dir,
+            cleanup_armed: true,
+            observer,
+        };
+        let attempt_token = uuid::Uuid::new_v4().simple().to_string();
+
+        for (index, data) in images_data.iter().enumerate() {
+            let image = image::load_from_memory(data)
+                .map_err(|error| format!("Decode staged image failed: {error}"))?;
+            let (width, height) = image.dimensions();
+            let extension = detected_image_extension(data)
+                .unwrap_or_else(|| extension_for_output_format(output_format));
+            let image_id = format!("{generation_id}_{index}");
+            let staged_image_path = staged.staging_dir.join(format!("{image_id}.{extension}"));
+            let staged_thumbnail_path = staged.staging_dir.join(format!("{image_id}_thumb.png"));
+            let final_image_path =
+                image_dir.join(format!("{image_id}_{attempt_token}.{extension}"));
+            let final_thumbnail_path =
+                thumbnail_dir.join(format!("{image_id}_{attempt_token}_thumb.png"));
+
+            staged.entries.push(StagedImageFile {
+                image_id,
+                staged_image_path: staged_image_path.clone(),
+                staged_thumbnail_path: staged_thumbnail_path.clone(),
+                final_image_path,
+                final_thumbnail_path,
+                width: width as i32,
+                height: height as i32,
+                file_size: data.len() as i64,
+            });
+
+            let mut image_file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&staged_image_path)
+                .map_err(|error| format!("Create staged image failed: {error}"))?;
+            image_file
+                .write_all(data)
+                .map_err(|error| format!("Write staged image failed: {error}"))?;
+            image_file
+                .sync_all()
+                .map_err(|error| format!("Sync staged image failed: {error}"))?;
+            drop(image_file);
+
+            image
+                .thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+                .save_with_format(&staged_thumbnail_path, ImageFormat::Png)
+                .map_err(|error| format!("Write staged thumbnail failed: {error}"))?;
+            open_staged_thumbnail_for_sync(&staged_thumbnail_path)
+                .and_then(|file| file.sync_all())
+                .map_err(|error| format!("Sync staged thumbnail failed: {error}"))?;
+        }
+
+        sync_directory(&staged.staging_dir)
+            .map_err(|error| format!("Sync generation staging directory failed: {error}"))?;
+        Ok(staged)
+    }
+
     pub fn save_image_at(
         &self,
         generation_id: &str,
@@ -187,6 +679,8 @@ mod tests {
     use super::*;
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
     use std::io::Cursor;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     fn test_base_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -204,6 +698,40 @@ mod tests {
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
             .expect("encode jpeg");
         bytes
+    }
+
+    #[derive(Default)]
+    struct AtomicLifecycleObserver {
+        promote: AtomicUsize,
+        promote_rollback: AtomicUsize,
+        staged_drop: AtomicUsize,
+        disarm: AtomicUsize,
+        promoted_drop: AtomicUsize,
+    }
+
+    impl GenerationFileLifecycleObserver for AtomicLifecycleObserver {
+        fn observe(&self, event: GenerationFileLifecycleEvent) {
+            let counter = match event {
+                GenerationFileLifecycleEvent::PromoteBeforeIo => &self.promote,
+                GenerationFileLifecycleEvent::PromoteRollbackBeforeIo => &self.promote_rollback,
+                GenerationFileLifecycleEvent::StagedDropBeforeIo => &self.staged_drop,
+                GenerationFileLifecycleEvent::DisarmBeforeIo => &self.disarm,
+                GenerationFileLifecycleEvent::PromotedDropBeforeIo => &self.promoted_drop,
+            };
+            counter.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl AtomicLifecycleObserver {
+        fn counts(&self) -> [usize; 5] {
+            [
+                self.promote.load(Ordering::SeqCst),
+                self.promote_rollback.load(Ordering::SeqCst),
+                self.staged_drop.load(Ordering::SeqCst),
+                self.disarm.load(Ordering::SeqCst),
+                self.promoted_drop.load(Ordering::SeqCst),
+            ]
+        }
     }
 
     #[test]
@@ -233,6 +761,236 @@ mod tests {
         );
         assert_eq!(saved_data, source);
         assert_eq!(saved.file_size, saved_data.len() as i64);
+
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn staged_generation_files_promote_without_overwrite_and_cleanup_until_disarmed() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let source = jpeg_bytes();
+        let staged = manager
+            .stage_generation_images(
+                "generation-1",
+                &[source.clone()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage generation image");
+        assert_eq!(staged.len(), 1);
+        assert!(staged.final_paths().iter().all(|path| !path.exists()));
+
+        let promoted = staged.promote().expect("promote generation image");
+        let saved = promoted.saved_images();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(std::fs::read(&saved[0].file_path).unwrap(), source);
+        let promoted_paths = promoted.final_paths();
+        drop(promoted);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+
+        let staged = manager
+            .stage_generation_images(
+                "generation-1",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("restage generation image");
+        let mut promoted = staged.promote().expect("promote generation image");
+        let committed_paths = promoted.final_paths();
+        promoted.disarm_cleanup();
+        drop(promoted);
+        assert!(committed_paths.iter().all(|path| path.exists()));
+
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn promoted_images_cannot_be_cross_wired_to_another_generation() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let staged = manager
+            .stage_generation_images(
+                "generation-owner",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage generation image");
+        let promoted = staged.promote().expect("promote generation image");
+
+        assert!(promoted.matches_generation("generation-owner"));
+        assert!(!promoted.matches_generation("generation-cross-wired"));
+        let saved = promoted.saved_images();
+        assert_eq!(saved[0].generation_id, "generation-owner");
+
+        drop(promoted);
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn successful_promotion_and_disarm_emit_real_io_events_but_disarmed_drop_does_not() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let observer = Arc::new(AtomicLifecycleObserver::default());
+        let observer_trait: Arc<dyn GenerationFileLifecycleObserver> = observer.clone();
+        let staged = manager
+            .stage_generation_images_with_observer(
+                "generation-observed-success",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+                observer_trait,
+            )
+            .expect("stage observed generation image");
+        let staging_dir = staged.staging_dir.clone();
+
+        let mut promoted = staged.promote().expect("promote observed generation image");
+        let final_paths = promoted.final_paths();
+        assert_eq!(observer.counts(), [1, 0, 0, 0, 0]);
+        assert!(final_paths.iter().all(|path| path.exists()));
+
+        promoted.disarm_cleanup();
+        assert_eq!(observer.counts(), [1, 0, 0, 1, 0]);
+        assert!(!staging_dir.exists());
+        drop(promoted);
+
+        assert_eq!(observer.counts(), [1, 0, 0, 1, 0]);
+        assert!(final_paths.iter().all(|path| path.exists()));
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn armed_promoted_drop_emits_cleanup_event_and_removes_only_owned_files() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let observer = Arc::new(AtomicLifecycleObserver::default());
+        let observer_trait: Arc<dyn GenerationFileLifecycleObserver> = observer.clone();
+        let staged = manager
+            .stage_generation_images_with_observer(
+                "generation-observed-drop",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+                observer_trait,
+            )
+            .expect("stage observed generation image");
+        let staging_dir = staged.staging_dir.clone();
+        let promoted = staged.promote().expect("promote observed generation image");
+        let final_paths = promoted.final_paths();
+
+        drop(promoted);
+
+        assert_eq!(observer.counts(), [1, 0, 0, 0, 1]);
+        assert!(final_paths.iter().all(|path| !path.exists()));
+        assert!(!staging_dir.exists());
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn failed_promotion_emits_rollback_then_staged_cleanup_events() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let observer = Arc::new(AtomicLifecycleObserver::default());
+        let observer_trait: Arc<dyn GenerationFileLifecycleObserver> = observer.clone();
+        let mut staged = manager
+            .stage_generation_images_with_observer(
+                "generation-observed-rollback",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+                observer_trait,
+            )
+            .expect("stage observed generation image");
+        let staging_dir = staged.staging_dir.clone();
+        let first_final_path = staged.entries[0].final_image_path.clone();
+        staged.entries[0].final_thumbnail_path = first_final_path.clone();
+
+        let result = staged.promote();
+
+        assert!(result.is_err());
+        assert_eq!(observer.counts(), [1, 1, 1, 0, 0]);
+        assert!(!first_final_path.exists());
+        assert!(!staging_dir.exists());
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn promoted_cleanup_never_deletes_a_replacement_file_it_does_not_own() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let staged = manager
+            .stage_generation_images(
+                "generation-race",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage generation image");
+        let promoted = staged.promote().expect("promote generation image");
+        let image_path = promoted.saved_images()[0].file_path.clone();
+        std::fs::remove_file(&image_path).expect("remove owned image");
+        std::fs::write(&image_path, b"replacement-owned-by-another-attempt")
+            .expect("write replacement image");
+
+        drop(promoted);
+        assert_eq!(
+            std::fs::read(&image_path).expect("replacement must remain"),
+            b"replacement-owned-by-another-attempt"
+        );
+
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn concurrent_attempts_use_disjoint_non_overwriting_final_names() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let first = manager
+            .stage_generation_images(
+                "generation-concurrent",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage first attempt")
+            .promote()
+            .expect("promote first attempt");
+        let second = manager
+            .stage_generation_images(
+                "generation-concurrent",
+                &[jpeg_bytes()],
+                "png",
+                "2026-04-29T06:18:01Z",
+            )
+            .expect("stage second attempt")
+            .promote()
+            .expect("promote second attempt");
+        let first_paths = first.final_paths();
+        let second_paths = second.final_paths();
+        assert!(first_paths.iter().all(|path| path.exists()));
+        assert!(second_paths.iter().all(|path| path.exists()));
+        assert!(first_paths
+            .iter()
+            .all(|path| !second_paths.iter().any(|other| other == path)));
+
+        drop(first);
+        assert!(second_paths.iter().all(|path| path.exists()));
+        drop(second);
+        std::fs::remove_dir_all(base_dir).ok();
+    }
+
+    #[test]
+    fn staged_thumbnail_sync_handle_is_write_capable() {
+        let base_dir = test_base_dir();
+        let path = base_dir.join("thumbnail.png");
+        std::fs::write(&path, b"thumbnail").expect("create thumbnail fixture");
+
+        let mut file = open_staged_thumbnail_for_sync(&path).expect("open thumbnail sync handle");
+        file.write_all(b"T")
+            .expect("thumbnail sync handle must carry write access");
+        file.sync_all().expect("sync thumbnail fixture");
 
         std::fs::remove_dir_all(base_dir).ok();
     }
