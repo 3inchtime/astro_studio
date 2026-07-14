@@ -1213,7 +1213,7 @@ fn response_path_matches_context(path: &Path, context: &GenerationExecutionConte
             == Some("generation-jobs")
 }
 
-fn validate_provider_execution_snapshot(
+pub(crate) fn validate_provider_execution_snapshot(
     snapshot: &GenerationExecutionSnapshot,
 ) -> Result<(), GenerationExecutionError> {
     let expected_provider_kind = match provider_for_model(&snapshot.context.model) {

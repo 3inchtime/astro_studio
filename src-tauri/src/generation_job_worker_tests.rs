@@ -842,7 +842,7 @@ impl GenerationJobWorkerDeps for ScriptedDeps {
                 kind: WorkerCoreErrorKind::Transient,
                 message: "scripted execution failure".to_owned(),
             }),
-            2 => panic!("scripted executor panic"),
+            2 => panic!("scripted executor panic api-key=panic-secret-sentinel"),
             3 => Ok(WorkerExecutionOutcome::NeedsReconciliation),
             4 => Ok(WorkerExecutionOutcome::LeaseLost),
             _ => Ok(WorkerExecutionOutcome::DurablyFinished),
@@ -924,6 +924,7 @@ impl GenerationJobWorkerDeps for ScriptedDeps {
 
     fn record_diagnostic(&self, diagnostic: WorkerDiagnostic) {
         self.record(format!("diagnostic:{:?}", diagnostic.kind));
+        self.record(format!("diagnostic-message:{}", diagnostic.message));
     }
 }
 
@@ -1226,6 +1227,12 @@ async fn executor_panic_cleans_registration_reconciles_then_drain_continues() {
     assert!(operations
         .iter()
         .any(|operation| operation == "diagnostic:ExecutePanic"));
+    assert!(
+        operations
+            .iter()
+            .all(|operation| !operation.contains("panic-secret-sentinel")),
+        "panic payloads may contain provider secrets and must never reach diagnostics"
+    );
     let panic_execution = operations
         .iter()
         .position(|operation| operation == "execute:panic-worker:7:panics")

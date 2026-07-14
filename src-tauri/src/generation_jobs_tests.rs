@@ -1928,7 +1928,7 @@ fn begin_provider_request_rejects_noncanonical_paths_without_mutation() {
 }
 
 #[test]
-fn fenced_stage_transitions_allow_only_retry_backoff_and_known_response_local_processing_edges() {
+fn fenced_stage_transitions_allow_only_known_edges_and_reject_cancelled_local_entry() {
     let fixture = JobFixture::new();
     let queued = fixture.enqueue("stage-edges", "stage-edges");
     let conn = fixture.database.conn.lock().expect("lock database");
@@ -2024,7 +2024,7 @@ fn fenced_stage_transitions_allow_only_retry_backoff_and_known_response_local_pr
         .expect("prepare response-ready job");
     request_cancel(&recovery_conn, &response_ready.id).expect("persist late cancellation");
 
-    let local = transition_running_job_stage_with_event(
+    let error = transition_running_job_stage_with_event(
         &recovery_conn,
         &response_ready.id,
         GenerationJobStage::ResponseReady,
@@ -2032,9 +2032,15 @@ fn fenced_stage_transitions_allow_only_retry_backoff_and_known_response_local_pr
         &recovery_authority,
         WORKER_NOW_MS + 2_000,
     )
-    .expect("known response must win over late cancellation");
-    assert_eq!(local.value.stage, GenerationJobStage::LocalProcessing);
-    assert!(local.value.cancel_requested_at.is_some());
+    .expect_err("durable cancellation must fence local-processing entry");
+    assert!(matches!(
+        error,
+        WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+    ));
+    let unchanged = get_job(&recovery_conn, &response_ready.id)
+        .expect("read response-ready job after rejected local entry");
+    assert_eq!(unchanged.stage, GenerationJobStage::ResponseReady);
+    assert!(unchanged.cancel_requested_at.is_some());
 }
 
 #[test]

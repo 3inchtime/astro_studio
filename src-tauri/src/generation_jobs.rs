@@ -2681,7 +2681,7 @@ pub(crate) fn transition_running_job_stage_with_event(
         WorkerStageTransition::EnterLocalProcessing
             if expected_stage == GenerationJobStage::ResponseReady =>
         {
-            (GenerationJobStage::LocalProcessing, false)
+            (GenerationJobStage::LocalProcessing, true)
         }
         _ => return Err(AppError::GenerationJobInvalidTransition.into()),
     };

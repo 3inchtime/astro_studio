@@ -1168,10 +1168,18 @@ fn record_execution_result(
             }
         }
         Err(error) => {
+            // A JoinError's display text includes the panic payload. Provider
+            // execution may panic while a secret is in scope, so diagnostics
+            // must classify the failure without ever formatting that payload.
+            let message = if error.is_cancelled() {
+                "generation execution task was cancelled"
+            } else {
+                "generation execution task panicked"
+            };
             deps.record_diagnostic(WorkerDiagnostic {
                 kind: WorkerDiagnosticKind::ExecutePanic,
                 job_id: Some(job_id.to_owned()),
-                message: error.to_string(),
+                message: message.to_owned(),
             });
             ExecutionResultOutcome::NeedsReconciliation
         }

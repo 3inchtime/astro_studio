@@ -5,6 +5,7 @@ mod db;
 mod error;
 mod file_manager;
 mod gallery;
+mod generation_job_execution;
 mod generation_job_worker;
 mod generation_jobs;
 mod generation_lifecycle;
