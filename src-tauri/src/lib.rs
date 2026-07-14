@@ -7,6 +7,7 @@ mod file_manager;
 mod gallery;
 mod generation_job_execution;
 mod generation_job_worker;
+mod generation_job_worker_deps;
 mod generation_jobs;
 mod generation_lifecycle;
 mod generation_worker_lease;

@@ -2579,8 +2579,23 @@ pub(crate) fn claim_next_job_fenced_with_event(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<Option<GenerationJobTransition<GenerationJob>>, WorkerTransitionError> {
-    let timestamp = canonical_worker_timestamp(now_ms)?;
+    claim_next_job_fenced_with_event_with_transaction_time(conn, authority, || now_ms)
+}
+
+/// Samples worker time exactly once after the immediate transaction is held.
+/// `now` must be side-effect free so the authority assertion remains the
+/// first database read in the worker-owned transaction.
+pub(crate) fn claim_next_job_fenced_with_event_with_transaction_time<Now>(
+    conn: &Connection,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<Option<GenerationJobTransition<GenerationJob>>, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    let timestamp = canonical_worker_timestamp(now_ms)?;
     assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
     let candidate_id = tx
         .query_row(
@@ -2745,6 +2760,121 @@ pub(crate) fn heartbeat_running_job(
     tx.commit()
         .map_err(|error| database_error("Commit generation job heartbeat failed", error))?;
     Ok(job)
+}
+
+pub(crate) fn heartbeat_running_job_current_stage_fenced(
+    conn: &Connection,
+    job_id: &str,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJob, WorkerTransitionError> {
+    heartbeat_running_job_current_stage_fenced_with_transaction_time(
+        conn,
+        job_id,
+        authority,
+        || now_ms,
+    )
+}
+
+/// Samples worker time exactly once after the immediate transaction is held.
+/// `now` must not access the database.
+pub(crate) fn heartbeat_running_job_current_stage_fenced_with_transaction_time<Now>(
+    conn: &Connection,
+    job_id: &str,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJob, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    let timestamp = canonical_worker_timestamp(now_ms)?;
+    // Keep the authority assertion as the first database operation after
+    // BEGIN IMMEDIATE and the transaction-time sample; the stage read and
+    // heartbeat then share one snapshot.
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let current = get_job_in_transaction(&tx, job_id)?;
+    if current.status != GenerationJobStatus::Running
+        || !matches!(
+            current.stage,
+            GenerationJobStage::Preparing
+                | GenerationJobStage::ProviderRequest
+                | GenerationJobStage::RetryBackoff
+                | GenerationJobStage::ResponseReady
+                | GenerationJobStage::LocalProcessing
+        )
+    {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    let updated = tx
+        .execute(
+            "UPDATE generation_jobs
+                SET last_heartbeat_at = ?1
+              WHERE id = ?2 AND status = 'running' AND stage = ?3
+                AND started_at IS NOT NULL AND started_at <= ?1
+                AND last_heartbeat_at IS NOT NULL
+                AND last_heartbeat_at <= ?1",
+            params![timestamp, job_id, stage_as_str(current.stage)],
+        )
+        .map_err(|error| database_error("Heartbeat current generation job stage failed", error))?;
+    if updated != 1 {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    let job = get_job_in_transaction(&tx, job_id)?;
+    tx.commit()
+        .map_err(|error| database_error("Commit current generation job heartbeat failed", error))?;
+    Ok(job)
+}
+
+pub(crate) fn reread_running_job_cancel_requested_fenced(
+    conn: &Connection,
+    job_id: &str,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<bool, WorkerTransitionError> {
+    reread_running_job_cancel_requested_fenced_with_transaction_time(
+        conn,
+        job_id,
+        authority,
+        || now_ms,
+    )
+}
+
+/// Samples worker time exactly once after the immediate transaction is held.
+/// `now` must not access the database.
+pub(crate) fn reread_running_job_cancel_requested_fenced_with_transaction_time<Now>(
+    conn: &Connection,
+    job_id: &str,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<bool, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    // Keep the authority assertion as the first database operation after
+    // BEGIN IMMEDIATE and the transaction-time sample so a stale process
+    // cannot inspect worker-owned state.
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let job = get_job_in_transaction(&tx, job_id)?;
+    if job.status != GenerationJobStatus::Running
+        || !matches!(
+            job.stage,
+            GenerationJobStage::Preparing
+                | GenerationJobStage::ProviderRequest
+                | GenerationJobStage::RetryBackoff
+                | GenerationJobStage::ResponseReady
+                | GenerationJobStage::LocalProcessing
+        )
+    {
+        return Err(AppError::GenerationJobInvalidTransition.into());
+    }
+    let cancel_requested = job.cancel_requested_at.is_some();
+    tx.commit()
+        .map_err(|error| database_error("Commit generation cancellation reread failed", error))?;
+    Ok(cancel_requested)
 }
 
 pub(crate) fn reserve_automatic_retry_with_event(

@@ -228,9 +228,25 @@ pub(crate) fn acquire_worker_lease(
     now_ms: i64,
     ttl: Duration,
 ) -> Result<WorkerLeaseAcquireOutcome, WorkerLeaseError> {
+    acquire_worker_lease_with_transaction_time(conn, owner_id, ttl, || now_ms)
+}
+
+/// Acquires the immediate write transaction before sampling time so a writer
+/// wait cannot make lease decisions with a pre-lock timestamp. The callback
+/// must be side-effect free and is invoked exactly once after BEGIN succeeds.
+pub(crate) fn acquire_worker_lease_with_transaction_time<Now>(
+    conn: &Connection,
+    owner_id: &str,
+    ttl: Duration,
+    now: Now,
+) -> Result<WorkerLeaseAcquireOutcome, WorkerLeaseError>
+where
+    Now: FnOnce() -> i64,
+{
     validate_owner_id(owner_id)?;
-    let (_, expires_at) = checked_expiry(now_ms, ttl)?;
     let tx = begin_immediate(conn)?;
+    let now_ms = now();
+    let (_, expires_at) = checked_expiry(now_ms, ttl)?;
     let current = load_worker_lease(&tx)?;
 
     if let Some(current_expires_at) = current.active_expires_at()? {
@@ -308,9 +324,24 @@ pub(crate) fn renew_worker_lease(
     now_ms: i64,
     ttl: Duration,
 ) -> Result<i64, WorkerLeaseError> {
+    renew_worker_lease_with_transaction_time(conn, authority, ttl, || now_ms)
+}
+
+/// Renews only after the immediate write transaction is held, then samples
+/// the authority time once inside that transaction.
+pub(crate) fn renew_worker_lease_with_transaction_time<Now>(
+    conn: &Connection,
+    authority: &WorkerTransitionAuthority,
+    ttl: Duration,
+    now: Now,
+) -> Result<i64, WorkerLeaseError>
+where
+    Now: FnOnce() -> i64,
+{
     validate_owner_id(&authority.owner_id)?;
-    let (_, next_expires_at) = checked_expiry(now_ms, ttl)?;
     let tx = begin_immediate(conn)?;
+    let now_ms = now();
+    let (_, next_expires_at) = checked_expiry(now_ms, ttl)?;
     let current = load_worker_lease(&tx)?;
     if !current.matches_authority(authority) {
         return Err(WorkerLeaseError::LeaseLost);
@@ -451,9 +482,13 @@ pub(crate) fn assert_worker_transition_authority_in_transaction(
 mod tests {
     use super::*;
     use crate::db::Database;
-    use rusqlite::{params, Connection, Transaction, TransactionBehavior};
+    use rusqlite::{
+        params, Connection, DatabaseName, Transaction, TransactionBehavior, TransactionState,
+    };
+    use std::cell::Cell;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Barrier};
+    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc, Barrier};
     use std::time::Duration;
 
     struct LeaseFixture {
@@ -519,6 +554,161 @@ mod tests {
 
     fn assert_lease_lost<T>(result: Result<T, WorkerLeaseError>) {
         assert!(matches!(result, Err(WorkerLeaseError::LeaseLost)));
+    }
+
+    #[test]
+    fn transaction_time_callbacks_run_after_the_immediate_write_transaction_begins() {
+        let fixture = LeaseFixture::new("astro-studio-worker-lease-transaction-time-test");
+        let conn = fixture.open();
+        let acquisition_sampled = Cell::new(false);
+        let (authority, expires) = acquired(
+            acquire_worker_lease_with_transaction_time(
+                &conn,
+                "transaction-clock-worker",
+                Duration::from_millis(100),
+                || {
+                    // Test-only state inspection proves the callback runs
+                    // after BEGIN; production clock callbacks are pure.
+                    assert_eq!(
+                        conn.transaction_state(Some(DatabaseName::Main))
+                            .expect("read acquisition transaction state"),
+                        TransactionState::Write
+                    );
+                    acquisition_sampled.set(true);
+                    1_000
+                },
+            )
+            .expect("acquire with transaction time"),
+        );
+        assert!(acquisition_sampled.get());
+        assert_eq!(expires, 1_100);
+
+        let renewal_sampled = Cell::new(false);
+        assert_eq!(
+            renew_worker_lease_with_transaction_time(
+                &conn,
+                &authority,
+                Duration::from_millis(100),
+                || {
+                    // Test-only state inspection proves the callback runs
+                    // after BEGIN; production clock callbacks are pure.
+                    assert_eq!(
+                        conn.transaction_state(Some(DatabaseName::Main))
+                            .expect("read renewal transaction state"),
+                        TransactionState::Write
+                    );
+                    renewal_sampled.set(true);
+                    1_050
+                },
+            )
+            .expect("renew with transaction time"),
+            1_150
+        );
+        assert!(renewal_sampled.get());
+    }
+
+    #[test]
+    fn acquire_samples_time_after_waiting_for_another_writer() {
+        let fixture = LeaseFixture::new("astro-studio-worker-lease-acquire-clock-race-test");
+        let setup = fixture.open();
+        let (_, first_expiry) = acquired(
+            acquire_worker_lease(&setup, "worker-a", 1_000, Duration::from_millis(100))
+                .expect("acquire initial lease"),
+        );
+        assert_eq!(first_expiry, 1_100);
+
+        let blocker = fixture.open();
+        let blocker_tx = Transaction::new_unchecked(&blocker, TransactionBehavior::Immediate)
+            .expect("hold competing writer transaction");
+        let barrier = Arc::new(Barrier::new(2));
+        let now_ms = Arc::new(AtomicI64::new(1_099));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (sampled_tx, sampled_rx) = mpsc::channel();
+        let path = fixture.path.clone();
+        let worker_barrier = Arc::clone(&barrier);
+        let worker_now_ms = Arc::clone(&now_ms);
+        let worker_calls = Arc::clone(&calls);
+        let handle = std::thread::spawn(move || {
+            let conn = open_test_connection(&path);
+            worker_barrier.wait();
+            acquire_worker_lease_with_transaction_time(
+                &conn,
+                "worker-b",
+                Duration::from_millis(100),
+                || {
+                    worker_calls.fetch_add(1, Ordering::SeqCst);
+                    sampled_tx.send(()).expect("signal acquire clock sample");
+                    worker_now_ms.load(Ordering::SeqCst)
+                },
+            )
+        });
+
+        barrier.wait();
+        assert!(matches!(
+            sampled_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        now_ms.store(1_100, Ordering::SeqCst);
+        blocker_tx.commit().expect("release competing writer");
+        let (authority, expires) = acquired(
+            handle
+                .join()
+                .expect("acquire clock thread panicked")
+                .expect("acquire after writer wait"),
+        );
+        assert_eq!(authority.fencing_epoch(), 2);
+        assert_eq!(expires, 1_200);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn renew_rejects_expiry_crossed_while_waiting_for_another_writer() {
+        let fixture = LeaseFixture::new("astro-studio-worker-lease-renew-clock-race-test");
+        let setup = fixture.open();
+        let (authority, _) = acquired(
+            acquire_worker_lease(&setup, "worker-a", 1_000, Duration::from_millis(100))
+                .expect("acquire renewable lease"),
+        );
+        let baseline = row(&setup);
+
+        let blocker = fixture.open();
+        let blocker_tx = Transaction::new_unchecked(&blocker, TransactionBehavior::Immediate)
+            .expect("hold competing renewal writer");
+        let barrier = Arc::new(Barrier::new(2));
+        let now_ms = Arc::new(AtomicI64::new(1_099));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (sampled_tx, sampled_rx) = mpsc::channel();
+        let path = fixture.path.clone();
+        let worker_barrier = Arc::clone(&barrier);
+        let worker_now_ms = Arc::clone(&now_ms);
+        let worker_calls = Arc::clone(&calls);
+        let handle = std::thread::spawn(move || {
+            let conn = open_test_connection(&path);
+            worker_barrier.wait();
+            renew_worker_lease_with_transaction_time(
+                &conn,
+                &authority,
+                Duration::from_millis(100),
+                || {
+                    worker_calls.fetch_add(1, Ordering::SeqCst);
+                    sampled_tx.send(()).expect("signal renewal clock sample");
+                    worker_now_ms.load(Ordering::SeqCst)
+                },
+            )
+        });
+
+        barrier.wait();
+        assert!(matches!(
+            sampled_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        now_ms.store(1_100, Ordering::SeqCst);
+        blocker_tx
+            .commit()
+            .expect("release competing renewal writer");
+        assert_lease_lost(handle.join().expect("renewal clock thread panicked"));
+        assert_eq!(row(&setup), baseline);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

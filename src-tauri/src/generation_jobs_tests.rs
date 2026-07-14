@@ -5,10 +5,12 @@ use crate::generation_worker_lease::{
     acquire_worker_lease, WorkerLeaseAcquireOutcome, WorkerLeaseError, WorkerTransitionAuthority,
 };
 use crate::models::{GenerationJobFilter, GenerationJobStage, GenerationJobStatus};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, DatabaseName, TransactionState};
 use serde_json::json;
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc, Barrier};
 use std::time::Duration;
 
 const WORKER_NOW_MS: i64 = 1_783_872_000_000;
@@ -114,6 +116,60 @@ fn assert_worker_transition_lease_lost<T>(result: Result<T, WorkerTransitionErro
         result,
         Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
     ));
+}
+
+fn run_after_competing_writer_with_transaction_time<T, Operation>(
+    fixture: &JobFixture,
+    initial_now_ms: i64,
+    transaction_now_ms: i64,
+    operation: Operation,
+) -> (Result<T, WorkerTransitionError>, usize)
+where
+    T: Send + 'static,
+    Operation: FnOnce(&Connection, Box<dyn FnOnce() -> i64 + Send>) -> Result<T, WorkerTransitionError>
+        + Send
+        + 'static,
+{
+    let blocker = fixture.open_connection();
+    let blocker_tx =
+        rusqlite::Transaction::new_unchecked(&blocker, rusqlite::TransactionBehavior::Immediate)
+            .expect("hold competing generation job writer");
+    let barrier = Arc::new(Barrier::new(2));
+    let now_ms = Arc::new(AtomicI64::new(initial_now_ms));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (sampled_tx, sampled_rx) = mpsc::channel();
+    let path = fixture.path.clone();
+    let worker_barrier = Arc::clone(&barrier);
+    let worker_now_ms = Arc::clone(&now_ms);
+    let worker_calls = Arc::clone(&calls);
+    let handle = std::thread::spawn(move || {
+        let conn = Connection::open(path).expect("open competing worker connection");
+        conn.execute_batch("PRAGMA foreign_keys=ON;")
+            .expect("configure competing worker connection");
+        worker_barrier.wait();
+        let sample_now: Box<dyn FnOnce() -> i64 + Send> = Box::new(move || {
+            worker_calls.fetch_add(1, Ordering::SeqCst);
+            sampled_tx
+                .send(())
+                .expect("signal generation job clock sample");
+            worker_now_ms.load(Ordering::SeqCst)
+        });
+        operation(&conn, sample_now)
+    });
+
+    barrier.wait();
+    assert!(matches!(
+        sampled_rx.recv_timeout(Duration::from_millis(100)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    now_ms.store(transaction_now_ms, Ordering::SeqCst);
+    blocker_tx
+        .commit()
+        .expect("release competing generation job writer");
+    let result = handle
+        .join()
+        .expect("transaction-time worker thread panicked");
+    (result, calls.load(Ordering::SeqCst))
 }
 
 fn prepare_fenced_retry_backoff(
@@ -1570,6 +1626,178 @@ fn fenced_claim_uses_explicit_time_and_returns_the_committed_fifo_event() {
 }
 
 #[test]
+fn worker_dependency_clock_callbacks_run_inside_the_immediate_write_transaction() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("transaction-clock-job", "transaction-clock-job");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "transaction-clock-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    let samples = Cell::new(0);
+    let connection: &Connection = &conn;
+    let sample_count = &samples;
+    let transaction_now = move |now_ms| {
+        move || {
+            // Test-only state inspection proves the callback runs after
+            // BEGIN; production clock callbacks are pure.
+            assert_eq!(
+                connection
+                    .transaction_state(Some(DatabaseName::Main))
+                    .expect("read generation job transaction state"),
+                TransactionState::Write
+            );
+            sample_count.set(sample_count.get() + 1);
+            now_ms
+        }
+    };
+
+    claim_next_job_fenced_with_event_with_transaction_time(
+        &conn,
+        &authority,
+        transaction_now(WORKER_NOW_MS),
+    )
+    .expect("claim using transaction time")
+    .expect("transaction-clock job must be claimable");
+    heartbeat_running_job_current_stage_fenced_with_transaction_time(
+        &conn,
+        &queued.id,
+        &authority,
+        transaction_now(WORKER_NOW_MS + 1_000),
+    )
+    .expect("heartbeat using transaction time");
+    request_cancel(&conn, &queued.id).expect("request durable cancellation");
+    assert!(
+        reread_running_job_cancel_requested_fenced_with_transaction_time(
+            &conn,
+            &queued.id,
+            &authority,
+            transaction_now(WORKER_NOW_MS + 2_000),
+        )
+        .expect("reread cancellation using transaction time")
+    );
+    assert_eq!(samples.get(), 3);
+}
+
+#[test]
+fn fenced_claim_rejects_authority_expired_while_waiting_for_another_writer() {
+    let fixture = JobFixture::new();
+    fixture.enqueue("claim-writer-wait", "claim-writer-wait");
+    let (authority, baseline) = {
+        let conn = fixture.database.conn.lock().expect("lock claim fixture");
+        let authority = acquire_test_worker(
+            &conn,
+            "claim-writer-wait-worker",
+            WORKER_NOW_MS,
+            Duration::from_millis(100),
+        );
+        (authority, worker_database_snapshot(&conn))
+    };
+
+    let (result, samples) = run_after_competing_writer_with_transaction_time(
+        &fixture,
+        WORKER_NOW_MS + 99,
+        WORKER_NOW_MS + 100,
+        move |conn, now| {
+            claim_next_job_fenced_with_event_with_transaction_time(conn, &authority, now)
+        },
+    );
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples, 1);
+    let conn = fixture.database.conn.lock().expect("read claim fixture");
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
+fn fenced_heartbeat_rejects_authority_expired_while_waiting_for_another_writer() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("heartbeat-writer-wait", "heartbeat-writer-wait");
+    let (authority, baseline) = {
+        let conn = fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock heartbeat fixture");
+        let authority = acquire_test_worker(
+            &conn,
+            "heartbeat-writer-wait-worker",
+            WORKER_NOW_MS,
+            Duration::from_millis(100),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim heartbeat fixture")
+            .expect("heartbeat fixture job exists");
+        (authority, worker_database_snapshot(&conn))
+    };
+    let job_id = queued.id.clone();
+
+    let (result, samples) = run_after_competing_writer_with_transaction_time(
+        &fixture,
+        WORKER_NOW_MS + 99,
+        WORKER_NOW_MS + 100,
+        move |conn, now| {
+            heartbeat_running_job_current_stage_fenced_with_transaction_time(
+                conn, &job_id, &authority, now,
+            )
+        },
+    );
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples, 1);
+    let conn = fixture
+        .database
+        .conn
+        .lock()
+        .expect("read heartbeat fixture");
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
+fn fenced_cancel_reread_rejects_authority_expired_while_waiting_for_another_writer() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("cancel-reread-writer-wait", "cancel-reread-writer-wait");
+    let (authority, baseline) = {
+        let conn = fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock cancellation fixture");
+        let authority = acquire_test_worker(
+            &conn,
+            "cancel-reread-writer-wait-worker",
+            WORKER_NOW_MS,
+            Duration::from_millis(100),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim cancellation fixture")
+            .expect("cancellation fixture job exists");
+        request_cancel(&conn, &queued.id).expect("request fixture cancellation");
+        (authority, worker_database_snapshot(&conn))
+    };
+    let job_id = queued.id.clone();
+
+    let (result, samples) = run_after_competing_writer_with_transaction_time(
+        &fixture,
+        WORKER_NOW_MS + 99,
+        WORKER_NOW_MS + 100,
+        move |conn, now| {
+            reread_running_job_cancel_requested_fenced_with_transaction_time(
+                conn, &job_id, &authority, now,
+            )
+        },
+    );
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples, 1);
+    let conn = fixture
+        .database
+        .conn
+        .lock()
+        .expect("read cancellation fixture");
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
 fn fenced_claim_rejects_a_worker_time_before_the_queued_timestamp_without_mutation() {
     let fixture = JobFixture::new();
     let queued = fixture.enqueue("claim-time-regression", "claim-time-regression");
@@ -2306,6 +2534,121 @@ fn fenced_heartbeat_updates_only_the_exact_running_stage_without_time_regression
             Some("2026-07-12T16:00:02Z")
         );
     }
+}
+
+#[test]
+fn fenced_cancellation_reread_requires_the_exact_live_authority_without_mutation() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("cancel-reread", "cancel-reread");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "cancel-reread-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim cancellation-reread job")
+        .expect("cancellation-reread job exists");
+    let before = worker_database_snapshot(&conn);
+
+    assert!(!reread_running_job_cancel_requested_fenced(
+        &conn,
+        &queued.id,
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("read absent cancellation"));
+    assert_eq!(worker_database_snapshot(&conn), before);
+
+    request_cancel(&conn, &queued.id).expect("persist cancellation request");
+    let cancelled = worker_database_snapshot(&conn);
+    assert!(reread_running_job_cancel_requested_fenced(
+        &conn,
+        &queued.id,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("read durable cancellation"));
+    assert_eq!(worker_database_snapshot(&conn), cancelled);
+
+    let stale = WorkerTransitionAuthority::for_test(
+        authority.owner_id().to_string(),
+        authority.fencing_epoch() + 1,
+    );
+    assert_worker_transition_lease_lost(reread_running_job_cancel_requested_fenced(
+        &conn,
+        &queued.id,
+        &stale,
+        WORKER_NOW_MS + 2_000,
+    ));
+    assert_worker_transition_lease_lost(reread_running_job_cancel_requested_fenced(
+        &conn,
+        &queued.id,
+        &authority,
+        WORKER_NOW_MS + 60_000,
+    ));
+    assert_eq!(worker_database_snapshot(&conn), cancelled);
+}
+
+#[test]
+fn fenced_current_stage_heartbeat_discovers_and_updates_one_atomic_stage() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("current-heartbeat", "current-heartbeat");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "current-heartbeat-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim current-heartbeat job")
+        .expect("current-heartbeat job exists");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("enter provider request before heartbeat");
+
+    let heartbeat = heartbeat_running_job_current_stage_fenced(
+        &conn,
+        &queued.id,
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("heartbeat current persisted stage");
+    assert_eq!(heartbeat.stage, GenerationJobStage::ProviderRequest);
+    assert_eq!(
+        heartbeat.last_heartbeat_at.as_deref(),
+        Some("2026-07-12T16:00:02Z")
+    );
+
+    let stale = WorkerTransitionAuthority::for_test(
+        authority.owner_id().to_string(),
+        authority.fencing_epoch() + 1,
+    );
+    assert_worker_transition_lease_lost(heartbeat_running_job_current_stage_fenced(
+        &conn,
+        &queued.id,
+        &stale,
+        WORKER_NOW_MS + 3_000,
+    ));
+    assert_eq!(
+        get_job(&conn, &queued.id)
+            .expect("read unchanged heartbeat after stale authority")
+            .last_heartbeat_at,
+        heartbeat.last_heartbeat_at
+    );
 }
 
 #[test]
