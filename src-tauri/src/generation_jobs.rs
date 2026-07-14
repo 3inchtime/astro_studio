@@ -112,6 +112,27 @@ pub(crate) struct GenerationJobTransition<T> {
     pub(crate) event: Option<GenerationJobEvent>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ModernStartupRecovery {
+    RequestingEmpty,
+    RequestingBound {
+        expected_file: PathBuf,
+    },
+    ResponseReady {
+        file: PathBuf,
+        size: u64,
+        sha256: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ModernStartupCandidate {
+    pub(crate) snapshot: GenerationExecutionSnapshot,
+    pub(crate) stage: GenerationJobStage,
+    pub(crate) cancel_requested: bool,
+    pub(crate) recovery: ModernStartupRecovery,
+}
+
 impl<T> GenerationJobTransition<T> {
     fn into_value(self) -> T {
         let Self { value, event } = self;
@@ -2510,6 +2531,148 @@ pub(crate) fn list_jobs(
     filter: &GenerationJobFilter,
 ) -> Result<GenerationJobPage, AppError> {
     with_generation_job_read_transaction(conn, "list", |tx| list_jobs_in_transaction(tx, filter))
+}
+
+fn load_modern_startup_recovery_in_transaction(
+    tx: &Transaction<'_>,
+    generation_id: &str,
+    stage: GenerationJobStage,
+) -> Result<ModernStartupRecovery, AppError> {
+    validate_worker_recovery_for_stage(tx, generation_id, stage)?;
+    let recovery = tx
+        .query_row(
+            "SELECT request_state, expected_response_file, response_file,
+                    response_size, response_sha256
+               FROM generation_recoveries WHERE generation_id = ?1",
+            params![generation_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persisted_row_error("Read startup recovery descriptor failed", error))?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let (request_state, expected_file, response_file, response_size, response_sha256) = recovery;
+    match stage {
+        GenerationJobStage::Preparing
+            if request_state == "requesting"
+                && expected_file.is_none()
+                && response_file.is_none()
+                && response_size.is_none()
+                && response_sha256.is_none() =>
+        {
+            Ok(ModernStartupRecovery::RequestingEmpty)
+        }
+        GenerationJobStage::ProviderRequest | GenerationJobStage::RetryBackoff
+            if request_state == "requesting"
+                && response_file.is_none()
+                && response_size.is_none()
+                && response_sha256.is_none() =>
+        {
+            Ok(ModernStartupRecovery::RequestingBound {
+                expected_file: PathBuf::from(
+                    expected_file.ok_or(AppError::GenerationJobCorruptPersistedData)?,
+                ),
+            })
+        }
+        GenerationJobStage::ResponseReady | GenerationJobStage::LocalProcessing
+            if request_state == "response_ready" =>
+        {
+            let expected_file = expected_file.ok_or(AppError::GenerationJobCorruptPersistedData)?;
+            let response_file = response_file.ok_or(AppError::GenerationJobCorruptPersistedData)?;
+            if response_file != expected_file {
+                return Err(AppError::GenerationJobCorruptPersistedData);
+            }
+            Ok(ModernStartupRecovery::ResponseReady {
+                file: PathBuf::from(response_file),
+                size: u64::try_from(
+                    response_size.ok_or(AppError::GenerationJobCorruptPersistedData)?,
+                )
+                .map_err(|_| AppError::GenerationJobCorruptPersistedData)?,
+                sha256: response_sha256.ok_or(AppError::GenerationJobCorruptPersistedData)?,
+            })
+        }
+        _ => Err(AppError::GenerationJobCorruptPersistedData),
+    }
+}
+
+/// Snapshots only modern, executable running jobs while the current worker
+/// authority is fenced. The returned descriptors are owned pure data so all
+/// response-file I/O can happen after this short transaction releases both the
+/// SQLite writer lock and the app-owned database mutex.
+pub(crate) fn load_modern_startup_candidates_with_transaction_time<Now>(
+    conn: &Connection,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<Vec<ModernStartupCandidate>, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    canonical_worker_timestamp(now_ms)?;
+    // This must remain the first database read after BEGIN IMMEDIATE and the
+    // side-effect-free transaction-time sample.
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let candidate_ids = {
+        let mut statement = tx
+            .prepare(
+                "SELECT id
+                   FROM generation_jobs
+                  WHERE status = 'running'
+                    AND stage IN (
+                        'preparing', 'provider_request', 'retry_backoff',
+                        'response_ready', 'local_processing'
+                    )
+                  ORDER BY queued_at ASC, rowid ASC",
+            )
+            .map_err(|error| {
+                database_error("Prepare modern startup candidate list failed", error)
+            })?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| database_error("Query modern startup candidate list failed", error))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| {
+                persisted_row_error("Read modern startup candidate list failed", error)
+            })?;
+        ids
+    };
+    let mut candidates = Vec::with_capacity(candidate_ids.len());
+    for job_id in candidate_ids {
+        let job = get_job_in_transaction(&tx, &job_id)?;
+        let stage = job.stage;
+        if job.status != GenerationJobStatus::Running
+            || !matches!(
+                stage,
+                GenerationJobStage::Preparing
+                    | GenerationJobStage::ProviderRequest
+                    | GenerationJobStage::RetryBackoff
+                    | GenerationJobStage::ResponseReady
+                    | GenerationJobStage::LocalProcessing
+            )
+        {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+        let snapshot =
+            load_generation_execution_snapshot_for_stage_in_transaction(&tx, &job_id, stage)?;
+        let recovery = load_modern_startup_recovery_in_transaction(&tx, &job.generation_id, stage)?;
+        candidates.push(ModernStartupCandidate {
+            snapshot,
+            stage,
+            cancel_requested: job.cancel_requested_at.is_some(),
+            recovery,
+        });
+    }
+    tx.commit()
+        .map_err(|error| database_error("Commit modern startup candidate list failed", error))?;
+    Ok(candidates)
 }
 
 fn stored_job_from_row_offset(

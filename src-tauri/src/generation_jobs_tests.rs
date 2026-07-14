@@ -5733,3 +5733,302 @@ fn fixture_uses_real_v16_file_database() {
         .expect("read schema version");
     assert_eq!(version_exists, 1);
 }
+
+fn install_startup_response_ready_projection(
+    conn: &Connection,
+    job: &crate::models::GenerationJob,
+    expected_path: &Path,
+    stage: GenerationJobStage,
+) {
+    assert!(matches!(
+        stage,
+        GenerationJobStage::ResponseReady | GenerationJobStage::LocalProcessing
+    ));
+    let updated_recovery = conn
+        .execute(
+            "UPDATE generation_recoveries
+                SET request_state = 'response_ready', expected_response_file = ?1,
+                    response_file = ?1, response_size = 23, response_sha256 = ?2,
+                    updated_at = '2026-07-12T16:00:10Z'
+              WHERE generation_id = ?3 AND request_state = 'requesting'",
+            params![expected_path.to_str(), "a".repeat(64), job.generation_id],
+        )
+        .expect("install response-ready recovery projection");
+    assert_eq!(updated_recovery, 1);
+    let updated_job = conn
+        .execute(
+            "UPDATE generation_jobs SET stage = ?1,
+                    last_heartbeat_at = '2026-07-12T16:00:10Z'
+              WHERE id = ?2 AND status = 'running' AND stage = 'provider_request'",
+            params![stage_as_str(stage), job.id],
+        )
+        .expect("install response-ready job projection");
+    assert_eq!(updated_job, 1);
+}
+
+#[test]
+fn modern_startup_candidate_loader_snapshots_only_executable_running_stages() {
+    let fixture = JobFixture::new();
+    let mut conn = fixture.database.conn.lock().expect("lock startup fixture");
+    let authority = acquire_test_worker(
+        &conn,
+        "startup-candidate-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+
+    let preparing = fixture.prepared("startup-preparing", "startup-preparing");
+    enqueue_job(&mut conn, &preparing).expect("enqueue preparing job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim preparing job")
+        .expect("preparing job exists");
+
+    let provider = fixture.prepared("startup-provider", "startup-provider");
+    enqueue_job(&mut conn, &provider).expect("enqueue provider job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS + 1_000)
+        .expect("claim provider job")
+        .expect("provider job exists");
+    let provider_path = std::env::temp_dir()
+        .join("astro-studio-startup")
+        .join(format!("{}.response.json", provider.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &provider.job_id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: provider_path.clone(),
+        },
+        &authority,
+        WORKER_NOW_MS + 2_000,
+    )
+    .expect("enter provider request");
+
+    let retry = fixture.prepared("startup-retry", "startup-retry");
+    enqueue_job(&mut conn, &retry).expect("enqueue retry job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS + 3_000)
+        .expect("claim retry job")
+        .expect("retry job exists");
+    let retry_path = std::env::temp_dir()
+        .join("astro-studio-startup")
+        .join(format!("{}.response.json", retry.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &retry.job_id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: retry_path.clone(),
+        },
+        &authority,
+        WORKER_NOW_MS + 4_000,
+    )
+    .expect("enter retry provider request");
+    transition_running_job_stage_with_event(
+        &conn,
+        &retry.job_id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority,
+        WORKER_NOW_MS + 5_000,
+    )
+    .expect("enter startup retry backoff");
+
+    let response_ready = fixture.prepared("startup-response", "startup-response");
+    enqueue_job(&mut conn, &response_ready).expect("enqueue response-ready job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS + 6_000)
+        .expect("claim response-ready job")
+        .expect("response-ready job exists");
+    let response_path = std::env::temp_dir()
+        .join("astro-studio-startup")
+        .join(format!("{}.response.json", response_ready.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &response_ready.job_id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: response_path.clone(),
+        },
+        &authority,
+        WORKER_NOW_MS + 7_000,
+    )
+    .expect("enter response-ready provider request");
+    let response_job = get_job(&conn, &response_ready.job_id).expect("read response-ready job");
+    install_startup_response_ready_projection(
+        &conn,
+        &response_job,
+        &response_path,
+        GenerationJobStage::ResponseReady,
+    );
+
+    let local = fixture.prepared("startup-local", "startup-local");
+    enqueue_job(&mut conn, &local).expect("enqueue local job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS + 8_000)
+        .expect("claim local job")
+        .expect("local job exists");
+    let local_path = std::env::temp_dir()
+        .join("astro-studio-startup")
+        .join(format!("{}.response.json", local.generation_id));
+    transition_running_job_stage_with_event(
+        &conn,
+        &local.job_id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: local_path.clone(),
+        },
+        &authority,
+        WORKER_NOW_MS + 9_000,
+    )
+    .expect("enter local provider request");
+    let local_job = get_job(&conn, &local.job_id).expect("read local job");
+    install_startup_response_ready_projection(
+        &conn,
+        &local_job,
+        &local_path,
+        GenerationJobStage::LocalProcessing,
+    );
+
+    let legacy = fixture.prepared("startup-legacy-marker", "startup-legacy-marker");
+    enqueue_job(&mut conn, &legacy).expect("enqueue legacy-marker job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS + 10_000)
+        .expect("claim legacy-marker job")
+        .expect("legacy-marker job exists");
+    conn.execute(
+        "UPDATE generation_jobs SET stage = 'startup_reconciliation' WHERE id = ?1",
+        [&legacy.job_id],
+    )
+    .expect("install excluded legacy marker");
+
+    let queued = fixture.prepared("startup-queued", "startup-queued");
+    enqueue_job(&mut conn, &queued).expect("enqueue excluded queued job");
+
+    let samples = Cell::new(0);
+    let candidates =
+        load_modern_startup_candidates_with_transaction_time(&conn, &authority, || {
+            assert_eq!(
+                conn.transaction_state(Some(DatabaseName::Main))
+                    .expect("read startup transaction state"),
+                TransactionState::Write
+            );
+            samples.set(samples.get() + 1);
+            WORKER_NOW_MS + 11_000
+        })
+        .expect("load modern startup candidates");
+
+    assert_eq!(samples.get(), 1);
+    assert_eq!(candidates.len(), 5);
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.stage)
+            .collect::<Vec<_>>(),
+        vec![
+            GenerationJobStage::Preparing,
+            GenerationJobStage::ProviderRequest,
+            GenerationJobStage::RetryBackoff,
+            GenerationJobStage::ResponseReady,
+            GenerationJobStage::LocalProcessing,
+        ]
+    );
+    assert!(matches!(
+        candidates[0].recovery,
+        ModernStartupRecovery::RequestingEmpty
+    ));
+    assert!(matches!(
+        &candidates[1].recovery,
+        ModernStartupRecovery::RequestingBound { expected_file } if expected_file == &provider_path
+    ));
+    assert!(matches!(
+        &candidates[2].recovery,
+        ModernStartupRecovery::RequestingBound { expected_file } if expected_file == &retry_path
+    ));
+    assert!(matches!(
+        &candidates[3].recovery,
+        ModernStartupRecovery::ResponseReady { file, size: 23, sha256 }
+            if file == &response_path && sha256 == &"a".repeat(64)
+    ));
+    assert!(matches!(
+        &candidates[4].recovery,
+        ModernStartupRecovery::ResponseReady { file, size: 23, sha256 }
+            if file == &local_path && sha256 == &"a".repeat(64)
+    ));
+    assert!(candidates
+        .iter()
+        .all(|candidate| !candidate.cancel_requested));
+}
+
+#[test]
+fn modern_startup_candidate_loader_rejects_stale_authority_before_reading_jobs() {
+    let fixture = JobFixture::new();
+    fixture.enqueue("startup-stale-authority", "startup-stale-authority");
+    let conn = fixture.database.conn.lock().expect("lock startup fixture");
+    let authority = acquire_test_worker(
+        &conn,
+        "startup-stale-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(1),
+    );
+    let samples = Cell::new(0);
+
+    let result = load_modern_startup_candidates_with_transaction_time(&conn, &authority, || {
+        assert_eq!(
+            conn.transaction_state(Some(DatabaseName::Main))
+                .expect("read stale startup transaction state"),
+            TransactionState::Write
+        );
+        samples.set(samples.get() + 1);
+        WORKER_NOW_MS + 2_000
+    });
+
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples.get(), 1);
+}
+
+#[test]
+fn modern_startup_candidate_loader_rejects_corrupt_recovery_without_mutation() {
+    let fixture = JobFixture::new();
+    let mut conn = fixture.database.conn.lock().expect("lock startup fixture");
+    let authority = acquire_test_worker(
+        &conn,
+        "startup-corrupt-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    let provider = fixture.prepared("startup-corrupt-provider", "startup-corrupt-provider");
+    enqueue_job(&mut conn, &provider).expect("enqueue corrupt provider job");
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim corrupt provider job")
+        .expect("corrupt provider job exists");
+    transition_running_job_stage_with_event(
+        &conn,
+        &provider.job_id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: std::env::temp_dir()
+                .join("astro-studio-startup")
+                .join(format!("{}.response.json", provider.generation_id)),
+        },
+        &authority,
+        WORKER_NOW_MS + 1_000,
+    )
+    .expect("enter provider request before corrupting recovery");
+    let corrupted = conn
+        .execute(
+            "UPDATE generation_recoveries SET expected_response_file = NULL
+              WHERE generation_id = ?1",
+            [&provider.generation_id],
+        )
+        .expect("corrupt provider recovery");
+    assert_eq!(corrupted, 1);
+    let before = worker_database_snapshot(&conn);
+
+    let result = load_modern_startup_candidates_with_transaction_time(&conn, &authority, || {
+        WORKER_NOW_MS + 2_000
+    });
+
+    assert!(matches!(
+        result,
+        Err(WorkerTransitionError::Repository(
+            AppError::GenerationJobCorruptPersistedData
+        ))
+    ));
+    assert_eq!(worker_database_snapshot(&conn), before);
+}
