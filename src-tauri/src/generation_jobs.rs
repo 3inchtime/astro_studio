@@ -1747,7 +1747,7 @@ fn safe_error_code(value: &str) -> bool {
         && public_string_is_safe(value)
 }
 
-fn terminal_message_for_code(code: &str) -> &'static str {
+pub(crate) fn terminal_message_for_code(code: &str) -> &'static str {
     match code {
         "provider_profile_missing" => "The selected provider profile is unavailable",
         "provider_configuration_invalid" => "The provider configuration is invalid",

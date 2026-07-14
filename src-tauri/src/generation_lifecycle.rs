@@ -9,9 +9,9 @@ use crate::generation_jobs::{
     finish_job_in_transaction, get_job_event_in_transaction, get_job_in_transaction,
     insert_and_claim_exact_job, load_generation_execution_snapshot_for_stage_in_transaction,
     load_generation_execution_snapshot_in_transaction, set_actual_image_count_in_transaction,
-    validate_worker_recovery_for_stage, GenerationJobOptions, GenerationJobRequest,
-    GenerationJobRequestKind, GenerationJobTerminalUpdate, PreparedGenerationJob,
-    WorkerTransitionError,
+    terminal_message_for_code, validate_worker_recovery_for_stage, GenerationJobOptions,
+    GenerationJobRequest, GenerationJobRequestKind, GenerationJobTerminalUpdate,
+    PreparedGenerationJob, WorkerTransitionError,
 };
 use crate::generation_worker_lease::{
     assert_worker_transition_authority_in_transaction, WorkerLeaseError, WorkerTransitionAuthority,
@@ -190,12 +190,21 @@ pub(crate) struct GenerationTerminalDisposition {
 }
 
 #[derive(Debug)]
-pub(crate) enum GenerationSuccessTransition {
+enum GenerationSuccessTransition {
     Completed(GenerateResult),
     CancelRequested,
 }
 
-pub(crate) type PrecreatedLocalOutcome = GenerationSuccessTransition;
+#[derive(Debug)]
+pub(crate) enum FencedGenerationSuccessTransition {
+    Completed {
+        result: GenerateResult,
+        event: Box<GenerationJobEvent>,
+    },
+    CancelRequested,
+}
+
+type PrecreatedLocalOutcome = GenerationSuccessTransition;
 
 /// Verified response envelope. Raw bodies are deliberately not serializable or
 /// debuggable outside the app-owned response store.
@@ -209,7 +218,7 @@ pub(crate) struct ProviderAttemptResponse {
 
 /// Narrow, already-verified input for the response-ready SQL transition.
 /// Private fields ensure callers cannot bypass response artifact verification.
-pub(crate) struct VerifiedResponseCommit {
+struct VerifiedResponseCommit {
     response_file: String,
     response_size: u64,
     response_sha256: String,
@@ -230,10 +239,23 @@ struct PersistedFencedResponseProjection {
     last_heartbeat_at: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TerminalRecoveryProjection {
+    request_kind: String,
+    request_state: String,
+    output_format: String,
+    expected_response_file: Option<String>,
+    response_file: Option<String>,
+    response_size: Option<i64>,
+    response_sha256: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
 /// Sealed, pure-data success projection derived from a live promoted-file
 /// guard. The lifetime prevents cleanup/disarm while the SQL commit is using
 /// the projection, without passing an I/O-capable guard into the transaction.
-pub(crate) struct PromotedImageCommit<'a> {
+struct PromotedImageCommit<'a> {
     generation_id: String,
     images: Vec<GeneratedImage>,
     _guard: PhantomData<&'a PromotedGenerationFiles>,
@@ -1380,7 +1402,7 @@ fn lifecycle_worker_timestamp(now_ms: i64) -> Result<String, WorkerTransitionErr
         .ok_or_else(|| WorkerLeaseError::TimeOverflow.into())
 }
 
-pub(crate) fn promote_verified_response_in_transaction(
+fn promote_verified_response_in_transaction(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
     response: &VerifiedResponseCommit,
@@ -1429,7 +1451,7 @@ pub(crate) fn promote_verified_response_in_transaction(
     Ok(())
 }
 
-pub(crate) fn promote_verified_response(
+fn promote_verified_response(
     db: &Database,
     context: &GenerationExecutionContext,
     expected_path: &Path,
@@ -1627,7 +1649,7 @@ pub(crate) fn promote_verified_response_fenced(
     )
 }
 
-pub(crate) fn finalize_generation_failure_in_transaction(
+fn finalize_generation_failure_in_transaction(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
     error: &GenerationExecutionError,
@@ -1696,7 +1718,7 @@ pub(crate) fn finalize_generation_failure_in_transaction(
     Ok(())
 }
 
-pub(crate) fn finalize_generation_failure(
+fn finalize_generation_failure(
     db: &Database,
     context: &GenerationExecutionContext,
     error: &GenerationExecutionError,
@@ -1708,6 +1730,187 @@ pub(crate) fn finalize_generation_failure(
     tx.commit().map_err(|query_error| {
         lifecycle_database_error("Commit generation failure failed", query_error)
     })
+}
+
+pub(crate) fn finalize_generation_failure_fenced(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    error: &GenerationExecutionError,
+    disposition: &GenerationTerminalDisposition,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJobEvent, WorkerTransitionError> {
+    if error.code() != disposition.error_code
+        || !matches!(
+            disposition.status,
+            GenerationJobStatus::Failed | GenerationJobStatus::Interrupted
+        )
+    {
+        return Err(AppError::GenerationJobInvalidSnapshot.into());
+    }
+    let timestamp = lifecycle_worker_timestamp(now_ms)?;
+    let event = {
+        let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+        let tx = begin_generation_job_write_transaction(&mut conn)?;
+
+        // This must remain the first database operation after BEGIN IMMEDIATE.
+        assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+
+        let job = get_job_in_transaction(&tx, &context.job_id)?;
+        let expected_stage = match (job.stage, disposition.preserve_response_ready) {
+            (GenerationJobStage::Preparing, false)
+            | (GenerationJobStage::ProviderRequest, false)
+            | (GenerationJobStage::ResponseReady, false)
+            | (GenerationJobStage::LocalProcessing, true) => job.stage,
+            _ => return Err(AppError::GenerationJobInvalidTransition.into()),
+        };
+        let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
+            &tx,
+            &context.job_id,
+            expected_stage,
+        )?;
+        if snapshot.context != *context
+            || job.generation_id != context.generation_id
+            || job.cancel_requested_at.is_some()
+            || !terminal_timestamp_not_before_job(&job, &timestamp, false)
+        {
+            return Err(AppError::GenerationJobInvalidTransition.into());
+        }
+        validate_worker_recovery_for_stage(&tx, &context.generation_id, expected_stage)?;
+        let recovery_before = load_terminal_recovery_projection(&tx, &context.generation_id)?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        validate_terminal_recovery_timestamp(&recovery_before, &timestamp)?;
+        let (generation_status_before, generation_error_before, request_metadata_before): (
+            String,
+            Option<String>,
+            String,
+        ) = tx
+            .query_row(
+                "SELECT status, error_message, request_metadata
+                   FROM generations WHERE id = ?1",
+                params![context.generation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|query_error| {
+                lifecycle_database_error(
+                    "Read fenced failure generation projection failed",
+                    query_error,
+                )
+            })?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        let existing_images: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
+                params![context.generation_id],
+                |row| row.get(0),
+            )
+            .map_err(|query_error| {
+                lifecycle_database_error(
+                    "Count fenced failed generation images failed",
+                    query_error,
+                )
+            })?;
+        if generation_status_before != "running"
+            || generation_error_before.is_some()
+            || existing_images != 0
+        {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+
+        if !disposition.preserve_response_ready {
+            let deleted = tx
+                .execute(
+                    "DELETE FROM generation_recoveries WHERE generation_id = ?1",
+                    params![context.generation_id],
+                )
+                .map_err(|query_error| {
+                    lifecycle_database_error("Delete fenced failure recovery failed", query_error)
+                })?;
+            if deleted != 1 {
+                return Err(AppError::GenerationJobCorruptPersistedData.into());
+            }
+        }
+        finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: context.job_id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: disposition.status.clone(),
+                finished_at: timestamp.clone(),
+                error_code: Some(disposition.error_code.clone()),
+                error_message: None,
+                retryable: disposition.retryable,
+            },
+        )?;
+
+        let mut expected_job = job.clone();
+        expected_job.status = disposition.status.clone();
+        expected_job.stage = GenerationJobStage::Terminal;
+        expected_job.finished_at = Some(timestamp.clone());
+        expected_job.error_code = Some(disposition.error_code.clone());
+        expected_job.error_message =
+            Some(terminal_message_for_code(&disposition.error_code).to_string());
+        expected_job.retryable = disposition.retryable;
+        let persisted_job = get_job_in_transaction(&tx, &context.job_id)?;
+        let expected_status = match disposition.status {
+            GenerationJobStatus::Failed => "failed",
+            GenerationJobStatus::Interrupted => "interrupted",
+            _ => return Err(AppError::GenerationJobInvalidSnapshot.into()),
+        };
+        let (generation_status, generation_error, request_metadata, image_count): (
+            String,
+            Option<String>,
+            String,
+            i64,
+        ) = tx
+            .query_row(
+                "SELECT g.status, g.error_message, g.request_metadata,
+                        (SELECT COUNT(*) FROM images i WHERE i.generation_id = g.id)
+                   FROM generations g WHERE g.id = ?1",
+                params![context.generation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .map_err(|query_error| {
+                lifecycle_database_error("Verify fenced failure projection failed", query_error)
+            })?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        let recovery_after = load_terminal_recovery_projection(&tx, &context.generation_id)?;
+        let recovery_is_exact = if disposition.preserve_response_ready {
+            recovery_after.as_ref() == Some(&recovery_before)
+        } else {
+            recovery_after.is_none()
+        };
+        if persisted_job != expected_job
+            || generation_status != expected_status
+            || generation_error.as_deref()
+                != Some(terminal_message_for_code(&disposition.error_code))
+            || request_metadata != request_metadata_before
+            || image_count != 0
+            || !recovery_is_exact
+        {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+
+        let event = get_job_event_in_transaction(&tx, &context.job_id)?;
+        if event.status != disposition.status
+            || event.stage != GenerationJobStage::Terminal
+            || event.finished_at.as_deref() != Some(timestamp.as_str())
+            || event.cancel_requested_at.is_some()
+            || event.error_code.as_deref() != Some(disposition.error_code.as_str())
+            || event.error_message.as_deref()
+                != Some(terminal_message_for_code(&disposition.error_code))
+            || event.retryable != disposition.retryable
+        {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+        tx.commit().map_err(|query_error| {
+            lifecycle_database_error("Commit fenced generation failure failed", query_error)
+        })?;
+        event
+    };
+    Ok(event)
 }
 
 fn generation_image_projection_is_valid(image: &GeneratedImage, generation_id: &str) -> bool {
@@ -1760,13 +1963,31 @@ impl<'a> PromotedImageCommit<'a> {
     }
 }
 
-pub(crate) fn commit_generation_success_in_transaction(
+fn commit_generation_success_in_transaction(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
     request: &GenerationJobRequest,
     promoted: &PromotedImageCommit<'_>,
 ) -> Result<GenerationSuccessTransition, AppError> {
     let snapshot = load_matching_execution_snapshot(tx, context)?;
+    commit_generation_success_projection_in_transaction(
+        tx,
+        context,
+        request,
+        promoted,
+        &snapshot,
+        current_timestamp(),
+    )
+}
+
+fn commit_generation_success_projection_in_transaction(
+    tx: &Transaction<'_>,
+    context: &GenerationExecutionContext,
+    request: &GenerationJobRequest,
+    promoted: &PromotedImageCommit<'_>,
+    snapshot: &GenerationExecutionSnapshot,
+    finished_at: String,
+) -> Result<GenerationSuccessTransition, AppError> {
     if snapshot.request != *request || promoted.generation_id != context.generation_id {
         return Err(AppError::GenerationJobInvalidSnapshot);
     }
@@ -1852,7 +2073,7 @@ pub(crate) fn commit_generation_success_in_transaction(
             job_id: context.job_id.clone(),
             expected_status: GenerationJobStatus::Running,
             status: GenerationJobStatus::Completed,
-            finished_at: current_timestamp(),
+            finished_at,
             error_code: None,
             error_message: None,
             retryable: false,
@@ -1863,6 +2084,433 @@ pub(crate) fn commit_generation_success_in_transaction(
         conversation_id: context.conversation_id.clone(),
         images: images.to_vec(),
     }))
+}
+
+fn terminal_timestamp_not_before_job(
+    job: &GenerationJob,
+    timestamp: &str,
+    require_cancel_request: bool,
+) -> bool {
+    job.started_at
+        .as_deref()
+        .is_some_and(|started_at| timestamp >= started_at)
+        && job
+            .last_heartbeat_at
+            .as_deref()
+            .is_some_and(|heartbeat_at| timestamp >= heartbeat_at)
+        && (!require_cancel_request
+            || job
+                .cancel_requested_at
+                .as_deref()
+                .is_some_and(|cancel_requested_at| timestamp >= cancel_requested_at))
+}
+
+fn load_terminal_recovery_projection(
+    tx: &Transaction<'_>,
+    generation_id: &str,
+) -> Result<Option<TerminalRecoveryProjection>, AppError> {
+    tx.query_row(
+        "SELECT request_kind, request_state, output_format, expected_response_file,
+                response_file, response_size, response_sha256, created_at, updated_at
+           FROM generation_recoveries WHERE generation_id = ?1",
+        params![generation_id],
+        |row| {
+            Ok(TerminalRecoveryProjection {
+                request_kind: row.get(0)?,
+                request_state: row.get(1)?,
+                output_format: row.get(2)?,
+                expected_response_file: row.get(3)?,
+                response_file: row.get(4)?,
+                response_size: row.get(5)?,
+                response_sha256: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|error| lifecycle_database_error("Read fenced terminal recovery failed", error))
+}
+
+fn validate_terminal_recovery_timestamp(
+    recovery: &TerminalRecoveryProjection,
+    terminal_timestamp: &str,
+) -> Result<(), AppError> {
+    let parse_canonical = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .ok()
+            .filter(|timestamp| {
+                timestamp
+                    .with_timezone(&chrono::Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                    == value
+            })
+    };
+    let created_at =
+        parse_canonical(&recovery.created_at).ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let updated_at =
+        parse_canonical(&recovery.updated_at).ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let terminal_at =
+        parse_canonical(terminal_timestamp).ok_or(AppError::GenerationJobInvalidTransition)?;
+    if updated_at < created_at {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+    if terminal_at < updated_at {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    Ok(())
+}
+
+pub(crate) fn acknowledge_generation_cancellation_fenced(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<GenerationJobEvent, WorkerTransitionError> {
+    let timestamp = lifecycle_worker_timestamp(now_ms)?;
+    let event = {
+        let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+        let tx = begin_generation_job_write_transaction(&mut conn)?;
+
+        // This must remain the first database operation after BEGIN IMMEDIATE.
+        assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+
+        let job = get_job_in_transaction(&tx, &context.job_id)?;
+        let expected_stage = match job.stage {
+            GenerationJobStage::Preparing
+            | GenerationJobStage::ProviderRequest
+            | GenerationJobStage::RetryBackoff
+            | GenerationJobStage::ResponseReady
+            | GenerationJobStage::LocalProcessing => job.stage,
+            _ => return Err(AppError::GenerationJobInvalidTransition.into()),
+        };
+        let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
+            &tx,
+            &context.job_id,
+            expected_stage,
+        )?;
+        if snapshot.context != *context
+            || job.generation_id != context.generation_id
+            || job.cancel_requested_at.is_none()
+            || !terminal_timestamp_not_before_job(&job, &timestamp, true)
+        {
+            return Err(AppError::GenerationJobInvalidTransition.into());
+        }
+        validate_worker_recovery_for_stage(&tx, &context.generation_id, expected_stage)?;
+        let recovery = load_terminal_recovery_projection(&tx, &context.generation_id)?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        validate_terminal_recovery_timestamp(&recovery, &timestamp)?;
+        let (generation_status_before, generation_error_before, request_metadata_before): (
+            String,
+            Option<String>,
+            String,
+        ) = tx
+            .query_row(
+                "SELECT status, error_message, request_metadata
+                   FROM generations WHERE id = ?1",
+                params![context.generation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|error| {
+                lifecycle_database_error("Read fenced cancelled generation failed", error)
+            })?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        let existing_images: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM images WHERE generation_id = ?1",
+                params![context.generation_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                lifecycle_database_error("Count fenced cancelled generation images failed", error)
+            })?;
+        if generation_status_before != "running"
+            || generation_error_before.is_some()
+            || existing_images != 0
+        {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+
+        let deleted = tx
+            .execute(
+                "DELETE FROM generation_recoveries WHERE generation_id = ?1",
+                params![context.generation_id],
+            )
+            .map_err(|error| {
+                lifecycle_database_error("Delete fenced cancelled recovery failed", error)
+            })?;
+        if deleted != 1 {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+        finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: context.job_id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Cancelled,
+                finished_at: timestamp.clone(),
+                error_code: Some("cancelled_by_user".to_string()),
+                error_message: None,
+                retryable: false,
+            },
+        )?;
+
+        let mut expected_job = job.clone();
+        expected_job.status = GenerationJobStatus::Cancelled;
+        expected_job.stage = GenerationJobStage::Terminal;
+        expected_job.finished_at = Some(timestamp.clone());
+        expected_job.error_code = Some("cancelled_by_user".to_string());
+        expected_job.error_message = Some("The operation was cancelled".to_string());
+        expected_job.retryable = false;
+        if get_job_in_transaction(&tx, &context.job_id)? != expected_job {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+        let event = get_job_event_in_transaction(&tx, &context.job_id)?;
+        let (generation_status, generation_error, request_metadata, image_count): (
+            String,
+            Option<String>,
+            String,
+            i64,
+        ) = tx
+            .query_row(
+                "SELECT g.status, g.error_message,
+                        g.request_metadata,
+                        (SELECT COUNT(*) FROM images i WHERE i.generation_id = g.id)
+                   FROM generations g WHERE g.id = ?1",
+                params![context.generation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .map_err(|error| {
+                lifecycle_database_error("Verify fenced cancelled generation failed", error)
+            })?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        if load_terminal_recovery_projection(&tx, &context.generation_id)?.is_some()
+            || generation_status != "cancelled"
+            || generation_error.as_deref() != Some("The operation was cancelled")
+            || request_metadata != request_metadata_before
+            || image_count != 0
+            || event.status != GenerationJobStatus::Cancelled
+            || event.stage != GenerationJobStage::Terminal
+            || event.finished_at.as_deref() != Some(timestamp.as_str())
+            || event.cancel_requested_at != job.cancel_requested_at
+            || event.error_code.as_deref() != Some("cancelled_by_user")
+            || event.error_message.as_deref() != Some("The operation was cancelled")
+            || event.retryable
+        {
+            return Err(AppError::GenerationJobCorruptPersistedData.into());
+        }
+        tx.commit().map_err(|error| {
+            lifecycle_database_error("Commit fenced generation cancellation failed", error)
+        })?;
+        event
+    };
+    Ok(event)
+}
+
+fn verify_fenced_success_projection_in_transaction(
+    tx: &Transaction<'_>,
+    context: &GenerationExecutionContext,
+    snapshot: &GenerationExecutionSnapshot,
+    images: &[GeneratedImage],
+    job_before: &GenerationJob,
+    finished_at: &str,
+    request_metadata_before: &str,
+) -> Result<(), AppError> {
+    let mut expected_job = job_before.clone();
+    expected_job.status = GenerationJobStatus::Completed;
+    expected_job.stage = GenerationJobStage::Terminal;
+    expected_job.finished_at = Some(finished_at.to_string());
+    expected_job.error_code = None;
+    expected_job.error_message = None;
+    expected_job.retryable = false;
+    if get_job_in_transaction(tx, &context.job_id)? != expected_job {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+    let (generation_status, generation_error, request_metadata, recovery_count): (
+        String,
+        Option<String>,
+        String,
+        i64,
+    ) = tx
+        .query_row(
+            "SELECT g.status, g.error_message, g.request_metadata,
+                    (SELECT COUNT(*) FROM generation_recoveries r
+                      WHERE r.generation_id = g.id)
+               FROM generations g WHERE g.id = ?1",
+            params![context.generation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|error| {
+            lifecycle_database_error("Verify fenced successful generation failed", error)
+        })?
+        .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+    let mut metadata: serde_json::Value = serde_json::from_str(&request_metadata)
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    let metadata_before: serde_json::Value = serde_json::from_str(request_metadata_before)
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    let actual_image_count = metadata
+        .as_object_mut()
+        .and_then(|object| object.remove("actual_image_count"))
+        .and_then(|value| value.as_u64());
+    if generation_status != "completed"
+        || generation_error.is_some()
+        || recovery_count != 0
+        || actual_image_count != Some(images.len() as u64)
+        || metadata != metadata_before
+    {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+
+    let mut statement = tx
+        .prepare(
+            "SELECT id, generation_id, file_path, thumbnail_path, width, height, file_size,
+                    created_at
+               FROM images WHERE generation_id = ?1 ORDER BY id",
+        )
+        .map_err(|error| {
+            lifecycle_database_error("Prepare fenced successful image verification failed", error)
+        })?;
+    let persisted = statement
+        .query_map(params![context.generation_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i32>(4)?,
+                row.get::<_, i32>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        })
+        .map_err(|error| lifecycle_database_error("Query fenced successful images failed", error))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| lifecycle_database_error("Read fenced successful images failed", error))?;
+    let mut expected = images
+        .iter()
+        .map(|image| {
+            (
+                image.id.clone(),
+                image.generation_id.clone(),
+                image.file_path.clone(),
+                image.thumbnail_path.clone(),
+                image.width,
+                image.height,
+                image.file_size,
+                snapshot.created_at.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    expected.sort_by(|left, right| left.0.cmp(&right.0));
+    if persisted != expected {
+        return Err(AppError::GenerationJobCorruptPersistedData);
+    }
+    Ok(())
+}
+
+pub(crate) fn commit_generation_success_fenced(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    request: &GenerationJobRequest,
+    mut promoted: PromotedGenerationFiles,
+    authority: &WorkerTransitionAuthority,
+    now_ms: i64,
+) -> Result<FencedGenerationSuccessTransition, WorkerTransitionError> {
+    let promoted_projection =
+        PromotedImageCommit::from_promoted(&promoted, &context.generation_id)?;
+    let timestamp = lifecycle_worker_timestamp(now_ms)?;
+    let outcome = (|| -> Result<FencedGenerationSuccessTransition, WorkerTransitionError> {
+        let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+        let tx = begin_generation_job_write_transaction(&mut conn)?;
+
+        // This must remain the first database operation after BEGIN IMMEDIATE.
+        assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+
+        let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
+            &tx,
+            &context.job_id,
+            GenerationJobStage::LocalProcessing,
+        )?;
+        if snapshot.context != *context {
+            return Err(AppError::GenerationJobInvalidSnapshot.into());
+        }
+        validate_worker_recovery_for_stage(
+            &tx,
+            &context.generation_id,
+            GenerationJobStage::LocalProcessing,
+        )?;
+        let recovery = load_terminal_recovery_projection(&tx, &context.generation_id)?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+        validate_terminal_recovery_timestamp(&recovery, &timestamp)?;
+        let job = get_job_in_transaction(&tx, &context.job_id)?;
+        if !terminal_timestamp_not_before_job(&job, &timestamp, false) {
+            return Err(AppError::GenerationJobInvalidTransition.into());
+        }
+        let request_metadata_before: String = tx
+            .query_row(
+                "SELECT request_metadata FROM generations WHERE id = ?1",
+                params![context.generation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| {
+                lifecycle_database_error("Read fenced success metadata failed", error)
+            })?
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?;
+
+        match commit_generation_success_projection_in_transaction(
+            &tx,
+            context,
+            request,
+            &promoted_projection,
+            &snapshot,
+            timestamp.clone(),
+        )? {
+            GenerationSuccessTransition::Completed(result) => {
+                verify_fenced_success_projection_in_transaction(
+                    &tx,
+                    context,
+                    &snapshot,
+                    &result.images,
+                    &job,
+                    &timestamp,
+                    &request_metadata_before,
+                )?;
+                let event = get_job_event_in_transaction(&tx, &context.job_id)?;
+                tx.commit().map_err(|error| {
+                    lifecycle_database_error("Commit fenced generation success failed", error)
+                })?;
+                Ok(FencedGenerationSuccessTransition::Completed {
+                    result,
+                    event: Box::new(event),
+                })
+            }
+            GenerationSuccessTransition::CancelRequested => {
+                tx.rollback().map_err(|error| {
+                    lifecycle_database_error("Rollback fenced cancelled success failed", error)
+                })?;
+                Ok(FencedGenerationSuccessTransition::CancelRequested)
+            }
+        }
+    })();
+    drop(promoted_projection);
+    match outcome {
+        Ok(completed @ FencedGenerationSuccessTransition::Completed { .. }) => {
+            promoted.disarm_cleanup();
+            Ok(completed)
+        }
+        Ok(FencedGenerationSuccessTransition::CancelRequested) => {
+            drop(promoted);
+            Ok(FencedGenerationSuccessTransition::CancelRequested)
+        }
+        Err(error) => {
+            drop(promoted);
+            Err(error)
+        }
+    }
 }
 
 fn commit_precreated_generation_success(
@@ -1893,7 +2541,7 @@ fn commit_precreated_generation_success(
     }
 }
 
-pub(crate) async fn continue_precreated_generation_after_provider(
+async fn continue_precreated_generation_after_provider(
     db: &Database,
     artifact_store: &dyn ResponseArtifactStore,
     decoder: &dyn ImageResponseDecoder,
@@ -4182,6 +4830,32 @@ mod tests {
         image_count: i64,
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct FencedTerminalProjection {
+        job_status: String,
+        job_stage: String,
+        job_finished_at: Option<String>,
+        cancel_requested_at: Option<String>,
+        last_heartbeat_at: Option<String>,
+        job_error_code: Option<String>,
+        job_error_message: Option<String>,
+        retryable: i64,
+        generation_status: String,
+        generation_error_message: Option<String>,
+        request_metadata: String,
+        recovery_count: i64,
+        recovery_state: Option<String>,
+        expected_response_file: Option<String>,
+        response_file: Option<String>,
+        response_size: Option<i64>,
+        response_sha256: Option<String>,
+        recovery_request_kind: Option<String>,
+        recovery_output_format: Option<String>,
+        recovery_created_at: Option<String>,
+        recovery_updated_at: Option<String>,
+        images: Vec<(String, String, String, i32, i32, i64, String)>,
+    }
+
     impl PrecreatedTestFixture {
         fn new(requested_image_count: u8) -> Self {
             Self::new_with_request(
@@ -4371,12 +5045,157 @@ mod tests {
                     &self.snapshot.context,
                     ProviderAttemptBody {
                         body_text: r#"{"data":[]}"#.to_string(),
-                        requested_image_count: 1,
+                        requested_image_count: self.snapshot.runtime_options.image_count,
                     },
                 )
                 .await
                 .expect("persist fenced response");
             (response_store, expected_path, authority, response)
+        }
+
+        async fn enter_response_ready(
+            &self,
+            owner_id: &str,
+            now_ms: i64,
+        ) -> (
+            FileResponseArtifactStore,
+            WorkerTransitionAuthority,
+            ProviderAttemptResponse,
+        ) {
+            let (response_store, _, authority, response) =
+                self.prepare_fenced_response(owner_id, now_ms).await;
+            promote_verified_response_fenced(
+                self.db.as_ref(),
+                &response_store,
+                &self.snapshot.context,
+                &response,
+                &authority,
+                now_ms + 1,
+            )
+            .expect("enter fixture response-ready stage");
+            (response_store, authority, response)
+        }
+
+        async fn enter_local_processing(
+            &self,
+            owner_id: &str,
+            now_ms: i64,
+        ) -> (
+            FileResponseArtifactStore,
+            WorkerTransitionAuthority,
+            ProviderAttemptResponse,
+        ) {
+            let (response_store, authority, response) =
+                self.enter_response_ready(owner_id, now_ms).await;
+            {
+                let conn = self.db.conn.lock().expect("enter local processing");
+                transition_running_job_stage_with_event(
+                    &conn,
+                    &self.snapshot.context.job_id,
+                    GenerationJobStage::ResponseReady,
+                    WorkerStageTransition::EnterLocalProcessing,
+                    &authority,
+                    now_ms + 2,
+                )
+                .expect("enter fixture local-processing stage");
+            }
+            (response_store, authority, response)
+        }
+
+        async fn promote_images(&self, image_count: usize) -> PromotedGenerationFiles {
+            LocalGenerationFileStore::new(self.file_root())
+                .stage_images(
+                    &self.snapshot,
+                    (0..image_count).map(|_| jpeg_bytes()).collect(),
+                    &CancellationProbe::new(),
+                )
+                .await
+                .expect("stage fixture images")
+                .promote()
+                .expect("promote fixture images")
+        }
+
+        fn fenced_terminal_projection(&self) -> FencedTerminalProjection {
+            let conn = self.db.conn.lock().expect("read fenced terminal state");
+            let mut projection = conn
+                .query_row(
+                    "SELECT j.status, j.stage, j.finished_at, j.cancel_requested_at,
+                            j.last_heartbeat_at, j.error_code, j.error_message, j.retryable,
+                            g.status, g.error_message, g.request_metadata,
+                            (SELECT COUNT(*) FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT request_state FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT expected_response_file FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT response_file FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT response_size FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT response_sha256 FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT request_kind FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT output_format FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT created_at FROM generation_recoveries r
+                              WHERE r.generation_id = g.id),
+                            (SELECT updated_at FROM generation_recoveries r
+                              WHERE r.generation_id = g.id)
+                       FROM generation_jobs j
+                       JOIN generations g ON g.id = j.generation_id
+                      WHERE j.id = ?1",
+                    params![self.snapshot.context.job_id],
+                    |row| {
+                        Ok(FencedTerminalProjection {
+                            job_status: row.get(0)?,
+                            job_stage: row.get(1)?,
+                            job_finished_at: row.get(2)?,
+                            cancel_requested_at: row.get(3)?,
+                            last_heartbeat_at: row.get(4)?,
+                            job_error_code: row.get(5)?,
+                            job_error_message: row.get(6)?,
+                            retryable: row.get(7)?,
+                            generation_status: row.get(8)?,
+                            generation_error_message: row.get(9)?,
+                            request_metadata: row.get(10)?,
+                            recovery_count: row.get(11)?,
+                            recovery_state: row.get(12)?,
+                            expected_response_file: row.get(13)?,
+                            response_file: row.get(14)?,
+                            response_size: row.get(15)?,
+                            response_sha256: row.get(16)?,
+                            recovery_request_kind: row.get(17)?,
+                            recovery_output_format: row.get(18)?,
+                            recovery_created_at: row.get(19)?,
+                            recovery_updated_at: row.get(20)?,
+                            images: Vec::new(),
+                        })
+                    },
+                )
+                .expect("read fenced terminal projection");
+            let mut statement = conn
+                .prepare(
+                    "SELECT id, file_path, thumbnail_path, width, height, file_size, created_at
+                       FROM images WHERE generation_id = ?1 ORDER BY id",
+                )
+                .expect("prepare fenced image projection");
+            projection.images = statement
+                .query_map(params![self.snapshot.context.generation_id], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                })
+                .expect("query fenced image projection")
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .expect("collect fenced image projection");
+            projection
         }
 
         fn assert_pristine_provider_request(&self, expected_path: &Path) {
@@ -5711,6 +6530,1521 @@ mod tests {
             Err(WorkerTransitionError::Repository(AppError::Database { .. }))
         ));
         assert_eq!(fixture.fenced_response_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_success_commits_projection_and_returns_the_committed_event() {
+        let fixture = PrecreatedTestFixture::new(2);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-success-worker", now_ms)
+            .await;
+        let file_observer = Arc::new(DbLockFileObserver::new(Arc::clone(&fixture.db)));
+        let file_observer_trait: Arc<dyn GenerationFileLifecycleObserver> = file_observer.clone();
+        let promoted = ObservedLocalFileStore {
+            root: fixture.file_root(),
+            observer: file_observer_trait,
+            path_observer: Arc::clone(&file_observer),
+        }
+        .stage_images(
+            &fixture.snapshot,
+            vec![jpeg_bytes()],
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect("stage successful fenced image")
+        .promote()
+        .expect("promote successful fenced image");
+        let promoted_paths = promoted.final_paths();
+
+        let outcome = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect("commit fenced success");
+        let (result, event) = match outcome {
+            FencedGenerationSuccessTransition::Completed { result, event } => (result, event),
+            FencedGenerationSuccessTransition::CancelRequested => {
+                panic!("uncancelled success must complete")
+            }
+        };
+
+        assert_eq!(result.generation_id, fixture.snapshot.context.generation_id);
+        assert_eq!(result.images.len(), 1);
+        assert_eq!(event.job_id, fixture.snapshot.context.job_id);
+        assert_eq!(event.status, GenerationJobStatus::Completed);
+        assert_eq!(event.stage, GenerationJobStage::Terminal);
+        assert_eq!(
+            event.finished_at.as_deref(),
+            Some(lifecycle_worker_timestamp(now_ms + 3).unwrap().as_str())
+        );
+        let projection = fixture.fenced_terminal_projection();
+        assert_eq!(projection.job_status, "completed");
+        assert_eq!(projection.job_stage, "terminal");
+        assert_eq!(projection.generation_status, "completed");
+        assert_eq!(projection.recovery_count, 0);
+        assert_eq!(projection.images.len(), 1);
+        let metadata: serde_json::Value =
+            serde_json::from_str(&projection.request_metadata).expect("parse completed metadata");
+        assert_eq!(metadata["actual_image_count"], 1);
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("reread committed success event");
+            let tx = conn
+                .unchecked_transaction()
+                .expect("begin success event read");
+            assert_eq!(
+                get_job_event_in_transaction(&tx, &event.job_id)
+                    .expect("read committed success event"),
+                *event
+            );
+            tx.commit().expect("commit success event read");
+        }
+        assert_eq!(file_observer.disarm_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.cleanup_calls.load(Ordering::SeqCst), 0);
+        assert!(file_observer.all_unlocked.load(Ordering::SeqCst));
+        assert!(promoted_paths.iter().all(|path| path.is_file()));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_success_rejects_a_valid_shape_image_rebind_and_rolls_back() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-success-image-postcheck", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        let promoted_paths = promoted.final_paths();
+        let baseline = fixture.fenced_terminal_projection();
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install image rebind trigger");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER rebind_fenced_success_images
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'completed'
+                 BEGIN
+                     UPDATE images
+                        SET file_path = '/tmp/rebound-image.png',
+                            thumbnail_path = '/tmp/rebound-thumbnail.png'
+                      WHERE generation_id = NEW.id;
+                 END;",
+            )
+            .expect("install image rebind trigger");
+        }
+
+        let error = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect_err("post-write image rebinding must prevent commit and event");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_success_rejects_semantic_job_rewrite_and_rolls_back() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-success-job-postcheck", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        let promoted_paths = promoted.final_paths();
+        let baseline = fixture.fenced_terminal_projection();
+        {
+            let conn = fixture.db.conn.lock().expect("install job rewrite trigger");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER rewrite_fenced_success_job
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'completed'
+                 BEGIN
+                     UPDATE generation_jobs
+                        SET auto_attempt = 1
+                      WHERE generation_id = NEW.id;
+                 END;",
+            )
+            .expect("install job rewrite trigger");
+        }
+
+        let error = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect_err("semantic job rewrite must prevent commit and event");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_cancel_first_is_typed_then_cleans_files_before_acknowledgement() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-cancel-first-worker", now_ms)
+            .await;
+        let file_observer = Arc::new(DbLockFileObserver::new(Arc::clone(&fixture.db)));
+        let file_observer_trait: Arc<dyn GenerationFileLifecycleObserver> = file_observer.clone();
+        let promoted = ObservedLocalFileStore {
+            root: fixture.file_root(),
+            observer: file_observer_trait,
+            path_observer: Arc::clone(&file_observer),
+        }
+        .stage_images(
+            &fixture.snapshot,
+            vec![jpeg_bytes()],
+            &CancellationProbe::new(),
+        )
+        .await
+        .expect("stage cancel-first image")
+        .promote()
+        .expect("promote cancel-first image");
+        let promoted_paths = promoted.final_paths();
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("persist cancel-first request");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("request durable cancellation");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+
+        let outcome = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect("cancel-first is a typed fenced outcome");
+        assert!(matches!(
+            outcome,
+            FencedGenerationSuccessTransition::CancelRequested
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+
+        assert_eq!(file_observer.promote_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(file_observer.disarm_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(file_observer.cleanup_calls.load(Ordering::SeqCst), 1);
+        assert!(file_observer.all_unlocked.load(Ordering::SeqCst));
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+
+        let event = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority,
+            now_ms + 4,
+        )
+        .expect("acknowledge cancellation after promoted-file cleanup");
+        assert_eq!(event.status, GenerationJobStatus::Cancelled);
+        assert_eq!(event.stage, GenerationJobStage::Terminal);
+        assert_eq!(event.error_code.as_deref(), Some("cancelled_by_user"));
+        let projection = fixture.fenced_terminal_projection();
+        assert_eq!(projection.job_status, "cancelled");
+        assert_eq!(projection.generation_status, "cancelled");
+        assert_eq!(projection.recovery_count, 0);
+        assert!(projection.images.is_empty());
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_success_requires_local_processing_and_monotonic_heartbeat() {
+        let response_ready = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = response_ready
+            .enter_response_ready("fenced-success-stage", now_ms)
+            .await;
+        let promoted = response_ready.promote_images(1).await;
+        let baseline = response_ready.fenced_terminal_projection();
+        let error = commit_generation_success_fenced(
+            response_ready.db.as_ref(),
+            &response_ready.snapshot.context,
+            &response_ready.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 2,
+        )
+        .expect_err("response-ready must explicitly enter local processing");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(response_ready.fenced_terminal_projection(), baseline);
+        response_ready.cleanup();
+
+        let future_heartbeat = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = future_heartbeat
+            .enter_local_processing("fenced-success-future-heartbeat", now_ms)
+            .await;
+        let promoted = future_heartbeat.promote_images(1).await;
+        {
+            let conn = future_heartbeat
+                .db
+                .conn
+                .lock()
+                .expect("install future job heartbeat");
+            conn.execute(
+                "UPDATE generation_jobs SET last_heartbeat_at = ?1 WHERE id = ?2",
+                params![
+                    lifecycle_worker_timestamp(now_ms + 10_000).unwrap(),
+                    future_heartbeat.snapshot.context.job_id
+                ],
+            )
+            .expect("install future job heartbeat");
+        }
+        let baseline = future_heartbeat.fenced_terminal_projection();
+        let error = commit_generation_success_fenced(
+            future_heartbeat.db.as_ref(),
+            &future_heartbeat.snapshot.context,
+            &future_heartbeat.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect_err("success must not finish before the persisted heartbeat");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(future_heartbeat.fenced_terminal_projection(), baseline);
+        future_heartbeat.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_success_checks_exact_expiry_before_corrupt_recovery() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-success-expiry", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        {
+            let conn = fixture.db.conn.lock().expect("corrupt fenced recovery");
+            conn.execute(
+                "UPDATE generation_recoveries SET response_sha256 = 'not-a-hash'
+                  WHERE generation_id = ?1",
+                params![fixture.snapshot.context.generation_id],
+            )
+            .expect("corrupt fenced recovery");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+
+        let error = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 100,
+        )
+        .expect_err("authority is stale at exact expiry before repository reads");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_rejects_finished_time_before_recovery_update() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-terminal-future-recovery", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install future recovery timestamp");
+            conn.execute(
+                "UPDATE generation_recoveries SET updated_at = ?1 WHERE generation_id = ?2",
+                params![
+                    lifecycle_worker_timestamp(now_ms + 10_000).unwrap(),
+                    fixture.snapshot.context.generation_id
+                ],
+            )
+            .expect("install future recovery timestamp");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+
+        let error = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect_err("terminal time cannot precede recovery updated_at");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_stale_success_cleans_only_its_files_then_takeover_commits_once() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority_a, _response) = fixture
+            .enter_local_processing("fenced-success-worker-a", now_ms)
+            .await;
+        let promoted_a = fixture.promote_images(1).await;
+        let paths_a = promoted_a.final_paths();
+        let authority_b = {
+            let conn = fixture.db.conn.lock().expect("acquire takeover worker");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-success-worker-b", now_ms + 100)
+        };
+        let baseline = fixture.fenced_terminal_projection();
+
+        let stale_error = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted_a,
+            &authority_a,
+            now_ms + 101,
+        )
+        .expect_err("stale success owner must be fenced");
+        assert!(matches!(
+            stale_error,
+            WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert!(paths_a.iter().all(|path| !path.exists()));
+
+        let promoted_b = fixture.promote_images(1).await;
+        let paths_b = promoted_b.final_paths();
+        let outcome = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted_b,
+            &authority_b,
+            now_ms + 101,
+        )
+        .expect("takeover owner uniquely commits success");
+        assert!(matches!(
+            outcome,
+            FencedGenerationSuccessTransition::Completed { .. }
+        ));
+        assert!(paths_b.iter().all(|path| path.is_file()));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_completion_is_idempotently_immutable_to_duplicate_and_late_cancel() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-completion-first", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        )
+        .expect("commit completion before cancellation");
+        let baseline = fixture.fenced_terminal_projection();
+
+        let duplicate_promoted = fixture.promote_images(1).await;
+        let duplicate = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            duplicate_promoted,
+            &authority,
+            now_ms + 4,
+        );
+        assert!(matches!(
+            duplicate,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        let cancel_ack = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority,
+            now_ms + 4,
+        );
+        assert!(matches!(
+            cancel_ack,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        {
+            let conn = fixture.db.conn.lock().expect("reject late cancel request");
+            assert!(request_cancel(&conn, &fixture.snapshot.context.job_id).is_err());
+        }
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_local_failure_preserves_exact_response_and_returns_committed_event() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-local-failure-worker", now_ms)
+            .await;
+        let before = fixture.fenced_terminal_projection();
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "must never be persisted".to_string(),
+            stage: "response_decode".to_string(),
+        };
+
+        let event = finalize_generation_failure_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            now_ms + 3,
+        )
+        .expect("commit fenced local failure");
+
+        assert_eq!(event.status, GenerationJobStatus::Failed);
+        assert_eq!(event.stage, GenerationJobStage::Terminal);
+        assert_eq!(event.error_code.as_deref(), Some("response_decode_failed"));
+        assert_eq!(
+            event.error_message.as_deref(),
+            Some("The provider response could not be decoded")
+        );
+        let after = fixture.fenced_terminal_projection();
+        assert_eq!(after.job_status, "failed");
+        assert_eq!(after.generation_status, "failed");
+        assert_eq!(after.recovery_count, 1);
+        assert_eq!(after.recovery_state, before.recovery_state);
+        assert_eq!(after.expected_response_file, before.expected_response_file);
+        assert_eq!(after.response_file, before.response_file);
+        assert_eq!(after.response_size, before.response_size);
+        assert_eq!(after.response_sha256, before.response_sha256);
+        assert!(after.images.is_empty());
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("reread committed failure event");
+            let tx = conn
+                .unchecked_transaction()
+                .expect("begin failure event read");
+            assert_eq!(
+                get_job_event_in_transaction(&tx, &event.job_id)
+                    .expect("read committed failure event"),
+                event
+            );
+            tx.commit().expect("commit failure event read");
+        }
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_failure_accepts_only_its_explicit_stage_recovery_matrix() {
+        let preparing = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let authority = {
+            let conn = preparing
+                .db
+                .conn
+                .lock()
+                .expect("acquire preparing failure worker");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-failure-preparing", now_ms)
+        };
+        let error = GenerationExecutionError::Local {
+            code: "provider_configuration_invalid".to_string(),
+            sanitized_message: "configuration failed".to_string(),
+            stage: "provider_credentials".to_string(),
+        };
+        let event = finalize_generation_failure_fenced(
+            preparing.db.as_ref(),
+            &preparing.snapshot.context,
+            &error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "provider_configuration_invalid".to_string(),
+                retryable: false,
+                preserve_response_ready: false,
+            },
+            &authority,
+            now_ms + 1,
+        )
+        .expect("preparing failure deletes requesting recovery");
+        assert_eq!(event.status, GenerationJobStatus::Failed);
+        assert_eq!(preparing.fenced_terminal_projection().recovery_count, 0);
+        preparing.cleanup();
+
+        let provider = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let expected_path = provider
+            .response_store()
+            .expected_response_path(&provider.snapshot.context)
+            .expect("derive provider failure path");
+        let authority =
+            provider.enter_provider_request("fenced-failure-provider", now_ms, expected_path);
+        let error = GenerationExecutionError::Local {
+            code: "provider_unavailable".to_string(),
+            sanitized_message: "provider failed".to_string(),
+            stage: "provider_request".to_string(),
+        };
+        finalize_generation_failure_fenced(
+            provider.db.as_ref(),
+            &provider.snapshot.context,
+            &error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "provider_unavailable".to_string(),
+                retryable: true,
+                preserve_response_ready: false,
+            },
+            &authority,
+            now_ms + 1,
+        )
+        .expect("provider failure deletes requesting recovery");
+        assert_eq!(provider.fenced_terminal_projection().recovery_count, 0);
+        provider.cleanup();
+
+        let response_ready = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = response_ready
+            .enter_response_ready("fenced-failure-response-ready", now_ms)
+            .await;
+        let error = GenerationExecutionError::Local {
+            code: "recovery_failed".to_string(),
+            sanitized_message: "artifact unusable".to_string(),
+            stage: "response_artifact".to_string(),
+        };
+        finalize_generation_failure_fenced(
+            response_ready.db.as_ref(),
+            &response_ready.snapshot.context,
+            &error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "recovery_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: false,
+            },
+            &authority,
+            now_ms + 2,
+        )
+        .expect("unusable response-ready artifact may be discarded terminally");
+        assert_eq!(
+            response_ready.fenced_terminal_projection().recovery_count,
+            0
+        );
+        response_ready.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_failure_rejects_retry_backoff_and_mismatched_preservation() {
+        let retry = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let expected_path = retry
+            .response_store()
+            .expected_response_path(&retry.snapshot.context)
+            .expect("derive retry failure path");
+        let authority =
+            retry.enter_provider_request("fenced-failure-retry-backoff", now_ms, expected_path);
+        {
+            let conn = retry.db.conn.lock().expect("enter failure retry backoff");
+            transition_running_job_stage_with_event(
+                &conn,
+                &retry.snapshot.context.job_id,
+                GenerationJobStage::ProviderRequest,
+                WorkerStageTransition::EnterRetryBackoff,
+                &authority,
+                now_ms + 1,
+            )
+            .expect("enter retry backoff");
+        }
+        let baseline = retry.fenced_terminal_projection();
+        let error = GenerationExecutionError::Local {
+            code: "provider_unavailable".to_string(),
+            sanitized_message: "provider failed".to_string(),
+            stage: "provider_request".to_string(),
+        };
+        let rejected = finalize_generation_failure_fenced(
+            retry.db.as_ref(),
+            &retry.snapshot.context,
+            &error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "provider_unavailable".to_string(),
+                retryable: true,
+                preserve_response_ready: false,
+            },
+            &authority,
+            now_ms + 2,
+        );
+        assert!(matches!(
+            rejected,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        assert_eq!(retry.fenced_terminal_projection(), baseline);
+        retry.cleanup();
+
+        let local = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = local
+            .enter_local_processing("fenced-failure-local-discard", now_ms)
+            .await;
+        let baseline = local.fenced_terminal_projection();
+        let rejected = finalize_generation_failure_fenced(
+            local.db.as_ref(),
+            &local.snapshot.context,
+            &GenerationExecutionError::Local {
+                code: "response_decode_failed".to_string(),
+                sanitized_message: "decode failed".to_string(),
+                stage: "response_decode".to_string(),
+            },
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: false,
+            },
+            &authority,
+            now_ms + 3,
+        );
+        assert!(matches!(
+            rejected,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        assert_eq!(local.fenced_terminal_projection(), baseline);
+        local.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_failure_rejects_semantic_preserved_recovery_rewrite() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-failure-recovery-postcheck", now_ms)
+            .await;
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install preserved recovery rewrite");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER rewrite_fenced_failure_recovery
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'failed'
+                 BEGIN
+                     UPDATE generation_recoveries
+                        SET output_format = 'jpeg'
+                      WHERE generation_id = NEW.id;
+                 END;",
+            )
+            .expect("install preserved recovery rewrite");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+
+        let error = finalize_generation_failure_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            now_ms + 3,
+        )
+        .expect_err("semantic preserved-recovery rewrite must prevent commit and event");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_failure_rejects_semantic_error_rewrite_and_deleted_recovery_reinsert()
+    {
+        let error_rewrite = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = error_rewrite
+            .enter_local_processing("fenced-failure-error-postcheck", now_ms)
+            .await;
+        {
+            let conn = error_rewrite
+                .db
+                .conn
+                .lock()
+                .expect("install failure error rewrite");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER rewrite_fenced_failure_error
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'failed'
+                 BEGIN
+                     UPDATE generation_jobs
+                        SET error_code = 'provider_unavailable',
+                            error_message = 'The provider is temporarily unavailable'
+                      WHERE generation_id = NEW.id;
+                 END;",
+            )
+            .expect("install failure error rewrite");
+        }
+        let baseline = error_rewrite.fenced_terminal_projection();
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+        let result = finalize_generation_failure_fenced(
+            error_rewrite.db.as_ref(),
+            &error_rewrite.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            now_ms + 3,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobCorruptPersistedData
+            ))
+        ));
+        assert_eq!(error_rewrite.fenced_terminal_projection(), baseline);
+        error_rewrite.cleanup();
+
+        let reinsert = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = reinsert
+            .enter_response_ready("fenced-failure-reinsert-postcheck", now_ms)
+            .await;
+        {
+            let conn = reinsert
+                .db
+                .conn
+                .lock()
+                .expect("install failure recovery reinsert");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER reinsert_fenced_failure_recovery
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'failed'
+                 BEGIN
+                     INSERT INTO generation_recoveries (
+                         generation_id, request_kind, request_state, output_format,
+                         response_file, created_at, updated_at
+                     ) VALUES (
+                         NEW.id, NEW.request_kind, 'requesting', NEW.output_format,
+                         NULL, NEW.created_at, NEW.created_at
+                     );
+                 END;",
+            )
+            .expect("install failure recovery reinsert");
+        }
+        let baseline = reinsert.fenced_terminal_projection();
+        let execution_error = GenerationExecutionError::Local {
+            code: "recovery_failed".to_string(),
+            sanitized_message: "recovery failed".to_string(),
+            stage: "response_artifact".to_string(),
+        };
+        let result = finalize_generation_failure_fenced(
+            reinsert.db.as_ref(),
+            &reinsert.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "recovery_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: false,
+            },
+            &authority,
+            now_ms + 2,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobCorruptPersistedData
+            ))
+        ));
+        assert_eq!(reinsert.fenced_terminal_projection(), baseline);
+        reinsert.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_failure_rejects_future_heartbeat_and_exact_expiry_without_mutation() {
+        let future = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = future
+            .enter_local_processing("fenced-failure-future-heartbeat", now_ms)
+            .await;
+        {
+            let conn = future
+                .db
+                .conn
+                .lock()
+                .expect("install future failure heartbeat");
+            conn.execute(
+                "UPDATE generation_jobs SET last_heartbeat_at = ?1 WHERE id = ?2",
+                params![
+                    lifecycle_worker_timestamp(now_ms + 10_000).unwrap(),
+                    future.snapshot.context.job_id
+                ],
+            )
+            .expect("install future failure heartbeat");
+        }
+        let baseline = future.fenced_terminal_projection();
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+        let result = finalize_generation_failure_fenced(
+            future.db.as_ref(),
+            &future.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            now_ms + 3,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        assert_eq!(future.fenced_terminal_projection(), baseline);
+        future.cleanup();
+
+        let expiry = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = expiry
+            .enter_local_processing("fenced-failure-expiry", now_ms)
+            .await;
+        {
+            let conn = expiry.db.conn.lock().expect("corrupt expiry recovery");
+            conn.execute(
+                "UPDATE generation_recoveries SET response_sha256 = 'not-a-hash'
+                  WHERE generation_id = ?1",
+                params![expiry.snapshot.context.generation_id],
+            )
+            .expect("corrupt expiry recovery");
+        }
+        let baseline = expiry.fenced_terminal_projection();
+        let result = finalize_generation_failure_fenced(
+            expiry.db.as_ref(),
+            &expiry.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            now_ms + 100,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+        ));
+        assert_eq!(expiry.fenced_terminal_projection(), baseline);
+        expiry.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_stale_failure_is_side_effect_free_then_takeover_commits_once() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority_a, _response) = fixture
+            .enter_local_processing("fenced-failure-worker-a", now_ms)
+            .await;
+        let authority_b = {
+            let conn = fixture.db.conn.lock().expect("acquire failure takeover");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-failure-worker-b", now_ms + 100)
+        };
+        let baseline = fixture.fenced_terminal_projection();
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+        let disposition = GenerationTerminalDisposition {
+            status: GenerationJobStatus::Failed,
+            error_code: "response_decode_failed".to_string(),
+            retryable: false,
+            preserve_response_ready: true,
+        };
+
+        let stale = finalize_generation_failure_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &disposition,
+            &authority_a,
+            now_ms + 101,
+        );
+        assert!(matches!(
+            stale,
+            Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+
+        let event = finalize_generation_failure_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &disposition,
+            &authority_b,
+            now_ms + 101,
+        )
+        .expect("takeover worker uniquely commits failure");
+        assert_eq!(event.status, GenerationJobStatus::Failed);
+        let committed = fixture.fenced_terminal_projection();
+        let duplicate = finalize_generation_failure_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &disposition,
+            &authority_b,
+            now_ms + 102,
+        );
+        assert!(matches!(
+            duplicate,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), committed);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_cancel_acknowledges_only_the_explicit_running_stage_matrix() {
+        let preparing = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let authority = {
+            let conn = preparing
+                .db
+                .conn
+                .lock()
+                .expect("acquire preparing cancel worker");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-cancel-preparing", now_ms)
+        };
+        {
+            let conn = preparing.db.conn.lock().expect("request preparing cancel");
+            request_cancel(&conn, &preparing.snapshot.context.job_id)
+                .expect("persist preparing cancel");
+        }
+        acknowledge_generation_cancellation_fenced(
+            preparing.db.as_ref(),
+            &preparing.snapshot.context,
+            &authority,
+            now_ms + 1,
+        )
+        .expect("acknowledge preparing cancellation");
+        assert_eq!(preparing.fenced_terminal_projection().recovery_count, 0);
+        preparing.cleanup();
+
+        let provider = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let expected_path = provider
+            .response_store()
+            .expected_response_path(&provider.snapshot.context)
+            .expect("derive provider cancel path");
+        let authority =
+            provider.enter_provider_request("fenced-cancel-provider", now_ms, expected_path);
+        {
+            let conn = provider.db.conn.lock().expect("request provider cancel");
+            request_cancel(&conn, &provider.snapshot.context.job_id)
+                .expect("persist provider cancel");
+        }
+        acknowledge_generation_cancellation_fenced(
+            provider.db.as_ref(),
+            &provider.snapshot.context,
+            &authority,
+            now_ms + 1,
+        )
+        .expect("acknowledge provider cancellation");
+        assert_eq!(provider.fenced_terminal_projection().recovery_count, 0);
+        provider.cleanup();
+
+        let retry = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let expected_path = retry
+            .response_store()
+            .expected_response_path(&retry.snapshot.context)
+            .expect("derive retry cancel path");
+        let authority = retry.enter_provider_request("fenced-cancel-retry", now_ms, expected_path);
+        {
+            let conn = retry.db.conn.lock().expect("enter cancel retry backoff");
+            transition_running_job_stage_with_event(
+                &conn,
+                &retry.snapshot.context.job_id,
+                GenerationJobStage::ProviderRequest,
+                WorkerStageTransition::EnterRetryBackoff,
+                &authority,
+                now_ms + 1,
+            )
+            .expect("enter cancel retry backoff");
+            request_cancel(&conn, &retry.snapshot.context.job_id)
+                .expect("persist retry cancellation");
+        }
+        acknowledge_generation_cancellation_fenced(
+            retry.db.as_ref(),
+            &retry.snapshot.context,
+            &authority,
+            now_ms + 2,
+        )
+        .expect("acknowledge retry-backoff cancellation");
+        assert_eq!(retry.fenced_terminal_projection().recovery_count, 0);
+        retry.cleanup();
+
+        let response_ready = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = response_ready
+            .enter_response_ready("fenced-cancel-response-ready", now_ms)
+            .await;
+        {
+            let conn = response_ready
+                .db
+                .conn
+                .lock()
+                .expect("request response cancel");
+            request_cancel(&conn, &response_ready.snapshot.context.job_id)
+                .expect("persist response-ready cancellation");
+        }
+        acknowledge_generation_cancellation_fenced(
+            response_ready.db.as_ref(),
+            &response_ready.snapshot.context,
+            &authority,
+            now_ms + 2,
+        )
+        .expect("acknowledge response-ready cancellation");
+        assert_eq!(
+            response_ready.fenced_terminal_projection().recovery_count,
+            0
+        );
+        response_ready.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_cancel_requires_request_and_monotonic_cancel_timestamp() {
+        let missing_request = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let authority = {
+            let conn = missing_request
+                .db
+                .conn
+                .lock()
+                .expect("acquire missing-cancel worker");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-cancel-missing", now_ms)
+        };
+        let baseline = missing_request.fenced_terminal_projection();
+        let error = acknowledge_generation_cancellation_fenced(
+            missing_request.db.as_ref(),
+            &missing_request.snapshot.context,
+            &authority,
+            now_ms + 1,
+        )
+        .expect_err("worker cannot invent a cancellation request");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(missing_request.fenced_terminal_projection(), baseline);
+        missing_request.cleanup();
+
+        let future_cancel = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = future_cancel
+            .enter_local_processing("fenced-cancel-future", now_ms)
+            .await;
+        {
+            let conn = future_cancel.db.conn.lock().expect("install future cancel");
+            request_cancel(&conn, &future_cancel.snapshot.context.job_id)
+                .expect("persist cancellation before future mutation");
+            conn.execute(
+                "UPDATE generation_jobs SET cancel_requested_at = ?1 WHERE id = ?2",
+                params![
+                    lifecycle_worker_timestamp(now_ms + 10_000).unwrap(),
+                    future_cancel.snapshot.context.job_id
+                ],
+            )
+            .expect("install future cancellation timestamp");
+        }
+        let baseline = future_cancel.fenced_terminal_projection();
+        let error = acknowledge_generation_cancellation_fenced(
+            future_cancel.db.as_ref(),
+            &future_cancel.snapshot.context,
+            &authority,
+            now_ms + 3,
+        )
+        .expect_err("cancel ack cannot finish before its durable request");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobInvalidTransition)
+        ));
+        assert_eq!(future_cancel.fenced_terminal_projection(), baseline);
+        future_cancel.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_stale_cancel_is_side_effect_free_then_takeover_acknowledges_once() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority_a, _response) = fixture
+            .enter_response_ready("fenced-cancel-worker-a", now_ms)
+            .await;
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("request takeover cancellation");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("persist takeover cancellation");
+        }
+        let authority_b = {
+            let conn = fixture.db.conn.lock().expect("acquire cancel takeover");
+            PrecreatedTestFixture::acquire_worker(&conn, "fenced-cancel-worker-b", now_ms + 100)
+        };
+        let baseline = fixture.fenced_terminal_projection();
+
+        let stale = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority_a,
+            now_ms + 101,
+        )
+        .expect_err("stale cancellation owner must be fenced");
+        assert!(matches!(
+            stale,
+            WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+
+        let event = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority_b,
+            now_ms + 101,
+        )
+        .expect("takeover owner acknowledges cancellation once");
+        assert_eq!(event.status, GenerationJobStatus::Cancelled);
+        let committed = fixture.fenced_terminal_projection();
+        let duplicate = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority_b,
+            now_ms + 102,
+        );
+        assert!(matches!(
+            duplicate,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobInvalidTransition
+            ))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), committed);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_cancel_rejects_semantic_job_rewrite_and_rolls_back() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = fixture
+            .enter_response_ready("fenced-cancel-job-postcheck", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("request semantic cancel");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("persist semantic cancellation");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER rewrite_fenced_cancel_job
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'cancelled'
+                 BEGIN
+                     UPDATE generation_jobs
+                        SET auto_attempt = 1
+                      WHERE generation_id = NEW.id;
+                 END;",
+            )
+            .expect("install cancel job rewrite trigger");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+
+        let error = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority,
+            now_ms + 2,
+        )
+        .expect_err("semantic cancel job rewrite must prevent commit and event");
+        assert!(matches!(
+            error,
+            WorkerTransitionError::Repository(AppError::GenerationJobCorruptPersistedData)
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_cancel_rejects_deleted_recovery_reinsert_and_rolls_back() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = fixture
+            .enter_response_ready("fenced-cancel-reinsert-postcheck", now_ms)
+            .await;
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install cancel reinsert trigger");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("persist reinsert cancellation");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER reinsert_fenced_cancel_recovery
+                 AFTER UPDATE OF status ON generations
+                 WHEN NEW.status = 'cancelled'
+                 BEGIN
+                     INSERT INTO generation_recoveries (
+                         generation_id, request_kind, request_state, output_format,
+                         response_file, created_at, updated_at
+                     ) VALUES (
+                         NEW.id, NEW.request_kind, 'requesting', NEW.output_format,
+                         NULL, NEW.created_at, NEW.created_at
+                     );
+                 END;",
+            )
+            .expect("install cancel recovery reinsert trigger");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+
+        let result = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority,
+            now_ms + 2,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(
+                AppError::GenerationJobCorruptPersistedData
+            ))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_success_commit_failure_rolls_back_every_projection_without_event() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-success-commit-fault", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        let promoted_paths = promoted.final_paths();
+        let baseline = fixture.fenced_terminal_projection();
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install success commit fault");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_fenced_success_at_commit
+                 AFTER UPDATE OF status ON generation_jobs
+                 WHEN NEW.status = 'completed'
+                 BEGIN
+                     INSERT INTO images (id, generation_id, file_path)
+                     VALUES ('fenced-success-invalid-image', 'missing-generation', '/tmp/invalid.png');
+                 END;
+                 PRAGMA defer_foreign_keys=ON;",
+            )
+            .expect("install success deferred commit fault");
+        }
+
+        let result = commit_generation_success_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &fixture.snapshot.request,
+            promoted,
+            &authority,
+            now_ms + 3,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(AppError::Database { .. }))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert_eq!(fixture.row_count("images"), 0);
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_failure_commit_failure_rolls_back_every_projection_without_event() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = fixture
+            .enter_local_processing("fenced-failure-commit-fault", now_ms)
+            .await;
+        let baseline = fixture.fenced_terminal_projection();
+        {
+            let conn = fixture
+                .db
+                .conn
+                .lock()
+                .expect("install failure commit fault");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_fenced_failure_at_commit
+                 AFTER UPDATE OF status ON generation_jobs
+                 WHEN NEW.status = 'failed'
+                 BEGIN
+                     INSERT INTO images (id, generation_id, file_path)
+                     VALUES ('fenced-failure-invalid-image', 'missing-generation', '/tmp/invalid.png');
+                 END;
+                 PRAGMA defer_foreign_keys=ON;",
+            )
+            .expect("install failure deferred commit fault");
+        }
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+
+        let result = finalize_generation_failure_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            now_ms + 3,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(AppError::Database { .. }))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert_eq!(fixture.row_count("images"), 0);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_terminal_cancel_commit_failure_rolls_back_every_projection_without_event() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = fixture
+            .enter_response_ready("fenced-cancel-commit-fault", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("install cancel commit fault");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("persist commit-fault cancellation");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER fail_fenced_cancel_at_commit
+                 AFTER UPDATE OF status ON generation_jobs
+                 WHEN NEW.status = 'cancelled'
+                 BEGIN
+                     INSERT INTO images (id, generation_id, file_path)
+                     VALUES ('fenced-cancel-invalid-image', 'missing-generation', '/tmp/invalid.png');
+                 END;
+                 PRAGMA defer_foreign_keys=ON;",
+            )
+            .expect("install cancel deferred commit fault");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+
+        let result = acknowledge_generation_cancellation_fenced(
+            fixture.db.as_ref(),
+            &fixture.snapshot.context,
+            &authority,
+            now_ms + 2,
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Repository(AppError::Database { .. }))
+        ));
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert_eq!(fixture.row_count("images"), 0);
         fixture.cleanup();
     }
 
