@@ -2638,8 +2638,32 @@ pub(crate) fn transition_running_job_stage_with_event(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<GenerationJobTransition<GenerationJob>, WorkerTransitionError> {
-    let timestamp = canonical_worker_timestamp(now_ms)?;
+    transition_running_job_stage_with_event_with_transaction_time(
+        conn,
+        job_id,
+        expected_stage,
+        transition,
+        authority,
+        || now_ms,
+    )
+}
+
+/// Samples worker time exactly once after the immediate transaction is held.
+/// `now` must not access the database.
+pub(crate) fn transition_running_job_stage_with_event_with_transaction_time<Now>(
+    conn: &Connection,
+    job_id: &str,
+    expected_stage: GenerationJobStage,
+    transition: WorkerStageTransition,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJobTransition<GenerationJob>, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    let timestamp = canonical_worker_timestamp(now_ms)?;
     assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
     let current = get_job_in_transaction(&tx, job_id)?;
     if current.status != GenerationJobStatus::Running || current.stage != expected_stage {
@@ -2739,8 +2763,24 @@ pub(crate) fn heartbeat_running_job(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<GenerationJob, WorkerTransitionError> {
-    let timestamp = canonical_worker_timestamp(now_ms)?;
+    heartbeat_running_job_with_transaction_time(conn, job_id, expected_stage, authority, || now_ms)
+}
+
+/// Samples worker time exactly once after the immediate transaction is held.
+/// `now` must not access the database.
+pub(crate) fn heartbeat_running_job_with_transaction_time<Now>(
+    conn: &Connection,
+    job_id: &str,
+    expected_stage: GenerationJobStage,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJob, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    let timestamp = canonical_worker_timestamp(now_ms)?;
     assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
     let updated = tx
         .execute(
@@ -2884,8 +2924,30 @@ pub(crate) fn reserve_automatic_retry_with_event(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<GenerationJobTransition<GenerationJob>, WorkerTransitionError> {
-    let timestamp = canonical_worker_timestamp(now_ms)?;
+    reserve_automatic_retry_with_event_with_transaction_time(
+        conn,
+        job_id,
+        expected_auto_attempt,
+        authority,
+        || now_ms,
+    )
+}
+
+/// Samples worker time exactly once after the immediate transaction is held.
+/// `now` must not access the database.
+pub(crate) fn reserve_automatic_retry_with_event_with_transaction_time<Now>(
+    conn: &Connection,
+    job_id: &str,
+    expected_auto_attempt: i32,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJobTransition<GenerationJob>, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    let timestamp = canonical_worker_timestamp(now_ms)?;
     assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
     let current = get_job_in_transaction(&tx, job_id)?;
     if current.status != GenerationJobStatus::Running

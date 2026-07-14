@@ -1500,15 +1500,40 @@ fn promote_verified_response_fenced_with_optional_observer(
     now_ms: i64,
     observer: Option<&dyn ResponseVerificationObserver>,
 ) -> Result<GenerationJobEvent, WorkerTransitionError> {
+    promote_verified_response_fenced_with_optional_observer_and_transaction_time(
+        db,
+        artifact_store,
+        context,
+        response,
+        authority,
+        || now_ms,
+        observer,
+    )
+}
+
+fn promote_verified_response_fenced_with_optional_observer_and_transaction_time<Now>(
+    db: &Database,
+    artifact_store: &FileResponseArtifactStore,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+    observer: Option<&dyn ResponseVerificationObserver>,
+) -> Result<GenerationJobEvent, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let response =
         VerifiedResponseCommit::verify_with_store(context, artifact_store, response, observer)?;
-    let timestamp = lifecycle_worker_timestamp(now_ms)?;
     let response_size = i64::try_from(response.response_size)
         .map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
     let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
     let tx = begin_generation_job_write_transaction(&mut conn)?;
+    let now_ms = now();
+    let timestamp = lifecycle_worker_timestamp(now_ms)?;
 
-    // This must remain the first database operation after BEGIN IMMEDIATE.
+    // This must remain the first database operation after BEGIN IMMEDIATE and
+    // the side-effect-free transaction-time sample.
     assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
 
     let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
@@ -1636,15 +1661,39 @@ pub(crate) fn promote_verified_response_fenced(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<GenerationJobEvent, WorkerTransitionError> {
-    // The production adapter must pass its managed app-owned store. Unlike the
-    // compatibility API, this fenced path never accepts a caller-selected path.
-    promote_verified_response_fenced_with_optional_observer(
+    promote_verified_response_fenced_with_transaction_time(
         db,
         artifact_store,
         context,
         response,
         authority,
-        now_ms,
+        || now_ms,
+    )
+}
+
+/// Verifies the response artifact without holding the database lock, then
+/// samples worker time exactly once after the immediate write transaction is
+/// held and before the first authority read.
+pub(crate) fn promote_verified_response_fenced_with_transaction_time<Now>(
+    db: &Database,
+    artifact_store: &FileResponseArtifactStore,
+    context: &GenerationExecutionContext,
+    response: &ProviderAttemptResponse,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJobEvent, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
+    // The production adapter must pass its managed app-owned store. Unlike the
+    // compatibility API, this fenced path never accepts a caller-selected path.
+    promote_verified_response_fenced_with_optional_observer_and_transaction_time(
+        db,
+        artifact_store,
+        context,
+        response,
+        authority,
+        now,
         None,
     )
 }
@@ -1740,6 +1789,29 @@ pub(crate) fn finalize_generation_failure_fenced(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<GenerationJobEvent, WorkerTransitionError> {
+    finalize_generation_failure_fenced_with_transaction_time(
+        db,
+        context,
+        error,
+        disposition,
+        authority,
+        || now_ms,
+    )
+}
+
+/// Samples worker time exactly once after the immediate write transaction is
+/// held, while preserving the terminal projection's existing rollback rules.
+pub(crate) fn finalize_generation_failure_fenced_with_transaction_time<Now>(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    error: &GenerationExecutionError,
+    disposition: &GenerationTerminalDisposition,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJobEvent, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     if error.code() != disposition.error_code
         || !matches!(
             disposition.status,
@@ -1748,12 +1820,14 @@ pub(crate) fn finalize_generation_failure_fenced(
     {
         return Err(AppError::GenerationJobInvalidSnapshot.into());
     }
-    let timestamp = lifecycle_worker_timestamp(now_ms)?;
     let event = {
         let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
         let tx = begin_generation_job_write_transaction(&mut conn)?;
+        let now_ms = now();
+        let timestamp = lifecycle_worker_timestamp(now_ms)?;
 
-        // This must remain the first database operation after BEGIN IMMEDIATE.
+        // This must remain the first database operation after BEGIN IMMEDIATE
+        // and the side-effect-free transaction-time sample.
         assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
 
         let job = get_job_in_transaction(&tx, &context.job_id)?;
@@ -2167,12 +2241,30 @@ pub(crate) fn acknowledge_generation_cancellation_fenced(
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<GenerationJobEvent, WorkerTransitionError> {
-    let timestamp = lifecycle_worker_timestamp(now_ms)?;
+    acknowledge_generation_cancellation_fenced_with_transaction_time(db, context, authority, || {
+        now_ms
+    })
+}
+
+/// Samples worker time exactly once after the immediate write transaction is
+/// held and before cancellation authority or durable job state is read.
+pub(crate) fn acknowledge_generation_cancellation_fenced_with_transaction_time<Now>(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<GenerationJobEvent, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let event = {
         let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
         let tx = begin_generation_job_write_transaction(&mut conn)?;
+        let now_ms = now();
+        let timestamp = lifecycle_worker_timestamp(now_ms)?;
 
-        // This must remain the first database operation after BEGIN IMMEDIATE.
+        // This must remain the first database operation after BEGIN IMMEDIATE
+        // and the side-effect-free transaction-time sample.
         assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
 
         let job = get_job_in_transaction(&tx, &context.job_id)?;
@@ -2415,18 +2507,43 @@ pub(crate) fn commit_generation_success_fenced(
     db: &Database,
     context: &GenerationExecutionContext,
     request: &GenerationJobRequest,
-    mut promoted: PromotedGenerationFiles,
+    promoted: PromotedGenerationFiles,
     authority: &WorkerTransitionAuthority,
     now_ms: i64,
 ) -> Result<FencedGenerationSuccessTransition, WorkerTransitionError> {
+    commit_generation_success_fenced_with_transaction_time(
+        db,
+        context,
+        request,
+        promoted,
+        authority,
+        || now_ms,
+    )
+}
+
+/// Keeps promoted-file ownership and cleanup outside the database lock while
+/// sampling worker time exactly once after the immediate transaction is held.
+pub(crate) fn commit_generation_success_fenced_with_transaction_time<Now>(
+    db: &Database,
+    context: &GenerationExecutionContext,
+    request: &GenerationJobRequest,
+    mut promoted: PromotedGenerationFiles,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<FencedGenerationSuccessTransition, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
     let promoted_projection =
         PromotedImageCommit::from_promoted(&promoted, &context.generation_id)?;
-    let timestamp = lifecycle_worker_timestamp(now_ms)?;
     let outcome = (|| -> Result<FencedGenerationSuccessTransition, WorkerTransitionError> {
         let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
         let tx = begin_generation_job_write_transaction(&mut conn)?;
+        let now_ms = now();
+        let timestamp = lifecycle_worker_timestamp(now_ms)?;
 
-        // This must remain the first database operation after BEGIN IMMEDIATE.
+        // This must remain the first database operation after BEGIN IMMEDIATE
+        // and the side-effect-free transaction-time sample.
         assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
 
         let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
@@ -3292,8 +3409,8 @@ mod tests {
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
     use std::io::Cursor;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc, Barrier, Mutex};
     use std::time::Duration;
 
     fn fixture_execution_context() -> GenerationExecutionContext {
@@ -5241,6 +5358,107 @@ mod tests {
         }
     }
 
+    fn sample_transaction_time_while_local_database_is_locked(
+        db: &Database,
+        db_path: &Path,
+        calls: &AtomicUsize,
+        now_ms: i64,
+    ) -> i64 {
+        assert!(matches!(
+            db.conn.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ));
+        let probe = rusqlite::Connection::open(db_path)
+            .expect("open transaction-time write-lock probe connection");
+        probe
+            .busy_timeout(Duration::ZERO)
+            .expect("disable transaction-time write-lock probe wait");
+        match rusqlite::Transaction::new_unchecked(&probe, rusqlite::TransactionBehavior::Immediate)
+        {
+            Err(rusqlite::Error::SqliteFailure(code, _))
+                if matches!(
+                    code.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                ) => {}
+            Ok(tx) => {
+                drop(tx);
+                panic!("transaction-time callback ran before BEGIN IMMEDIATE")
+            }
+            Err(error) => panic!("unexpected transaction-time write-lock probe error: {error}"),
+        }
+        calls.fetch_add(1, Ordering::SeqCst);
+        now_ms
+    }
+
+    fn run_after_competing_lifecycle_writer<T, Operation>(
+        db: Arc<Database>,
+        db_path: PathBuf,
+        initial_now_ms: i64,
+        transaction_now_ms: i64,
+        operation: Operation,
+    ) -> (Result<T, WorkerTransitionError>, usize)
+    where
+        T: Send + 'static,
+        Operation: FnOnce(Box<dyn FnOnce() -> i64 + Send>) -> Result<T, WorkerTransitionError>
+            + Send
+            + 'static,
+    {
+        let blocker = rusqlite::Connection::open(db_path).expect("open lifecycle writer blocker");
+        let blocker_tx = rusqlite::Transaction::new_unchecked(
+            &blocker,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .expect("hold competing lifecycle writer");
+        let barrier = Arc::new(Barrier::new(2));
+        let now_ms = Arc::new(AtomicI64::new(initial_now_ms));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (sampled_tx, sampled_rx) = mpsc::channel();
+        let worker_barrier = Arc::clone(&barrier);
+        let worker_now_ms = Arc::clone(&now_ms);
+        let worker_calls = Arc::clone(&calls);
+        let handle = std::thread::spawn(move || {
+            worker_barrier.wait();
+            operation(Box::new(move || {
+                worker_calls.fetch_add(1, Ordering::SeqCst);
+                sampled_tx
+                    .send(())
+                    .expect("signal lifecycle transaction-time sample");
+                worker_now_ms.load(Ordering::SeqCst)
+            }))
+        });
+
+        barrier.wait();
+        let lock_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match db.conn.try_lock() {
+                Ok(guard) => {
+                    drop(guard);
+                    assert!(
+                        std::time::Instant::now() < lock_deadline,
+                        "lifecycle operation never reached its database transaction"
+                    );
+                    std::thread::yield_now();
+                }
+                Err(std::sync::TryLockError::WouldBlock) => break,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    panic!("lifecycle database mutex was poisoned")
+                }
+            }
+        }
+        assert!(matches!(
+            sampled_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        now_ms.store(transaction_now_ms, Ordering::SeqCst);
+        blocker_tx
+            .commit()
+            .expect("release competing lifecycle writer");
+        let result = handle
+            .join()
+            .expect("transaction-time lifecycle thread panicked");
+        (result, calls.load(Ordering::SeqCst))
+    }
+
     enum CoreEngineOutcome {
         Success,
         Error(EngineCallError),
@@ -6007,6 +6225,314 @@ mod tests {
         assert_eq!(observer.hash_calls.load(Ordering::SeqCst), 1);
         assert_eq!(observer.metadata_calls.load(Ordering::SeqCst), 1);
         assert!(observer.all_unlocked.load(Ordering::SeqCst));
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_lifecycle_transaction_time_callbacks_run_inside_the_immediate_transaction() {
+        let calls = AtomicUsize::new(0);
+
+        let promotion = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = promotion
+            .prepare_fenced_response("transaction-time-response", now_ms)
+            .await;
+        promote_verified_response_fenced_with_transaction_time(
+            promotion.db.as_ref(),
+            &response_store,
+            &promotion.snapshot.context,
+            &response,
+            &authority,
+            || {
+                sample_transaction_time_while_local_database_is_locked(
+                    promotion.db.as_ref(),
+                    &promotion.db_path,
+                    &calls,
+                    now_ms + 1,
+                )
+            },
+        )
+        .expect("promote response with transaction time");
+        promotion.cleanup();
+
+        let failure = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = failure
+            .enter_local_processing("transaction-time-failure", now_ms)
+            .await;
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+        finalize_generation_failure_fenced_with_transaction_time(
+            failure.db.as_ref(),
+            &failure.snapshot.context,
+            &execution_error,
+            &GenerationTerminalDisposition {
+                status: GenerationJobStatus::Failed,
+                error_code: "response_decode_failed".to_string(),
+                retryable: false,
+                preserve_response_ready: true,
+            },
+            &authority,
+            || {
+                sample_transaction_time_while_local_database_is_locked(
+                    failure.db.as_ref(),
+                    &failure.db_path,
+                    &calls,
+                    now_ms + 3,
+                )
+            },
+        )
+        .expect("finalize failure with transaction time");
+        failure.cleanup();
+
+        let cancellation = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, _response) = cancellation
+            .enter_response_ready("transaction-time-cancel", now_ms)
+            .await;
+        {
+            let conn = cancellation
+                .db
+                .conn
+                .lock()
+                .expect("request transaction-time cancellation");
+            request_cancel(&conn, &cancellation.snapshot.context.job_id)
+                .expect("persist transaction-time cancellation");
+        }
+        acknowledge_generation_cancellation_fenced_with_transaction_time(
+            cancellation.db.as_ref(),
+            &cancellation.snapshot.context,
+            &authority,
+            || {
+                sample_transaction_time_while_local_database_is_locked(
+                    cancellation.db.as_ref(),
+                    &cancellation.db_path,
+                    &calls,
+                    now_ms + 2,
+                )
+            },
+        )
+        .expect("acknowledge cancellation with transaction time");
+        cancellation.cleanup();
+
+        let success = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, _response) = success
+            .enter_local_processing("transaction-time-success", now_ms)
+            .await;
+        let promoted = success.promote_images(1).await;
+        let outcome = commit_generation_success_fenced_with_transaction_time(
+            success.db.as_ref(),
+            &success.snapshot.context,
+            &success.snapshot.request,
+            promoted,
+            &authority,
+            || {
+                sample_transaction_time_while_local_database_is_locked(
+                    success.db.as_ref(),
+                    &success.db_path,
+                    &calls,
+                    now_ms + 3,
+                )
+            },
+        )
+        .expect("commit success with transaction time");
+        assert!(matches!(
+            outcome,
+            FencedGenerationSuccessTransition::Completed { .. }
+        ));
+        success.cleanup();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn fenced_response_promotion_samples_expired_authority_after_competing_writer() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (response_store, _, authority, response) = fixture
+            .prepare_fenced_response("writer-wait-response", now_ms)
+            .await;
+        let baseline = fixture.fenced_response_projection();
+        let response_path = PathBuf::from(&response.response_file);
+        let response_bytes = std::fs::read(&response_path).expect("read response baseline");
+        let operation_db = Arc::clone(&fixture.db);
+        let context = fixture.snapshot.context.clone();
+
+        let (result, samples) = run_after_competing_lifecycle_writer(
+            Arc::clone(&fixture.db),
+            fixture.db_path.clone(),
+            now_ms + 99,
+            now_ms + 100,
+            move |now| {
+                promote_verified_response_fenced_with_transaction_time(
+                    operation_db.as_ref(),
+                    &response_store,
+                    &context,
+                    &response,
+                    &authority,
+                    now,
+                )
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+        ));
+        assert_eq!(samples, 1);
+        assert_eq!(fixture.fenced_response_projection(), baseline);
+        assert_eq!(
+            std::fs::read(&response_path).expect("reread response after stale promotion"),
+            response_bytes
+        );
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_failure_samples_expired_authority_after_competing_writer() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, response) = fixture
+            .enter_local_processing("writer-wait-failure", now_ms)
+            .await;
+        let baseline = fixture.fenced_terminal_projection();
+        let response_path = PathBuf::from(&response.response_file);
+        let response_bytes = std::fs::read(&response_path).expect("read failure response baseline");
+        let operation_db = Arc::clone(&fixture.db);
+        let context = fixture.snapshot.context.clone();
+        let execution_error = GenerationExecutionError::Local {
+            code: "response_decode_failed".to_string(),
+            sanitized_message: "decode failed".to_string(),
+            stage: "response_decode".to_string(),
+        };
+        let disposition = GenerationTerminalDisposition {
+            status: GenerationJobStatus::Failed,
+            error_code: "response_decode_failed".to_string(),
+            retryable: false,
+            preserve_response_ready: true,
+        };
+
+        let (result, samples) = run_after_competing_lifecycle_writer(
+            Arc::clone(&fixture.db),
+            fixture.db_path.clone(),
+            now_ms + 99,
+            now_ms + 100,
+            move |now| {
+                finalize_generation_failure_fenced_with_transaction_time(
+                    operation_db.as_ref(),
+                    &context,
+                    &execution_error,
+                    &disposition,
+                    &authority,
+                    now,
+                )
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+        ));
+        assert_eq!(samples, 1);
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert_eq!(
+            std::fs::read(&response_path).expect("reread response after stale failure"),
+            response_bytes
+        );
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_cancellation_samples_expired_authority_after_competing_writer() {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis() + 10_000;
+        let (_response_store, authority, response) = fixture
+            .enter_response_ready("writer-wait-cancel", now_ms)
+            .await;
+        {
+            let conn = fixture.db.conn.lock().expect("request writer-wait cancel");
+            request_cancel(&conn, &fixture.snapshot.context.job_id)
+                .expect("persist writer-wait cancellation");
+        }
+        let baseline = fixture.fenced_terminal_projection();
+        let response_path = PathBuf::from(&response.response_file);
+        let response_bytes = std::fs::read(&response_path).expect("read cancel response baseline");
+        let operation_db = Arc::clone(&fixture.db);
+        let context = fixture.snapshot.context.clone();
+
+        let (result, samples) = run_after_competing_lifecycle_writer(
+            Arc::clone(&fixture.db),
+            fixture.db_path.clone(),
+            now_ms + 99,
+            now_ms + 100,
+            move |now| {
+                acknowledge_generation_cancellation_fenced_with_transaction_time(
+                    operation_db.as_ref(),
+                    &context,
+                    &authority,
+                    now,
+                )
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+        ));
+        assert_eq!(samples, 1);
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert_eq!(
+            std::fs::read(&response_path).expect("reread response after stale cancellation"),
+            response_bytes
+        );
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn fenced_success_samples_expired_authority_after_competing_writer_and_cleans_owned_files(
+    ) {
+        let fixture = PrecreatedTestFixture::new(1);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let (_response_store, authority, response) = fixture
+            .enter_local_processing("writer-wait-success", now_ms)
+            .await;
+        let promoted = fixture.promote_images(1).await;
+        let promoted_paths = promoted.final_paths();
+        let baseline = fixture.fenced_terminal_projection();
+        let response_path = PathBuf::from(&response.response_file);
+        let response_bytes = std::fs::read(&response_path).expect("read success response baseline");
+        let operation_db = Arc::clone(&fixture.db);
+        let context = fixture.snapshot.context.clone();
+        let request = fixture.snapshot.request.clone();
+
+        let (result, samples) = run_after_competing_lifecycle_writer(
+            Arc::clone(&fixture.db),
+            fixture.db_path.clone(),
+            now_ms + 99,
+            now_ms + 100,
+            move |now| {
+                commit_generation_success_fenced_with_transaction_time(
+                    operation_db.as_ref(),
+                    &context,
+                    &request,
+                    promoted,
+                    &authority,
+                    now,
+                )
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(WorkerTransitionError::Lease(WorkerLeaseError::LeaseLost))
+        ));
+        assert_eq!(samples, 1);
+        assert_eq!(fixture.fenced_terminal_projection(), baseline);
+        assert_eq!(
+            std::fs::read(&response_path).expect("reread response after stale success"),
+            response_bytes
+        );
+        assert!(promoted_paths.iter().all(|path| !path.exists()));
         fixture.cleanup();
     }
 

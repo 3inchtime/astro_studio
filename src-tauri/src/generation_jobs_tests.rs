@@ -1682,6 +1682,207 @@ fn worker_dependency_clock_callbacks_run_inside_the_immediate_write_transaction(
 }
 
 #[test]
+fn execution_transition_clock_callbacks_run_inside_the_immediate_write_transaction() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("execution-clock-job", "execution-clock-job");
+    let conn = fixture.database.conn.lock().expect("lock database");
+    let authority = acquire_test_worker(
+        &conn,
+        "execution-clock-worker",
+        WORKER_NOW_MS,
+        Duration::from_secs(60),
+    );
+    claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+        .expect("claim execution-clock fixture")
+        .expect("execution-clock job must be claimable");
+    let samples = Cell::new(0);
+    let connection: &Connection = &conn;
+    let sample_count = &samples;
+    let transaction_now = move |now_ms| {
+        move || {
+            assert_eq!(
+                connection
+                    .transaction_state(Some(DatabaseName::Main))
+                    .expect("read generation job transaction state"),
+                TransactionState::Write
+            );
+            sample_count.set(sample_count.get() + 1);
+            now_ms
+        }
+    };
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+
+    transition_running_job_stage_with_event_with_transaction_time(
+        &conn,
+        &queued.id,
+        GenerationJobStage::Preparing,
+        WorkerStageTransition::BeginProviderRequest {
+            expected_response_file: expected_path,
+        },
+        &authority,
+        transaction_now(WORKER_NOW_MS + 1_000),
+    )
+    .expect("begin provider request using transaction time");
+    transition_running_job_stage_with_event_with_transaction_time(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        WorkerStageTransition::EnterRetryBackoff,
+        &authority,
+        transaction_now(WORKER_NOW_MS + 2_000),
+    )
+    .expect("enter retry backoff using transaction time");
+    reserve_automatic_retry_with_event_with_transaction_time(
+        &conn,
+        &queued.id,
+        0,
+        &authority,
+        transaction_now(WORKER_NOW_MS + 3_000),
+    )
+    .expect("reserve automatic retry using transaction time");
+    heartbeat_running_job_with_transaction_time(
+        &conn,
+        &queued.id,
+        GenerationJobStage::ProviderRequest,
+        &authority,
+        transaction_now(WORKER_NOW_MS + 4_000),
+    )
+    .expect("heartbeat explicit stage using transaction time");
+
+    assert_eq!(samples.get(), 4);
+}
+
+#[test]
+fn fenced_stage_transition_rejects_authority_expired_while_waiting_for_another_writer() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("stage-writer-wait", "stage-writer-wait");
+    let expected_path = std::env::temp_dir()
+        .join("astro-studio-responses")
+        .join(format!("{}.response.json", queued.generation_id));
+    let (authority, baseline) = {
+        let conn = fixture.database.conn.lock().expect("lock stage fixture");
+        let authority = acquire_test_worker(
+            &conn,
+            "stage-writer-wait-worker",
+            WORKER_NOW_MS,
+            Duration::from_millis(100),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim stage fixture")
+            .expect("stage fixture job exists");
+        (authority, worker_database_snapshot(&conn))
+    };
+    let job_id = queued.id.clone();
+
+    let (result, samples) = run_after_competing_writer_with_transaction_time(
+        &fixture,
+        WORKER_NOW_MS + 99,
+        WORKER_NOW_MS + 100,
+        move |conn, now| {
+            transition_running_job_stage_with_event_with_transaction_time(
+                conn,
+                &job_id,
+                GenerationJobStage::Preparing,
+                WorkerStageTransition::BeginProviderRequest {
+                    expected_response_file: expected_path,
+                },
+                &authority,
+                now,
+            )
+        },
+    );
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples, 1);
+    let conn = fixture.database.conn.lock().expect("read stage fixture");
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
+fn fenced_retry_reservation_rejects_authority_expired_while_waiting_for_another_writer() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("retry-writer-wait", "retry-writer-wait");
+    let (authority, baseline) = {
+        let conn = fixture.database.conn.lock().expect("lock retry fixture");
+        let authority = acquire_test_worker(
+            &conn,
+            "retry-writer-wait-worker",
+            WORKER_NOW_MS,
+            Duration::from_secs(60),
+        );
+        prepare_fenced_retry_backoff(&conn, &queued, &authority);
+        (authority, worker_database_snapshot(&conn))
+    };
+    let job_id = queued.id.clone();
+
+    let (result, samples) = run_after_competing_writer_with_transaction_time(
+        &fixture,
+        WORKER_NOW_MS + 59_999,
+        WORKER_NOW_MS + 60_000,
+        move |conn, now| {
+            reserve_automatic_retry_with_event_with_transaction_time(
+                conn, &job_id, 0, &authority, now,
+            )
+        },
+    );
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples, 1);
+    let conn = fixture.database.conn.lock().expect("read retry fixture");
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
+fn fenced_explicit_stage_heartbeat_rejects_authority_expired_while_waiting_for_another_writer() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue(
+        "explicit-heartbeat-writer-wait",
+        "explicit-heartbeat-writer-wait",
+    );
+    let (authority, baseline) = {
+        let conn = fixture
+            .database
+            .conn
+            .lock()
+            .expect("lock explicit heartbeat fixture");
+        let authority = acquire_test_worker(
+            &conn,
+            "explicit-heartbeat-writer-wait-worker",
+            WORKER_NOW_MS,
+            Duration::from_millis(100),
+        );
+        claim_next_job_fenced_with_event(&conn, &authority, WORKER_NOW_MS)
+            .expect("claim explicit heartbeat fixture")
+            .expect("explicit heartbeat fixture job exists");
+        (authority, worker_database_snapshot(&conn))
+    };
+    let job_id = queued.id.clone();
+
+    let (result, samples) = run_after_competing_writer_with_transaction_time(
+        &fixture,
+        WORKER_NOW_MS + 99,
+        WORKER_NOW_MS + 100,
+        move |conn, now| {
+            heartbeat_running_job_with_transaction_time(
+                conn,
+                &job_id,
+                GenerationJobStage::Preparing,
+                &authority,
+                now,
+            )
+        },
+    );
+    assert_worker_transition_lease_lost(result);
+    assert_eq!(samples, 1);
+    let conn = fixture
+        .database
+        .conn
+        .lock()
+        .expect("read explicit heartbeat fixture");
+    assert_eq!(worker_database_snapshot(&conn), baseline);
+}
+
+#[test]
 fn fenced_claim_rejects_authority_expired_while_waiting_for_another_writer() {
     let fixture = JobFixture::new();
     fixture.enqueue("claim-writer-wait", "claim-writer-wait");

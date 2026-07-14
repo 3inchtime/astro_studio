@@ -9,19 +9,22 @@ use crate::generation_job_worker::{
 };
 use crate::generation_jobs::{
     get_job, get_job_in_transaction, load_generation_execution_snapshot_for_stage_in_transaction,
-    reserve_automatic_retry_with_event, transition_running_job_stage_with_event,
+    reserve_automatic_retry_with_event_with_transaction_time,
+    transition_running_job_stage_with_event_with_transaction_time,
     validate_worker_recovery_for_stage, GenerationJobTransition, WorkerStageTransition,
     WorkerTransitionError,
 };
 use crate::generation_lifecycle::{
-    acknowledge_generation_cancellation_fenced, commit_generation_success_fenced,
-    finalize_generation_failure_fenced, perform_provider_http_attempt,
-    persist_provider_attempt_response, prepare_provider_attempt, promote_verified_response_fenced,
-    resume_verified_response, validate_provider_execution_snapshot, CancellationProbe,
-    FencedGenerationSuccessTransition, FileResponseArtifactStore, GenerationExecutionError,
-    GenerationExecutionSnapshot, GenerationFileStore, GenerationTerminalDisposition,
-    ImageResponseDecoder, PreparedProviderAttempt, ProviderAttemptResponse,
-    ProviderExecutionCredentials, ResponseArtifactStore,
+    acknowledge_generation_cancellation_fenced_with_transaction_time,
+    commit_generation_success_fenced_with_transaction_time,
+    finalize_generation_failure_fenced_with_transaction_time, perform_provider_http_attempt,
+    persist_provider_attempt_response, prepare_provider_attempt,
+    promote_verified_response_fenced_with_transaction_time, resume_verified_response,
+    validate_provider_execution_snapshot, CancellationProbe, FencedGenerationSuccessTransition,
+    FileResponseArtifactStore, GenerationExecutionError, GenerationExecutionSnapshot,
+    GenerationFileStore, GenerationTerminalDisposition, ImageResponseDecoder,
+    PreparedProviderAttempt, ProviderAttemptResponse, ProviderExecutionCredentials,
+    ResponseArtifactStore,
 };
 use crate::generation_worker_lease::{WorkerLeaseError, WorkerTransitionAuthority};
 use crate::models::{GenerationJob, GenerationJobEvent, GenerationJobStage, GenerationJobStatus};
@@ -60,6 +63,8 @@ pub(crate) trait GenerationExecutionDiagnosticSink: Send + Sync + 'static {
 }
 
 pub(crate) trait GenerationExecutionClock: Send + Sync + 'static {
+    /// Must be non-blocking and side-effect free. Fenced repositories invoke
+    /// this while holding their database mutex and immediate write transaction.
     fn now_ms(&self) -> i64;
     fn now_utc(&self) -> DateTime<Utc>;
 }
@@ -674,15 +679,15 @@ impl GenerationJobExecutionAdapter {
         let db = self.db.clone();
         let context = snapshot.context.clone();
         let fenced_authority = authority.clone();
-        let now_ms = self.clock.now_ms();
+        let clock = Arc::clone(&self.clock);
         let transition = tokio::task::spawn_blocking(move || {
-            finalize_generation_failure_fenced(
+            finalize_generation_failure_fenced_with_transaction_time(
                 &db,
                 &context,
                 &error,
                 &disposition,
                 &fenced_authority,
-                now_ms,
+                || clock.now_ms(),
             )
         })
         .await
@@ -725,9 +730,14 @@ impl GenerationJobExecutionAdapter {
         let db = self.db.clone();
         let context = snapshot.context.clone();
         let authority = authority.clone();
-        let now_ms = self.clock.now_ms();
+        let clock = Arc::clone(&self.clock);
         let transition = tokio::task::spawn_blocking(move || {
-            acknowledge_generation_cancellation_fenced(&db, &context, &authority, now_ms)
+            acknowledge_generation_cancellation_fenced_with_transaction_time(
+                &db,
+                &context,
+                &authority,
+                || clock.now_ms(),
+            )
         })
         .await
         .map_err(|_| blocking_task_error())?;
@@ -908,16 +918,16 @@ impl GenerationJobExecutionAdapter {
         let db = self.db.clone();
         let authority = authority.clone();
         let job_id = job_id.to_string();
-        let now_ms = self.clock.now_ms();
+        let clock = Arc::clone(&self.clock);
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().map_err(|_| PersistenceFailure::Repository)?;
-            transition_running_job_stage_with_event(
+            transition_running_job_stage_with_event_with_transaction_time(
                 &conn,
                 &job_id,
                 expected_stage,
                 transition,
                 &authority,
-                now_ms,
+                || clock.now_ms(),
             )
             .map_err(PersistenceFailure::from_transition)
         })
@@ -934,15 +944,15 @@ impl GenerationJobExecutionAdapter {
         let db = self.db.clone();
         let authority = authority.clone();
         let job_id = job_id.to_string();
-        let now_ms = self.clock.now_ms();
+        let clock = Arc::clone(&self.clock);
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().map_err(|_| PersistenceFailure::Repository)?;
-            reserve_automatic_retry_with_event(
+            reserve_automatic_retry_with_event_with_transaction_time(
                 &conn,
                 &job_id,
                 expected_auto_attempt,
                 &authority,
-                now_ms,
+                || clock.now_ms(),
             )
             .map_err(PersistenceFailure::from_transition)
         })
@@ -960,10 +970,17 @@ impl GenerationJobExecutionAdapter {
         let store = self.artifact_store.clone();
         let context = snapshot.context.clone();
         let authority = authority.clone();
-        let now_ms = self.clock.now_ms();
+        let clock = Arc::clone(&self.clock);
         tokio::task::spawn_blocking(move || {
-            promote_verified_response_fenced(&db, &store, &context, &response, &authority, now_ms)
-                .map_err(PersistenceFailure::from_transition)
+            promote_verified_response_fenced_with_transaction_time(
+                &db,
+                &store,
+                &context,
+                &response,
+                &authority,
+                || clock.now_ms(),
+            )
+            .map_err(PersistenceFailure::from_transition)
         })
         .await
         .map_err(|_| PersistenceFailure::Join)?
@@ -979,10 +996,17 @@ impl GenerationJobExecutionAdapter {
         let context = snapshot.context.clone();
         let request = snapshot.request.clone();
         let authority = authority.clone();
-        let now_ms = self.clock.now_ms();
+        let clock = Arc::clone(&self.clock);
         tokio::task::spawn_blocking(move || {
-            commit_generation_success_fenced(&db, &context, &request, promoted, &authority, now_ms)
-                .map_err(PersistenceFailure::from_transition)
+            commit_generation_success_fenced_with_transaction_time(
+                &db,
+                &context,
+                &request,
+                promoted,
+                &authority,
+                || clock.now_ms(),
+            )
+            .map_err(PersistenceFailure::from_transition)
         })
         .await
         .map_err(|_| PersistenceFailure::Join)?

@@ -20,7 +20,7 @@ use serde_json::json;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, TryLockError};
 use tokio::sync::Notify;
 
 const SECRET_ONE: &str = "sk-execution-secret-one";
@@ -340,40 +340,34 @@ fn save_profile(db: &Database, secret: &str) {
     .expect("save execution profile");
 }
 
-struct CancelOnFirstClockRead {
+struct DatabaseLockAssertingClock {
     db: Database,
-    job_id: String,
     now_ms: i64,
     calls: AtomicUsize,
 }
 
-impl CancelOnFirstClockRead {
-    fn new(db: &Database, job_id: String) -> Arc<Self> {
+impl DatabaseLockAssertingClock {
+    fn new(db: &Database) -> Arc<Self> {
         Arc::new(Self {
             db: db.clone(),
-            job_id,
             now_ms: Utc::now().timestamp_millis(),
             calls: AtomicUsize::new(0),
         })
     }
 }
 
-impl GenerationExecutionClock for CancelOnFirstClockRead {
+impl GenerationExecutionClock for DatabaseLockAssertingClock {
     fn now_ms(&self) -> i64 {
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            let conn = self
-                .db
-                .conn
-                .lock()
-                .expect("lock cancellation between precheck and transition");
-            request_cancel(&conn, &self.job_id)
-                .expect("persist cancellation between precheck and transition");
-        }
+        assert!(
+            matches!(self.db.conn.try_lock(), Err(TryLockError::WouldBlock)),
+            "execution time must be sampled only after the repository mutex is held"
+        );
+        self.calls.fetch_add(1, Ordering::SeqCst);
         self.now_ms
     }
 
     fn now_utc(&self) -> DateTime<Utc> {
-        DateTime::from_timestamp_millis(self.now_ms).expect("valid fixture timestamp")
+        DateTime::from_timestamp_millis(self.now_ms).expect("valid lock-asserting clock timestamp")
     }
 }
 
@@ -814,6 +808,32 @@ async fn preparing_completes_once_and_emits_only_committed_unlocked_events() {
 }
 
 #[tokio::test]
+async fn execution_time_is_sampled_only_inside_repository_writes() {
+    let fixture = Fixture::new(2);
+    let engine = ScriptedEngine::new(&fixture.db, [EngineOutcome::Success]);
+    let decoder = ObservedDecoder::new(&fixture.db);
+    let sleeper = ImmediateSleeper::plain(&fixture.db);
+    let clock = DatabaseLockAssertingClock::new(&fixture.db);
+    let (adapter, _, _) = fixture.adapter_with_clock(
+        engine,
+        decoder,
+        sleeper,
+        Arc::clone(&clock) as Arc<dyn GenerationExecutionClock>,
+        false,
+    );
+    let (_cancel, cancellation) = watch::channel(false);
+
+    let outcome = adapter
+        .execute(&fixture.authority, &fixture.job_id, cancellation)
+        .await
+        .expect("execute with transaction-time clock");
+
+    assert_eq!(outcome, WorkerExecutionOutcome::DurablyFinished);
+    assert_eq!(fixture.job().status, GenerationJobStatus::Completed);
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
 async fn corrupt_provider_snapshot_fails_before_exact_secret_lookup() {
     let fixture = Fixture::new(2);
     {
@@ -836,7 +856,14 @@ async fn corrupt_provider_snapshot_fails_before_exact_secret_lookup() {
     let engine = ScriptedEngine::new(&fixture.db, []);
     let decoder = ObservedDecoder::new(&fixture.db);
     let sleeper = ImmediateSleeper::plain(&fixture.db);
-    let (adapter, _, _) = fixture.adapter(engine.clone(), decoder, sleeper, false);
+    let clock = DatabaseLockAssertingClock::new(&fixture.db);
+    let (adapter, _, _) = fixture.adapter_with_clock(
+        engine.clone(),
+        decoder,
+        sleeper,
+        Arc::clone(&clock) as Arc<dyn GenerationExecutionClock>,
+        false,
+    );
     let (_cancel, cancellation) = watch::channel(false);
 
     let outcome = adapter
@@ -853,6 +880,7 @@ async fn corrupt_provider_snapshot_fails_before_exact_secret_lookup() {
         Some("provider_configuration_invalid"),
         "pure snapshot validation must run before the missing-profile secret lookup"
     );
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -867,7 +895,14 @@ async fn retry_waits_before_reserving_ordinal_and_reloads_exact_profile_secret()
     );
     let decoder = ObservedDecoder::new(&fixture.db);
     let sleeper = ImmediateSleeper::replace_secret(&fixture.db);
-    let (adapter, events, _) = fixture.adapter(engine.clone(), decoder, sleeper.clone(), false);
+    let clock = DatabaseLockAssertingClock::new(&fixture.db);
+    let (adapter, events, _) = fixture.adapter_with_clock(
+        engine.clone(),
+        decoder,
+        sleeper.clone(),
+        Arc::clone(&clock) as Arc<dyn GenerationExecutionClock>,
+        false,
+    );
     let (_cancel, cancellation) = watch::channel(false);
 
     let outcome = adapter
@@ -910,6 +945,7 @@ async fn retry_waits_before_reserving_ordinal_and_reloads_exact_profile_secret()
             (GenerationJobStage::Terminal, 1),
         ]
     );
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 6);
 }
 
 #[tokio::test]
@@ -1136,7 +1172,14 @@ async fn response_ready_durable_cancel_acknowledges_without_entering_local_proce
     let engine = ScriptedEngine::new(&fixture.db, []);
     let decoder = ObservedDecoder::new(&fixture.db);
     let sleeper = ImmediateSleeper::plain(&fixture.db);
-    let (adapter, events, _) = fixture.adapter(engine.clone(), decoder.clone(), sleeper, false);
+    let clock = DatabaseLockAssertingClock::new(&fixture.db);
+    let (adapter, events, _) = fixture.adapter_with_clock(
+        engine.clone(),
+        decoder.clone(),
+        sleeper,
+        Arc::clone(&clock) as Arc<dyn GenerationExecutionClock>,
+        false,
+    );
     let (_cancel, cancellation) = watch::channel(false);
 
     let outcome = adapter
@@ -1159,22 +1202,28 @@ async fn response_ready_durable_cancel_acknowledges_without_entering_local_proce
         vec![GenerationJobStage::Terminal],
         "ResponseReady cancellation must not publish LocalProcessing"
     );
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
-async fn response_ready_cancel_between_precheck_and_transition_is_fenced_and_acknowledged() {
+async fn response_ready_cancel_after_loaded_snapshot_before_transition_is_fenced_and_acknowledged()
+{
     let fixture = Fixture::new(2);
     fixture.make_response_ready().await;
     let engine = ScriptedEngine::new(&fixture.db, []);
     let decoder = ObservedDecoder::new(&fixture.db);
     let sleeper = ImmediateSleeper::plain(&fixture.db);
-    let clock = CancelOnFirstClockRead::new(&fixture.db, fixture.job_id.clone());
-    let (adapter, events, _) =
-        fixture.adapter_with_clock(engine.clone(), decoder.clone(), sleeper, clock, false);
+    let (adapter, events, _) = fixture.adapter(engine.clone(), decoder.clone(), sleeper, false);
+    let loaded = adapter
+        .load_execution_at_stage(&fixture.job_id, GenerationJobStage::ResponseReady)
+        .await
+        .expect("load response-ready snapshot before cancellation");
+    assert!(loaded.job.cancel_requested_at.is_none());
+    fixture.request_cancel();
     let (_cancel, cancellation) = watch::channel(false);
 
     let outcome = adapter
-        .execute(&fixture.authority, &fixture.job_id, cancellation)
+        .execute_response_ready(&fixture.authority, loaded, cancellation)
         .await
         .expect("fence response-ready cancellation race");
 
