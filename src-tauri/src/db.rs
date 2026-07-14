@@ -2,16 +2,74 @@ use crate::error::AppError;
 use crate::models::LogEntry;
 use rusqlite::{params, Connection};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct Database {
-    pub conn: Mutex<Connection>,
+    pub conn: Arc<Mutex<Connection>>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::ErrorCode;
+
+    fn assert_clone_send_sync_static<T: Clone + Send + Sync + 'static>() {}
+
+    #[test]
+    fn database_is_clone_send_sync_and_static() {
+        assert_clone_send_sync_static::<Database>();
+    }
+
+    #[test]
+    fn database_clone_shares_the_exact_connection_mutex() {
+        let db_path = test_db_path("astro-studio-database-clone-identity-test");
+        let _directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let database = Database::open(&db_path).expect("open test db");
+
+        let clone = database.clone();
+
+        assert!(std::sync::Arc::ptr_eq(&database.conn, &clone.conn));
+    }
+
+    #[test]
+    fn database_clones_read_and_write_through_one_connection() {
+        let db_path = test_db_path("astro-studio-database-clone-state-test");
+        let _directory = TestDatabaseDirectory(
+            db_path
+                .parent()
+                .expect("test database parent")
+                .to_path_buf(),
+        );
+        let writer = Database::open(&db_path).expect("open test db");
+        let reader = writer.clone();
+
+        {
+            let conn = writer.conn.lock().expect("lock writer clone");
+            conn.execute_batch(
+                "CREATE TABLE shared_clone_state (value TEXT NOT NULL);
+                 INSERT INTO shared_clone_state (value) VALUES ('shared');",
+            )
+            .expect("write state through first clone");
+        }
+
+        let value = reader
+            .conn
+            .lock()
+            .expect("lock reader clone")
+            .query_row("SELECT value FROM shared_clone_state", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("read state through second clone");
+
+        assert_eq!(value, "shared");
+        assert!(std::sync::Arc::ptr_eq(&writer.conn, &reader.conn));
+    }
 
     struct TestDatabaseDirectory(std::path::PathBuf);
 
@@ -1801,7 +1859,7 @@ impl Database {
                 message: format!("PRAGMA failed: {}", e),
             })?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         })
     }
 
