@@ -40,6 +40,7 @@ src-tauri/Cargo.lock
 
 # Claude Code
 .claude/
+.codex/
 CLAUDE.md
 
 # Docs
