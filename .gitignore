@@ -51,3 +51,6 @@ wiki/
 # MCP
 .playwright-mcp/
 .playwright-cli/
+
+# Git worktrees
+.worktrees/
