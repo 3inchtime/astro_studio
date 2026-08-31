@@ -99,7 +99,7 @@ pub(crate) fn clear_logs(
 ) -> Result<u64, AppError> {
     let days = before_days.unwrap_or(DEFAULT_LOG_RETENTION_DAYS);
     let before_str = format_log_clear_cutoff(Utc::now(), days);
-    Ok(db.clear_logs_before(&before_str)?)
+    db.clear_logs_before(&before_str)
 }
 
 #[tauri::command]

@@ -28,6 +28,7 @@ import {
 import type { Project } from "../types";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
+import { ROUTES } from "../app/routes/contracts";
 
 type Filter = "all" | "pinned" | "mostImages" | "recent";
 
@@ -65,7 +66,13 @@ export default function ProjectsPage() {
         const withImages = await Promise.all(
           filtered.map(async (project) => {
             try {
-              const result = await searchGenerations(undefined, 1, false, {}, project.id);
+              const result = await searchGenerations(
+                undefined,
+                1,
+                false,
+                {},
+                project.id,
+              );
               const paths = result.generations
                 .flatMap((g) => g.images)
                 .slice(0, 5)
@@ -104,7 +111,10 @@ export default function ProjectsPage() {
         list.sort((a, b) => b.image_count - a.image_count);
         break;
       case "recent":
-        list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        list.sort(
+          (a, b) =>
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        );
         break;
       case "all":
       default:
@@ -112,7 +122,9 @@ export default function ProjectsPage() {
         list.sort((a, b) => {
           if (a.pinned_at && !b.pinned_at) return -1;
           if (!a.pinned_at && b.pinned_at) return 1;
-          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+          return (
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          );
         });
         break;
     }
@@ -122,7 +134,10 @@ export default function ProjectsPage() {
 
   const stats = useMemo(() => {
     const totalImages = projects.reduce((sum, p) => sum + p.image_count, 0);
-    const totalChats = projects.reduce((sum, p) => sum + p.conversation_count, 0);
+    const totalChats = projects.reduce(
+      (sum, p) => sum + p.conversation_count,
+      0,
+    );
     const pinned = projects.filter((p) => p.pinned_at).length;
     return { totalProjects: projects.length, totalImages, totalChats, pinned };
   }, [projects]);
@@ -133,7 +148,7 @@ export default function ProjectsPage() {
     try {
       const project = await createProject(name);
       setCreateDialogOpen(false);
-      navigate(`/projects/${project.id}`);
+      navigate(ROUTES.projectHome(project.id));
     } catch {
       setCreateError(t("projectDialog.createError"));
     } finally {
@@ -165,7 +180,9 @@ export default function ProjectsPage() {
     }
   }
 
-  async function handleTogglePin(project: ProjectWithImages | null = actionProject) {
+  async function handleTogglePin(
+    project: ProjectWithImages | null = actionProject,
+  ) {
     if (!project || actionPending) return;
     setActionPending(true);
     try {
@@ -194,7 +211,9 @@ export default function ProjectsPage() {
     }
   }
 
-  async function handleArchive(project: ProjectWithImages | null = actionProject) {
+  async function handleArchive(
+    project: ProjectWithImages | null = actionProject,
+  ) {
     if (!project || actionPending) return;
     setActionPending(true);
     try {
@@ -249,7 +268,10 @@ export default function ProjectsPage() {
         ))}
         <div className="flex-1" />
         <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+          />
           <input
             type="text"
             value={searchQuery}
@@ -289,7 +311,9 @@ export default function ProjectsPage() {
               {searchQuery ? t("projects.noResults") : t("projects.emptyTitle")}
             </div>
             <div className="text-[12px] text-muted max-w-[260px] text-center leading-relaxed">
-              {searchQuery ? t("projects.noResultsHint") : t("projects.emptyHint")}
+              {searchQuery
+                ? t("projects.noResultsHint")
+                : t("projects.emptyHint")}
             </div>
             {!searchQuery && (
               <button
@@ -311,8 +335,11 @@ export default function ProjectsPage() {
                 key={project.id}
                 project={project}
                 index={index}
-                mosaicLayout={getMosaicLayout(index, project.previewImages.length)}
-                onOpen={() => navigate(`/projects/${project.id}`)}
+                mosaicLayout={getMosaicLayout(
+                  index,
+                  project.previewImages.length,
+                )}
+                onOpen={() => navigate(ROUTES.projectHome(project.id))}
                 onAction={(action) => {
                   setActionProjectId(project.id);
                   if (action === "rename") {
@@ -425,7 +452,14 @@ interface ProjectCardProps {
   t: (key: string, opts?: Record<string, unknown>) => string;
 }
 
-function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: ProjectCardProps) {
+function ProjectCard({
+  project,
+  index,
+  mosaicLayout,
+  onOpen,
+  onAction,
+  t,
+}: ProjectCardProps) {
   const [showActions, setShowActions] = useState(false);
   const images = project.previewImages;
 
@@ -433,7 +467,11 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.03, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+      transition={{
+        delay: index * 0.03,
+        duration: 0.3,
+        ease: [0.22, 1, 0.36, 1],
+      }}
       className="studio-card group relative cursor-pointer overflow-hidden rounded-[14px] hover:studio-card-hover"
       onClick={onOpen}
     >
@@ -533,7 +571,9 @@ function ProjectCard({ project, index, mosaicLayout, onOpen, onAction, t }: Proj
                 className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 {project.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
-                <span>{project.pinned_at ? t("projects.unpin") : t("projects.pin")}</span>
+                <span>
+                  {project.pinned_at ? t("projects.unpin") : t("projects.pin")}
+                </span>
               </button>
               <button
                 onClick={() => {

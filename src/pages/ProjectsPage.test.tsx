@@ -1,7 +1,14 @@
 import { MemoryRouter } from "react-router-dom";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "./ProjectsPage";
+import { ROUTES } from "../app/routes/contracts";
 
 const getProjects = vi.fn();
 const createProject = vi.fn();
@@ -30,7 +37,10 @@ vi.mock("../lib/api", () => {
 });
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     ...actual,
     useNavigate: () => navigate,
@@ -117,7 +127,9 @@ describe("ProjectsPage", () => {
     fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
       target: { value: "  Launch Visuals  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projectDialog.createSubmit" }),
+    );
 
     await waitFor(() => {
       expect(createProject).toHaveBeenCalledWith("Launch Visuals");
@@ -137,10 +149,14 @@ describe("ProjectsPage", () => {
     fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
       target: { value: "Launch Visuals" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projectDialog.createSubmit" }),
+    );
 
     await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith("/projects/project-created");
+      expect(navigate).toHaveBeenCalledWith(
+        ROUTES.projectHome("project-created"),
+      );
     });
   });
 
@@ -157,9 +173,13 @@ describe("ProjectsPage", () => {
     fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
       target: { value: "Launch Visuals" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.createSubmit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projectDialog.createSubmit" }),
+    );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("projectDialog.createError");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "projectDialog.createError",
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
@@ -186,7 +206,9 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByText("projects.emptyTitle")).toBeInTheDocument();
     expect(screen.getByText("projects.emptyHint")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "sidebar.newProject" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: "sidebar.newProject" }).length,
+    ).toBeGreaterThan(0);
   });
 
   it("renders a load error when projects fail to load", async () => {
@@ -259,7 +281,9 @@ describe("ProjectsPage", () => {
       </MemoryRouter>,
     );
 
-    const firstCard = (await screen.findByText("Brand Storyboards")).closest(".studio-card");
+    const firstCard = (await screen.findByText("Brand Storyboards")).closest(
+      ".studio-card",
+    );
     expect(firstCard).not.toBeNull();
     const firstMenuButton = within(firstCard as HTMLElement)
       .getAllByRole("button")
@@ -268,7 +292,9 @@ describe("ProjectsPage", () => {
     fireEvent.click(firstMenuButton!);
     fireEvent.click(screen.getByRole("button", { name: "sidebar.rename" }));
 
-    const secondCard = screen.getByText("Campaign Finals").closest(".studio-card");
+    const secondCard = screen
+      .getByText("Campaign Finals")
+      .closest(".studio-card");
     expect(secondCard).not.toBeNull();
     const secondMenuButton = within(secondCard as HTMLElement)
       .getAllByRole("button")

@@ -6,8 +6,17 @@ import { createConversation, pickSourceImages, toAssetUrl } from "../lib/api";
 import { normalizePromptFavorite } from "../lib/generatePageHelpers";
 import { normalizeLanguage } from "../lib/languages";
 import { formatLocalDateTime } from "../lib/utils";
-import { useCreatePromptFavoriteMutation, useDeletePromptFavoriteMutation, usePromptFavoritesQuery } from "../lib/queries/favorites";
-import { useExtractPromptFromImageMutation, useLlmConfigsQuery, usePromptExtractionsQuery } from "../lib/queries/llm";
+import {
+  useCreatePromptFavoriteMutation,
+  useDeletePromptFavoriteMutation,
+  usePromptFavoritesQuery,
+} from "../lib/queries/favorites";
+import {
+  useExtractPromptFromImageMutation,
+  useLlmConfigsQuery,
+  usePromptExtractionsQuery,
+} from "../lib/queries/llm";
+import { ROUTES } from "../app/routes/contracts";
 
 export default function PromptExtractPage() {
   const { t, i18n } = useTranslation();
@@ -24,7 +33,10 @@ export default function PromptExtractPage() {
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
 
   const multimodalConfigs = useMemo(
-    () => llmConfigs.filter((config) => config.enabled && config.capability === "multimodal"),
+    () =>
+      llmConfigs.filter(
+        (config) => config.enabled && config.capability === "multimodal",
+      ),
     [llmConfigs],
   );
   const selectedConfigId = multimodalConfigs[0]?.id ?? "";
@@ -86,7 +98,7 @@ export default function PromptExtractPage() {
     if (!prompt) return;
 
     const conversation = await createConversation();
-    navigate("/generate", {
+    navigate(ROUTES.generate, {
       state: {
         pendingPrompt: prompt,
         activateConversationId: conversation.id,
@@ -94,17 +106,18 @@ export default function PromptExtractPage() {
     });
   }, [navigate, prompt]);
 
-  const canExtract = !!imagePath && !!selectedConfigId && !extractMutation.isPending;
+  const canExtract =
+    !!imagePath && !!selectedConfigId && !extractMutation.isPending;
 
-  const handleSelectHistory = useCallback((historyItem: {
-    image_path: string;
-    prompt: string;
-  }) => {
-    setImagePath(historyItem.image_path);
-    setPrompt(historyItem.prompt);
-    setCopied(false);
-    setFavoriteError(null);
-  }, []);
+  const handleSelectHistory = useCallback(
+    (historyItem: { image_path: string; prompt: string }) => {
+      setImagePath(historyItem.image_path);
+      setPrompt(historyItem.prompt);
+      setCopied(false);
+      setFavoriteError(null);
+    },
+    [],
+  );
 
   return (
     <div className="flex h-full flex-col overflow-auto px-6 py-6">
@@ -172,7 +185,9 @@ export default function PromptExtractPage() {
                   onClick={handlePickImage}
                   className="studio-control focus-ring rounded-[10px] px-4 py-2 text-[12px] font-medium hover:studio-control-hover"
                 >
-                  {imagePath ? t("extract.changeImage") : t("extract.selectImage")}
+                  {imagePath
+                    ? t("extract.changeImage")
+                    : t("extract.selectImage")}
                 </button>
                 <button
                   type="button"
@@ -237,8 +252,13 @@ export default function PromptExtractPage() {
                 disabled={!prompt}
                 className="studio-control focus-ring inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Heart size={13} fill={favoritedPrompt ? "currentColor" : "none"} />
-                {favoritedPrompt ? t("extract.unfavorite") : t("extract.favorite")}
+                <Heart
+                  size={13}
+                  fill={favoritedPrompt ? "currentColor" : "none"}
+                />
+                {favoritedPrompt
+                  ? t("extract.unfavorite")
+                  : t("extract.favorite")}
               </button>
               <button
                 type="button"
@@ -273,7 +293,8 @@ export default function PromptExtractPage() {
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {promptExtractions.map((historyItem) => {
                 const isActive =
-                  historyItem.image_path === imagePath && historyItem.prompt === prompt;
+                  historyItem.image_path === imagePath &&
+                  historyItem.prompt === prompt;
 
                 return (
                   <button

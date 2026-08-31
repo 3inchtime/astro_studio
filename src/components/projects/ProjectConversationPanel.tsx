@@ -23,6 +23,7 @@ import { formatConversationTime } from "../../lib/utils";
 import type { Conversation } from "../../types";
 import ProjectNameDialog from "./ProjectNameDialog";
 import ConfirmDialog from "../common/ConfirmDialog";
+import { ROUTES } from "../../app/routes/contracts";
 
 interface ProjectConversationPanelProps {
   projectId: string;
@@ -49,9 +50,9 @@ export default function ProjectConversationPanel({
     try {
       const conversation = await createConversation(undefined, projectId);
       onConversationsChange([conversation, ...conversations]);
-      navigate(`/projects/${projectId}/chat/${conversation.id}`);
+      navigate(ROUTES.projectChat(projectId, conversation.id));
     } catch {
-      navigate(`/projects/${projectId}/chat`);
+      navigate(ROUTES.projectChat(projectId));
     }
   }
 
@@ -90,7 +91,12 @@ export default function ProjectConversationPanel({
       onConversationsChange(
         conversations.map((c) =>
           c.id === conversation.id
-            ? { ...c, pinned_at: conversation.pinned_at ? null : new Date().toISOString() }
+            ? {
+                ...c,
+                pinned_at: conversation.pinned_at
+                  ? null
+                  : new Date().toISOString(),
+              }
             : c,
         ),
       );
@@ -106,7 +112,9 @@ export default function ProjectConversationPanel({
     try {
       await deleteConversation(deleteTarget.id);
       setDeleteTarget(null);
-      onConversationsChange(conversations.filter((c) => c.id !== deleteTarget.id));
+      onConversationsChange(
+        conversations.filter((c) => c.id !== deleteTarget.id),
+      );
     } catch {
       setDeleteError(t("projects.deleteConversationError"));
     } finally {
@@ -147,7 +155,11 @@ export default function ProjectConversationPanel({
         {sortedConversations.length === 0 ? (
           <div className="px-4 pt-16 text-center">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[12px] bg-subtle">
-              <MessageSquarePlus size={20} className="text-muted/40" strokeWidth={1.6} />
+              <MessageSquarePlus
+                size={20}
+                className="text-muted/40"
+                strokeWidth={1.6}
+              />
             </div>
             <p className="text-[12px] text-muted/50 leading-relaxed">
               {t("projects.emptyConversations")}
@@ -164,7 +176,9 @@ export default function ProjectConversationPanel({
                 className="group relative"
               >
                 <button
-                  onClick={() => navigate(`/projects/${projectId}/chat/${conv.id}`)}
+                  onClick={() =>
+                    navigate(ROUTES.projectChat(projectId, conv.id))
+                  }
                   className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left transition-colors hover:bg-subtle"
                 >
                   <div className="flex h-[43px] w-[43px] shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-border-subtle bg-subtle">
@@ -230,8 +244,14 @@ export default function ProjectConversationPanel({
                       onClick={() => handlePin(conv)}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors"
                     >
-                      {conv.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
-                      <span>{conv.pinned_at ? t("sidebar.unpin") : t("sidebar.pin")}</span>
+                      {conv.pinned_at ? (
+                        <PinOff size={13} />
+                      ) : (
+                        <Pin size={13} />
+                      )}
+                      <span>
+                        {conv.pinned_at ? t("sidebar.unpin") : t("sidebar.pin")}
+                      </span>
                     </button>
                     <button
                       onClick={() => {

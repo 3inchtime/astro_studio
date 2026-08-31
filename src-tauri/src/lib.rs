@@ -5,11 +5,15 @@ mod db;
 mod error;
 mod file_manager;
 mod gallery;
-mod generation_job_execution;
-mod generation_job_worker;
-mod generation_job_worker_deps;
+mod generation_execution;
+// Durable worker persistence is retained for backwards-compatible job records,
+// but its executor is intentionally not part of the compatibility runtime yet.
+#[allow(dead_code)]
 mod generation_jobs;
 mod generation_lifecycle;
+// Lease primitives belong to the deferred worker runtime and have no caller
+// while compatibility execution remains the supported production path.
+#[allow(dead_code)]
 mod generation_worker_lease;
 mod image_engines;
 mod llm;
@@ -651,7 +655,7 @@ pub fn run() {
                 let db = app.state::<Database>();
                 let engine = app.state::<api_gateway::GptImageEngine>();
                 tauri::async_runtime::block_on(recover_interrupted_generations(
-                    &app.handle(),
+                    app.handle(),
                     db.inner(),
                     engine.inner(),
                 ))?;
@@ -685,7 +689,7 @@ pub fn run() {
                     .get_trash_retention_days()
                     .unwrap_or(DEFAULT_TRASH_RETENTION_DAYS);
                 let _ =
-                    gallery::purge_trashed_generations(&app.handle(), db.inner(), retention_days);
+                    gallery::purge_trashed_generations(app.handle(), db.inner(), retention_days);
             }
 
             #[cfg(target_os = "windows")]

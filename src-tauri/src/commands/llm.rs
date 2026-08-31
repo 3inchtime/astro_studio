@@ -405,7 +405,7 @@ pub(crate) async fn optimize_prompt(
     image_paths: Option<Vec<String>>,
 ) -> Result<String, AppError> {
     let configs = read_llm_configs(db.inner())?;
-    let has_images = image_paths.as_ref().map_or(false, |p| !p.is_empty());
+    let has_images = image_paths.as_ref().is_some_and(|p| !p.is_empty());
 
     let config = if has_images {
         resolve_multimodal_config(&configs, &config_id)?
@@ -488,7 +488,7 @@ pub(crate) async fn extract_prompt_from_image(
         &app,
         db.inner(),
         selected_images.inner(),
-        &[image_path.clone()],
+        std::slice::from_ref(&image_path),
     )?;
     let client = create_multimodal_llm_client(config)?;
 
@@ -702,7 +702,7 @@ mod tests {
         let registry = crate::commands::generation::SelectedImageRegistry::default();
         let result = registry.contains_path(&image_path);
 
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -719,9 +719,9 @@ mod tests {
 
         let registry = crate::commands::generation::SelectedImageRegistry::default();
         registry
-            .register_paths(&[image_path.clone()])
+            .register_paths(std::slice::from_ref(&image_path))
             .expect("register selected image");
-        assert_eq!(registry.contains_path(&image_path).unwrap(), true);
+        assert!(registry.contains_path(&image_path).unwrap());
         let paths = vec![image_path.clone()];
         let result = load_images(&paths);
 

@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectChatPage from "./ProjectChatPage";
+import { ROUTE_PATHS, ROUTES } from "../app/routes/contracts";
 
 const navigate = vi.fn();
 const setActiveProjectId = vi.fn();
@@ -14,7 +15,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     ...actual,
     useNavigate: () => navigate,
@@ -41,11 +45,16 @@ describe("ProjectChatPage", () => {
 
   it("does not render a duplicate back-to-projects button inside the chat area", () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1/chat/conversation-1"]}>
-        <Routes>
-          <Route path="/projects/:projectId/chat/:conversationId" element={<ProjectChatPage />} />
-        </Routes>
-      </MemoryRouter>,
+        <MemoryRouter
+          initialEntries={[ROUTES.projectChat("project-1", "conversation-1")]}
+        >
+          <Routes>
+            <Route
+              path={ROUTE_PATHS.projectChatConversation}
+              element={<ProjectChatPage />}
+            />
+          </Routes>
+        </MemoryRouter>,
     );
 
     expect(

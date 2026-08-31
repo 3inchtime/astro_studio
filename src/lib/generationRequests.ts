@@ -17,7 +17,7 @@ export function buildGenerationParams(
     request.model,
   ).parameterCapabilities;
 
-  return {
+  const params: GenerationParams = {
     prompt: request.prompt,
     model: request.model,
     ...(capabilities.qualities.length > 1 ? { quality: request.quality } : {}),
@@ -36,6 +36,10 @@ export function buildGenerationParams(
     conversationId: request.conversationId,
     projectId: request.projectId,
   };
+  if (request.clientRequestId) {
+    params.clientRequestId = request.clientRequestId;
+  }
+  return params;
 }
 
 export function buildEditParams(

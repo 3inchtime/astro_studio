@@ -151,6 +151,7 @@ export interface GenerationSearchFilters {
 
 export interface GenerationParams {
   prompt: string;
+  clientRequestId?: string;
   model?: ImageModel;
   size?: ImageSize;
   quality?: ImageQuality;
@@ -223,6 +224,7 @@ export interface EditSourceImage {
 
 export interface RetryGenerationRequest {
   prompt: string;
+  clientRequestId?: string;
   model: ImageModel;
   size: ImageSize;
   quality: ImageQuality;

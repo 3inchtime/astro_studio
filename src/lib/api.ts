@@ -244,6 +244,7 @@ export async function generateImage(
 ): Promise<GenerateResponse> {
   return invoke("generate_image", {
     prompt: params.prompt,
+    clientRequestId: params.clientRequestId ?? null,
     model: params.model,
     size: params.size,
     quality: params.quality,
@@ -269,6 +270,7 @@ export async function editImage(
 
   return invoke("edit_image", {
     prompt: params.prompt,
+    clientRequestId: params.clientRequestId ?? null,
     model: params.model,
     sourceImagePaths: params.sourceImagePaths,
     size: params.size,

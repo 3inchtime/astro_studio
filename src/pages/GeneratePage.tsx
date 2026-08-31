@@ -452,6 +452,7 @@ export default function GeneratePage() {
         ...request,
         prompt: promptText,
         editSources: request.editSources.map((source) => ({ ...source })),
+        clientRequestId: tempId,
       };
       const normalizedRequest: RetryGenerationRequest = {
         ...retryRequest,

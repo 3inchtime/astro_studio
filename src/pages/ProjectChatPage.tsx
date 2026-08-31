@@ -1,18 +1,8 @@
-import { useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { useLayoutContext } from "../components/layout/AppLayout";
 import GeneratePage from "./GeneratePage";
 
 export default function ProjectChatPage() {
-  const { projectId, conversationId } = useParams();
-  const { setActiveProjectId, setActiveConversationId } = useLayoutContext();
-
-  useEffect(() => {
-    if (projectId) {
-      setActiveProjectId(projectId);
-      setActiveConversationId(conversationId ?? null);
-    }
-  }, [projectId, conversationId, setActiveProjectId, setActiveConversationId]);
+  const { projectId } = useParams();
 
   if (!projectId) return null;
 

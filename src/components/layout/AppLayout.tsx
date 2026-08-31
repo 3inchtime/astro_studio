@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -18,11 +26,22 @@ import appLogo from "../../assets/logo.png";
 import { ResizeHandle } from "./ResizeHandle";
 import ConversationList from "../sidebar/ConversationList";
 import ProjectsSidebar from "../projects/ProjectsSidebar";
-import { createConversation, checkForUpdate, isUpdateSupported } from "../../lib/api";
+import {
+  createConversation,
+  checkForUpdate,
+  isUpdateSupported,
+} from "../../lib/api";
 import { ThemeCardPicker } from "../theme/ThemeCardPicker";
 import { getThemeName } from "../../lib/themes";
 import UpdateDialog from "../common/UpdateDialog";
 import type { UpdateMetadata } from "../../lib/api";
+import {
+  ROUTES,
+  MAIN_NAV_ROUTES,
+  getRouteContext,
+  getRouteLayout,
+  shouldHideSidebarForContext,
+} from "../../app/routes/contracts";
 
 interface LayoutContextType {
   activeProjectId: string | null;
@@ -31,7 +50,9 @@ interface LayoutContextType {
   setActiveConversationId: (id: string | null) => void;
   refreshConversations: () => void;
   updateSupported: boolean | null;
-  checkForUpdates: (options?: { silent?: boolean }) => Promise<UpdateMetadata | null>;
+  checkForUpdates: (options?: {
+    silent?: boolean;
+  }) => Promise<UpdateMetadata | null>;
 }
 
 export const LayoutContext = createContext<LayoutContextType>({
@@ -48,14 +69,19 @@ export function useLayoutContext() {
   return useContext(LayoutContext);
 }
 
-const navItems = [
-  { to: "/generate", icon: Sparkles, labelKey: "nav.generate" },
-  { to: "/extract", icon: MessageSquareText, labelKey: "nav.extract" },
-  { to: "/canvas", icon: LayoutTemplate, labelKey: "nav.canvas" },
-  { to: "/projects", icon: FolderKanban, labelKey: "nav.projects" },
-  { to: "/gallery", icon: Image, labelKey: "nav.gallery" },
-  { to: "/favorites", icon: Heart, labelKey: "nav.favorites" },
-];
+type MainNavKey = (typeof MAIN_NAV_ROUTES)[number]["key"];
+const iconByKey: Record<MainNavKey, typeof Sparkles> = {
+  generate: Sparkles,
+  extract: MessageSquareText,
+  canvas: LayoutTemplate,
+  projects: FolderKanban,
+  gallery: Image,
+  favorites: Heart,
+};
+
+const navItems = MAIN_NAV_ROUTES.map(({ key, to, labelKey }) => {
+  return { to, labelKey, icon: iconByKey[key] };
+});
 
 const NAV_RAIL_WIDTH = 64;
 const PANEL_CONFIGS = [
@@ -70,45 +96,33 @@ export default function AppLayout() {
   const { t } = useTranslation();
   const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<
+    string | null
+  >(null);
   const [conversationRefreshKey, setConversationRefreshKey] = useState(0);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const themeButtonRef = useRef<HTMLButtonElement | null>(null);
   const themePanelRef = useRef<HTMLDivElement | null>(null);
-  const [pendingUpdate, setPendingUpdate] = useState<UpdateMetadata | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateMetadata | null>(
+    null,
+  );
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateSupported, setUpdateSupported] = useState<boolean | null>(null);
 
-  const isProjectListRoute = useMemo(
-    () => location.pathname === "/projects",
+  const routeContext = useMemo(
+    () => getRouteContext(location.pathname),
     [location.pathname],
   );
-  const isProjectDetailRoute = useMemo(
-    () => /^\/projects\/[^/]+$/.test(location.pathname),
-    [location.pathname],
-  );
+  const layout = getRouteLayout(routeContext.kind);
+  const isProjectListRoute = layout.sidebar.type === "projects";
+  const isProjectHomeRoute = routeContext.kind === "projectHome";
   const shouldHideSidebar = useMemo(
-    () =>
-      location.pathname === "/settings" ||
-      location.pathname === "/extract" ||
-      location.pathname === "/canvas" ||
-      location.pathname === "/gallery" ||
-      location.pathname === "/favorites",
-    [location.pathname],
+    () => shouldHideSidebarForContext(routeContext),
+    [routeContext],
   );
-  const routeProjectId = useMemo(() => {
-    if (!location.pathname.startsWith("/projects/")) {
-      return null;
-    }
-    const rest = location.pathname.slice("/projects/".length);
-    const firstSegment = rest.split("/")[0];
-    return decodeURIComponent(firstSegment) || null;
-  }, [location.pathname]);
+  const routeProjectId = routeContext.projectId;
 
-  const isProjectChatRoute = useMemo(
-    () => /^\/projects\/[^/]+\/chat/.test(location.pathname),
-    [location.pathname],
-  );
+  const isProjectChatRoute = routeContext.kind === "chat";
   const pendingGenerateConversationId = useMemo(() => {
     const state = location.state as { activateConversationId?: string } | null;
     return typeof state?.activateConversationId === "string"
@@ -120,39 +134,56 @@ export default function AppLayout() {
   // (e.g. navigating from a project page to /generate would briefly show project
   // conversations before the useEffect clears activeProjectId)
   const sidebarConversationProjectId = useMemo(() => {
-    if (location.pathname === "/generate") return null;
-    if (isProjectDetailRoute || isProjectChatRoute) return routeProjectId;
+    if (layout.sidebar.type === "projects") return null;
+    if (layout.sidebar.useProjectFromPath) return routeProjectId;
+    if (routeContext.kind === "generate") return null;
     return activeProjectId;
-  }, [location.pathname, activeProjectId, isProjectDetailRoute, isProjectChatRoute, routeProjectId]);
+  }, [
+    routeContext.kind,
+    activeProjectId,
+    layout.sidebar.type,
+    layout.sidebar.useProjectFromPath,
+    routeProjectId,
+  ]);
 
   useEffect(() => {
-    if (location.pathname === "/projects") {
-      setActiveProjectId(null);
-      setActiveConversationId(null);
-      return;
-    }
-
-    // Project chat route — set project but let ProjectChatPage control the conversation
-    if (isProjectChatRoute && routeProjectId) {
-      setActiveProjectId(routeProjectId);
-      return;
-    }
-
-    if (routeProjectId) {
-      setActiveProjectId(routeProjectId);
-      setActiveConversationId(null);
-      return;
-    }
-
-    // /generate always uses the default project — no cross-contamination
-    if (location.pathname === "/generate") {
+    // /generate always uses the default project — keep pending launch context.
+    if (routeContext.kind === "generate") {
       setActiveProjectId(null);
       setActiveConversationId(pendingGenerateConversationId);
       return;
     }
 
+    if (layout.clearProjectOnEnter) {
+      setActiveProjectId(null);
+      setActiveConversationId(null);
+      return;
+    }
+
+    if (isProjectChatRoute && routeProjectId) {
+      setActiveProjectId(routeProjectId);
+      setActiveConversationId(routeContext.conversationId ?? null);
+      return;
+    }
+
+    if (layout.sidebar.useProjectFromPath && routeProjectId) {
+      setActiveProjectId(routeProjectId);
+      if (isProjectHomeRoute) {
+        setActiveConversationId(null);
+      }
+      return;
+    }
+
     setActiveProjectId(null);
-  }, [location.pathname, routeProjectId, isProjectChatRoute, pendingGenerateConversationId]);
+  }, [
+    routeContext.kind,
+    layout.clearProjectOnEnter,
+    layout.sidebar.useProjectFromPath,
+    routeProjectId,
+    isProjectChatRoute,
+    isProjectHomeRoute,
+    pendingGenerateConversationId,
+  ]);
 
   useEffect(() => {
     if (!themePickerOpen) {
@@ -259,9 +290,9 @@ export default function AppLayout() {
     (id: string) => {
       setActiveConversationId(id);
       if (activeProjectId && activeProjectId !== "default") {
-        navigate(`/projects/${activeProjectId}/chat/${id}`);
+        navigate(ROUTES.projectChat(activeProjectId, id));
       } else {
-        navigate("/generate");
+        navigate(ROUTES.generate);
       }
     },
     [navigate, activeProjectId],
@@ -271,7 +302,7 @@ export default function AppLayout() {
     (id: string | null) => {
       setActiveProjectId(id);
       setActiveConversationId(null);
-      navigate(id ? `/projects/${id}` : "/projects");
+      navigate(id ? ROUTES.projectHome(id) : ROUTES.projects);
     },
     [navigate],
   );
@@ -280,7 +311,7 @@ export default function AppLayout() {
     (id: string) => {
       setActiveProjectId(id);
       setActiveConversationId(null);
-      navigate(`/projects/${id}`);
+      navigate(ROUTES.projectHome(id));
     },
     [navigate],
   );
@@ -292,9 +323,9 @@ export default function AppLayout() {
   const clearActiveConversation = useCallback(() => {
     setActiveConversationId(null);
     if (activeProjectId && activeProjectId !== "default") {
-      navigate(`/projects/${activeProjectId}/chat`);
+      navigate(ROUTES.projectChat(activeProjectId));
     } else {
-      navigate("/generate");
+      navigate(ROUTES.generate);
     }
   }, [activeProjectId, navigate]);
 
@@ -305,17 +336,21 @@ export default function AppLayout() {
         setActiveConversationId(conversation.id);
         refreshConversations();
         if (conversation.project_id && conversation.project_id !== "default") {
-          navigate(`/projects/${conversation.project_id}/chat/${conversation.id}`);
+          navigate(
+            ROUTES.projectChat(conversation.project_id, conversation.id),
+          );
         } else {
-          navigate("/generate");
+          navigate(ROUTES.generate);
         }
       })
       .catch(() => {
         setActiveConversationId(null);
         if (activeProjectId && activeProjectId !== "default") {
-          navigate(`/projects/${activeProjectId}/chat`);
-        } else {
-          navigate("/generate");
+          navigate(
+            activeProjectId && activeProjectId !== "default"
+              ? ROUTES.projectChat(activeProjectId)
+              : ROUTES.generate,
+          );
         }
       });
   }, [activeProjectId, navigate, refreshConversations]);
@@ -338,11 +373,15 @@ export default function AppLayout() {
           style={{ width: NAV_RAIL_WIDTH }}
         >
           <NavLink
-            to="/generate"
+            to={ROUTES.generate}
             className="focus-ring mb-10 rounded-[12px] border border-transparent p-1 transition-colors hover:border-border-subtle hover:bg-surface/70"
           >
             <div className="relative h-9 w-9 overflow-hidden rounded-[10px] shadow-button transition-shadow duration-200">
-              <img src={appLogo} alt="Astro Studio" className="h-full w-full object-cover" />
+              <img
+                src={appLogo}
+                alt="Astro Studio"
+                className="h-full w-full object-cover"
+              />
             </div>
           </NavLink>
 
@@ -367,7 +406,11 @@ export default function AppLayout() {
                       <motion.div
                         layoutId="nav-indicator"
                         className="absolute -left-[8px] top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full gradient-primary"
-                        transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                        transition={{
+                          type: "spring",
+                          stiffness: 500,
+                          damping: 35,
+                        }}
                       />
                     )}
                   </>
@@ -392,14 +435,17 @@ export default function AppLayout() {
               }`}
             >
               <motion.div
-                animate={{ rotate: themePickerOpen ? 12 : 0, scale: themePickerOpen ? 1.04 : 1 }}
+                animate={{
+                  rotate: themePickerOpen ? 12 : 0,
+                  scale: themePickerOpen ? 1.04 : 1,
+                }}
                 transition={{ type: "spring", stiffness: 360, damping: 22 }}
               >
                 <Palette size={18} strokeWidth={1.8} />
               </motion.div>
             </button>
             <NavLink
-              to="/settings"
+              to={ROUTES.settings}
               title={t("nav.settings")}
               className={({ isActive }) =>
                 `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
@@ -416,7 +462,10 @@ export default function AppLayout() {
 
         {!shouldHideSidebar && (
           <>
-            <aside className="flex shrink-0 flex-col border-r border-border-subtle bg-surface/78 backdrop-blur-xl" style={{ width: widths[0] }}>
+            <aside
+              className="flex shrink-0 flex-col border-r border-border-subtle bg-surface/78 backdrop-blur-xl"
+              style={{ width: widths[0] }}
+            >
               {isProjectListRoute ? (
                 <ProjectsSidebar
                   activeProjectId={activeProjectId}
@@ -442,10 +491,13 @@ export default function AppLayout() {
           </>
         )}
 
-        <main className="studio-main-canvas relative flex-1 overflow-hidden" style={{ minWidth: widths[1] }}>
+        <main
+          className="studio-main-canvas relative flex-1 overflow-hidden"
+          style={{ minWidth: widths[1] }}
+        >
           <AnimatePresence mode="wait">
             <motion.div
-              key={location.pathname}
+              key={routeContext.pathname}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}

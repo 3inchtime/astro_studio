@@ -22,6 +22,7 @@ pub(crate) fn build_generation_request_body(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Mirrors provider request fields without an allocation-only adapter.
 pub(crate) fn build_generation_request_body_with_controls(
     model: &str,
     prompt: &str,

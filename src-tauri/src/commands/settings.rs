@@ -92,7 +92,7 @@ fn get_model_setting(
 
     if normalize_image_model(model) == ENGINE_GPT_IMAGE_2 {
         if let Some(legacy_key) = legacy_key {
-            return Ok(db.get_setting(legacy_key)?);
+            return db.get_setting(legacy_key);
         }
     }
 
@@ -105,7 +105,7 @@ fn set_model_setting(
     suffix: &str,
     value: &str,
 ) -> Result<(), AppError> {
-    Ok(db.set_setting(&model_setting_key(model, suffix), value)?)
+    db.set_setting(&model_setting_key(model, suffix), value)
 }
 
 fn read_legacy_model_api_key(db: &Database, model: &str) -> Result<Option<String>, AppError> {
@@ -618,7 +618,7 @@ pub(crate) fn get_font_size(db: State<'_, Database>) -> Result<String, AppError>
 
 #[tauri::command]
 pub(crate) fn save_font_size(db: State<'_, Database>, font_size: String) -> Result<(), AppError> {
-    Ok(db.set_setting(SETTING_FONT_SIZE, crate::normalize_font_size(&font_size))?)
+    db.set_setting(SETTING_FONT_SIZE, crate::normalize_font_size(&font_size))
 }
 
 #[tauri::command]
@@ -633,7 +633,7 @@ pub(crate) fn get_image_model(db: State<'_, Database>) -> Result<String, AppErro
 
 #[tauri::command]
 pub(crate) fn save_image_model(db: State<'_, Database>, model: String) -> Result<(), AppError> {
-    Ok(db.set_setting(SETTING_IMAGE_MODEL, normalize_image_model(&model))?)
+    db.set_setting(SETTING_IMAGE_MODEL, normalize_image_model(&model))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

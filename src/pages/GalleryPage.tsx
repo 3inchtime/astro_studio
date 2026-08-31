@@ -23,6 +23,7 @@ import {
   isFilterActive,
   updateFilterValue,
 } from "../lib/galleryFilters";
+import { ROUTES } from "../app/routes/contracts";
 
 export default function GalleryPage() {
   const { t, i18n } = useTranslation();
@@ -132,9 +133,11 @@ export default function GalleryPage() {
 
   const handleEditImage = useCallback(
     (imagePath: string, imageId: string, generationId: string) => {
-      savePendingEditSources([buildEditSource(imagePath, imageId, generationId)]);
+      savePendingEditSources([
+        buildEditSource(imagePath, imageId, generationId),
+      ]);
       setActiveConversationId(null);
-      navigate("/generate");
+      navigate(ROUTES.generate);
     },
     [navigate, setActiveConversationId],
   );
@@ -181,9 +184,7 @@ export default function GalleryPage() {
           onQueryChange={setQuery}
           onSearch={() => void handleSearch()}
           onReset={resetFilters}
-          actions={
-            <ViewModeToggle value={viewMode} onChange={setViewMode} />
-          }
+          actions={<ViewModeToggle value={viewMode} onChange={setViewMode} />}
         />
 
         <div className="flex-1 overflow-y-auto p-5">

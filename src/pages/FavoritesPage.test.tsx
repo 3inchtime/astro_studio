@@ -1,7 +1,14 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import FavoritesPage from "./FavoritesPage";
 import type { GenerationResult } from "../types";
+import { ROUTES } from "../app/routes/contracts";
 
 const deleteGeneration = vi.fn();
 const deletePromptFavorite = vi.fn();
@@ -34,7 +41,8 @@ vi.mock("../lib/editSources", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/editSources")>();
   return {
     ...actual,
-    savePendingEditSources: (...args: unknown[]) => savePendingEditSources(...args),
+    savePendingEditSources: (...args: unknown[]) =>
+      savePendingEditSources(...args),
   };
 });
 
@@ -125,7 +133,8 @@ vi.mock("../components/lightbox/Lightbox", () => ({
       <span data-testid="lightbox-index">{initialIndex}</span>
       {images.map((image) => (
         <span key={image.imageId} data-testid="lightbox-image">
-          {image.imageId}:{image.generationId}:{image.path}:{image.thumbnailPath}
+          {image.imageId}:{image.generationId}:{image.path}:
+          {image.thumbnailPath}
         </span>
       ))}
       {images[initialIndex] && (
@@ -268,9 +277,11 @@ describe("FavoritesPage", () => {
       expect(screen.getByTestId("grid")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", {
-      name: "Open preview generation-1",
-    }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Open preview generation-1",
+      }),
+    );
 
     expect(screen.getByTestId("lightbox-index")).toHaveTextContent("1");
     expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
@@ -286,12 +297,16 @@ describe("FavoritesPage", () => {
       expect(screen.getByTestId("grid")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", {
-      name: "Open detail generation-1",
-    }));
-    fireEvent.click(screen.getByRole("button", {
-      name: "Preview detail generation-1",
-    }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Open detail generation-1",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Preview detail generation-1",
+      }),
+    );
 
     expect(screen.getByTestId("lightbox-index")).toHaveTextContent("0");
     expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
@@ -304,10 +319,14 @@ describe("FavoritesPage", () => {
       expect(screen.getByTestId("grid")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", {
-      name: "Open preview generation-1",
-    }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit lightbox image" }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Open preview generation-1",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit lightbox image" }),
+    );
 
     expect(savePendingEditSources).toHaveBeenCalledWith([
       {
@@ -319,7 +338,7 @@ describe("FavoritesPage", () => {
       },
     ]);
     expect(setActiveConversationId).toHaveBeenCalledWith(null);
-    expect(navigate).toHaveBeenCalledWith("/generate");
+    expect(navigate).toHaveBeenCalledWith(ROUTES.generate);
   });
 
   it("loads the next favorites image page when the waterfall sentinel becomes visible", async () => {
@@ -340,7 +359,9 @@ describe("FavoritesPage", () => {
     render(<FavoritesPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Open preview generation-1" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Open preview generation-1" }),
+      ).toBeInTheDocument();
     });
 
     await act(async () => {
@@ -348,11 +369,19 @@ describe("FavoritesPage", () => {
     });
 
     await waitFor(() => {
-      expect(getFavoriteImages).toHaveBeenLastCalledWith(undefined, undefined, 2);
+      expect(getFavoriteImages).toHaveBeenLastCalledWith(
+        undefined,
+        undefined,
+        2,
+      );
     });
 
-    expect(screen.getByRole("button", { name: "Open preview generation-1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open preview generation-2" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open preview generation-1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open preview generation-2" }),
+    ).toBeInTheDocument();
   });
 
   it("switches favorite images between waterfall and list display modes", async () => {
@@ -365,11 +394,18 @@ describe("FavoritesPage", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "gallery.viewModeList" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "gallery.viewModeList" }),
+    );
 
-    expect(screen.getByTestId("grid")).toHaveAttribute("data-view-mode", "list");
+    expect(screen.getByTestId("grid")).toHaveAttribute(
+      "data-view-mode",
+      "list",
+    );
 
-    fireEvent.click(screen.getByRole("button", { name: "gallery.viewModeMasonry" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "gallery.viewModeMasonry" }),
+    );
 
     expect(screen.getByTestId("grid")).toHaveAttribute(
       "data-view-mode",
@@ -401,9 +437,13 @@ describe("FavoritesPage", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "gallery.viewModeList" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "gallery.viewModeList" }),
+    );
 
-    expect(localStorage.getItem("astro-favorites-image-view-mode")).toBe("list");
+    expect(localStorage.getItem("astro-favorites-image-view-mode")).toBe(
+      "list",
+    );
 
     unmount();
     render(<FavoritesPage />);

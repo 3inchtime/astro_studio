@@ -34,6 +34,7 @@ import Lightbox from "../components/lightbox/Lightbox";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import { useStoredGalleryViewMode } from "../hooks/useStoredGalleryViewMode";
+import { ROUTES } from "../app/routes/contracts";
 
 type FavoriteKind = "images" | "prompts";
 
@@ -162,9 +163,11 @@ export default function FavoritesPage() {
 
   const handleEditImage = useCallback(
     (imagePath: string, imageId: string, generationId: string) => {
-      savePendingEditSources([buildEditSource(imagePath, imageId, generationId)]);
+      savePendingEditSources([
+        buildEditSource(imagePath, imageId, generationId),
+      ]);
       setActiveConversationId(null);
-      navigate("/generate");
+      navigate(ROUTES.generate);
     },
     [navigate, setActiveConversationId],
   );
@@ -386,7 +389,9 @@ export default function FavoritesPage() {
             onClose={() => setSelectedImage(null)}
             onDelete={(id) => void handleDeleteImage(id)}
             onEditImage={handleEditImage}
-            onPreview={(imageIndex) => openResultLightbox(selectedImage, imageIndex)}
+            onPreview={(imageIndex) =>
+              openResultLightbox(selectedImage, imageIndex)
+            }
             onManageFolders={openFolderSelector}
           />
         )}
@@ -450,10 +455,7 @@ function PromptFavoritesList({
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       {favorites.map((favorite) => (
-        <article
-          key={favorite.id}
-          className="studio-card rounded-[10px] p-4"
-        >
+        <article key={favorite.id} className="studio-card rounded-[10px] p-4">
           <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/85">
             {favorite.prompt}
           </p>

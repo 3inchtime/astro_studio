@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PromptExtractPage from "./PromptExtractPage";
+import { ROUTES } from "../app/routes/contracts";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -9,9 +10,7 @@ const queryClient = new QueryClient({
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 }
 
@@ -51,7 +50,8 @@ vi.mock("react-i18next", () => ({
         "extract.historyHint": "Recent extractions",
         "extract.historyEmpty": "No extraction history yet",
         "extract.noImageSelected": "Select an image first",
-        "extract.noMultimodalConfig": "Enable a multimodal LLM in settings first",
+        "extract.noMultimodalConfig":
+          "Enable a multimodal LLM in settings first",
         "extract.copied": "Copied",
         "extract.extracting": "Extracting...",
       })[key] ?? key,
@@ -59,7 +59,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     ...actual,
     useNavigate: () => navigate,
@@ -73,7 +76,8 @@ vi.mock("../lib/api", () => ({
   getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
   getPromptExtractions: (...args: unknown[]) => getPromptExtractions(...args),
   getLlmConfigs: (...args: unknown[]) => getLlmConfigs(...args),
-  extractPromptFromImage: (...args: unknown[]) => extractPromptFromImage(...args),
+  extractPromptFromImage: (...args: unknown[]) =>
+    extractPromptFromImage(...args),
   createConversation: (...args: unknown[]) => createConversation(...args),
   toAssetUrl: (path: string) => path,
 }));
@@ -168,7 +172,10 @@ describe("PromptExtractPage", () => {
   });
 
   it("picks the first image and extracts a prompt into the textarea", async () => {
-    pickSourceImages.mockResolvedValue(["/tmp/reference.png", "/tmp/other.png"]);
+    pickSourceImages.mockResolvedValue([
+      "/tmp/reference.png",
+      "/tmp/other.png",
+    ]);
 
     render(<PromptExtractPage />, { wrapper: TestWrapper });
 
@@ -181,7 +188,11 @@ describe("PromptExtractPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Extract prompt" }));
 
     await waitFor(() => {
-      expect(extractPromptFromImage).toHaveBeenCalledWith("/tmp/reference.png", "vision-1", "zh-CN");
+      expect(extractPromptFromImage).toHaveBeenCalledWith(
+        "/tmp/reference.png",
+        "vision-1",
+        "zh-CN",
+      );
     });
     expect(screen.getByDisplayValue("cinematic portrait")).toBeInTheDocument();
   });
@@ -198,7 +209,9 @@ describe("PromptExtractPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Extract prompt" }));
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("cinematic portrait")).toBeInTheDocument();
+      expect(
+        screen.getByDisplayValue("cinematic portrait"),
+      ).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
@@ -217,7 +230,7 @@ describe("PromptExtractPage", () => {
       expect(createConversation).toHaveBeenCalled();
     });
     expect(setActiveConversationId).not.toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledWith("/generate", {
+    expect(navigate).toHaveBeenCalledWith(ROUTES.generate, {
       state: {
         pendingPrompt: "cinematic portrait",
         activateConversationId: "conversation-new-1",
@@ -226,11 +239,17 @@ describe("PromptExtractPage", () => {
   });
 
   it("renders extraction history in its own card and restores a selected record into the editor", async () => {
-    const { container } = render(<PromptExtractPage />, { wrapper: TestWrapper });
+    const { container } = render(<PromptExtractPage />, {
+      wrapper: TestWrapper,
+    });
 
     expect(await screen.findByText("History")).toBeInTheDocument();
-    expect(await screen.findByText("soft daylight portrait")).toBeInTheDocument();
-    expect(await screen.findByText("editorial street fashion")).toBeInTheDocument();
+    expect(
+      await screen.findByText("soft daylight portrait"),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("editorial street fashion"),
+    ).toBeInTheDocument();
 
     const promptSection = screen.getByText("Prompt").closest("section");
     const historySection = screen.getByText("History").closest("section");
@@ -240,9 +259,13 @@ describe("PromptExtractPage", () => {
     expect(historySection).not.toBe(promptSection);
     expect(container.querySelectorAll("section")).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole("button", { name: /editorial street fashion/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /editorial street fashion/i }),
+    );
 
-    expect(screen.getByDisplayValue("editorial street fashion")).toBeInTheDocument();
+    expect(
+      screen.getByDisplayValue("editorial street fashion"),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("/tmp/history-2.png")).toHaveLength(2);
   });
 });

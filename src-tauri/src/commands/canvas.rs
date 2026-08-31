@@ -397,6 +397,7 @@ pub(crate) fn save_canvas_export(
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[allow(dead_code)]
 pub(crate) fn resolve_canvas_generation_conversation_id(
     conn: &rusqlite::Connection,
     conversation_id: Option<&str>,

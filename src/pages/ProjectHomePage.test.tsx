@@ -1,7 +1,14 @@
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectHomePage from "./ProjectHomePage";
+import { ROUTE_PATHS, ROUTES } from "../app/routes/contracts";
 
 const getProjects = vi.fn();
 const getConversations = vi.fn();
@@ -55,7 +62,10 @@ vi.mock("../components/layout/AppLayout", () => ({
 }));
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     ...actual,
     useNavigate: () => navigate,
@@ -77,7 +87,9 @@ describe("ProjectHomePage", () => {
     navigate.mockReset();
     setActiveConversationId.mockReset();
     setActiveProjectId.mockReset();
-    promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Native Prompt Name");
+    promptSpy = vi
+      .spyOn(window, "prompt")
+      .mockReturnValue("Native Prompt Name");
 
     getProjects.mockResolvedValue([
       {
@@ -125,18 +137,26 @@ describe("ProjectHomePage", () => {
 
   it("loads the project overview, recent conversations, and project-scoped images", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "projects.manage" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "projects.manage" }),
+    ).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, false, {}, "project-1");
+      expect(searchGenerations).toHaveBeenCalledWith(
+        undefined,
+        1,
+        false,
+        {},
+        "project-1",
+      );
     });
 
     expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
@@ -144,22 +164,24 @@ describe("ProjectHomePage", () => {
 
   it("does not render a duplicate back button inside the project content header", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "projects.backToList" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "projects.backToList" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens the rename dialog with the current project name", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -169,7 +191,9 @@ describe("ProjectHomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "sidebar.rename" }));
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByLabelText("projectDialog.nameLabel")).toHaveValue("Brand Storyboards");
+    expect(screen.getByLabelText("projectDialog.nameLabel")).toHaveValue(
+      "Brand Storyboards",
+    );
     expect(promptSpy).not.toHaveBeenCalled();
   });
 
@@ -204,9 +228,9 @@ describe("ProjectHomePage", () => {
       ]);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -217,7 +241,9 @@ describe("ProjectHomePage", () => {
     fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
       target: { value: "New Name" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.renameSubmit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projectDialog.renameSubmit" }),
+    );
 
     await waitFor(() => {
       expect(renameProject).toHaveBeenCalledWith("project-1", "New Name");
@@ -228,9 +254,9 @@ describe("ProjectHomePage", () => {
     renameProject.mockRejectedValue(new Error("failed"));
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -241,9 +267,13 @@ describe("ProjectHomePage", () => {
     fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
       target: { value: "New Name" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.renameSubmit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projectDialog.renameSubmit" }),
+    );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("projectDialog.renameError");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "projectDialog.renameError",
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
@@ -264,9 +294,9 @@ describe("ProjectHomePage", () => {
     ]);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -277,7 +307,9 @@ describe("ProjectHomePage", () => {
     fireEvent.change(await screen.findByLabelText("projectDialog.nameLabel"), {
       target: { value: "New Name" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "projectDialog.renameSubmit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projectDialog.renameSubmit" }),
+    );
 
     await waitFor(() => {
       expect(renameProject).toHaveBeenCalledWith("project-1", "New Name");
@@ -285,8 +317,12 @@ describe("ProjectHomePage", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
-    expect(screen.queryByText("projectDialog.renameError")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "New Name" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("projectDialog.renameError"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "New Name" }),
+    ).toBeInTheDocument();
   });
 
   it("shows Unpin, not Pin, for pinned projects", async () => {
@@ -305,9 +341,9 @@ describe("ProjectHomePage", () => {
     ]);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -315,15 +351,19 @@ describe("ProjectHomePage", () => {
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
 
-    expect(screen.getByRole("button", { name: "projects.unpin" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "projects.pin" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "projects.unpin" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "projects.pin" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows Pin, not Unpin, for unpinned projects", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -331,8 +371,12 @@ describe("ProjectHomePage", () => {
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
 
-    expect(screen.getByRole("button", { name: "projects.pin" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "projects.unpin" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "projects.pin" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "projects.unpin" }),
+    ).not.toBeInTheDocument();
   });
 
   it("pins an unpinned project optimistically", async () => {
@@ -351,9 +395,9 @@ describe("ProjectHomePage", () => {
     ]);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -365,7 +409,7 @@ describe("ProjectHomePage", () => {
     await waitFor(() => {
       expect(pinProject).toHaveBeenCalledWith("project-1");
     });
-    expect(navigate).not.toHaveBeenCalledWith("/projects");
+    expect(navigate).not.toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("unpins a pinned project optimistically", async () => {
@@ -384,9 +428,9 @@ describe("ProjectHomePage", () => {
     ]);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -398,14 +442,14 @@ describe("ProjectHomePage", () => {
     await waitFor(() => {
       expect(unpinProject).toHaveBeenCalledWith("project-1");
     });
-    expect(navigate).not.toHaveBeenCalledWith("/projects");
+    expect(navigate).not.toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("archives a project and navigates back to projects", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -417,14 +461,14 @@ describe("ProjectHomePage", () => {
     await waitFor(() => {
       expect(archiveProject).toHaveBeenCalledWith("project-1");
     });
-    expect(navigate).toHaveBeenCalledWith("/projects");
+    expect(navigate).toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("requires confirmation before deleting a project", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -436,21 +480,23 @@ describe("ProjectHomePage", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(deleteProject).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "projects.deleteConfirmAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projects.deleteConfirmAction" }),
+    );
 
     await waitFor(() => {
       expect(deleteProject).toHaveBeenCalledWith("project-1");
     });
-    expect(navigate).toHaveBeenCalledWith("/projects");
+    expect(navigate).toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("shows an action error when pin fails", async () => {
     pinProject.mockRejectedValue(new Error("failed"));
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -459,8 +505,10 @@ describe("ProjectHomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
     fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("projects.actionError");
-    expect(navigate).not.toHaveBeenCalledWith("/projects");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "projects.actionError",
+    );
+    expect(navigate).not.toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("shows an action error when unpin fails", async () => {
@@ -480,9 +528,9 @@ describe("ProjectHomePage", () => {
     unpinProject.mockRejectedValue(new Error("failed"));
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -491,17 +539,19 @@ describe("ProjectHomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
     fireEvent.click(screen.getByRole("button", { name: "projects.unpin" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("projects.actionError");
-    expect(navigate).not.toHaveBeenCalledWith("/projects");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "projects.actionError",
+    );
+    expect(navigate).not.toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("shows an action error when archive fails", async () => {
     archiveProject.mockRejectedValue(new Error("failed"));
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -510,8 +560,10 @@ describe("ProjectHomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
     fireEvent.click(screen.getByRole("button", { name: "sidebar.archive" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("projects.actionError");
-    expect(navigate).not.toHaveBeenCalledWith("/projects");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "projects.actionError",
+    );
+    expect(navigate).not.toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("prevents repeated pin submits while pending", async () => {
@@ -519,9 +571,9 @@ describe("ProjectHomePage", () => {
     pinProject.mockReturnValue(pendingPin.promise);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -531,7 +583,9 @@ describe("ProjectHomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "projects.pin" })).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "projects.pin" }),
+      ).toBeDisabled();
     });
     fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));
 
@@ -546,9 +600,9 @@ describe("ProjectHomePage", () => {
     deleteProject.mockRejectedValue(new Error("failed"));
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -556,11 +610,17 @@ describe("ProjectHomePage", () => {
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
     fireEvent.click(screen.getByRole("button", { name: "sidebar.delete" }));
-    fireEvent.click(await screen.findByRole("button", { name: "projects.deleteConfirmAction" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "projects.deleteConfirmAction",
+      }),
+    );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("projects.deleteError");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "projects.deleteError",
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(navigate).not.toHaveBeenCalledWith("/projects");
+    expect(navigate).not.toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("prevents repeated delete submits while pending", async () => {
@@ -568,9 +628,9 @@ describe("ProjectHomePage", () => {
     deleteProject.mockReturnValue(pendingDelete.promise);
 
     render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
         <Routes>
-          <Route path="/projects/:projectId" element={<ProjectHomePage />} />
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -578,12 +638,20 @@ describe("ProjectHomePage", () => {
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
     fireEvent.click(screen.getByRole("button", { name: "sidebar.delete" }));
-    fireEvent.click(await screen.findByRole("button", { name: "projects.deleteConfirmAction" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "projects.deleteConfirmAction",
+      }),
+    );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "projects.deleteConfirmAction" })).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "projects.deleteConfirmAction" }),
+      ).toBeDisabled();
     });
-    fireEvent.click(screen.getByRole("button", { name: "projects.deleteConfirmAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projects.deleteConfirmAction" }),
+    );
 
     expect(deleteProject).toHaveBeenCalledTimes(1);
     await act(async () => {

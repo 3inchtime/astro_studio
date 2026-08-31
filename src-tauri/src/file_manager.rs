@@ -12,6 +12,7 @@ pub struct FileManager {
     base_dir: PathBuf,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GenerationFileLifecycleEvent {
     PromoteBeforeIo,
@@ -222,10 +223,12 @@ impl Drop for PromotedPathGuard {
 }
 
 impl StagedGenerationFiles {
+    #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn final_paths(&self) -> Vec<PathBuf> {
         self.entries
             .iter()
@@ -311,6 +314,7 @@ impl PromotedGenerationFiles {
         self.generation_id == generation_id
     }
 
+    #[allow(dead_code)]
     pub(crate) fn final_paths(&self) -> Vec<PathBuf> {
         self.entries
             .iter()
@@ -474,6 +478,7 @@ impl FileManager {
         )
     }
 
+    #[allow(dead_code)]
     pub(crate) fn stage_generation_images_with_observer(
         &self,
         generation_id: &str,
@@ -773,7 +778,7 @@ mod tests {
         let staged = manager
             .stage_generation_images(
                 "generation-1",
-                &[source.clone()],
+                std::slice::from_ref(&source),
                 "png",
                 "2026-04-29T06:18:01Z",
             )

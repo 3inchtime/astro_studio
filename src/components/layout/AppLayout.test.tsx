@@ -4,6 +4,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AppLayout, { useLayoutContext } from "./AppLayout";
+import { ROUTES, ROUTE_PATHS } from "../../app/routes/contracts";
 
 const checkForUpdate = vi.fn();
 const isUpdateSupported = vi.fn();
@@ -75,7 +76,7 @@ function ProjectChatFixture() {
     setActiveConversationId("project-conversation-1");
   }, [setActiveConversationId, setActiveProjectId]);
 
-  return <Link to="/generate">global conversations</Link>;
+  return <Link to={ROUTES.generate}>global conversations</Link>;
 }
 
 function CheckUpdateFixture() {
@@ -105,10 +106,10 @@ describe("AppLayout", () => {
     localStorage.clear();
 
     const { container } = render(
-      <MemoryRouter initialEntries={["/generate"]}>
+      <MemoryRouter initialEntries={[ROUTES.generate]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -133,10 +134,10 @@ describe("AppLayout", () => {
 
   it("renders active rail destinations as elevated tool buttons", () => {
     render(
-      <MemoryRouter initialEntries={["/generate"]}>
+      <MemoryRouter initialEntries={[ROUTES.generate]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -153,10 +154,10 @@ describe("AppLayout", () => {
     localStorage.clear();
 
     render(
-      <MemoryRouter initialEntries={["/generate"]}>
+      <MemoryRouter initialEntries={[ROUTES.generate]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -170,11 +171,11 @@ describe("AppLayout", () => {
 
   it("renders the project sidebar on project routes and the conversation sidebar elsewhere", () => {
     const { rerender } = render(
-      <MemoryRouter key="projects" initialEntries={["/projects"]}>
+      <MemoryRouter key="projects" initialEntries={[ROUTES.projects]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/projects" element={<div>projects</div>} />
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route path={ROUTES.projects} element={<div>projects</div>} />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -184,11 +185,11 @@ describe("AppLayout", () => {
     expect(screen.queryByTestId("conversation-sidebar")).not.toBeInTheDocument();
 
     rerender(
-      <MemoryRouter key="generate" initialEntries={["/generate"]}>
+      <MemoryRouter key="generate" initialEntries={[ROUTES.generate]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/projects" element={<div>projects</div>} />
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route path={ROUTES.projects} element={<div>projects</div>} />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -199,10 +200,10 @@ describe("AppLayout", () => {
 
   it("collapses the conversation sidebar on settings routes", () => {
     render(
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter initialEntries={[ROUTES.settings]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/settings" element={<div>settings</div>} />
+            <Route path={ROUTES.settings} element={<div>settings</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -214,11 +215,11 @@ describe("AppLayout", () => {
 
   it("collapses the conversation sidebar on gallery and favorites routes", () => {
     const { rerender } = render(
-      <MemoryRouter key="gallery" initialEntries={["/gallery"]}>
+      <MemoryRouter key="gallery" initialEntries={[ROUTES.gallery]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/gallery" element={<div>gallery</div>} />
-            <Route path="/favorites" element={<div>favorites</div>} />
+            <Route path={ROUTES.gallery} element={<div>gallery</div>} />
+            <Route path={ROUTES.favorites} element={<div>favorites</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -228,11 +229,11 @@ describe("AppLayout", () => {
     expect(screen.getByText("gallery")).toBeInTheDocument();
 
     rerender(
-      <MemoryRouter key="favorites" initialEntries={["/favorites"]}>
+      <MemoryRouter key="favorites" initialEntries={[ROUTES.favorites]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/gallery" element={<div>gallery</div>} />
-            <Route path="/favorites" element={<div>favorites</div>} />
+            <Route path={ROUTES.gallery} element={<div>gallery</div>} />
+            <Route path={ROUTES.favorites} element={<div>favorites</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -244,10 +245,10 @@ describe("AppLayout", () => {
 
   it("shows the extract nav item and collapses the conversation sidebar on extract routes", () => {
     render(
-      <MemoryRouter initialEntries={["/extract"]}>
+      <MemoryRouter initialEntries={[ROUTES.extract]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/extract" element={<div>extract</div>} />
+            <Route path={ROUTES.extract} element={<div>extract</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -260,10 +261,10 @@ describe("AppLayout", () => {
 
   it("shows the canvas nav item and collapses the conversation sidebar on canvas routes", () => {
     render(
-      <MemoryRouter initialEntries={["/canvas"]}>
+      <MemoryRouter initialEntries={[ROUTES.canvas]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/canvas" element={<div>canvas</div>} />
+            <Route path={ROUTES.canvas} element={<div>canvas</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -279,14 +280,14 @@ describe("AppLayout", () => {
       <MemoryRouter
         initialEntries={[
           {
-            pathname: "/generate",
+            pathname: ROUTES.generate,
             state: { activateConversationId: "extract-conversation-1" },
           } as never,
         ]}
       >
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -299,13 +300,49 @@ describe("AppLayout", () => {
     });
   });
 
-  it("clears a project conversation selection when returning to global conversations", async () => {
+  it("hydrates project and conversation state from chat routes", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1/chat/project-conversation-1"]}>
+      <MemoryRouter
+        initialEntries={[
+          ROUTE_PATHS.projectChatConversation
+            .replace(":projectId", "project-1")
+            .replace(":conversationId", "project-conversation-1"),
+        ]}
+      >
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/projects/:projectId/chat/:conversationId" element={<ProjectChatFixture />} />
-            <Route path="/generate" element={<div>generate</div>} />
+            <Route
+              path={ROUTE_PATHS.projectChatConversation}
+              element={<div>project-chat</div>}
+            />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-active-project")).toHaveTextContent(
+        "project-1",
+      );
+      expect(
+        screen.getByTestId("conversation-active-conversation"),
+      ).toHaveTextContent("project-conversation-1");
+    });
+  });
+
+  it("clears a project conversation selection when returning to global conversations", async () => {
+    render(
+      <MemoryRouter
+        initialEntries={[ROUTES.projectChat("project-1", "project-conversation-1")]}
+      >
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route
+              path={ROUTE_PATHS.projectChatConversation}
+              element={<ProjectChatFixture />}
+            />
+            <Route path={ROUTES.generate} element={<div>generate</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -327,12 +364,17 @@ describe("AppLayout", () => {
 
   it("keeps project chat context when clearing the active project conversation", async () => {
     render(
-      <MemoryRouter initialEntries={["/projects/project-1/chat/project-conversation-1"]}>
+      <MemoryRouter
+        initialEntries={[ROUTES.projectChat("project-1", "project-conversation-1")]}
+      >
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/projects/:projectId/chat/:conversationId" element={<ProjectChatFixture />} />
-            <Route path="/projects/:projectId/chat" element={<div>project chat empty</div>} />
-            <Route path="/projects/:projectId" element={<div>project home</div>} />
+            <Route
+              path={ROUTE_PATHS.projectChatConversation}
+              element={<ProjectChatFixture />}
+            />
+            <Route path={ROUTE_PATHS.projectChat} element={<div>project chat empty</div>} />
+            <Route path={ROUTE_PATHS.projectHome} element={<div>project home</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -361,10 +403,10 @@ describe("AppLayout", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter initialEntries={[ROUTES.settings]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/settings" element={<CheckUpdateFixture />} />
+            <Route path={ROUTES.settings} element={<CheckUpdateFixture />} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -384,10 +426,10 @@ describe("AppLayout", () => {
     isUpdateSupported.mockResolvedValue(false);
 
     render(
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter initialEntries={[ROUTES.settings]}>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/settings" element={<CheckUpdateFixture />} />
+            <Route path={ROUTES.settings} element={<CheckUpdateFixture />} />
           </Route>
         </Routes>
       </MemoryRouter>,

@@ -2,9 +2,10 @@ use crate::api_gateway;
 use crate::db::Database;
 use crate::error::AppError;
 use crate::file_manager;
-use crate::generation_lifecycle::{
-    run_generation_lifecycle, GenerationLifecycleKind, GenerationLifecycleRequest,
+use crate::generation_execution::{
+    submit_generation_request, GenerationExecutionMode, GenerationExecutionRequest,
 };
+use crate::generation_lifecycle::GenerationLifecycleKind;
 use crate::models::*;
 use std::collections::HashSet;
 use std::io::Read;
@@ -159,11 +160,13 @@ pub(crate) fn resolve_source_image_paths(
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command parameters form the stable IPC contract.
 pub(crate) async fn generate_image(
     app: tauri::AppHandle,
     db: State<'_, Database>,
     engine_state: State<'_, api_gateway::GptImageEngine>,
     prompt: String,
+    client_request_id: Option<String>,
     model: Option<String>,
     size: Option<String>,
     quality: Option<String>,
@@ -175,13 +178,14 @@ pub(crate) async fn generate_image(
     conversation_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<GenerateResult, AppError> {
-    run_generation_lifecycle(
+    submit_generation_request(
         &app,
         db.inner(),
         engine_state.inner(),
-        GenerationLifecycleRequest {
+        GenerationExecutionRequest {
             kind: GenerationLifecycleKind::Generate,
             prompt,
+            client_request_id,
             model,
             source_image_paths: Vec::new(),
             size,
@@ -194,17 +198,20 @@ pub(crate) async fn generate_image(
             image_count,
             conversation_id,
             project_id,
+            execution_mode: GenerationExecutionMode::Compatibility,
         },
     )
     .await
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command parameters form the stable IPC contract.
 pub(crate) async fn edit_image(
     app: tauri::AppHandle,
     db: State<'_, Database>,
     engine_state: State<'_, api_gateway::GptImageEngine>,
     selected_images: State<'_, SelectedImageRegistry>,
+    client_request_id: Option<String>,
     prompt: String,
     model: Option<String>,
     source_image_paths: Vec<String>,
@@ -231,13 +238,14 @@ pub(crate) async fn edit_image(
         &source_image_paths,
     )?;
 
-    run_generation_lifecycle(
+    submit_generation_request(
         &app,
         db.inner(),
         engine_state.inner(),
-        GenerationLifecycleRequest {
+        GenerationExecutionRequest {
             kind: GenerationLifecycleKind::Edit,
             prompt,
+            client_request_id,
             model,
             source_image_paths,
             size,
@@ -250,6 +258,7 @@ pub(crate) async fn edit_image(
             image_count,
             conversation_id,
             project_id,
+            execution_mode: GenerationExecutionMode::Compatibility,
         },
     )
     .await

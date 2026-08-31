@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Fenced worker transitions remain inert until a runtime owner is introduced.
+
 use crate::api_gateway::{EngineCallError, ImageEngine, PreparedEditImage, ProviderAttemptBody};
 use crate::commands::settings;
 use crate::current_timestamp;
@@ -5,9 +7,9 @@ use crate::db::Database;
 use crate::error::AppError;
 use crate::file_manager::{self, PromotedGenerationFiles, StagedGenerationFiles};
 use crate::generation_jobs::{
-    begin_generation_job_write_transaction, enqueue_job, executable_provider_snapshot_is_valid,
-    finish_job_in_transaction, get_job_event_in_transaction, get_job_in_transaction,
-    insert_and_claim_exact_job, load_generation_execution_snapshot_for_stage_in_transaction,
+    begin_generation_job_write_transaction, claim_job_in_transaction, enqueue_job,
+    executable_provider_snapshot_is_valid, finish_job_in_transaction, get_job_event_in_transaction,
+    get_job_in_transaction, load_generation_execution_snapshot_for_stage_in_transaction,
     load_generation_execution_snapshot_in_transaction, set_actual_image_count_in_transaction,
     terminal_message_for_code, validate_worker_recovery_for_stage, GenerationJobOptions,
     GenerationJobRequest, GenerationJobRequestKind, GenerationJobTerminalUpdate,
@@ -85,6 +87,7 @@ pub(crate) struct GenerationLifecycleRequest {
     pub(crate) kind: GenerationLifecycleKind,
     pub(crate) prompt: String,
     pub(crate) model: Option<String>,
+    pub(crate) client_request_id: Option<String>,
     pub(crate) source_image_paths: Vec<String>,
     pub(crate) size: Option<String>,
     pub(crate) quality: Option<String>,
@@ -2740,6 +2743,7 @@ fn normalize_input_fidelity(input_fidelity: &str) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Mirrors the persisted generation request fields.
 pub(crate) fn image_request_options(
     size: Option<String>,
     quality: Option<String>,
@@ -2857,9 +2861,30 @@ fn prepare_compatibility_job(
         image_count: request.image_count.map(|_| runtime_options.image_count),
     };
     let queued_at = current_timestamp();
-    let job_id = uuid::Uuid::new_v4().to_string();
-    let client_request_id = uuid::Uuid::new_v4().to_string();
-    let generation_id = uuid::Uuid::new_v4().to_string();
+    let client_request_id = request
+        .client_request_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let seed = format!(
+        "compatibility:{}:{client_request_id}",
+        request.kind.as_str()
+    );
+    let job_id = {
+        let digest = Sha256::digest(seed.as_bytes());
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest[0..16]);
+        uuid::Uuid::from_bytes(bytes).to_string()
+    };
+    let generation_id = request
+        .client_request_id
+        .as_ref()
+        .map(|value| {
+            let digest = Sha256::digest(value.as_bytes());
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(&digest[0..16]);
+            uuid::Uuid::from_bytes(bytes).to_string()
+        })
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let active_profile = settings::active_provider_profile_for_model(db, &model);
     let (provider_kind, provider_profile_id, endpoint_snapshot, status, finished_at, error_code) =
         match active_profile {
@@ -3072,7 +3097,34 @@ fn start_compatibility_job(
     event_sink: &dyn LegacyGenerationEventSink,
     prepared_job: PreparedGenerationJob,
 ) -> Result<GenerationExecutionSnapshot, AppError> {
-    if prepared_job.status == GenerationJobStatus::Failed {
+    let (enqueue_result, snapshot) = {
+        let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+        let enqueue_result = enqueue_job(&mut conn, &prepared_job)?;
+        if enqueue_result.job_id != prepared_job.job_id
+            || enqueue_result.generation_id != prepared_job.generation_id
+        {
+            return Err(AppError::GenerationJobIdempotencyConflict);
+        }
+        if enqueue_result.status != GenerationJobStatus::Queued {
+            (enqueue_result, None)
+        } else {
+            let tx = begin_generation_job_write_transaction(&mut conn)?;
+            let claimed = claim_job_in_transaction(&tx, &prepared_job.job_id)?;
+            if claimed.id != prepared_job.job_id
+                || claimed.generation_id != prepared_job.generation_id
+            {
+                return Err(AppError::GenerationJobCorruptPersistedData);
+            }
+            let snapshot =
+                load_generation_execution_snapshot_in_transaction(&tx, &prepared_job.job_id)?;
+            tx.commit().map_err(|error| {
+                lifecycle_database_error("Claim compatibility job transaction failed", error)
+            })?;
+            (enqueue_result, Some(snapshot))
+        }
+    };
+
+    if enqueue_result.status == GenerationJobStatus::Failed {
         let error_code = prepared_job
             .error_code
             .as_deref()
@@ -3090,15 +3142,6 @@ fn start_compatibility_job(
             "edit" => GenerationLifecycleKind::Edit,
             _ => return Err(AppError::GenerationJobInvalidSnapshot),
         };
-        {
-            let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
-            let inserted = enqueue_job(&mut conn, &prepared_job)?;
-            if inserted.job_id != prepared_job.job_id
-                || inserted.generation_id != prepared_job.generation_id
-            {
-                return Err(AppError::GenerationJobIdempotencyConflict);
-            }
-        }
         let _ = db.insert_log(
             "generation",
             "error",
@@ -3118,14 +3161,11 @@ fn start_compatibility_job(
             },
         });
     }
-    if prepared_job.status != GenerationJobStatus::Queued {
+    if enqueue_result.status != GenerationJobStatus::Queued {
         return Err(AppError::GenerationJobInvalidSnapshot);
     }
+    let snapshot = snapshot.ok_or(AppError::GenerationJobInvalidSnapshot)?;
 
-    let snapshot = {
-        let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
-        insert_and_claim_exact_job(&mut conn, &prepared_job)?
-    };
     let kind = GenerationLifecycleKind::from(snapshot.request.kind);
     if kind == GenerationLifecycleKind::Generate {
         let _ = db.insert_log(
@@ -3501,6 +3541,7 @@ mod tests {
             kind: GenerationLifecycleKind::Generate,
             prompt: "draw a durable nebula".to_string(),
             model: Some(model.to_string()),
+            client_request_id: None,
             source_image_paths: Vec::new(),
             size: Some("1536x1024".to_string()),
             quality: Some("high".to_string()),
@@ -4123,6 +4164,69 @@ mod tests {
             }
         }
         drop(sink);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn compatibility_executor_replays_completion_as_idempotency_no_double_execution() {
+        let fixture = CompatibilityPreparationFixture::new();
+        fixture.save_profiles(
+            ENGINE_GPT_IMAGE_2,
+            ModelProviderProfilesState {
+                active_provider_id: "provider-a".to_string(),
+                profiles: vec![ModelProviderProfile {
+                    id: "provider-a".to_string(),
+                    name: "Provider A".to_string(),
+                    api_key: "sk-a-current".to_string(),
+                    endpoint_settings: default_endpoint_settings_for_model(ENGINE_GPT_IMAGE_2),
+                }],
+            },
+        );
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.client_request_id = Some("compatibility-completion-replay".to_string());
+        let first = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        let replay = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        assert_eq!(first.job_id, replay.job_id);
+        assert_eq!(first.generation_id, replay.generation_id);
+
+        let engine = CompatibilityObservationEngine::new();
+        let decoder = FakeLocalDecoder {
+            calls: Arc::new(AtomicUsize::new(0)),
+            images: vec![jpeg_bytes()],
+        };
+        let artifact_store = FileResponseArtifactStore::new(fixture.root.join("responses"));
+        let file_store = LocalGenerationFileStore::new(fixture.root.join("app-data"));
+
+        let _result = execute_compatibility_job(
+            fixture.db.as_ref(),
+            &engine,
+            &artifact_store,
+            &decoder,
+            &file_store,
+            &CompatibilityEventSink::new(None),
+            first,
+        )
+        .await
+        .expect("complete initial compatibility request");
+        assert_eq!(engine.calls.load(Ordering::SeqCst), 1);
+
+        let replay_error = execute_compatibility_job(
+            fixture.db.as_ref(),
+            &engine,
+            &artifact_store,
+            &decoder,
+            &file_store,
+            &CompatibilityEventSink::new(None),
+            replay,
+        )
+        .await
+        .expect_err("replayed client id should not trigger another provider call");
+
+        assert!(matches!(
+            replay_error,
+            AppError::GenerationJobInvalidSnapshot
+        ));
+        assert_eq!(engine.calls.load(Ordering::SeqCst), 1);
         fixture.cleanup();
     }
 

@@ -33,6 +33,7 @@ import {
 import { formatConversationTime } from "../../lib/utils";
 import type { Conversation, Project } from "../../types";
 import ConfirmDialog from "../common/ConfirmDialog";
+import { ROUTES } from "../../app/routes/contracts";
 
 interface ConversationListProps {
   activeProjectId: string | null;
@@ -46,9 +47,7 @@ interface ConversationListProps {
   onNewConversation: () => void;
 }
 
-type ActionMenu =
-  | { type: "conversation"; id: string }
-  | null;
+type ActionMenu = { type: "conversation"; id: string } | null;
 
 export default function ConversationList({
   activeProjectId,
@@ -117,7 +116,10 @@ export default function ConversationList({
     async (conversation: Conversation, action: string) => {
       setOpenMenu(null);
       if (action === "rename") {
-        const title = window.prompt(t("sidebar.renameConversation"), conversation.title);
+        const title = window.prompt(
+          t("sidebar.renameConversation"),
+          conversation.title,
+        );
         if (!title || title.trim() === conversation.title) return;
         await renameConversation(conversation.id, title.trim());
       } else if (action === "pin") {
@@ -194,7 +196,7 @@ export default function ConversationList({
           {activeProjectId && selectedProject ? (
             <button
               type="button"
-              onClick={() => navigate("/projects")}
+              onClick={() => navigate(ROUTES.projects)}
               className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 shadow-card transition-colors hover:bg-subtle hover:text-foreground"
               aria-label={t("projects.backToList")}
             >
@@ -204,7 +206,11 @@ export default function ConversationList({
           ) : null}
         </div>
         <div className="relative">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" strokeWidth={2} />
+          <Search
+            size={12}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+            strokeWidth={2}
+          />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -228,7 +234,9 @@ export default function ConversationList({
             </p>
             <div className="mt-0.5 flex items-center gap-1.5">
               <span className="truncate text-[10px] text-muted/60">
-                {activeProjectId ? t("sidebar.conversations") : selectedProject?.name ?? t("sidebar.conversations")}
+                {activeProjectId
+                  ? t("sidebar.conversations")
+                  : (selectedProject?.name ?? t("sidebar.conversations"))}
               </span>
             </div>
           </div>
@@ -339,10 +347,16 @@ function ConversationRow({
         </div>
         <div className="min-w-0 flex-1 pr-6">
           <div className="flex min-w-0 items-center gap-1.5">
-            {conversation.pinned_at && <Pin size={10} className="shrink-0 text-primary" />}
-            <p className={`truncate text-[12px] leading-snug transition-colors ${
-              active ? "font-semibold text-foreground" : "text-foreground/78 group-hover:text-foreground"
-            }`}>
+            {conversation.pinned_at && (
+              <Pin size={10} className="shrink-0 text-primary" />
+            )}
+            <p
+              className={`truncate text-[12px] leading-snug transition-colors ${
+                active
+                  ? "font-semibold text-foreground"
+                  : "text-foreground/78 group-hover:text-foreground"
+              }`}
+            >
               {conversation.title}
             </p>
           </div>
@@ -371,7 +385,9 @@ function ConversationRow({
           onToggleMenu();
         }}
         className={`absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[9px] text-muted/60 transition-all hover:bg-subtle hover:text-foreground ${
-          menuOpen ? "bg-subtle opacity-100" : "opacity-0 group-hover:opacity-100"
+          menuOpen
+            ? "bg-subtle opacity-100"
+            : "opacity-0 group-hover:opacity-100"
         }`}
         aria-label={t("sidebar.conversationActions")}
       >
@@ -385,18 +401,26 @@ function ConversationRow({
             onClick={() => onAction("rename")}
           />
           <ActionButton
-            icon={conversation.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
-            label={conversation.pinned_at ? t("sidebar.unpin") : t("sidebar.pin")}
+            icon={
+              conversation.pinned_at ? <PinOff size={13} /> : <Pin size={13} />
+            }
+            label={
+              conversation.pinned_at ? t("sidebar.unpin") : t("sidebar.pin")
+            }
             onClick={() => onAction(conversation.pinned_at ? "unpin" : "pin")}
           />
           <ActionButton
             icon={
-              conversation.archived_at
-                ? <ArchiveRestore size={13} />
-                : <Archive size={13} />
+              conversation.archived_at ? (
+                <ArchiveRestore size={13} />
+              ) : (
+                <Archive size={13} />
+              )
             }
             label={
-              conversation.archived_at ? t("sidebar.unarchive") : t("sidebar.archive")
+              conversation.archived_at
+                ? t("sidebar.unarchive")
+                : t("sidebar.archive")
             }
             onClick={() =>
               onAction(conversation.archived_at ? "unarchive" : "archive")
@@ -408,7 +432,8 @@ function ConversationRow({
             label={t("sidebar.delete")}
             onClick={() => onAction("delete")}
           />
-          {projects.filter((project) => project.id !== conversation.project_id).length > 0 && (
+          {projects.filter((project) => project.id !== conversation.project_id)
+            .length > 0 && (
             <>
               <div className="my-1 border-t border-border-subtle" />
               <p className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted/50">

@@ -1,3 +1,5 @@
+#![allow(clippy::items_after_test_module)] // Database tests share private migration helpers below.
+
 use crate::error::AppError;
 use crate::models::LogEntry;
 use rusqlite::{params, Connection};

@@ -43,7 +43,9 @@ pub const DEFAULT_IMAGE_STREAM: bool = false;
 pub const DEFAULT_PARTIAL_IMAGES: u8 = 0;
 pub const DEFAULT_IMAGE_COUNT: u8 = 1;
 pub const DEFAULT_PAGE_SIZE: i32 = 20;
+#[allow(dead_code)]
 pub const DEFAULT_GENERATION_JOB_PAGE_LIMIT: i32 = 50;
+#[allow(dead_code)]
 pub const MAX_GENERATION_JOB_PAGE_LIMIT: i32 = 100;
 pub const SETTING_LOG_ENABLED: &str = "log_enabled";
 pub const SETTING_LOG_RETENTION_DAYS: &str = "log_retention_days";
@@ -285,6 +287,7 @@ pub struct EnqueueGenerationResult {
     pub finished_at: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct GenerationJobFilter {
@@ -297,6 +300,7 @@ pub struct GenerationJobFilter {
     pub cursor: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct GenerationJobPage {

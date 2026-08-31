@@ -2,6 +2,7 @@ import { MemoryRouter } from "react-router-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationList from "./ConversationList";
+import { ROUTES } from "../../app/routes/contracts";
 
 const getConversations = vi.fn();
 const getProjects = vi.fn();
@@ -13,7 +14,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     ...actual,
     useNavigate: () => navigate,
@@ -95,17 +99,29 @@ describe("ConversationList", () => {
     );
 
     await waitFor(() => {
-      expect(getConversations).toHaveBeenCalledWith(undefined, "project-1", false);
+      expect(getConversations).toHaveBeenCalledWith(
+        undefined,
+        "project-1",
+        false,
+      );
     });
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "nav.projects" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "projects.backToList" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "sidebar.newProject" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "nav.projects" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "projects.backToList" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "sidebar.newProject" }),
+    ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "projects.backToList" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projects.backToList" }),
+    );
 
-    expect(navigate).toHaveBeenCalledWith("/projects");
+    expect(navigate).toHaveBeenCalledWith(ROUTES.projects);
   });
 
   it("renders larger conversation thumbnails in the sidebar list", async () => {
@@ -143,7 +159,9 @@ describe("ConversationList", () => {
 
     await screen.findByText("Homepage hero direction");
 
-    const thumbnailImage = container.querySelector('img[src="/tmp/sidebar-thumb.png"]');
+    const thumbnailImage = container.querySelector(
+      'img[src="/tmp/sidebar-thumb.png"]',
+    );
 
     expect(thumbnailImage).not.toBeNull();
     expect(thumbnailImage?.parentElement).toHaveClass("h-[43px]", "w-[43px]");
@@ -168,7 +186,9 @@ describe("ConversationList", () => {
 
     await screen.findByText("Homepage hero direction");
 
-    const activeRow = container.querySelector("[data-active-conversation='true']");
+    const activeRow = container.querySelector(
+      "[data-active-conversation='true']",
+    );
 
     expect(activeRow).toHaveClass("bg-surface", "shadow-card", "ring-1");
   });
@@ -193,11 +213,15 @@ describe("ConversationList", () => {
     );
 
     await screen.findByText("Homepage hero direction");
-    fireEvent.click(screen.getByRole("button", { name: "sidebar.conversationActions" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "sidebar.conversationActions" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "sidebar.delete" }));
 
     expect(confirmSpy).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toHaveTextContent("sidebar.deleteConversationConfirm");
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "sidebar.deleteConversationConfirm",
+    );
 
     confirmSpy.mockRestore();
   });
@@ -223,9 +247,13 @@ describe("ConversationList", () => {
     );
 
     await screen.findByText("Homepage hero direction");
-    fireEvent.click(screen.getByRole("button", { name: "sidebar.conversationActions" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "sidebar.conversationActions" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "sidebar.delete" }));
-    fireEvent.click(screen.getByRole("button", { name: "projects.deleteConfirmAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "projects.deleteConfirmAction" }),
+    );
 
     await waitFor(() => {
       expect(deleteConversation).toHaveBeenCalledWith("conversation-1");

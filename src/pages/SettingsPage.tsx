@@ -3,16 +3,26 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { getVersion } from "@tauri-apps/api/app";
 import {
-  getLogs, clearLogs, getLogSettings, saveLogSettings,
-  readLogResponseFile, getTrashSettings, saveTrashSettings,
-  getFontSize, getImageModel, saveFontSize, saveImageModel,
-  getRuntimeLogs, onRuntimeLog, getModelProviderProfiles,
-  saveModelProviderProfiles, createModelProviderProfile,
-  deleteModelProviderProfile, setActiveModelProvider,
+  getLogs,
+  clearLogs,
+  getLogSettings,
+  saveLogSettings,
+  readLogResponseFile,
+  getTrashSettings,
+  saveTrashSettings,
+  getFontSize,
+  getImageModel,
+  saveFontSize,
+  saveImageModel,
+  getRuntimeLogs,
+  onRuntimeLog,
+  getModelProviderProfiles,
+  saveModelProviderProfiles,
+  createModelProviderProfile,
+  deleteModelProviderProfile,
+  setActiveModelProvider,
 } from "../lib/api";
-import {
-  Cpu, FileText, SlidersHorizontal,
-} from "lucide-react";
+import { Cpu, FileText, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../hooks/useTheme";
 import { useLayoutContext } from "../components/layout/AppLayout";
@@ -26,19 +36,14 @@ import type {
   RuntimeLogEntry,
   TrashSettings,
 } from "../types";
-import {
-  applyAppFontSize,
-  getStoredAppFontSize,
-} from "../lib/fontSize";
+import { applyAppFontSize, getStoredAppFontSize } from "../lib/fontSize";
 import { normalizeLanguage, type SupportedLanguage } from "../lib/languages";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import { GeneralSettingsPanel } from "../components/settings/GeneralSettingsPanel";
 import { LogsPanel } from "../components/settings/LogsPanel";
 import { ModelSettingsPanel } from "../components/settings/ModelSettingsPanel";
-import {
-  copyTextToClipboard,
-  mergeRuntimeLogs,
-} from "../lib/settingsLogs";
+import { ROUTES } from "../app/routes/contracts";
+import { copyTextToClipboard, mergeRuntimeLogs } from "../lib/settingsLogs";
 import {
   DEFAULT_PROVIDER_ID,
   NEW_PROVIDER_NAME,
@@ -79,15 +84,19 @@ const SETTINGS_TABS = [
 export default function SettingsPage() {
   const navigate = useNavigate();
   const { checkForUpdates, updateSupported } = useLayoutContext();
-  const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">(
+    "general",
+  );
   const { theme, setThemeWithEvent } = useTheme();
 
   // General settings state
   const [showKey, setShowKey] = useState(false);
-  const [providerState, setProviderState] = useState<ModelProviderProfilesState>(() =>
-    defaultProviderProfilesStateForModel(DEFAULT_MODEL),
-  );
-  const [selectedProviderId, setSelectedProviderId] = useState(DEFAULT_PROVIDER_ID);
+  const [providerState, setProviderState] =
+    useState<ModelProviderProfilesState>(() =>
+      defaultProviderProfilesStateForModel(DEFAULT_MODEL),
+    );
+  const [selectedProviderId, setSelectedProviderId] =
+    useState(DEFAULT_PROVIDER_ID);
   const [providerSaved, setProviderSaved] = useState(false);
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_MODEL);
   const [modelSaved, setModelSaved] = useState(false);
@@ -97,7 +106,9 @@ export default function SettingsPage() {
   );
   const [fontSize, setFontSize] = useState<AppFontSize>(getStoredAppFontSize());
   const [fontSizeSaved, setFontSizeSaved] = useState(false);
-  const [trashSettings, setTrashSettings] = useState<TrashSettings>({ retention_days: 30 });
+  const [trashSettings, setTrashSettings] = useState<TrashSettings>({
+    retention_days: 30,
+  });
   const [trashSaved, setTrashSaved] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [appVersion, setAppVersion] = useState("");
@@ -108,12 +119,17 @@ export default function SettingsPage() {
   const [logPage, setLogPage] = useState(1);
   const [logType, setLogType] = useState("");
   const [logLevel, setLogLevel] = useState("");
-  const [logSettings, setLogSettings] = useState<LogSettings>({ enabled: true, retention_days: 7 });
+  const [logSettings, setLogSettings] = useState<LogSettings>({
+    enabled: true,
+    retention_days: 7,
+  });
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const [responseContent, setResponseContent] = useState<string | null>(null);
   const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogEntry[]>([]);
   const [autoScrollRuntimeLogs, setAutoScrollRuntimeLogs] = useState(true);
-  const [copiedLogTarget, setCopiedLogTarget] = useState<"runtime" | "detail" | null>(null);
+  const [copiedLogTarget, setCopiedLogTarget] = useState<
+    "runtime" | "detail" | null
+  >(null);
   const [clearLogsOpen, setClearLogsOpen] = useState(false);
   const [clearingLogs, setClearingLogs] = useState(false);
   const runtimeLogsRef = useRef<HTMLDivElement | null>(null);
@@ -136,24 +152,28 @@ export default function SettingsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    getImageModel().then((model) => {
-      if (cancelled || didUserSelectModelRef.current) {
-        return;
-      }
+    getImageModel()
+      .then((model) => {
+        if (cancelled || didUserSelectModelRef.current) {
+          return;
+        }
 
-      setImageModel(model);
-    }).catch(() => {
-      // Ignore persisted model load failures and keep catalog default.
-    });
+        setImageModel(model);
+      })
+      .catch(() => {
+        // Ignore persisted model load failures and keep catalog default.
+      });
 
-    getFontSize().then((size) => {
-      setFontSize(size);
-      applyAppFontSize(size);
-    }).catch(() => {
-      const storedFontSize = getStoredAppFontSize();
-      setFontSize(storedFontSize);
-      applyAppFontSize(storedFontSize);
-    });
+    getFontSize()
+      .then((size) => {
+        setFontSize(size);
+        applyAppFontSize(size);
+      })
+      .catch(() => {
+        const storedFontSize = getStoredAppFontSize();
+        setFontSize(storedFontSize);
+        applyAppFontSize(storedFontSize);
+      });
 
     return () => {
       cancelled = true;
@@ -170,21 +190,23 @@ export default function SettingsPage() {
     setProviderState(defaultState);
     setSelectedProviderId(defaultState.active_provider_id);
 
-    getModelProviderProfiles(modelAtLoadStart).then((state) => {
-      if (cancelled || imageModelRef.current !== modelAtLoadStart) {
-        return;
-      }
+    getModelProviderProfiles(modelAtLoadStart)
+      .then((state) => {
+        if (cancelled || imageModelRef.current !== modelAtLoadStart) {
+          return;
+        }
 
-      setProviderState(state);
-      setSelectedProviderId(state.active_provider_id);
-    }).catch(() => {
-      if (cancelled || imageModelRef.current !== modelAtLoadStart) {
-        return;
-      }
+        setProviderState(state);
+        setSelectedProviderId(state.active_provider_id);
+      })
+      .catch(() => {
+        if (cancelled || imageModelRef.current !== modelAtLoadStart) {
+          return;
+        }
 
-      setProviderState(defaultState);
-      setSelectedProviderId(defaultState.active_provider_id);
-    });
+        setProviderState(defaultState);
+        setSelectedProviderId(defaultState.active_provider_id);
+      });
 
     return () => {
       cancelled = true;
@@ -202,10 +224,17 @@ export default function SettingsPage() {
 
   const fetchLogs = useCallback(async () => {
     try {
-      const result = await getLogs(logType || undefined, logLevel || undefined, logPage, pageSize);
+      const result = await getLogs(
+        logType || undefined,
+        logLevel || undefined,
+        logPage,
+        pageSize,
+      );
       setLogs(result.logs);
       setTotalLogs(result.total);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [logType, logLevel, logPage]);
 
   useEffect(() => {
@@ -221,22 +250,26 @@ export default function SettingsPage() {
     onRuntimeLog((entry) => {
       if (cancelled) return;
       setRuntimeLogs((current) => mergeRuntimeLogs(current, [entry]));
-    }).then((dispose) => {
-      if (cancelled) {
-        dispose();
-        return;
-      }
-      unlisten = dispose;
-    }).catch(() => {
-      unlisten = undefined;
-    });
+    })
+      .then((dispose) => {
+        if (cancelled) {
+          dispose();
+          return;
+        }
+        unlisten = dispose;
+      })
+      .catch(() => {
+        unlisten = undefined;
+      });
 
-    getRuntimeLogs(200).then((entries) => {
-      if (cancelled) return;
-      setRuntimeLogs((current) => mergeRuntimeLogs(current, entries));
-    }).catch(() => {
-      if (!cancelled) setRuntimeLogs([]);
-    });
+    getRuntimeLogs(200)
+      .then((entries) => {
+        if (cancelled) return;
+        setRuntimeLogs((current) => mergeRuntimeLogs(current, entries));
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeLogs([]);
+      });
 
     return () => {
       cancelled = true;
@@ -339,7 +372,10 @@ export default function SettingsPage() {
     });
     setProviderSaved(false);
 
-    const nextState = await deleteModelProviderProfile(modelAtDeleteStart, providerId);
+    const nextState = await deleteModelProviderProfile(
+      modelAtDeleteStart,
+      providerId,
+    );
     if (imageModelRef.current !== modelAtDeleteStart) {
       return;
     }
@@ -354,7 +390,10 @@ export default function SettingsPage() {
 
   async function handleSetActiveProvider(providerId: string) {
     const modelAtActivateStart = imageModel;
-    const nextState = await setActiveModelProvider(modelAtActivateStart, providerId);
+    const nextState = await setActiveModelProvider(
+      modelAtActivateStart,
+      providerId,
+    );
     if (imageModelRef.current !== modelAtActivateStart) {
       return;
     }
@@ -452,7 +491,9 @@ export default function SettingsPage() {
       try {
         const content = await readLogResponseFile(log.response_file);
         setResponseContent(content);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -467,7 +508,9 @@ export default function SettingsPage() {
   }
 
   const totalPages = Math.ceil(totalLogs / pageSize);
-  const activeSection = SETTINGS_TABS.find((section) => section.id === activeTab) ?? SETTINGS_TABS[0];
+  const activeSection =
+    SETTINGS_TABS.find((section) => section.id === activeTab) ??
+    SETTINGS_TABS[0];
 
   return (
     <div className="h-full overflow-y-auto bg-transparent">
@@ -493,7 +536,9 @@ export default function SettingsPage() {
         </motion.header>
 
         <nav
-          aria-label={t("settings.sections", { defaultValue: "Settings sections" })}
+          aria-label={t("settings.sections", {
+            defaultValue: "Settings sections",
+          })}
           className="mb-6 grid gap-3 lg:grid-cols-3"
         >
           {SETTINGS_TABS.map(({ id, icon: Icon, labelKey, descriptionKey }) => {
@@ -512,15 +557,19 @@ export default function SettingsPage() {
                     : "border-border-subtle bg-surface/70 hover:border-border hover:bg-surface"
                 }`}
               >
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border ${
-                  active
-                    ? "border-primary/15 bg-primary/7 text-primary"
-                    : "border-border-subtle bg-subtle/35 text-muted"
-                }`}>
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border ${
+                    active
+                      ? "border-primary/15 bg-primary/7 text-primary"
+                      : "border-border-subtle bg-subtle/35 text-muted"
+                  }`}
+                >
                   <Icon size={16} strokeWidth={2} />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[12px] font-semibold text-foreground">{t(labelKey)}</div>
+                  <div className="text-[12px] font-semibold text-foreground">
+                    {t(labelKey)}
+                  </div>
                   <p className="mt-1.5 text-[11px] leading-relaxed text-muted/65">
                     {t(descriptionKey)}
                   </p>
@@ -546,9 +595,13 @@ export default function SettingsPage() {
               onLanguageChange={handleLanguageChange}
               onTrashSettingsChange={setTrashSettings}
               onSaveTrashRetention={() => void handleSaveTrashRetention()}
-              onOpenTrash={() => navigate("/trash")}
-              onFontSizeChange={(nextSize) => void handleFontSizeChange(nextSize)}
-              onThemeChange={(nextTheme, event) => setThemeWithEvent(nextTheme, event)}
+              onOpenTrash={() => navigate(ROUTES.trash)}
+              onFontSizeChange={(nextSize) =>
+                void handleFontSizeChange(nextSize)
+              }
+              onThemeChange={(nextTheme, event) =>
+                setThemeWithEvent(nextTheme, event)
+              }
               onCheckUpdate={() => void handleCheckUpdate()}
               updateChecking={updateChecking}
             />
@@ -572,7 +625,10 @@ export default function SettingsPage() {
                 updateSelectedProvider((provider) => ({ ...provider, name }))
               }
               onProviderApiKeyChange={(apiKey) =>
-                updateSelectedProvider((provider) => ({ ...provider, api_key: apiKey }))
+                updateSelectedProvider((provider) => ({
+                  ...provider,
+                  api_key: apiKey,
+                }))
               }
               onShowKeyChange={setShowKey}
               onProviderEndpointModeChange={(mode) =>
@@ -612,8 +668,12 @@ export default function SettingsPage() {
                 }))
               }
               onCreateProvider={() => void handleCreateProvider()}
-              onDeleteProvider={(providerId) => void handleDeleteProvider(providerId)}
-              onSetActiveProvider={(providerId) => void handleSetActiveProvider(providerId)}
+              onDeleteProvider={(providerId) =>
+                void handleDeleteProvider(providerId)
+              }
+              onSetActiveProvider={(providerId) =>
+                void handleSetActiveProvider(providerId)
+              }
               onSaveProvider={() => void handleSaveProvider()}
               onCancelProviderEdit={() => void handleCancelProviderEdit()}
             />

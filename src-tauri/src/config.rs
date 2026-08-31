@@ -24,6 +24,7 @@ pub struct LogConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ApiConfig {
     pub timeout_secs: u64,
     pub max_retries: u32,
@@ -41,15 +42,6 @@ impl Default for LogConfig {
             level: "info".to_string(),
             save_to_file: false,
             file_path: "astro_studio.log".to_string(),
-        }
-    }
-}
-
-impl Default for ApiConfig {
-    fn default() -> Self {
-        Self {
-            timeout_secs: 0,
-            max_retries: 0,
         }
     }
 }

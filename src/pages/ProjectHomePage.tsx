@@ -16,7 +16,6 @@ import {
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { useUIStore } from "../lib/store";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
-import { useLayoutContext } from "../components/layout/AppLayout";
 import type { GenerationResult, MessageImage, Project } from "../types";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
@@ -24,18 +23,20 @@ import ConfirmDialog from "../components/common/ConfirmDialog";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import Lightbox from "../components/lightbox/Lightbox";
 import FolderSelector from "../components/favorites/FolderSelector";
+import { ROUTES } from "../app/routes/contracts";
 
 export default function ProjectHomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { projectId = "" } = useParams();
-  const { setActiveProjectId, setActiveConversationId } = useLayoutContext();
   const [project, setProject] = useState<Project | null>(null);
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(null);
+  const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
+    null,
+  );
 
   // Project action dialogs
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -46,7 +47,9 @@ export default function ProjectHomePage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [projectActionPending, setProjectActionPending] = useState(false);
   const projectActionPendingRef = useRef(false);
-  const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [projectActionError, setProjectActionError] = useState<string | null>(
+    null,
+  );
   const [showActions, setShowActions] = useState(false);
 
   const {
@@ -59,14 +62,13 @@ export default function ProjectHomePage() {
   } = useUIStore();
 
   useEffect(() => {
-    setActiveProjectId(projectId);
-    setActiveConversationId(null);
-  }, [projectId, setActiveConversationId, setActiveProjectId]);
-
-  useEffect(() => {
     Promise.all([
       getProjects(false).then((items) => {
-        setProject(items.find((item) => item.id === projectId && item.id !== "default") ?? null);
+        setProject(
+          items.find(
+            (item) => item.id === projectId && item.id !== "default",
+          ) ?? null,
+        );
       }),
       searchGenerations(undefined, 1, false, {}, projectId).then((result) => {
         setResults(result.generations);
@@ -109,7 +111,10 @@ export default function ProjectHomePage() {
     setProjectActionError(null);
     try {
       await pinProject(currentProject.id);
-      setProject({ ...currentProject, pinned_at: currentProject.pinned_at ?? new Date().toISOString() });
+      setProject({
+        ...currentProject,
+        pinned_at: currentProject.pinned_at ?? new Date().toISOString(),
+      });
       setShowActions(false);
     } catch {
       setProjectActionError(t("projects.actionError"));
@@ -145,7 +150,7 @@ export default function ProjectHomePage() {
     try {
       await archiveProject(project.id);
       setShowActions(false);
-      navigate("/projects");
+      navigate(ROUTES.projects);
     } catch {
       setProjectActionError(t("projects.actionError"));
     } finally {
@@ -162,7 +167,7 @@ export default function ProjectHomePage() {
     try {
       await deleteProject(project.id);
       setDeleteDialogOpen(false);
-      navigate("/projects");
+      navigate(ROUTES.projects);
     } catch {
       setDeleteError(t("projects.deleteError"));
     } finally {
@@ -173,7 +178,13 @@ export default function ProjectHomePage() {
 
   async function handleDeleteImage(id: string) {
     await deleteGeneration(id);
-    const result = await searchGenerations(undefined, page, false, {}, project!.id);
+    const result = await searchGenerations(
+      undefined,
+      page,
+      false,
+      {},
+      project!.id,
+    );
     setResults(result.generations);
     setTotal(result.total);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
@@ -184,8 +195,10 @@ export default function ProjectHomePage() {
 
   const handleEditImage = useCallback(
     (imagePath: string, imageId: string, generationId: string) => {
-      savePendingEditSources([buildEditSource(imagePath, imageId, generationId)]);
-      navigate(`/projects/${project!.id}/chat`);
+      savePendingEditSources([
+        buildEditSource(imagePath, imageId, generationId),
+      ]);
+      navigate(ROUTES.projectChat(project!.id));
     },
     [navigate, project],
   );
@@ -334,7 +347,13 @@ export default function ProjectHomePage() {
           page={page}
           pageSize={pageSize}
           onSearch={async (query, filters, nextPage) => {
-            const result = await searchGenerations(query || undefined, nextPage, false, filters, project.id);
+            const result = await searchGenerations(
+              query || undefined,
+              nextPage,
+              false,
+              filters,
+              project.id,
+            );
             setResults(result.generations);
             setTotal(result.total);
             setPage(result.page);
@@ -355,7 +374,9 @@ export default function ProjectHomePage() {
             onClose={() => setSelectedImage(null)}
             onDelete={(id) => void handleDeleteImage(id)}
             onEditImage={handleEditImage}
-            onPreview={(imageIndex) => openResultLightbox(selectedImage, imageIndex)}
+            onPreview={(imageIndex) =>
+              openResultLightbox(selectedImage, imageIndex)
+            }
             onManageFolders={openFolderSelector}
           />
         )}

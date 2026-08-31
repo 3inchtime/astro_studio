@@ -7,10 +7,12 @@ pub(crate) struct GeminiInlineImage {
     pub(crate) data: String,
 }
 
+#[allow(dead_code)]
 pub(crate) fn request_was_closed_before_completion(error: &str) -> bool {
     error.contains("connection closed before message completed")
 }
 
+#[allow(dead_code)]
 pub(crate) fn augment_transport_error(model: &str, error: &str) -> String {
     if !is_gemini_model(model) || !request_was_closed_before_completion(error) {
         return error.to_string();
@@ -67,6 +69,7 @@ pub(crate) fn build_request_body(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_images(response: &Value) -> Result<Vec<Vec<u8>>, String> {
     parse_images_with_cancellation(response, &|| false)
 }

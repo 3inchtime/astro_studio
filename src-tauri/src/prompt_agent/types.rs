@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PromptAgentSuggestedParams {
     pub model: Option<String>,
     pub size: Option<String>,
@@ -10,20 +10,6 @@ pub struct PromptAgentSuggestedParams {
     pub output_format: Option<String>,
     pub moderation: Option<String>,
     pub image_count: Option<u8>,
-}
-
-impl Default for PromptAgentSuggestedParams {
-    fn default() -> Self {
-        Self {
-            model: None,
-            size: None,
-            quality: None,
-            background: None,
-            output_format: None,
-            moderation: None,
-            image_count: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

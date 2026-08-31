@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -10,6 +10,24 @@ export default defineConfig(async () => ({
   plugins: [tailwindcss(), react()],
 
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          query: ["@tanstack/react-query"],
+          animation: ["framer-motion"],
+          i18n: ["i18next", "react-i18next", "i18next-browser-languagedetector"],
+          tauri: [
+            "@tauri-apps/api",
+            "@tauri-apps/plugin-opener",
+            "@tauri-apps/plugin-process",
+            "@tauri-apps/plugin-updater",
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
@@ -22,7 +40,7 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/.worktrees/**"],
     },
   },
   test: {
@@ -30,5 +48,6 @@ export default defineConfig(async () => ({
     setupFiles: "./src/test/setup.ts",
     css: true,
     globals: true,
+    exclude: [...configDefaults.exclude, "**/.worktrees/**"],
   },
 }));

@@ -526,6 +526,7 @@ export default function CanvasPage() {
 
       await editImage({
         prompt: prompt.trim(),
+        clientRequestId: crypto.randomUUID(),
         model: imageModel,
         sourceImagePaths: [exportedPath],
         projectId: activeProjectId,
