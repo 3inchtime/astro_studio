@@ -36,12 +36,16 @@ fn normalize_provider_endpoint_settings(
 ) -> EndpointSettings {
     let defaults = default_endpoint_settings_for_model(model);
     let mode = normalize_endpoint_mode(&settings.mode).to_string();
-    let base_url = endpoint_value_or_default(Some(settings.base_url.clone()), &defaults.base_url);
-    let generation_url = endpoint_value_or_default(
-        Some(settings.generation_url.clone()),
-        &defaults.generation_url,
-    );
-    let edit_url = if is_gemini_model(model) {
+    let base_url = crate::model_registry::migrate_official_gemini_url(&endpoint_value_or_default(
+        Some(settings.base_url.clone()),
+        &defaults.base_url,
+    ));
+    let generation_url =
+        crate::model_registry::migrate_official_gemini_url(&endpoint_value_or_default(
+            Some(settings.generation_url.clone()),
+            &defaults.generation_url,
+        ));
+    let edit_url = if is_gemini_model(model) || crate::model_registry::is_seedream_model(model) {
         generation_url.clone()
     } else {
         endpoint_value_or_default(Some(settings.edit_url.clone()), &defaults.edit_url)
@@ -282,13 +286,22 @@ pub(crate) fn active_provider_profile_for_model(
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
-fn current_image_model(db: &Database) -> Result<String, AppError> {
-    Ok(normalize_image_model(
-        db.get_setting(SETTING_IMAGE_MODEL)?
-            .as_deref()
-            .unwrap_or(DEFAULT_IMAGE_MODEL),
-    )
-    .to_string())
+pub(crate) fn current_image_model(db: &Database) -> Result<String, AppError> {
+    if let Some(model) = db.get_setting(SETTING_IMAGE_MODEL)? {
+        return Ok(normalize_image_model(&model).to_string());
+    }
+    // Older installations may have configured the implicit GPT Image 2 default.
+    for key in [
+        SETTING_API_KEY.to_string(),
+        SETTING_BASE_URL.to_string(),
+        model_provider_profiles_key(ENGINE_GPT_IMAGE_2),
+        model_setting_key(ENGINE_GPT_IMAGE_2, SETTING_API_KEY),
+    ] {
+        if db.get_setting(&key)?.is_some() {
+            return Ok(ENGINE_GPT_IMAGE_2.to_string());
+        }
+    }
+    Ok(DEFAULT_IMAGE_MODEL.to_string())
 }
 
 fn read_endpoint_settings(db: &Database) -> Result<EndpointSettings, AppError> {
@@ -623,12 +636,7 @@ pub(crate) fn save_font_size(db: State<'_, Database>, font_size: String) -> Resu
 
 #[tauri::command]
 pub(crate) fn get_image_model(db: State<'_, Database>) -> Result<String, AppError> {
-    Ok(normalize_image_model(
-        db.get_setting(SETTING_IMAGE_MODEL)?
-            .as_deref()
-            .unwrap_or(DEFAULT_IMAGE_MODEL),
-    )
-    .to_string())
+    current_image_model(db.inner())
 }
 
 #[tauri::command]
@@ -1025,5 +1033,63 @@ mod tests {
 
         drop(db);
         remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn retired_official_google_endpoints_migrate_without_changing_custom_profiles() {
+        let defaults = default_endpoint_settings_for_model(ENGINE_NANO_BANANA_PRO);
+        let old = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent";
+        let settings = EndpointSettings {
+            mode: "full_url".into(),
+            generation_url: old.into(),
+            edit_url: old.into(),
+            ..defaults
+        };
+        let state = normalize_provider_profiles_state(
+            ENGINE_NANO_BANANA_PRO,
+            ModelProviderProfilesState {
+                active_provider_id: "company".into(),
+                profiles: vec![ModelProviderProfile {
+                    id: "company".into(),
+                    name: "Company".into(),
+                    api_key: "test-key".into(),
+                    endpoint_settings: settings.clone(),
+                }],
+            },
+        )
+        .unwrap();
+        assert_eq!(state.active_provider_id, "company");
+        assert_eq!(state.profiles[0].api_key, "test-key");
+        assert_eq!(state.profiles[0].name, "Company");
+        assert_eq!(
+            state.profiles[0].endpoint_settings.generation_url,
+            old.replace("-preview", "")
+        );
+        let custom = EndpointSettings {
+            generation_url: "https://custom.test/gemini-3-pro-image-preview:generateContent".into(),
+            ..settings
+        };
+        assert_eq!(
+            normalize_provider_endpoint_settings(ENGINE_NANO_BANANA_PRO, &custom).generation_url,
+            custom.generation_url
+        );
+    }
+
+    #[test]
+    fn only_fresh_installations_default_to_flare() {
+        let path = std::env::temp_dir().join(format!(
+            "astro-model-default-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::open(&path).unwrap();
+        db.run_migrations().unwrap();
+        assert_eq!(current_image_model(&db).unwrap(), ENGINE_GPT_IMAGE_FLARE);
+        db.set_setting(SETTING_API_KEY, "legacy-key").unwrap();
+        assert_eq!(current_image_model(&db).unwrap(), ENGINE_GPT_IMAGE_2);
+        db.set_setting(SETTING_IMAGE_MODEL, ENGINE_NANO_BANANA)
+            .unwrap();
+        assert_eq!(current_image_model(&db).unwrap(), ENGINE_NANO_BANANA);
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 }

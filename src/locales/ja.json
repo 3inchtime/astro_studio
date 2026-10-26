@@ -629,5 +629,17 @@
   "update.latestVersion": "最新バージョン",
   "update.updateNotes": "リリースノート",
   "gallery.clearDate": "日付をクリア",
-  "canvas.defaultLayerName": "レイヤー {{number}}"
+  "canvas.defaultLayerName": "レイヤー {{number}}",
+  "generate.aspectRatioLabel": "アスペクト比",
+  "generate.resolutionLabel": "解像度",
+  "generate.quality.xhigh": "超高",
+  "generate.quality.max": "最高",
+  "generate.tooManyReferences": "このモデルは参照画像を最大 {{count}} 枚まで使用できます。",
+  "generate.unsupportedParameters": "選択した画像モデルでは使用できないパラメータです。",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

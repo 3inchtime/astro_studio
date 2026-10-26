@@ -153,6 +153,8 @@ export interface GenerationParams {
   prompt: string;
   clientRequestId?: string;
   model?: ImageModel;
+  aspectRatio?: string;
+  resolution?: string;
   size?: ImageSize;
   quality?: ImageQuality;
   background?: ImageBackground;
@@ -226,6 +228,8 @@ export interface RetryGenerationRequest {
   prompt: string;
   clientRequestId?: string;
   model: ImageModel;
+  aspectRatio?: string;
+  resolution?: string;
   size: ImageSize;
   quality: ImageQuality;
   background: ImageBackground;
@@ -260,7 +264,7 @@ export type ImageSize =
   | "3840x2160"
   | "2160x3840"
   | "auto";
-export type ImageQuality = "low" | "medium" | "high" | "auto";
+export type ImageQuality = "low" | "medium" | "high" | "xhigh" | "max" | "auto";
 export type ImageBackground = "auto" | "opaque" | "transparent";
 export type ImageModeration = "auto" | "low";
 export type ImageInputFidelity = "low" | "high";
@@ -331,6 +335,12 @@ export interface TrashSettings {
 
 export type AppFontSize = "small" | "medium" | "large";
 export type ImageModel =
+  | "gpt-image-2.5-sunburst"
+  | "gpt-image-2.5-flare"
+  | "gemini-nano-banana-2.1"
+  | "grok-imagine-image-2.0"
+  | "doubao-seedream-5-0-pro-260628"
+  | "doubao-seedream-5-0-flash-260915"
   | "gpt-image-2"
   | "nano-banana"
   | "nano-banana-2"
@@ -363,6 +373,8 @@ export interface ModelConnectionDefaults {
 }
 
 export interface ModelParameterDefaults {
+  aspectRatio?: string;
+  resolution?: string;
   size: ImageSize;
   quality: ImageQuality;
   background: ImageBackground;
@@ -373,6 +385,8 @@ export interface ModelParameterDefaults {
 }
 
 export interface ModelParameterCapabilities {
+  aspectRatios?: string[];
+  resolutions?: string[];
   sizes: ImageSize[];
   qualities: ImageQuality[];
   backgrounds: ImageBackground[];
@@ -388,7 +402,14 @@ export interface ImageModelCatalogEntry {
   i18nKey: string;
   provider: string;
   providerModelId: string;
+  protocol:
+    | "openai-images"
+    | "gemini-generate-content"
+    | "gemini-interactions"
+    | "xai-images"
+    | "seedream-images";
   supportsEdit: boolean;
+  maxReferenceImages?: number;
   connectionDefaults: ModelConnectionDefaults;
   parameterDefaults: ModelParameterDefaults;
   parameterCapabilities: ModelParameterCapabilities;

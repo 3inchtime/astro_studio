@@ -50,14 +50,17 @@ pub(crate) fn build_request_body(
         "responseModalities".to_string(),
         serde_json::json!(["IMAGE"]),
     );
-    generation_config.insert(
-        "candidateCount".to_string(),
-        serde_json::json!(options.image_count),
-    );
 
     let mut image_config = serde_json::Map::new();
-    if let Some(aspect_ratio) = aspect_ratio_for_size(&options.size) {
+    if let Some(aspect_ratio) = options
+        .aspect_ratio
+        .as_deref()
+        .or_else(|| aspect_ratio_for_size(&options.size))
+    {
         image_config.insert("aspectRatio".to_string(), serde_json::json!(aspect_ratio));
+    }
+    if let Some(resolution) = &options.resolution {
+        image_config.insert("imageSize".to_string(), serde_json::json!(resolution));
     }
     if !image_config.is_empty() {
         generation_config.insert("imageConfig".to_string(), Value::Object(image_config));
@@ -93,6 +96,9 @@ pub(crate) fn parse_images_with_cancellation(
                 for part in parts {
                     if is_cancelled() {
                         return Err("Image response decoding was cancelled".to_string());
+                    }
+                    if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                        continue;
                     }
                     if let Some(data) = part
                         .get("inlineData")
@@ -139,6 +145,8 @@ mod tests {
             "Draw a striped glass tiger",
             &[],
             &GptImageRequestOptions {
+                aspect_ratio: None,
+                resolution: None,
                 size: DEFAULT_IMAGE_SIZE.to_string(),
                 quality: DEFAULT_IMAGE_QUALITY.to_string(),
                 background: DEFAULT_IMAGE_BACKGROUND.to_string(),
@@ -156,7 +164,7 @@ mod tests {
             body["contents"][0]["parts"][0]["text"],
             "Draw a striped glass tiger"
         );
-        assert_eq!(body["generationConfig"]["candidateCount"], 2);
+        assert!(body["generationConfig"].get("candidateCount").is_none());
         assert_eq!(
             body["generationConfig"]["responseModalities"],
             json!(["IMAGE"])
@@ -175,6 +183,8 @@ mod tests {
                 data: "cmVmZXJlbmNlLWJ5dGVz".to_string(),
             }],
             &GptImageRequestOptions {
+                aspect_ratio: None,
+                resolution: None,
                 size: "1536x1024".to_string(),
                 quality: "ignored-for-gemini".to_string(),
                 background: "ignored-for-gemini".to_string(),
@@ -204,7 +214,6 @@ mod tests {
                 }],
                 "generationConfig": {
                     "responseModalities": ["IMAGE"],
-                    "candidateCount": 3,
                     "imageConfig": {
                         "aspectRatio": "3:2",
                     }
@@ -219,6 +228,8 @@ mod tests {
             "Draw a square icon",
             &[],
             &GptImageRequestOptions {
+                aspect_ratio: None,
+                resolution: None,
                 size: "auto".to_string(),
                 quality: DEFAULT_IMAGE_QUALITY.to_string(),
                 background: DEFAULT_IMAGE_BACKGROUND.to_string(),

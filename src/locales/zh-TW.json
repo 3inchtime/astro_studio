@@ -629,5 +629,17 @@
   "update.currentVersion": "目前版本",
   "update.latestVersion": "最新版本",
   "update.updateNotes": "版本說明",
-  "canvas.defaultLayerName": "圖層 {{number}}"
+  "canvas.defaultLayerName": "圖層 {{number}}",
+  "generate.aspectRatioLabel": "長寬比",
+  "generate.resolutionLabel": "解析度",
+  "generate.quality.xhigh": "超高",
+  "generate.quality.max": "最高",
+  "generate.tooManyReferences": "此模型最多支援 {{count}} 張參考圖。",
+  "generate.unsupportedParameters": "所選模型不支援這些生成參數。",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

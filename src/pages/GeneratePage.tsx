@@ -1,4 +1,11 @@
-import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from "react";
 import { AnimatePresence } from "framer-motion";
 import { useLocation } from "react-router-dom";
 import {
@@ -31,7 +38,11 @@ import {
   mergeEditSources,
   normalizePromptFavorite,
 } from "../lib/generatePageHelpers";
-import { usePromptFavoritesQuery, useCreatePromptFavoriteMutation, useDeletePromptFavoriteMutation } from "../lib/queries/favorites";
+import {
+  usePromptFavoritesQuery,
+  useCreatePromptFavoriteMutation,
+  useDeletePromptFavoriteMutation,
+} from "../lib/queries/favorites";
 import {
   useAcceptPromptAgentDraftMutation,
   useSendPromptAgentMessageMutation,
@@ -61,8 +72,9 @@ import type {
   RetryGenerationRequest,
 } from "../types";
 import { useTranslation } from "react-i18next";
-const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2";
-const DEFAULT_IMAGE_MODEL_ENTRY = getImageModelCatalogEntry(DEFAULT_IMAGE_MODEL);
+const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2.5-flare";
+const DEFAULT_IMAGE_MODEL_ENTRY =
+  getImageModelCatalogEntry(DEFAULT_IMAGE_MODEL);
 
 export default function GeneratePage() {
   const { t } = useTranslation();
@@ -78,6 +90,8 @@ export default function GeneratePage() {
   const [size, setSize] = useState<ImageSize>(
     DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.size,
   );
+  const [aspectRatio, setAspectRatio] = useState<string | undefined>();
+  const [resolution, setResolution] = useState<string | undefined>();
   const [quality, setQuality] = useState<ImageQuality>(
     DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.quality,
   );
@@ -90,19 +104,23 @@ export default function GeneratePage() {
   const [moderation, setModeration] = useState<ImageModeration>(
     DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.moderation,
   );
-  const [inputFidelity, setInputFidelity] =
-    useState<ImageInputFidelity>(
-      DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.inputFidelity,
-    );
+  const [inputFidelity, setInputFidelity] = useState<ImageInputFidelity>(
+    DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.inputFidelity,
+  );
   const [imageCount, setImageCount] = useState(
     DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.imageCount,
   );
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_IMAGE_MODEL);
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
   const [composerMode, setComposerMode] = useState<ComposerMode>("direct");
-  const [promptAgentSessionId, setPromptAgentSessionId] = useState<string | null>(null);
-  const [promptAgentMessages, setPromptAgentMessages] = useState<PromptAgentMessage[]>([]);
-  const [selectedPromptAgentConfigId, setSelectedPromptAgentConfigId] = useState("");
+  const [promptAgentSessionId, setPromptAgentSessionId] = useState<
+    string | null
+  >(null);
+  const [promptAgentMessages, setPromptAgentMessages] = useState<
+    PromptAgentMessage[]
+  >([]);
+  const [selectedPromptAgentConfigId, setSelectedPromptAgentConfigId] =
+    useState("");
   const [editingPromptMessageId, setEditingPromptMessageId] = useState<
     string | null
   >(null);
@@ -140,7 +158,9 @@ export default function GeneratePage() {
   const messagesVersionRef = useRef(0);
   const navigationPendingPrompt = useMemo(() => {
     const state = location.state as { pendingPrompt?: string } | null;
-    return typeof state?.pendingPrompt === "string" ? state.pendingPrompt : null;
+    return typeof state?.pendingPrompt === "string"
+      ? state.pendingPrompt
+      : null;
   }, [location.state]);
 
   const setActiveImageModel = useCallback((model: ImageModel) => {
@@ -153,8 +173,11 @@ export default function GeneratePage() {
   }, []);
 
   const applyModelDefaults = useCallback((model: ImageModel) => {
-    const { parameterDefaults, supportsEdit } = getImageModelCatalogEntry(model);
+    const { parameterDefaults, supportsEdit } =
+      getImageModelCatalogEntry(model);
 
+    setAspectRatio(parameterDefaults.aspectRatio);
+    setResolution(parameterDefaults.resolution);
     setSize(parameterDefaults.size);
     setQuality(parameterDefaults.quality);
     setBackground(parameterDefaults.background);
@@ -169,12 +192,19 @@ export default function GeneratePage() {
   }, []);
 
   const reconcileDraftStateForModel = useCallback((model: ImageModel) => {
-    const {
-      parameterDefaults,
-      parameterCapabilities,
-      supportsEdit,
-    } = getImageModelCatalogEntry(model);
+    const { parameterDefaults, parameterCapabilities, supportsEdit } =
+      getImageModelCatalogEntry(model);
 
+    setAspectRatio((current) =>
+      parameterCapabilities.aspectRatios?.includes(current ?? "")
+        ? current
+        : parameterDefaults.aspectRatio,
+    );
+    setResolution((current) =>
+      parameterCapabilities.resolutions?.includes(current ?? "")
+        ? current
+        : parameterDefaults.resolution,
+    );
     setSize((current) =>
       parameterCapabilities.sizes.includes(current)
         ? current
@@ -206,7 +236,8 @@ export default function GeneratePage() {
         : parameterDefaults.imageCount,
     );
     setInputFidelity((current) =>
-      supportsEdit && parameterCapabilities.inputFidelityOptions.includes(current)
+      supportsEdit &&
+      parameterCapabilities.inputFidelityOptions.includes(current)
         ? current
         : parameterDefaults.inputFidelity,
     );
@@ -216,20 +247,23 @@ export default function GeneratePage() {
     }
   }, []);
 
-  const loadConversationMessages = useCallback(async (conversationId: string) => {
-    const requestId = ++conversationLoadRequestIdRef.current;
-    const messagesVersionAtStart = messagesVersionRef.current;
-    const generations = await getConversationGenerations(conversationId);
-    if (
-      requestId !== conversationLoadRequestIdRef.current ||
-      activeConversationIdRef.current !== conversationId ||
-      messagesVersionRef.current !== messagesVersionAtStart
-    ) {
-      return;
-    }
-    messagesVersionRef.current += 1;
-    setMessages(generationsToMessages(generations));
-  }, []);
+  const loadConversationMessages = useCallback(
+    async (conversationId: string) => {
+      const requestId = ++conversationLoadRequestIdRef.current;
+      const messagesVersionAtStart = messagesVersionRef.current;
+      const generations = await getConversationGenerations(conversationId);
+      if (
+        requestId !== conversationLoadRequestIdRef.current ||
+        activeConversationIdRef.current !== conversationId ||
+        messagesVersionRef.current !== messagesVersionAtStart
+      ) {
+        return;
+      }
+      messagesVersionRef.current += 1;
+      setMessages(generationsToMessages(generations));
+    },
+    [],
+  );
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -356,19 +390,21 @@ export default function GeneratePage() {
   useEffect(() => {
     let cancelled = false;
 
-    getImageModel().then((model) => {
-      if (cancelled || didUserSelectModelRef.current) {
-        return;
-      }
+    getImageModel()
+      .then((model) => {
+        if (cancelled || didUserSelectModelRef.current) {
+          return;
+        }
 
-      setActiveImageModel(model);
+        setActiveImageModel(model);
 
-      if (!hasComposerDraftRef.current) {
-        applyModelDefaults(model);
-      } else {
-        reconcileDraftStateForModel(model);
-      }
-    }).catch(() => {});
+        if (!hasComposerDraftRef.current) {
+          applyModelDefaults(model);
+        } else {
+          reconcileDraftStateForModel(model);
+        }
+      })
+      .catch(() => {});
 
     return () => {
       cancelled = true;
@@ -415,32 +451,41 @@ export default function GeneratePage() {
     [background, markComposerDraftStarted],
   );
 
-  const handleUseImageAsSource = useCallback((image: MessageImage) => {
-    markComposerDraftStarted();
-    if (!modelSupportsEdit(imageModelRef.current)) {
+  const handleUseImageAsSource = useCallback(
+    (image: MessageImage) => {
+      markComposerDraftStarted();
+      if (!modelSupportsEdit(imageModelRef.current)) {
+        textareaRef.current?.focus();
+        return;
+      }
+      setEditSources((current) =>
+        mergeEditSources(current, [messageImageToEditSource(image)]),
+      );
       textareaRef.current?.focus();
-      return;
-    }
-    setEditSources((current) =>
-      mergeEditSources(current, [messageImageToEditSource(image)]),
-    );
-    textareaRef.current?.focus();
-  }, [markComposerDraftStarted]);
+    },
+    [markComposerDraftStarted],
+  );
 
-  const handleModelChange = useCallback((model: ImageModel) => {
-    didUserSelectModelRef.current = true;
-    markComposerDraftStarted();
-    setActiveImageModel(model);
-    applyModelDefaults(model);
-    saveImageModel(model).catch(() => {});
-  }, [applyModelDefaults, markComposerDraftStarted, setActiveImageModel]);
+  const handleModelChange = useCallback(
+    (model: ImageModel) => {
+      didUserSelectModelRef.current = true;
+      markComposerDraftStarted();
+      setActiveImageModel(model);
+      applyModelDefaults(model);
+      saveImageModel(model).catch(() => {});
+    },
+    [applyModelDefaults, markComposerDraftStarted, setActiveImageModel],
+  );
 
-  const handleRemoveEditSource = useCallback((sourceId: string) => {
-    markComposerDraftStarted();
-    setEditSources((current) =>
-      current.filter((source) => source.id !== sourceId),
-    );
-  }, [markComposerDraftStarted]);
+  const handleRemoveEditSource = useCallback(
+    (sourceId: string) => {
+      markComposerDraftStarted();
+      setEditSources((current) =>
+        current.filter((source) => source.id !== sourceId),
+      );
+    },
+    [markComposerDraftStarted],
+  );
 
   const submitGenerationRequest = useCallback(
     async (request: RetryGenerationRequest) => {
@@ -485,25 +530,40 @@ export default function GeneratePage() {
       autoScrollRef.current = true;
 
       try {
+        const maxSources =
+          getImageModelCatalogEntry(normalizedRequest.model)
+            .maxReferenceImages ?? 16;
+        if (normalizedRequest.editSources.length > maxSources) {
+          throw new Error(
+            t("generate.tooManyReferences", { count: maxSources }),
+          );
+        }
         const result =
           normalizedRequest.editSources.length > 0
             ? await editImage(buildEditParams(normalizedRequest))
             : await generateImage(buildGenerationParams(normalizedRequest));
         messagesVersionRef.current += 1;
-        setMessages((prev) =>
-          completeGenerationMessage(prev, tempId, result),
-        );
+        setMessages((prev) => completeGenerationMessage(prev, tempId, result));
         setActiveConversationId(result.conversation_id);
         refreshConversations();
       } catch (e) {
         messagesVersionRef.current += 1;
         setMessages((prev) =>
-          failGenerationMessage(prev, tempId, e, normalizedRequest),
+          failGenerationMessage(
+            prev,
+            tempId,
+            (e as { kind?: string })?.kind === "Validation" &&
+              (e as { detail?: { message?: string } })?.detail?.message ===
+                "Unsupported image parameters for the selected model."
+              ? t("generate.unsupportedParameters")
+              : e,
+            normalizedRequest,
+          ),
         );
         refreshConversations();
       }
     },
-    [refreshConversations, setActiveConversationId],
+    [refreshConversations, setActiveConversationId, t],
   );
 
   async function handleGenerate() {
@@ -517,6 +577,8 @@ export default function GeneratePage() {
       prompt: promptText,
       model: imageModel,
       size,
+      aspectRatio,
+      resolution,
       quality,
       background,
       outputFormat,
@@ -597,7 +659,8 @@ export default function GeneratePage() {
       const nextSize = message.suggested_params.size ?? size;
       const nextQuality = message.suggested_params.quality ?? quality;
       const nextBackground = message.suggested_params.background ?? background;
-      const nextOutputFormat = message.suggested_params.output_format ?? outputFormat;
+      const nextOutputFormat =
+        message.suggested_params.output_format ?? outputFormat;
       const nextModeration = message.suggested_params.moderation ?? moderation;
       const nextImageCount = message.suggested_params.image_count ?? imageCount;
 
@@ -617,6 +680,15 @@ export default function GeneratePage() {
         prompt: acceptedPrompt,
         model: nextModel,
         size: nextSize,
+        aspectRatio:
+          nextModel === imageModel
+            ? aspectRatio
+            : getImageModelCatalogEntry(nextModel).parameterDefaults
+                .aspectRatio,
+        resolution:
+          nextModel === imageModel
+            ? resolution
+            : getImageModelCatalogEntry(nextModel).parameterDefaults.resolution,
         quality: nextQuality,
         background: nextBackground,
         outputFormat: nextOutputFormat,
@@ -647,10 +719,13 @@ export default function GeneratePage() {
     ],
   );
 
-  const handleContinueAgentDraft = useCallback((message: PromptAgentMessage) => {
-    setPrompt(message.draft_prompt ?? "");
-    textareaRef.current?.focus();
-  }, []);
+  const handleContinueAgentDraft = useCallback(
+    (message: PromptAgentMessage) => {
+      setPrompt(message.draft_prompt ?? "");
+      textareaRef.current?.focus();
+    },
+    [],
+  );
 
   const handleEditAgentDraft = useCallback((message: PromptAgentMessage) => {
     setPrompt(message.draft_prompt ?? "");
@@ -680,9 +755,7 @@ export default function GeneratePage() {
         );
         if (
           lightbox &&
-          lightbox.images.some(
-            (image) => image.generationId === generationId,
-          )
+          lightbox.images.some((image) => image.generationId === generationId)
         ) {
           closeLightbox();
         }
@@ -717,18 +790,23 @@ export default function GeneratePage() {
     [submitGenerationRequest],
   );
 
-  const handleEditPrompt = useCallback((message: Message) => {
-    markComposerDraftStarted();
-    setPrompt(message.content);
-    setEditSources(() =>
-      modelSupportsEdit(imageModelRef.current)
-        ? message.sourceImages?.map((image) => messageImageToEditSource(image)) ?? []
-        : [],
-    );
-    setEditingPromptMessageId(message.id);
-    autoScrollRef.current = false;
-    textareaRef.current?.focus();
-  }, [markComposerDraftStarted]);
+  const handleEditPrompt = useCallback(
+    (message: Message) => {
+      markComposerDraftStarted();
+      setPrompt(message.content);
+      setEditSources(() =>
+        modelSupportsEdit(imageModelRef.current)
+          ? (message.sourceImages?.map((image) =>
+              messageImageToEditSource(image),
+            ) ?? [])
+          : [],
+      );
+      setEditingPromptMessageId(message.id);
+      autoScrollRef.current = false;
+      textareaRef.current?.focus();
+    },
+    [markComposerDraftStarted],
+  );
 
   const handleCancelPromptEdit = useCallback(() => {
     markComposerDraftStarted();
@@ -758,7 +836,12 @@ export default function GeneratePage() {
         setPromptFavoriteActionKey(null);
       }
     },
-    [promptFavoriteActionKey, promptFavoriteByPrompt, promptFavoriteCreate, promptFavoriteDelete],
+    [
+      promptFavoriteActionKey,
+      promptFavoriteByPrompt,
+      promptFavoriteCreate,
+      promptFavoriteDelete,
+    ],
   );
 
   return (
@@ -797,6 +880,21 @@ export default function GeneratePage() {
         textareaRef={textareaRef}
         prompt={prompt}
         imageModel={imageModel}
+        size={size}
+        aspectRatio={aspectRatio}
+        resolution={resolution}
+        onSizeChange={(value) => {
+          markComposerDraftStarted();
+          setSize(value);
+        }}
+        onAspectRatioChange={(value) => {
+          markComposerDraftStarted();
+          setAspectRatio(value);
+        }}
+        onResolutionChange={(value) => {
+          markComposerDraftStarted();
+          setResolution(value);
+        }}
         quality={quality}
         background={background}
         outputFormat={outputFormat}

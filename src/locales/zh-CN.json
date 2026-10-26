@@ -565,5 +565,17 @@
   "canvas.objectCount_one": "{{count}} 个对象",
   "canvas.objectCount_other": "{{count}} 个对象",
   "gallery.clearDate": "清除日期",
-  "canvas.defaultLayerName": "图层 {{number}}"
+  "canvas.defaultLayerName": "图层 {{number}}",
+  "generate.aspectRatioLabel": "宽高比",
+  "generate.resolutionLabel": "分辨率",
+  "generate.quality.xhigh": "超高",
+  "generate.quality.max": "最高",
+  "generate.tooManyReferences": "此模型最多支持 {{count}} 张参考图。",
+  "generate.unsupportedParameters": "所选模型不支持这些生成参数。",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

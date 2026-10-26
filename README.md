@@ -41,10 +41,13 @@ If you do not want your workflow tied to a single platform, Astro Studio is buil
 
 ## Compatibility Progress
 
-- [x] `gpt-image-2`
+- [x] `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`
 - [x] `nano banana`
 - [x] `nano banana 2`
-- [x] `nano banana pro`
+- [x] `nano banana pro` (GA)
+- [x] `nano banana 2.1`
+- [x] `grok-imagine-image-2.0`
+- [x] Seedream 5.0 Pro / Flash
 - [ ] More third-party image generation APIs
 
 ## Why This Product Exists
@@ -192,3 +195,20 @@ Current automated GitHub releases publish Windows artifacts. If you build macOS 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## Image engine configuration
+
+| Provider | Models | Default API base URL |
+| --- | --- | --- |
+| OpenAI | GPT Image 2, GPT Image 2.5 Flare / Sunburst | `https://api.openai.com/v1` |
+| Google | Nano Banana, Nano Banana 2 / Pro (GA), Nano Banana 2.1 | `https://generativelanguage.googleapis.com/v1beta/models` (legacy models); `https://generativelanguage.googleapis.com/v1beta` (2.1 Interactions) |
+| xAI | Grok Imagine Image 2.0 | `https://api.x.ai/v1` |
+| Volcengine Ark | Seedream 5.0 Pro / Flash | `https://ark.cn-beijing.volces.com/api/v3` |
+
+Configure each model's API key and named provider profiles in **Settings → Model configuration**. Custom base URLs and full generation/edit URLs must implement that provider's native protocol. Grok edits use JSON, OpenAI edits use multipart, and Seedream generation and edits share `/images/generations`. Local reference images are sent as inline data; no public image hosting is needed.
+
+The composer shows only model-supported controls. GPT Image 2.5 adds `xhigh` and `max`; Google and Grok separate aspect ratio from resolution. Seedream Pro/Flash offer `1K`, `1.5K`, `2K`, and `auto`, PNG/JPEG output, and at most 10 reference images. Grok supports up to 5 references. Google and Seedream requests produce one image per submission in this release; no automatic paid fan-out is performed.
+
+New installations default to GPT Image 2.5 Flare. Existing model selections and legacy GPT Image 2 configuration are retained. Retired Google preview IDs resolve to GA models; only exact official default URLs are upgraded automatically. Custom gateway URLs and submitted job snapshots remain unchanged. Persisted responses can be recovered locally without resubmitting image generation.
+
+Official protocols: [OpenAI](https://developers.openai.com/api/docs/guides/image-generation), [Google](https://ai.google.dev/gemini-api/docs/image-generation), [xAI](https://docs.x.ai/developers/model-capabilities/images/generation), [Seedream](https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=en).

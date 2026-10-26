@@ -629,5 +629,17 @@
   "update.latestVersion": "Neueste Version",
   "update.updateNotes": "Versionshinweise",
   "gallery.clearDate": "Datum löschen",
-  "canvas.defaultLayerName": "Ebene {{number}}"
+  "canvas.defaultLayerName": "Ebene {{number}}",
+  "generate.aspectRatioLabel": "Seitenverhältnis",
+  "generate.resolutionLabel": "Auflösung",
+  "generate.quality.xhigh": "Sehr hoch",
+  "generate.quality.max": "Maximum",
+  "generate.tooManyReferences": "Dieses Modell unterstützt bis zu {{count}} Referenzbilder.",
+  "generate.unsupportedParameters": "Nicht unterstützte Parameter für das gewählte Bildmodell.",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

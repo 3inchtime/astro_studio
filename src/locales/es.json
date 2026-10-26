@@ -629,5 +629,17 @@
   "update.latestVersion": "Última versión",
   "update.updateNotes": "Notas de la versión",
   "gallery.clearDate": "Borrar fecha",
-  "canvas.defaultLayerName": "Capa {{number}}"
+  "canvas.defaultLayerName": "Capa {{number}}",
+  "generate.aspectRatioLabel": "Relación de aspecto",
+  "generate.resolutionLabel": "Resolución",
+  "generate.quality.xhigh": "Muy alta",
+  "generate.quality.max": "Máxima",
+  "generate.tooManyReferences": "Este modelo admite hasta {{count}} imágenes de referencia.",
+  "generate.unsupportedParameters": "Parámetros no admitidos para el modelo de imagen seleccionado.",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

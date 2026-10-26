@@ -36,7 +36,7 @@ pub(crate) fn build_generation_request_body_with_controls(
     partial_images: u8,
     image_count: u8,
 ) -> Value {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model,
         "prompt": prompt,
         "n": image_count,
@@ -48,7 +48,15 @@ pub(crate) fn build_generation_request_body_with_controls(
         "moderation": moderation,
         "stream": stream,
         "partial_images": partial_images,
-    })
+    });
+    let fields = body.as_object_mut().expect("request object");
+    if output_format == "png" {
+        fields.remove("output_compression");
+    }
+    if !stream {
+        fields.remove("partial_images");
+    }
+    body
 }
 
 pub(crate) fn build_edit_text_fields(
@@ -87,7 +95,7 @@ pub(crate) fn build_edit_text_fields_with_controls(
     partial_images: u8,
     image_count: u8,
 ) -> Vec<(&'static str, String)> {
-    vec![
+    let mut fields = vec![
         ("model", model.to_string()),
         ("prompt", prompt.to_string()),
         ("n", image_count.to_string()),
@@ -100,7 +108,13 @@ pub(crate) fn build_edit_text_fields_with_controls(
         ("moderation", moderation.to_string()),
         ("stream", stream.to_string()),
         ("partial_images", partial_images.to_string()),
-    ]
+    ];
+    fields.retain(|(name, _)| {
+        *name != "input_fidelity"
+            && !(output_format == "png" && *name == "output_compression")
+            && (stream || *name != "partial_images")
+    });
+    fields
 }
 
 pub(crate) fn image_endpoint_url(endpoint_url: &str) -> String {
@@ -160,7 +174,6 @@ mod tests {
                 "output_compression": 100,
                 "moderation": "auto",
                 "stream": false,
-                "partial_images": 0,
             })
         );
     }
@@ -226,18 +239,12 @@ mod tests {
         assert_eq!(fields.get("size").map(String::as_str), Some("1024x1024"));
         assert_eq!(fields.get("quality").map(String::as_str), Some("auto"));
         assert_eq!(fields.get("background").map(String::as_str), Some("auto"));
-        assert_eq!(
-            fields.get("input_fidelity").map(String::as_str),
-            Some("high")
-        );
+        assert_eq!(fields.get("input_fidelity").map(String::as_str), None);
         assert_eq!(fields.get("output_format").map(String::as_str), Some("png"));
-        assert_eq!(
-            fields.get("output_compression").map(String::as_str),
-            Some("100")
-        );
+        assert_eq!(fields.get("output_compression").map(String::as_str), None);
         assert_eq!(fields.get("moderation").map(String::as_str), Some("auto"));
         assert_eq!(fields.get("stream").map(String::as_str), Some("false"));
-        assert_eq!(fields.get("partial_images").map(String::as_str), Some("0"));
+        assert!(!fields.contains_key("partial_images"));
     }
 
     #[test]
@@ -269,7 +276,6 @@ mod tests {
                 ("size", "1536x1024".to_string()),
                 ("quality", "high".to_string()),
                 ("background", "opaque".to_string()),
-                ("input_fidelity", "low".to_string()),
                 ("output_format", "webp".to_string()),
                 ("output_compression", "61".to_string()),
                 ("moderation", "low".to_string()),

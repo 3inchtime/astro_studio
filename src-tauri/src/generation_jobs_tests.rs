@@ -275,6 +275,8 @@ impl JobFixture {
             partial_images: 0,
             source_image_paths: Vec::new(),
             request_options: GenerationJobOptions {
+                aspect_ratio: None,
+                resolution: None,
                 size: Some("1024x1024".to_string()),
                 quality: Some("high".to_string()),
                 background: Some("auto".to_string()),
@@ -6031,4 +6033,58 @@ fn modern_startup_candidate_loader_rejects_corrupt_recovery_without_mutation() {
         ))
     ));
     assert_eq!(worker_database_snapshot(&conn), before);
+}
+
+#[test]
+fn dimensions_survive_execution_metadata_and_retry_without_changing_legacy_snapshots() {
+    let fixture = JobFixture::new();
+    let mut request = fixture.prepared("native-dimensions", "native-dimensions");
+    request.model = crate::models::ENGINE_GROK.to_string();
+    request.provider_kind = "xai".to_string();
+    request.request_options.aspect_ratio = Some("16:9".to_string());
+    request.request_options.resolution = Some("2K".to_string());
+    let queued = fixture.enqueue_prepared(&request).unwrap();
+    fixture.claim().unwrap();
+    {
+        let conn = fixture.database.conn.lock().unwrap();
+        let snapshot = load_generation_execution_snapshot(&conn, &queued.job_id).unwrap();
+        assert_eq!(
+            snapshot.runtime_options.aspect_ratio.as_deref(),
+            Some("16:9")
+        );
+        assert_eq!(snapshot.runtime_options.resolution.as_deref(), Some("2K"));
+        finish_job(
+            &conn,
+            &GenerationJobTerminalUpdate {
+                job_id: queued.job_id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Failed,
+                finished_at: "2026-07-10T00:00:02Z".to_string(),
+                error_code: Some("provider_unavailable".to_string()),
+                error_message: None,
+                retryable: true,
+            },
+        )
+        .unwrap();
+    }
+    let mut conn = fixture.open_connection();
+    let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+    let retry =
+        insert_retry_job_in_transaction(&tx, &queued.job_id, "native-dimensions-retry", None)
+            .unwrap();
+    tx.commit().unwrap();
+    fixture.claim().unwrap();
+    let snapshot = load_generation_execution_snapshot(&conn, &retry.job_id).unwrap();
+    assert_eq!(snapshot.request.options, request.request_options);
+    assert_eq!(snapshot.runtime_options.resolution.as_deref(), Some("2K"));
+    let raw: String = conn
+        .query_row(
+            "SELECT request_metadata FROM generations WHERE id = ?1",
+            params![retry.generation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(metadata["aspect_ratio"], "16:9");
+    assert_eq!(metadata["resolution"], "2K");
 }

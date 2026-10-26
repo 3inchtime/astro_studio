@@ -1,5 +1,13 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUp, ChevronDown, ImagePlus, Loader2, Sparkles, Wand2, X } from "lucide-react";
+import {
+  ArrowUp,
+  ChevronDown,
+  ImagePlus,
+  Loader2,
+  Sparkles,
+  Wand2,
+  X,
+} from "lucide-react";
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,7 +16,10 @@ import {
   IMAGE_MODEL_CATALOG,
   getImageModelCatalogEntry,
 } from "../../lib/modelCatalog";
-import { useLlmConfigsQuery, useOptimizePromptMutation } from "../../lib/queries/llm";
+import {
+  useLlmConfigsQuery,
+  useOptimizePromptMutation,
+} from "../../lib/queries/llm";
 import type {
   ComposerMode,
   EditSourceImage,
@@ -18,10 +29,10 @@ import type {
   ImageModel,
   ImageOutputFormat,
   ImageQuality,
+  ImageSize,
 } from "../../types";
 import OptimizePromptModal from "./OptimizePromptModal";
 
-const qualityOptions: ImageQuality[] = ["auto", "high", "medium", "low"];
 const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
 const backgroundOptions: ImageBackground[] = ["auto", "opaque", "transparent"];
 const moderationOptions: ImageModeration[] = ["auto", "low"];
@@ -32,6 +43,12 @@ interface GenerationComposerProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   prompt: string;
   imageModel: ImageModel;
+  size?: ImageSize;
+  aspectRatio?: string;
+  resolution?: string;
+  onSizeChange?: (size: ImageSize) => void;
+  onAspectRatioChange?: (ratio: string) => void;
+  onResolutionChange?: (resolution: string) => void;
   quality: ImageQuality;
   background: ImageBackground;
   outputFormat: ImageOutputFormat;
@@ -65,6 +82,12 @@ export default function GenerationComposer({
   textareaRef,
   prompt,
   imageModel,
+  size = "auto",
+  aspectRatio,
+  resolution,
+  onSizeChange,
+  onAspectRatioChange,
+  onResolutionChange,
   quality,
   background,
   outputFormat,
@@ -101,7 +124,8 @@ export default function GenerationComposer({
   const [optimizedPrompt, setOptimizedPrompt] = useState("");
   const [showOptimizeModal, setShowOptimizeModal] = useState(false);
   const [selectedConfigId, setSelectedConfigId] = useState<string>("");
-  const [selectedMultimodalConfigId, setSelectedMultimodalConfigId] = useState<string>("");
+  const [selectedMultimodalConfigId, setSelectedMultimodalConfigId] =
+    useState<string>("");
   const [showConfigDropdown, setShowConfigDropdown] = useState(false);
 
   const { data: llmConfigs = [] } = useLlmConfigsQuery();
@@ -109,7 +133,9 @@ export default function GenerationComposer({
   const enabledPromptConfigs = useMemo(
     () =>
       llmConfigs.filter(
-        (c) => c.enabled && (c.capability === "text" || c.capability === "multimodal"),
+        (c) =>
+          c.enabled &&
+          (c.capability === "text" || c.capability === "multimodal"),
       ),
     [llmConfigs],
   );
@@ -260,7 +286,7 @@ export default function GenerationComposer({
   const { parameterCapabilities } = modelCatalogEntry;
   const showQuality = parameterCapabilities.qualities.length > 1;
   const showBackground = parameterCapabilities.backgrounds.length > 1;
-  const showImageCount = parameterCapabilities.imageCounts.length > 0;
+  const showImageCount = parameterCapabilities.imageCounts.length > 1;
   const showOutputFormat = parameterCapabilities.outputFormats.length > 1;
   const showModeration = parameterCapabilities.moderationLevels.length > 1;
   const showSourceEditing = modelCatalogEntry.supportsEdit;
@@ -270,6 +296,10 @@ export default function GenerationComposer({
     parameterCapabilities.inputFidelityOptions.length > 1;
   const parameterColumnCount = [
     true,
+    parameterCapabilities.sizes.length > 1 &&
+      !parameterCapabilities.aspectRatios,
+    Boolean(parameterCapabilities.aspectRatios),
+    Boolean(parameterCapabilities.resolutions),
     showQuality,
     showBackground,
     showImageCount,
@@ -303,19 +333,49 @@ export default function GenerationComposer({
                 label: t(entry.i18nKey),
               }))}
             />
+            {parameterCapabilities.sizes.length > 1 &&
+              !parameterCapabilities.aspectRatios && (
+                <SelectField
+                  label={t("generate.sizeLabel")}
+                  value={size}
+                  onChange={(value) => onSizeChange?.(value as ImageSize)}
+                  options={parameterCapabilities.sizes.map((value) => ({
+                    value,
+                    label: value,
+                  }))}
+                />
+              )}
+            {parameterCapabilities.aspectRatios && (
+              <SelectField
+                label={t("generate.aspectRatioLabel")}
+                value={aspectRatio ?? "1:1"}
+                onChange={(value) => onAspectRatioChange?.(value)}
+                options={parameterCapabilities.aspectRatios.map((value) => ({
+                  value,
+                  label: value,
+                }))}
+              />
+            )}
+            {parameterCapabilities.resolutions && (
+              <SelectField
+                label={t("generate.resolutionLabel")}
+                value={resolution ?? parameterCapabilities.resolutions[0]}
+                onChange={(value) => onResolutionChange?.(value)}
+                options={parameterCapabilities.resolutions.map((value) => ({
+                  value,
+                  label: value,
+                }))}
+              />
+            )}
             {showQuality && (
               <SelectField
                 label={t("generate.qualityLabel")}
                 value={quality}
                 onChange={(value) => onQualityChange(value as ImageQuality)}
-                options={qualityOptions
-                  .filter((value) =>
-                    parameterCapabilities.qualities.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.quality.${value}`),
-                  }))}
+                options={parameterCapabilities.qualities.map((value) => ({
+                  value,
+                  label: t(`generate.quality.${value}`),
+                }))}
               />
             )}
             {showBackground && (
@@ -332,7 +392,8 @@ export default function GenerationComposer({
                   .map((value) => ({
                     value,
                     label: t(`generate.background.${value}`),
-                    disabled: outputFormat === "jpeg" && value === "transparent",
+                    disabled:
+                      outputFormat === "jpeg" && value === "transparent",
                   }))}
               />
             )}
@@ -373,7 +434,9 @@ export default function GenerationComposer({
               <SelectField
                 label={t("generate.moderationLabel")}
                 value={moderation}
-                onChange={(value) => onModerationChange(value as ImageModeration)}
+                onChange={(value) =>
+                  onModerationChange(value as ImageModeration)
+                }
                 options={moderationOptions
                   .filter((value) =>
                     parameterCapabilities.moderationLevels.includes(value),
@@ -524,14 +587,16 @@ export default function GenerationComposer({
                     <div className="relative" ref={configDropdownRef}>
                       <button
                         type="button"
-                        onClick={() => setShowConfigDropdown(!showConfigDropdown)}
+                        onClick={() =>
+                          setShowConfigDropdown(!showConfigDropdown)
+                        }
                         className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-full px-2 text-[11px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedMultimodalConfigId
-                            ? enabledMultimodalConfigs.find(
+                            ? (enabledMultimodalConfigs.find(
                                 (c) => c.id === selectedMultimodalConfigId,
-                              )?.name ?? t("generate.llm.selectLlm")
+                              )?.name ?? t("generate.llm.selectLlm"))
                             : t("generate.llm.selectLlm")}
                         </span>
                         <ChevronDown size={11} className="text-muted/60" />
@@ -563,13 +628,16 @@ export default function GenerationComposer({
                     <div className="relative" ref={configDropdownRef}>
                       <button
                         type="button"
-                        onClick={() => setShowConfigDropdown(!showConfigDropdown)}
+                        onClick={() =>
+                          setShowConfigDropdown(!showConfigDropdown)
+                        }
                         className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-full px-2 text-[11px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedConfigId
-                            ? enabledPromptConfigs.find((c) => c.id === selectedConfigId)
-                                ?.name ?? t("generate.llm.selectLlm")
+                            ? (enabledPromptConfigs.find(
+                                (c) => c.id === selectedConfigId,
+                              )?.name ?? t("generate.llm.selectLlm"))
                             : t("generate.llm.selectLlm")}
                         </span>
                         <ChevronDown size={11} className="text-muted/60" />
@@ -618,12 +686,18 @@ export default function GenerationComposer({
                 ) : (
                   <Sparkles size={14} />
                 )}
-                <span className="hidden sm:inline">{t("generate.llm.optimize")}</span>
+                <span className="hidden sm:inline">
+                  {t("generate.llm.optimize")}
+                </span>
               </motion.button>
 
               {/* Send button */}
               <motion.button
-                onClick={composerMode === "deep-thinking" ? onDeepThinkingSend : onGenerate}
+                onClick={
+                  composerMode === "deep-thinking"
+                    ? onDeepThinkingSend
+                    : onGenerate
+                }
                 disabled={
                   !prompt.trim() ||
                   isGenerating ||
