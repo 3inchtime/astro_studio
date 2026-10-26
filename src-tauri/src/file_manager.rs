@@ -125,7 +125,7 @@ pub(crate) fn sync_directory(path: &Path) -> std::io::Result<()> {
                 std::ptr::null(),
                 OPEN_EXISTING,
                 FILE_FLAG_BACKUP_SEMANTICS,
-                0,
+                std::ptr::null_mut(),
             );
             if handle != INVALID_HANDLE_VALUE {
                 let _ = FlushFileBuffers(handle);

@@ -556,12 +556,12 @@ impl FileResponseArtifactStore {
     }
 
     fn sync_cap_directory(
-        directory: &cap_std::fs::Dir,
+        _directory: &cap_std::fs::Dir,
         _absolute_path: &Path,
     ) -> Result<(), GenerationExecutionError> {
         #[cfg(unix)]
         {
-            directory
+            _directory
                 .try_clone()
                 .and_then(|directory| directory.into_std_file().sync_all())
                 .map_err(|_| GenerationExecutionError::response_artifact())?;
@@ -575,7 +575,7 @@ impl FileResponseArtifactStore {
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = (directory, _absolute_path);
+            let _ = (_directory, _absolute_path);
         }
         Ok(())
     }
