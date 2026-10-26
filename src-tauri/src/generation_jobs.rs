@@ -270,6 +270,10 @@ impl GenerationJobRequestKind {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct GenerationJobOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) aspect_ratio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) resolution: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) size: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -359,6 +363,10 @@ enum GenerationJobSourceRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct CanonicalGenerationMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    aspect_ratio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolution: Option<String>,
     request_kind: GenerationJobRequestKind,
     conversation_id: String,
     project_id: String,
@@ -1289,7 +1297,9 @@ fn validate_job_projection(
         && source_image_paths
             .iter()
             .all(|path| nonempty(path) && public_string_is_safe(path));
-    let metadata_matches = metadata.request_kind == request.kind
+    let metadata_matches = metadata.aspect_ratio == request.options.aspect_ratio
+        && metadata.resolution == request.options.resolution
+        && metadata.request_kind == request.kind
         && metadata.conversation_id == linked_conversation_id.as_str()
         && metadata.project_id == request.project_id
         && metadata.model == generation.model
@@ -1997,6 +2007,8 @@ fn canonical_metadata(
     identity: &ResolvedConversationIdentity,
 ) -> Result<CanonicalGenerationMetadata, AppError> {
     Ok(CanonicalGenerationMetadata {
+        aspect_ratio: request.request_options.aspect_ratio.clone(),
+        resolution: request.request_options.resolution.clone(),
         request_kind: GenerationJobRequestKind::parse(&request.request_kind)?,
         conversation_id: identity.conversation_id.clone(),
         project_id: identity.project_id.clone(),
@@ -3277,6 +3289,8 @@ pub(crate) fn load_generation_execution_snapshot_for_stage_in_transaction(
             serde_json::from_str(value).map_err(|_| AppError::GenerationJobCorruptPersistedData)
         })?;
     let runtime_options = GptImageRequestOptions {
+        aspect_ratio: request.options.aspect_ratio.clone(),
+        resolution: request.options.resolution.clone(),
         size: generation.size.clone(),
         quality: generation.quality.clone(),
         background: generation.background.clone(),

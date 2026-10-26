@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import GeneratePage from "./GeneratePage";
@@ -9,9 +16,7 @@ const queryClient = new QueryClient({
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 }
 
@@ -46,6 +51,8 @@ vi.mock("react-i18next", () => ({
           "Describe how you want to edit these source images...",
         "generate.modelLabel": "Model",
         "generate.sizeLabel": "Size",
+        "generate.aspectRatioLabel": "Aspect ratio",
+        "generate.resolutionLabel": "Resolution",
         "generate.qualityLabel": "Quality",
         "generate.countLabel": "Count",
         "generate.formatLabel": "Format",
@@ -57,15 +64,19 @@ vi.mock("react-i18next", () => ({
         "generate.llm.optimizeTitle": "Optimize prompt with AI",
         "generate.llm.optimizeWithImages": "Optimize with image context",
         "generate.llm.emptyPrompt": "Enter a prompt before optimizing.",
-        "generate.llm.noPromptConfig": "Enable a text or multimodal LLM in Settings before optimizing prompts.",
-        "generate.llm.noMultimodalConfig": "Enable a multimodal LLM in Settings before optimizing with image context.",
+        "generate.llm.noPromptConfig":
+          "Enable a text or multimodal LLM in Settings before optimizing prompts.",
+        "generate.llm.noMultimodalConfig":
+          "Enable a multimodal LLM in Settings before optimizing with image context.",
         "generate.llm.selectConfigFirst": "Select an LLM before optimizing.",
-        "generate.llm.generating": "Wait for the current generation to finish before optimizing.",
+        "generate.llm.generating":
+          "Wait for the current generation to finish before optimizing.",
         "generate.parametersLabel": "Generation parameters",
         "generate.submit": "Generate",
         "generate.mode.direct": "Direct",
         "generate.mode.deepThinking": "Deep thinking",
-        "generate.agent.selectLlm": "Select an enabled LLM before using deep thinking mode.",
+        "generate.agent.selectLlm":
+          "Select an enabled LLM before using deep thinking mode.",
         "generate.agent.thinking": "Thinking through the prompt...",
         "generate.agent.finalPrompt": "Final prompt",
         "generate.agent.acceptAndGenerate": "Accept and generate",
@@ -129,10 +140,14 @@ vi.mock("../lib/api", () => ({
   getPromptFavorites: (...args: unknown[]) => getPromptFavorites(...args),
   getLlmConfigs: (...args: unknown[]) => getLlmConfigs(...args),
   optimizePrompt: (...args: unknown[]) => optimizePrompt(...args),
-  startPromptAgentSession: (...args: unknown[]) => startPromptAgentSession(...args),
-  sendPromptAgentMessage: (...args: unknown[]) => sendPromptAgentMessage(...args),
-  acceptPromptAgentDraft: (...args: unknown[]) => acceptPromptAgentDraft(...args),
-  cancelPromptAgentSession: (...args: unknown[]) => cancelPromptAgentSession(...args),
+  startPromptAgentSession: (...args: unknown[]) =>
+    startPromptAgentSession(...args),
+  sendPromptAgentMessage: (...args: unknown[]) =>
+    sendPromptAgentMessage(...args),
+  acceptPromptAgentDraft: (...args: unknown[]) =>
+    acceptPromptAgentDraft(...args),
+  cancelPromptAgentSession: (...args: unknown[]) =>
+    cancelPromptAgentSession(...args),
   getPromptAgentSession: (...args: unknown[]) => getPromptAgentSession(...args),
   onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
   onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
@@ -161,7 +176,10 @@ vi.mock("../lib/pendingPrompt", () => ({
 }));
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
   return {
     ...actual,
     useLocation: () => useLocation(),
@@ -204,7 +222,11 @@ vi.mock("../components/generate/MessageBubble", () => ({
       imageId: string;
       generationId: string;
     }) => void;
-    onEditPrompt?: (message: { id: string; role: string; content: string }) => void;
+    onEditPrompt?: (message: {
+      id: string;
+      role: string;
+      content: string;
+    }) => void;
     onFavoritePrompt?: (message: {
       id: string;
       role: string;
@@ -222,7 +244,9 @@ vi.mock("../components/generate/MessageBubble", () => ({
     ) : message.images?.[0] ? (
       <div>
         <span>{message.images[0].path}</span>
-        <button onClick={() => onEditImage?.(message.images![0])}>Edit image</button>
+        <button onClick={() => onEditImage?.(message.images![0])}>
+          Edit image
+        </button>
       </div>
     ) : null,
 }));
@@ -300,7 +324,9 @@ describe("GeneratePage", () => {
     getImageModel.mockResolvedValue("gpt-image-2");
     getPromptFavorites.mockResolvedValue([]);
     getLlmConfigs.mockResolvedValue([]);
-    optimizePrompt.mockResolvedValue("A cinematic moonlit observatory with refined lighting.");
+    optimizePrompt.mockResolvedValue(
+      "A cinematic moonlit observatory with refined lighting.",
+    );
     startPromptAgentSession.mockResolvedValue({
       session: {
         id: "agent-session-1",
@@ -384,14 +410,16 @@ describe("GeneratePage", () => {
     );
   });
 
-  it("hides the size selector and omits size from new generation requests", async () => {
+  it("submits the pixel size selected in the composer", async () => {
     render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
     });
 
-    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Size"), {
+      target: { value: "1536x1024" },
+    });
     fireEvent.change(
       screen.getByPlaceholderText("Describe the image you want to generate..."),
       { target: { value: "A quiet moonlit observatory" } },
@@ -406,7 +434,7 @@ describe("GeneratePage", () => {
         }),
       );
     });
-    expect(generateImage.mock.calls[0][0]).not.toHaveProperty("size");
+    expect(generateImage.mock.calls[0][0]).toHaveProperty("size", "1536x1024");
   });
 
   it("loads a sent prompt back into the composer when editing", async () => {
@@ -418,9 +446,13 @@ describe("GeneratePage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
 
-    expect(screen.getByDisplayValue("A dramatic mountain temple at sunrise")).toBeInTheDocument();
+    expect(
+      screen.getByDisplayValue("A dramatic mountain temple at sunrise"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Editing previous prompt")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel edit" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Cancel edit" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the prompt optimize button visible when no LLM config is enabled", async () => {
@@ -443,7 +475,9 @@ describe("GeneratePage", () => {
     fireEvent.click(optimizeButton);
 
     expect(
-      screen.getByText("Enable a text or multimodal LLM in Settings before optimizing prompts."),
+      screen.getByText(
+        "Enable a text or multimodal LLM in Settings before optimizing prompts.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -515,7 +549,9 @@ describe("GeneratePage", () => {
 
     render(<GeneratePage />, { wrapper: TestWrapper });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Deep thinking" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Deep thinking" }),
+    );
     fireEvent.change(
       screen.getByPlaceholderText("Describe the image you want to generate..."),
       { target: { value: "Design a floating tea house" } },
@@ -609,7 +645,9 @@ describe("GeneratePage", () => {
       );
     });
     expect(generateImage.mock.calls[0][0]).not.toHaveProperty("moderation");
-    expect(generateImage.mock.calls[0][0]).not.toHaveProperty("outputCompression");
+    expect(generateImage.mock.calls[0][0]).not.toHaveProperty(
+      "outputCompression",
+    );
   });
 
   it("uses the selected UI model for the next generate request even while model persistence is still in flight", async () => {
@@ -679,7 +717,9 @@ describe("GeneratePage", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByText("/tmp/generated-nano-banana.png")).toBeInTheDocument();
+      expect(
+        screen.getByText("/tmp/generated-nano-banana.png"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -719,7 +759,9 @@ describe("GeneratePage", () => {
     await waitFor(() => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-2");
     });
-    expect(await screen.findByText("/tmp/current-conversation.png")).toBeInTheDocument();
+    expect(
+      await screen.findByText("/tmp/current-conversation.png"),
+    ).toBeInTheDocument();
 
     await act(async () => {
       firstLoad.resolve([
@@ -743,37 +785,40 @@ describe("GeneratePage", () => {
       ]);
     });
 
-    expect(screen.getByText("/tmp/current-conversation.png")).toBeInTheDocument();
-    expect(screen.queryByText("/tmp/stale-conversation.png")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("/tmp/current-conversation.png"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("/tmp/stale-conversation.png"),
+    ).not.toBeInTheDocument();
   });
 
   it("reloads the active conversation when a generation completion event arrives", async () => {
-    let completeHandler: ((data: { generation_id: string; status: string }) => void) | undefined;
+    let completeHandler:
+      ((data: { generation_id: string; status: string }) => void) | undefined;
     onGenerationComplete.mockImplementation((handler) => {
       completeHandler = handler;
       return Promise.resolve(vi.fn());
     });
-    getConversationGenerations
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          generation: {
-            id: "generation-event",
-            prompt: "A completed event image",
-            created_at: "2026-04-26T00:00:00Z",
-            status: "completed",
-            source_image_paths: [],
-          },
-          images: [
-            {
-              id: "image-event",
-              generation_id: "generation-event",
-              file_path: "/tmp/event-generated.png",
-              thumbnail_path: "/tmp/event-generated-thumb.png",
-            },
-          ],
+    getConversationGenerations.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        generation: {
+          id: "generation-event",
+          prompt: "A completed event image",
+          created_at: "2026-04-26T00:00:00Z",
+          status: "completed",
+          source_image_paths: [],
         },
-      ]);
+        images: [
+          {
+            id: "image-event",
+            generation_id: "generation-event",
+            file_path: "/tmp/event-generated.png",
+            thumbnail_path: "/tmp/event-generated-thumb.png",
+          },
+        ],
+      },
+    ]);
 
     render(<GeneratePage />, { wrapper: TestWrapper });
 
@@ -803,7 +848,7 @@ describe("GeneratePage", () => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
     });
 
-    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Size")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Quality"), {
       target: { value: "high" },
     });
@@ -830,9 +875,7 @@ describe("GeneratePage", () => {
     });
 
     expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Count")).toHaveValue(
-      String(geminiEntry.parameterDefaults.imageCount),
-    );
+    expect(screen.queryByLabelText("Count")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Quality")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Background")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Format")).not.toBeInTheDocument();
@@ -843,11 +886,15 @@ describe("GeneratePage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
     ).toBeInTheDocument();
 
     fireEvent.change(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
       { target: { value: "A polished chrome crane" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
@@ -862,7 +909,10 @@ describe("GeneratePage", () => {
         }),
       );
     });
-    expect(editImage.mock.calls[0][0]).not.toHaveProperty("size");
+    expect(editImage.mock.calls[0][0]).toHaveProperty(
+      "size",
+      geminiEntry.parameterDefaults.size,
+    );
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("quality");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("background");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
@@ -882,7 +932,7 @@ describe("GeneratePage", () => {
       expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1");
     });
 
-    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Size")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Upload Source" }));
 
     await waitFor(() => {
@@ -908,9 +958,7 @@ describe("GeneratePage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Model")).toHaveValue(
-        "nano-banana",
-      );
+      expect(screen.getByLabelText("Model")).toHaveValue("nano-banana");
     });
     expect(
       screen.getByRole("button", { name: "Upload Source" }),
@@ -921,7 +969,9 @@ describe("GeneratePage", () => {
         "Describe how you want to edit these source images...",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Turn it into etched silver")).toBeInTheDocument();
+    expect(
+      screen.getByDisplayValue("Turn it into etched silver"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
 
     await waitFor(() => {
@@ -934,7 +984,7 @@ describe("GeneratePage", () => {
         }),
       );
     });
-    expect(editImage.mock.calls[0][0]).not.toHaveProperty("size");
+    expect(editImage.mock.calls[0][0]).toHaveProperty("size", "1024x1024");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("quality");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("background");
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
@@ -960,9 +1010,7 @@ describe("GeneratePage", () => {
     pickedSourcesDeferred.resolve(["/tmp/picked-after-hydration.png"]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Model")).toHaveValue(
-        "nano-banana",
-      );
+      expect(screen.getByLabelText("Model")).toHaveValue("nano-banana");
     });
 
     await waitFor(() => {
@@ -971,11 +1019,15 @@ describe("GeneratePage", () => {
 
     expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
     ).toBeInTheDocument();
 
     fireEvent.change(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
       { target: { value: "A brushed steel heron" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
@@ -1006,11 +1058,15 @@ describe("GeneratePage", () => {
 
     expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
     ).toBeInTheDocument();
 
     fireEvent.change(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
       { target: { value: "A paper lantern koi" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
@@ -1084,7 +1140,9 @@ describe("GeneratePage", () => {
     const promptInput = screen.getByPlaceholderText(
       "Describe the image you want to generate...",
     );
-    const commandSurface = promptInput.closest("[data-testid='generation-command-surface']");
+    const commandSurface = promptInput.closest(
+      "[data-testid='generation-command-surface']",
+    );
 
     expect(toolbar).toHaveClass("studio-toolbar");
     expect(commandSurface).toHaveClass("studio-panel-strong");
@@ -1122,9 +1180,9 @@ describe("GeneratePage", () => {
     const feedSurface = screen
       .getByRole("button", { name: "Edit prompt" })
       .closest(".space-y-7");
-    const composerSurface = screen
-      .getByPlaceholderText("Describe the image you want to generate...")
-      .parentElement?.parentElement;
+    const composerSurface = screen.getByPlaceholderText(
+      "Describe the image you want to generate...",
+    ).parentElement?.parentElement;
 
     expect(toolbar).toHaveClass("w-full");
     expect(toolbar.className).not.toContain("max-w-[900px]");
@@ -1166,7 +1224,9 @@ describe("GeneratePage", () => {
 
     expect(screen.queryByLabelText("Input fidelity")).not.toBeInTheDocument();
     fireEvent.change(
-      screen.getByPlaceholderText("Describe how you want to edit these source images..."),
+      screen.getByPlaceholderText(
+        "Describe how you want to edit these source images...",
+      ),
       { target: { value: "Make the source image look like a lithograph" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
@@ -1180,5 +1240,67 @@ describe("GeneratePage", () => {
       );
     });
     expect(editImage.mock.calls[0][0]).not.toHaveProperty("inputFidelity");
+  });
+
+  it("submits latest-model quality and native Grok resolution controls", async () => {
+    generateImage
+      .mockResolvedValueOnce({
+        generation_id: "generation-flare",
+        conversation_id: "conversation-1",
+        images: [],
+      })
+      .mockResolvedValueOnce({
+        generation_id: "generation-grok",
+        conversation_id: "conversation-1",
+        images: [],
+      });
+    render(<GeneratePage />, { wrapper: TestWrapper });
+    await waitFor(() =>
+      expect(getConversationGenerations).toHaveBeenCalledWith("conversation-1"),
+    );
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "gpt-image-2.5-flare" },
+    });
+    fireEvent.change(screen.getByLabelText("Quality"), {
+      target: { value: "max" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A lighthouse" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() =>
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-image-2.5-flare",
+          quality: "max",
+        }),
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "grok-imagine-image-2.0" },
+    });
+    expect(screen.getByLabelText("Quality")).toHaveValue("auto");
+    fireEvent.change(screen.getByLabelText("Resolution"), {
+      target: { value: "2K" },
+    });
+    fireEvent.change(screen.getByLabelText("Aspect ratio"), {
+      target: { value: "16:9" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "An ocean" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() =>
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "grok-imagine-image-2.0",
+          quality: "auto",
+          resolution: "2K",
+          aspectRatio: "16:9",
+        }),
+      ),
+    );
   });
 });

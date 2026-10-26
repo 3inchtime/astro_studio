@@ -44,7 +44,10 @@ export interface UpdateMetadata {
 
 export type DownloadEvent =
   | { event: "Started"; data: { contentLength: number | null } }
-  | { event: "Progress"; data: { chunkLength: number; totalDownloaded: number } }
+  | {
+      event: "Progress";
+      data: { chunkLength: number; totalDownloaded: number };
+    }
   | { event: "Finished" };
 
 export function hasTauriRuntime(): boolean {
@@ -53,9 +56,11 @@ export function hasTauriRuntime(): boolean {
   }
 
   return Boolean(
-    (window as typeof window & {
-      __TAURI_INTERNALS__?: { invoke?: unknown };
-    }).__TAURI_INTERNALS__?.invoke,
+    (
+      window as typeof window & {
+        __TAURI_INTERNALS__?: { invoke?: unknown };
+      }
+    ).__TAURI_INTERNALS__?.invoke,
   );
 }
 
@@ -247,6 +252,8 @@ export async function generateImage(
     clientRequestId: params.clientRequestId ?? null,
     model: params.model,
     size: params.size,
+    aspectRatio: params.aspectRatio,
+    resolution: params.resolution,
     quality: params.quality,
     background: params.background,
     outputFormat: params.outputFormat,
@@ -274,6 +281,8 @@ export async function editImage(
     model: params.model,
     sourceImagePaths: params.sourceImagePaths,
     size: params.size,
+    aspectRatio: params.aspectRatio,
+    resolution: params.resolution,
     quality: params.quality,
     background: params.background,
     inputFidelity: params.inputFidelity,
@@ -410,7 +419,10 @@ export async function removePromptFavoriteFromFolders(
   favoriteId: string,
   folderIds: string[],
 ): Promise<void> {
-  return invoke("remove_prompt_favorite_from_folders", { favoriteId, folderIds });
+  return invoke("remove_prompt_favorite_from_folders", {
+    favoriteId,
+    folderIds,
+  });
 }
 
 export async function getPromptFavoriteFolders(
@@ -519,10 +531,7 @@ export async function getProjects(
   return invoke("get_projects", { includeArchived: includeArchived || null });
 }
 
-export async function renameProject(
-  id: string,
-  name: string,
-): Promise<void> {
+export async function renameProject(id: string, name: string): Promise<void> {
   await invoke("rename_project", { id, name });
 }
 
@@ -585,7 +594,8 @@ export async function listCanvasDocuments(
     return readBrowserCanvasDocuments()
       .filter(
         (document) =>
-          document.project_id === browserProjectId && document.deleted_at === null,
+          document.project_id === browserProjectId &&
+          document.deleted_at === null,
       )
       .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
       .map(browserCanvasMetadata);
@@ -600,7 +610,9 @@ export async function getCanvasDocument(
   id: string,
 ): Promise<CanvasDocumentWithContent> {
   if (!hasTauriRuntime()) {
-    const document = readBrowserCanvasDocuments().find((entry) => entry.id === id);
+    const document = readBrowserCanvasDocuments().find(
+      (entry) => entry.id === id,
+    );
     if (!document) {
       throw new Error(`Canvas document not found: ${id}`);
     }
@@ -811,7 +823,9 @@ export async function getLogs(
   });
 }
 
-export async function getRuntimeLogs(limit?: number): Promise<RuntimeLogEntry[]> {
+export async function getRuntimeLogs(
+  limit?: number,
+): Promise<RuntimeLogEntry[]> {
   return invoke("get_runtime_logs", { limit });
 }
 

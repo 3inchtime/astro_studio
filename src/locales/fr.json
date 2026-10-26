@@ -629,5 +629,17 @@
   "update.latestVersion": "Dernière version",
   "update.updateNotes": "Notes de version",
   "gallery.clearDate": "Effacer la date",
-  "canvas.defaultLayerName": "Calque {{number}}"
+  "canvas.defaultLayerName": "Calque {{number}}",
+  "generate.aspectRatioLabel": "Format",
+  "generate.resolutionLabel": "Résolution",
+  "generate.quality.xhigh": "Très élevée",
+  "generate.quality.max": "Maximale",
+  "generate.tooManyReferences": "Ce modèle accepte jusqu’à {{count}} images de référence.",
+  "generate.unsupportedParameters": "Paramètres non pris en charge pour le modèle sélectionné.",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

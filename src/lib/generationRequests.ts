@@ -20,18 +20,41 @@ export function buildGenerationParams(
   const params: GenerationParams = {
     prompt: request.prompt,
     model: request.model,
-    ...(capabilities.qualities.length > 1 ? { quality: request.quality } : {}),
+    size: request.size,
+    ...(capabilities.aspectRatios?.includes(request.aspectRatio ?? "")
+      ? { aspectRatio: request.aspectRatio }
+      : {}),
+    ...(capabilities.resolutions?.includes(request.resolution ?? "")
+      ? { resolution: request.resolution }
+      : {}),
+    ...(capabilities.qualities.length > 1
+      ? {
+          quality: capabilities.qualities.includes(request.quality)
+            ? request.quality
+            : "auto",
+        }
+      : {}),
     ...(capabilities.backgrounds.length > 1
       ? { background: request.background }
       : {}),
     ...(capabilities.outputFormats.length > 1
-      ? { outputFormat: request.outputFormat }
+      ? {
+          outputFormat: capabilities.outputFormats.includes(
+            request.outputFormat,
+          )
+            ? request.outputFormat
+            : capabilities.outputFormats[0],
+        }
       : {}),
     ...(capabilities.moderationLevels.length > 1
       ? { moderation: request.moderation }
       : {}),
     ...(capabilities.imageCounts.length > 0
-      ? { imageCount: request.imageCount }
+      ? {
+          imageCount: capabilities.imageCounts.includes(request.imageCount)
+            ? request.imageCount
+            : 1,
+        }
       : {}),
     conversationId: request.conversationId,
     projectId: request.projectId,

@@ -31,6 +31,7 @@ function request(
 describe("generation request helpers", () => {
   it("includes supported visible GPT generation controls", () => {
     expect(buildGenerationParams(request())).toEqual({
+      size: "1536x1024",
       prompt: "A luminous glass observatory",
       model: "gpt-image-2",
       quality: "high",
@@ -50,9 +51,10 @@ describe("generation request helpers", () => {
         }),
       ),
     ).toEqual({
+      size: "1536x1024",
       prompt: "A luminous glass observatory",
       model: "nano-banana",
-      imageCount: 3,
+      imageCount: 1,
       conversationId: "conversation-1",
       projectId: "project-1",
     });
@@ -78,9 +80,10 @@ describe("generation request helpers", () => {
         }),
       ),
     ).toEqual({
+      size: "1536x1024",
       prompt: "A luminous glass observatory",
       model: "nano-banana",
-      imageCount: 3,
+      imageCount: 1,
       conversationId: "conversation-1",
       projectId: "project-1",
       sourceImagePaths: ["/tmp/source-1.png", "/tmp/source-2.png"],
@@ -89,6 +92,7 @@ describe("generation request helpers", () => {
 
   it("includes supported visible GPT edit controls with source image paths", () => {
     expect(buildEditParams(request())).toEqual({
+      size: "1536x1024",
       prompt: "A luminous glass observatory",
       model: "gpt-image-2",
       quality: "high",
@@ -100,4 +104,27 @@ describe("generation request helpers", () => {
       sourceImagePaths: ["/tmp/source-1.png"],
     });
   });
+});
+
+it("preserves ratio and resolution across generation and reference-image retry requests", () => {
+  const retry = request({
+    model: "grok-imagine-image-2.0",
+    aspectRatio: "16:9",
+    resolution: "2K",
+    quality: "max",
+  });
+  for (const params of [buildGenerationParams(retry), buildEditParams(retry)]) {
+    expect(params).toMatchObject({
+      aspectRatio: "16:9",
+      resolution: "2K",
+      quality: "auto",
+    });
+    expect(params).not.toHaveProperty("background");
+    expect(params).not.toHaveProperty("outputFormat");
+  }
+  expect(
+    buildGenerationParams(
+      request({ model: "doubao-seedream-5-0-pro-260628", imageCount: 4 }),
+    ),
+  ).toMatchObject({ imageCount: 1 });
 });

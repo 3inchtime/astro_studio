@@ -565,5 +565,17 @@
   "canvas.assetCount": "{{count}} canvases",
   "canvas.objectCount": "{{count}} objects",
   "gallery.clearDate": "Clear date",
-  "canvas.defaultLayerName": "Layer {{number}}"
+  "canvas.defaultLayerName": "Layer {{number}}",
+  "generate.aspectRatioLabel": "Aspect ratio",
+  "generate.resolutionLabel": "Resolution",
+  "generate.quality.xhigh": "Extra high",
+  "generate.quality.max": "Maximum",
+  "generate.tooManyReferences": "This model supports up to {{count}} reference images.",
+  "generate.unsupportedParameters": "Unsupported parameters for the selected image model.",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

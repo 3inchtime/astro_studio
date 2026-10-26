@@ -18,6 +18,8 @@ pub(crate) enum GenerationExecutionMode {
 
 #[derive(Debug, Clone)]
 pub(crate) struct GenerationExecutionRequest {
+    pub(crate) aspect_ratio: Option<String>,
+    pub(crate) resolution: Option<String>,
     pub(crate) kind: GenerationLifecycleKind,
     pub(crate) prompt: String,
     pub(crate) model: Option<String>,
@@ -39,6 +41,8 @@ pub(crate) struct GenerationExecutionRequest {
 impl GenerationExecutionRequest {
     pub(crate) fn into_lifecycle_request(self) -> GenerationLifecycleRequest {
         GenerationLifecycleRequest {
+            aspect_ratio: self.aspect_ratio,
+            resolution: self.resolution,
             kind: self.kind,
             prompt: self.prompt,
             model: self.model,
@@ -61,6 +65,8 @@ impl GenerationExecutionRequest {
 impl Default for GenerationExecutionRequest {
     fn default() -> Self {
         Self {
+            aspect_ratio: None,
+            resolution: None,
             kind: GenerationLifecycleKind::Generate,
             prompt: String::new(),
             client_request_id: None,

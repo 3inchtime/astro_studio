@@ -309,6 +309,7 @@ impl GptImageEngine {
 
     async fn request_gemini_images(
         &self,
+        model: &str,
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
@@ -329,7 +330,12 @@ impl GptImageEngine {
                 ),
             })
             .collect::<Vec<_>>();
-        let request_body = gemini::build_request_body(prompt, &inline_images, options);
+        let mut request_body = gemini::build_request_body(prompt, &inline_images, options);
+        if model == ENGINE_NANO_BANANA {
+            if let Some(config) = request_body["generationConfig"]["imageConfig"].as_object_mut() {
+                config.remove("imageSize");
+            }
+        }
         let response = self
             .client
             .post(openai::image_endpoint_url(endpoint_url))
@@ -340,6 +346,34 @@ impl GptImageEngine {
             .await
             .map_err(|error| EngineCallError::from_send_error(&error))?;
 
+        Self::read_attempt_response(response, options.image_count).await
+    }
+
+    async fn request_native_images(
+        &self,
+        model: &str,
+        api_key: &str,
+        endpoint_url: &str,
+        prompt: &str,
+        sources: &[PreparedEditImage],
+        options: &GptImageRequestOptions,
+    ) -> Result<ProviderAttemptBody, EngineCallError> {
+        if api_key.is_empty() {
+            return Err(EngineCallError::provider_configuration_invalid());
+        }
+        crate::model_registry::validate_request_options(model, options, sources.len())
+            .map_err(|_| EngineCallError::request_rejected())?;
+        let body = crate::image_engines::native::build_request(model, prompt, sources, options);
+        let request = self.client.post(endpoint_url).json(&body);
+        let request = if model == ENGINE_NANO_BANANA_21 {
+            request.header("x-goog-api-key", api_key)
+        } else {
+            request.bearer_auth(api_key)
+        };
+        let response = request
+            .send()
+            .await
+            .map_err(|error| EngineCallError::from_send_error(&error))?;
         Self::read_attempt_response(response, options.image_count).await
     }
 
@@ -373,6 +407,9 @@ impl GptImageEngine {
 
         let value: Value = serde_json::from_str(body_text)
             .map_err(|_| "Provider response was not valid JSON".to_string())?;
+        if value.get("steps").is_some() {
+            return crate::image_engines::native::parse_interaction_images(&value, is_cancelled);
+        }
         gemini::parse_images_with_cancellation(&value, is_cancelled)
             .map_err(|_| "Provider response did not include decodable image data".to_string())
     }
@@ -555,9 +592,21 @@ impl ImageEngine for GptImageEngine {
         prompt: &str,
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
+        if matches!(
+            provider_for_model(model),
+            ImageProvider::Xai | ImageProvider::Seedream
+        ) || model == ENGINE_NANO_BANANA_21
+        {
+            return self
+                .request_native_images(model, api_key, endpoint_url, prompt, &[], options)
+                .await;
+        }
+        if provider_for_model(model) == ImageProvider::Unknown {
+            return Err(EngineCallError::request_rejected());
+        }
         if provider_for_model(model) == ImageProvider::Gemini {
             return self
-                .request_gemini_images(api_key, endpoint_url, prompt, &[], options)
+                .request_gemini_images(model, api_key, endpoint_url, prompt, &[], options)
                 .await;
         }
         if api_key.is_empty() {
@@ -594,9 +643,21 @@ impl ImageEngine for GptImageEngine {
             return Err(EngineCallError::request_rejected());
         }
 
+        if matches!(
+            provider_for_model(model),
+            ImageProvider::Xai | ImageProvider::Seedream
+        ) || model == ENGINE_NANO_BANANA_21
+        {
+            return self
+                .request_native_images(model, api_key, endpoint_url, prompt, source_images, options)
+                .await;
+        }
+        if provider_for_model(model) == ImageProvider::Unknown {
+            return Err(EngineCallError::request_rejected());
+        }
         if provider_for_model(model) == ImageProvider::Gemini {
             return self
-                .request_gemini_images(api_key, endpoint_url, prompt, source_images, options)
+                .request_gemini_images(model, api_key, endpoint_url, prompt, source_images, options)
                 .await;
         }
 
@@ -678,6 +739,8 @@ mod tests {
 
     fn test_options(image_count: u8) -> GptImageRequestOptions {
         GptImageRequestOptions {
+            aspect_ratio: None,
+            resolution: None,
             size: DEFAULT_IMAGE_SIZE.to_string(),
             quality: DEFAULT_IMAGE_QUALITY.to_string(),
             background: DEFAULT_IMAGE_BACKGROUND.to_string(),
@@ -1205,5 +1268,137 @@ mod tests {
 
         assert!(result.is_err());
         assert!(checks.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[tokio::test]
+    async fn new_provider_protocols_generate_edit_and_recover_without_resubmission() {
+        use tokio::io::AsyncWriteExt;
+        for model in [
+            ENGINE_GPT_IMAGE_FLARE,
+            ENGINE_GPT_IMAGE_SUNBURST,
+            ENGINE_GROK,
+            ENGINE_SEEDREAM_PRO,
+            ENGINE_SEEDREAM_FLASH,
+            ENGINE_NANO_BANANA_21,
+        ] {
+            for editing in [false, true] {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let body = if model == ENGINE_NANO_BANANA_21 {
+                    r#"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"image","mime_type":"image/png","data":"aW1hZ2UtYnl0ZXM="}]}]}"#
+                } else {
+                    r#"{"data":[{"b64_json":"aW1hZ2UtYnl0ZXM="},{"error":{"code":"blocked"}}]}"#
+                };
+                let server = tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let request = read_complete_http_request(&mut socket).await;
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    request
+                });
+                let engine = local_test_engine(Some(3));
+                let mut options = test_options(1);
+                if !model.starts_with("gpt-image") {
+                    options.resolution = Some("2K".to_string());
+                }
+                if model == ENGINE_GROK {
+                    options.output_format = "jpeg".to_string();
+                    options.aspect_ratio = Some("16:9".to_string());
+                }
+                let url = format!("http://{address}/custom-endpoint");
+                let result = if editing {
+                    engine
+                        .edit(
+                            model,
+                            "test-key",
+                            &url,
+                            "draw a lighthouse",
+                            &[
+                                prepared_test_image(b"source".to_vec()),
+                                prepared_test_image(b"second-source".to_vec()),
+                            ],
+                            &options,
+                        )
+                        .await
+                } else {
+                    engine
+                        .generate(model, "test-key", &url, "draw a lighthouse", &options)
+                        .await
+                }
+                .unwrap();
+                let request = String::from_utf8(server.await.unwrap()).unwrap();
+                assert!(request.starts_with("POST /custom-endpoint HTTP/1.1"));
+                let (headers, payload) = request.split_once("\r\n\r\n").unwrap();
+                assert!(headers
+                    .to_ascii_lowercase()
+                    .contains(if model == ENGINE_NANO_BANANA_21 {
+                        "x-goog-api-key: test-key"
+                    } else {
+                        "authorization: bearer test-key"
+                    }));
+                if !model.starts_with("gpt-image") {
+                    assert!(headers.contains("application/json"));
+                    let json: Value = serde_json::from_str(payload).unwrap();
+                    assert_eq!(json["model"], model);
+                    assert!(json.get("input_fidelity").is_none());
+                    if model == ENGINE_NANO_BANANA_21 {
+                        assert_eq!(json["response_format"]["image_size"], "2K");
+                        assert_eq!(
+                            json["input"].as_array().unwrap().len(),
+                            if editing { 3 } else { 1 }
+                        );
+                    } else if model == ENGINE_GROK {
+                        assert_eq!(json["resolution"], "2k");
+                        assert_eq!(json["aspect_ratio"], "16:9");
+                        if editing {
+                            assert_eq!(json["images"].as_array().unwrap().len(), 2);
+                        }
+                    } else {
+                        assert!(json.get("n").is_none());
+                        assert_eq!(json["size"], "2K");
+                        if editing {
+                            assert_eq!(json["image"].as_array().unwrap().len(), 2);
+                        }
+                    }
+                }
+                // The mock server has closed: decoding a saved response must be entirely local.
+                for _ in 0..2 {
+                    assert_eq!(
+                        engine
+                            .decode_images_from_response(&result.body_text, &|| false)
+                            .await
+                            .unwrap(),
+                        vec![b"image-bytes".to_vec()]
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn interactions_reject_blocked_empty_malformed_and_cancelled_responses() {
+        let engine = local_test_engine(Some(2));
+        for body in [
+            r#"{"status":"failed","steps":[]}"#,
+            r#"{"status":"completed","steps":[]}"#,
+            r#"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"image","data":"!invalid"}]}]}"#,
+        ] {
+            assert!(engine
+                .decode_images_from_response(body, &|| false)
+                .await
+                .is_err());
+        }
+        let thought_and_result = r#"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"image","is_thought":true,"data":"dGhvdWdodA=="},{"type":"image","data":"cmVzdWx0"}]}]}"#;
+        assert_eq!(
+            engine
+                .decode_images_from_response(thought_and_result, &|| false)
+                .await
+                .unwrap(),
+            vec![b"result".to_vec()]
+        );
+        assert!(engine
+            .decode_images_from_response(thought_and_result, &|| true)
+            .await
+            .is_err());
     }
 }

@@ -13,7 +13,9 @@ export function defaultEditUrlForModel(model: ImageModel): string {
   return getImageModelCatalogEntry(model).connectionDefaults.editUrl;
 }
 
-export function defaultEndpointSettingsForModel(model: ImageModel): EndpointSettings {
+export function defaultEndpointSettingsForModel(
+  model: ImageModel,
+): EndpointSettings {
   return {
     mode: "base_url",
     base_url: defaultBaseUrlForModel(model),
@@ -27,7 +29,8 @@ export function modelSupportsEdit(model: ImageModel): boolean {
 }
 
 export function usesSharedEditEndpoint(model: ImageModel): boolean {
-  const { generationUrl, editUrl } = getImageModelCatalogEntry(model).connectionDefaults;
+  const { generationUrl, editUrl } =
+    getImageModelCatalogEntry(model).connectionDefaults;
 
   return generationUrl === editUrl;
 }
@@ -37,10 +40,22 @@ export function normalizeEndpointSettings(
   settings: EndpointSettings,
 ): EndpointSettings {
   const defaults = defaultEndpointSettingsForModel(model);
-  const generationUrl = settings.generation_url.trim() || defaults.generation_url;
-  const editUrl = !modelSupportsEdit(model) || usesSharedEditEndpoint(model)
-    ? generationUrl
-    : settings.edit_url.trim() || defaults.edit_url;
+  let generationUrl = settings.generation_url.trim() || defaults.generation_url;
+  for (const [oldId, newId] of [
+    ["gemini-3.1-flash-image-preview", "gemini-3.1-flash-image"],
+    ["gemini-3-pro-image-preview", "gemini-3-pro-image"],
+  ]) {
+    if (
+      generationUrl ===
+      `https://generativelanguage.googleapis.com/v1beta/models/${oldId}:generateContent`
+    ) {
+      generationUrl = `https://generativelanguage.googleapis.com/v1beta/models/${newId}:generateContent`;
+    }
+  }
+  const editUrl =
+    !modelSupportsEdit(model) || usesSharedEditEndpoint(model)
+      ? generationUrl
+      : settings.edit_url.trim() || defaults.edit_url;
 
   return {
     mode: settings.mode,

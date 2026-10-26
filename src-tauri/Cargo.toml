@@ -1,6 +1,6 @@
 [package]
 name = "astro-studio"
-version = "0.0.26"
+version = "0.0.27"
 description = "Astro Studio - AI Image Generation Desktop Client"
 authors = ["Astro Studio"]
 edition = "2021"

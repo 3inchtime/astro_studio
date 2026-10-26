@@ -629,5 +629,17 @@
   "update.latestVersion": "최신 버전",
   "update.updateNotes": "릴리스 노트",
   "gallery.clearDate": "날짜 지우기",
-  "canvas.defaultLayerName": "레이어 {{number}}"
+  "canvas.defaultLayerName": "레이어 {{number}}",
+  "generate.aspectRatioLabel": "화면 비율",
+  "generate.resolutionLabel": "해상도",
+  "generate.quality.xhigh": "매우 높음",
+  "generate.quality.max": "최대",
+  "generate.tooManyReferences": "이 모델은 참조 이미지를 최대 {{count}}개 지원합니다.",
+  "generate.unsupportedParameters": "선택한 이미지 모델에서 지원하지 않는 매개변수입니다.",
+  "models.gptImageFlare": "GPT Image 2.5 Flare",
+  "models.gptImageSunburst": "GPT Image 2.5 Sunburst",
+  "models.nanoBanana21": "Nano Banana 2.1",
+  "models.grokImagine": "Grok Imagine 2.0",
+  "models.seedreamPro": "Seedream 5.0 Pro",
+  "models.seedreamFlash": "Seedream 5.0 Flash"
 }

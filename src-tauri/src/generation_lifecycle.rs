@@ -84,6 +84,8 @@ impl From<GenerationJobRequestKind> for GenerationLifecycleKind {
 }
 
 pub(crate) struct GenerationLifecycleRequest {
+    pub(crate) aspect_ratio: Option<String>,
+    pub(crate) resolution: Option<String>,
     pub(crate) kind: GenerationLifecycleKind,
     pub(crate) prompt: String,
     pub(crate) model: Option<String>,
@@ -1222,6 +1224,9 @@ pub(crate) fn validate_provider_execution_snapshot(
     let expected_provider_kind = match provider_for_model(&snapshot.context.model) {
         ImageProvider::OpenAi => "openai",
         ImageProvider::Gemini => "gemini",
+        ImageProvider::Xai => "xai",
+        ImageProvider::Seedream => "seedream",
+        ImageProvider::Unknown => "unresolved",
     };
     if snapshot.context.provider_kind != expected_provider_kind
         || snapshot.request.model != snapshot.context.model
@@ -2755,6 +2760,8 @@ pub(crate) fn image_request_options(
     image_count: Option<u8>,
 ) -> GptImageRequestOptions {
     GptImageRequestOptions {
+        aspect_ratio: None,
+        resolution: None,
         size: size.unwrap_or_else(|| DEFAULT_IMAGE_SIZE.to_string()),
         quality: quality.unwrap_or_else(|| DEFAULT_IMAGE_QUALITY.to_string()),
         background: background.unwrap_or_else(|| DEFAULT_IMAGE_BACKGROUND.to_string()),
@@ -2781,10 +2788,17 @@ fn prepare_compatibility_job(
     request: &GenerationLifecycleRequest,
 ) -> Result<PreparedGenerationJob, AppError> {
     let stored_model = if request.model.is_none() {
-        db.get_setting(SETTING_IMAGE_MODEL)?
+        Some(crate::commands::settings::current_image_model(db)?)
     } else {
         None
     };
+    if let Some(model) = request.model.as_deref() {
+        if provider_for_model(model) == ImageProvider::Unknown {
+            return Err(AppError::Validation {
+                message: "Unknown image model.".to_string(),
+            });
+        }
+    }
     let model = normalize_image_model(
         request
             .model
@@ -2793,7 +2807,7 @@ fn prepare_compatibility_job(
             .unwrap_or(DEFAULT_IMAGE_MODEL),
     )
     .to_string();
-    let runtime_options = sanitize_request_options_for_model(
+    let mut runtime_options = sanitize_request_options_for_model(
         &model,
         image_request_options(
             request.size.clone(),
@@ -2806,8 +2820,25 @@ fn prepare_compatibility_job(
             request.image_count,
         ),
     );
+    runtime_options.aspect_ratio = request.aspect_ratio.clone();
+    runtime_options.resolution =
+        request
+            .resolution
+            .clone()
+            .or_else(|| match provider_for_model(&model) {
+                ImageProvider::Xai => Some("1K".to_string()),
+                ImageProvider::Seedream => Some("2K".to_string()),
+                _ => None,
+            });
+    crate::model_registry::validate_request_options(
+        &model,
+        &runtime_options,
+        request.source_image_paths.len(),
+    )?;
     let capability_omits_controls = is_gemini_model(&model);
     let request_options = GenerationJobOptions {
+        aspect_ratio: runtime_options.aspect_ratio.clone(),
+        resolution: runtime_options.resolution.clone(),
         size: request.size.as_ref().map(|_| runtime_options.size.clone()),
         quality: (!capability_omits_controls)
             .then(|| {
@@ -2825,7 +2856,7 @@ fn prepare_compatibility_job(
                     .map(|_| runtime_options.background.clone())
             })
             .flatten(),
-        output_format: (!capability_omits_controls)
+        output_format: (!capability_omits_controls || model == ENGINE_NANO_BANANA_21)
             .then(|| {
                 request
                     .output_format
@@ -2892,6 +2923,9 @@ fn prepare_compatibility_job(
                 let provider_kind = match provider_for_model(&model) {
                     ImageProvider::OpenAi => "openai",
                     ImageProvider::Gemini => "gemini",
+                    ImageProvider::Xai => "xai",
+                    ImageProvider::Seedream => "seedream",
+                    ImageProvider::Unknown => "unresolved",
                 };
                 let provider_profile_id = profile.id;
                 let api_key_is_present = !profile.api_key.trim().is_empty();
@@ -3538,6 +3572,8 @@ mod tests {
 
     fn compatibility_request(model: &str) -> GenerationLifecycleRequest {
         GenerationLifecycleRequest {
+            aspect_ratio: None,
+            resolution: None,
             kind: GenerationLifecycleKind::Generate,
             prompt: "draw a durable nebula".to_string(),
             model: Some(model.to_string()),
@@ -3652,7 +3688,7 @@ mod tests {
         assert_eq!(prepared.moderation, DEFAULT_IMAGE_MODERATION);
         assert_eq!(prepared.input_fidelity, DEFAULT_INPUT_FIDELITY);
         assert_eq!(prepared.request_options.size.as_deref(), Some("1536x1024"));
-        assert_eq!(prepared.request_options.image_count, Some(4));
+        assert_eq!(prepared.request_options.image_count, Some(1));
         assert_eq!(prepared.request_options.quality, None);
         assert_eq!(prepared.request_options.background, None);
         assert_eq!(prepared.request_options.output_format, None);
@@ -5122,6 +5158,8 @@ mod tests {
                 partial_images: 0,
                 source_image_paths,
                 request_options: GenerationJobOptions {
+                    aspect_ratio: None,
+                    resolution: None,
                     size: Some("1024x1024".to_string()),
                     quality: Some("high".to_string()),
                     background: Some("auto".to_string()),

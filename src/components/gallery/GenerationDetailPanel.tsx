@@ -45,6 +45,12 @@ export default function GenerationDetailPanel({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const image = result.images[selectedIndex] ?? result.images[0];
   const generation = result.generation;
+  let dimensions: { aspect_ratio?: string; resolution?: string } = {};
+  try {
+    dimensions = JSON.parse(generation.request_metadata ?? "{}") ?? {};
+  } catch {
+    /* Legacy metadata may not be JSON. */
+  }
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -137,13 +143,40 @@ export default function GenerationDetailPanel({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <MetaRow label={t("gallery.model")} value={generation.engine} />
-            <MetaRow label={t("gallery.requestKind")} value={generation.request_kind} />
+            <MetaRow
+              label={t("gallery.requestKind")}
+              value={generation.request_kind}
+            />
             <MetaRow label={t("gallery.size")} value={generation.size} />
+            {typeof dimensions.aspect_ratio === "string" && (
+              <MetaRow
+                label={t("generate.aspectRatioLabel")}
+                value={dimensions.aspect_ratio}
+              />
+            )}
+            {typeof dimensions.resolution === "string" && (
+              <MetaRow
+                label={t("generate.resolutionLabel")}
+                value={dimensions.resolution}
+              />
+            )}
             <MetaRow label={t("gallery.quality")} value={generation.quality} />
-            <MetaRow label={t("gallery.background")} value={generation.background} />
-            <MetaRow label={t("gallery.format")} value={generation.output_format} />
-            <MetaRow label={t("gallery.moderation")} value={generation.moderation} />
-            <MetaRow label={t("gallery.fidelity")} value={generation.input_fidelity} />
+            <MetaRow
+              label={t("gallery.background")}
+              value={generation.background}
+            />
+            <MetaRow
+              label={t("gallery.format")}
+              value={generation.output_format}
+            />
+            <MetaRow
+              label={t("gallery.moderation")}
+              value={generation.moderation}
+            />
+            <MetaRow
+              label={t("gallery.fidelity")}
+              value={generation.input_fidelity}
+            />
             <MetaRow
               label={t("gallery.imageCount")}
               value={String(generation.image_count)}
@@ -156,10 +189,7 @@ export default function GenerationDetailPanel({
               label={t("gallery.compression")}
               value={String(generation.output_compression)}
             />
-            <MetaRow
-              label={t("gallery.status")}
-              value={generation.status}
-            />
+            <MetaRow label={t("gallery.status")} value={generation.status} />
           </div>
           <div className="flex items-center gap-1.5">
             <Calendar size={11} className="text-muted/40" />

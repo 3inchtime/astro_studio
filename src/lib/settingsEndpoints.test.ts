@@ -55,3 +55,25 @@ describe("settings endpoint helpers", () => {
     });
   });
 });
+
+it("migrates only exact retired Google defaults and leaves third-party URLs intact", () => {
+  const old =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent";
+  const defaults = defaultEndpointSettingsForModel("nano-banana-pro");
+  expect(
+    normalizeEndpointSettings("nano-banana-pro", {
+      ...defaults,
+      mode: "full_url",
+      generation_url: old,
+    }).generation_url,
+  ).toBe(old.replace("-preview", ""));
+  const custom =
+    "https://gateway.test/models/gemini-3-pro-image-preview:generateContent";
+  expect(
+    normalizeEndpointSettings("nano-banana-pro", {
+      ...defaults,
+      mode: "full_url",
+      generation_url: custom,
+    }).generation_url,
+  ).toBe(custom);
+});
