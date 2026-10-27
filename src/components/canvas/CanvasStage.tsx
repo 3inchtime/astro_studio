@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import CanvasActionMenu, { type CanvasActionProps } from "./CanvasActionMenu";
+import CanvasResizeOverlay from "./CanvasResizeOverlay";
+import {
+  scaleCanvasObjects,
+  snapCanvasSelection,
+  type CanvasSnapGuide,
+} from "../../lib/canvas/editor";
 import type { MutableRefObject } from "react";
 import {
   Group,
+  Ellipse,
+  Shape,
   Image as KonvaImage,
   Layer,
   Line,
@@ -15,15 +24,15 @@ import { toAssetUrl } from "../../lib/api";
 import type { CanvasRect } from "../../lib/canvas/bounds";
 import {
   canvasRectToScreenRect,
+  getCanvasArrowHeadPoints,
   getCombinedCanvasBounds,
   normalizeCanvasRect,
 } from "../../lib/canvas/bounds";
 import {
   frameToScreenRect,
-  isSecondaryButtonPan,
   panViewportFromPointerDelta,
   screenPointToCanvasPoint,
-  zoomViewportAtScreenPoint,
+  viewportFromWheel,
 } from "../../lib/canvas/frame";
 import { getCanvasLayersBackToFront } from "../../lib/canvas/document";
 import {
@@ -33,6 +42,8 @@ import {
   toggleSelectedObjectId,
 } from "../../lib/canvas/selection";
 import type {
+  CanvasFrame,
+  CanvasTextObject,
   CanvasDocumentContent,
   CanvasObject,
   CanvasStrokeObject,
@@ -40,7 +51,20 @@ import type {
   CanvasViewport,
 } from "../../types";
 
-interface CanvasStageProps {
+interface CanvasStageProps extends CanvasActionProps {
+  onAddObject?: (object: CanvasObject) => void;
+  onUpdateText?: (
+    id: string,
+    text: string,
+    width: number,
+    height: number,
+  ) => void;
+  onTransformSelection?: (bounds: CanvasRect) => void;
+  onFrameChange?: (frame: CanvasFrame) => void;
+  frameEditing?: boolean;
+  fillColor?: string;
+  objectOpacity?: number;
+  fontSize?: number;
   content: CanvasDocumentContent;
   activeLayerId: string | null;
   activeTool: CanvasTool;
@@ -51,7 +75,13 @@ interface CanvasStageProps {
   onAddStroke: (stroke: CanvasStrokeObject) => void;
   onTransformImage: (
     objectId: string,
-    transform: { x: number; y: number; width: number; height: number; rotation?: number },
+    transform: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      rotation?: number;
+    },
   ) => void;
   onResetImageAspect: (objectId: string) => void;
   onSelectionChange: (ids: string[]) => void;
@@ -74,6 +104,22 @@ export default function CanvasStage({
   selectedObjectIds,
   strokeColor,
   strokeSize,
+  onCopySelection,
+  onPasteSelection,
+  onDuplicateSelection,
+  onDeleteSelection,
+  onReorderSelection,
+  onFrameFromSelection,
+  onSelectAll,
+  canPaste,
+  onAddObject,
+  onUpdateText,
+  onTransformSelection,
+  onFrameChange,
+  frameEditing = false,
+  fillColor = "transparent",
+  objectOpacity = 1,
+  fontSize = 24,
   onViewportChange,
   onAddStroke,
   onTransformImage,
@@ -87,6 +133,21 @@ export default function CanvasStage({
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const imageNodeRefs = useRef<Record<string, Konva.Image | null>>({});
+  const draftObjectRef = useRef<CanvasObject | null>(null);
+  const shapeAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [resizePreview, setResizePreview] = useState<CanvasRect | null>(null);
+  const [framePreview, setFramePreview] = useState<CanvasRect | null>(null);
+  const [snapGuides, setSnapGuides] = useState<CanvasSnapGuide[]>([]);
+  const composingRef = useRef(false);
+  const [textEditor, setTextEditor] = useState<
+    (CanvasTextObject & { existing?: boolean }) | null
+  >(null);
+  const textEditorRef = useRef(textEditor);
+  textEditorRef.current = textEditor;
   const draftStrokeRef = useRef<CanvasStrokeObject | null>(null);
   const draftContentRef = useRef<CanvasDocumentContent | null>(null);
   const isPointerDrawingRef = useRef(false);
@@ -113,7 +174,8 @@ export default function CanvasStage({
   const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
   const [loadedImages, setLoadedImages] = useState<LoadedImageMap>({});
   const [marqueeRect, setMarqueeRect] = useState<CanvasRect | null>(null);
-  const [selectionPreviewDelta, setSelectionPreviewDelta] = useState(ZERO_SELECTION_DELTA);
+  const [selectionPreviewDelta, setSelectionPreviewDelta] =
+    useState(ZERO_SELECTION_DELTA);
   const [, rerenderTick] = useState(0);
 
   onSelectionChangeRef.current = onSelectionChange;
@@ -125,7 +187,15 @@ export default function CanvasStage({
   }, []);
 
   const cancelActiveGestures = useCallback(() => {
-    const hadDraft = isPointerDrawingRef.current || draftStrokeRef.current !== null;
+    setContextMenu(null);
+    setResizePreview(null);
+    setFramePreview(null);
+    setSnapGuides([]);
+    draftObjectRef.current = null;
+    shapeAnchorRef.current = null;
+    textEditorRef.current = null;
+    composingRef.current = false;
+    setTextEditor(null);
     panAnchorRef.current = null;
     selectionDragRef.current = null;
     marqueeAnchorRef.current = null;
@@ -136,9 +206,7 @@ export default function CanvasStage({
     draftContentRef.current = null;
     setMarqueeRect(null);
     setSelectionPreviewDelta(ZERO_SELECTION_DELTA);
-    if (hadDraft) {
-      rerenderTick((value) => value + 1);
-    }
+    rerenderTick((value) => value + 1);
   }, []);
 
   useEffect(() => {
@@ -182,6 +250,7 @@ export default function CanvasStage({
       }
 
       const image = new window.Image();
+      image.crossOrigin = "anonymous";
       image.onload = () => {
         setLoadedImages((current) => ({ ...current, [path]: image }));
       };
@@ -189,10 +258,16 @@ export default function CanvasStage({
     });
   }, [imagePaths, loadedImages]);
 
-  const frameRect = frameToScreenRect(content.frame, content.viewport);
+  const frameRect = frameToScreenRect(
+    { ...content.frame, ...framePreview },
+    content.viewport,
+  );
+  const previewContent = resizePreview
+    ? scaleCanvasObjects(content, selectedObjectIds, resizePreview)
+    : content;
   const renderedLayers = useMemo(
-    () => getCanvasLayersBackToFront(content.layers),
-    [content.layers],
+    () => getCanvasLayersBackToFront(previewContent.layers),
+    [previewContent.layers],
   );
   const effectiveSelectedObjectIds = useMemo(
     () => reconcileSelectedObjectIds(content, selectedObjectIds),
@@ -252,7 +327,11 @@ export default function CanvasStage({
     ? canvasRectToScreenRect(marqueeRect, content.viewport)
     : null;
   const backgroundGrid = [];
-  for (let position = -CANVAS_WORLD_SIZE; position <= CANVAS_WORLD_SIZE; position += 128) {
+  for (
+    let position = -CANVAS_WORLD_SIZE;
+    position <= CANVAS_WORLD_SIZE;
+    position += 128
+  ) {
     backgroundGrid.push(position);
   }
 
@@ -264,13 +343,15 @@ export default function CanvasStage({
     return screenPointToCanvasPoint(pointer, content.viewport);
   }
 
-  function handlePointerDown(event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+  function handlePointerDown(
+    event: Konva.KonvaEventObject<MouseEvent | TouchEvent>,
+  ) {
     if (event.target.getParent()?.getClassName() === "Transformer") {
       return;
     }
 
-    const isSecondaryPan =
-      "button" in event.evt && isSecondaryButtonPan(event.evt.button);
+    if ("button" in event.evt && event.evt.button === 2) return;
+    const isSecondaryPan = "button" in event.evt && event.evt.button === 1;
     if (activeTool === "pan" || spacePanActiveRef.current || isSecondaryPan) {
       if (isSecondaryPan) {
         event.evt.preventDefault();
@@ -289,6 +370,7 @@ export default function CanvasStage({
       return;
     }
 
+    if (frameEditing) return;
     if (activeTool === "select") {
       const point = getCanvasPoint();
       if (!point) return;
@@ -329,11 +411,66 @@ export default function CanvasStage({
       return;
     }
 
+    if (textEditorRef.current) return;
+    const drawingLayer =
+      content.layers.find((l) => l.id === activeLayerId) ?? content.layers[0];
+    if (!drawingLayer || drawingLayer.locked || !drawingLayer.visible) return;
+    if (activeTool === "text") {
+      event.evt.preventDefault();
+      const point = getCanvasPoint();
+      draftContentRef.current = content;
+      if (point)
+        setTextEditor({
+          type: "text",
+          id: crypto.randomUUID(),
+          ...point,
+          width: 240,
+          height: fontSize * 1.2,
+          rotation: 0,
+          text: "",
+          fontSize,
+          color: strokeColor,
+          opacity: objectOpacity,
+        });
+      return;
+    }
+    if (["rectangle", "ellipse", "line", "arrow"].includes(activeTool)) {
+      const point = getCanvasPoint();
+      if (!point) return;
+      shapeAnchorRef.current = point;
+      draftContentRef.current = content;
+      const style = {
+        id: crypto.randomUUID(),
+        color: strokeColor,
+        size: strokeSize,
+        opacity: objectOpacity,
+      };
+      draftObjectRef.current =
+        activeTool === "line" || activeTool === "arrow"
+          ? {
+              ...style,
+              type: activeTool,
+              points: [point.x, point.y, point.x, point.y],
+            }
+          : {
+              ...style,
+              type: activeTool as "rectangle" | "ellipse",
+              ...point,
+              width: 0,
+              height: 0,
+              rotation: 0,
+              fill: fillColor,
+            };
+      rerenderTick((v) => v + 1);
+      return;
+    }
     if (activeTool !== "brush" && activeTool !== "eraser") {
       return;
     }
 
-    const layer = content.layers.find((entry) => entry.id === activeLayerId) ?? content.layers[0];
+    const layer =
+      content.layers.find((entry) => entry.id === activeLayerId) ??
+      content.layers[0];
     if (!layer || layer.locked || !layer.visible) {
       return;
     }
@@ -352,12 +489,44 @@ export default function CanvasStage({
       points: [point.x, point.y],
       color: activeTool === "eraser" ? "#000000" : strokeColor,
       size: strokeSize,
-      opacity: 1,
+      opacity: objectOpacity,
     };
     rerenderTick((value) => value + 1);
   }
 
-  function handlePointerMove() {
+  function handlePointerMove(
+    event?: Konva.KonvaEventObject<MouseEvent | TouchEvent>,
+  ) {
+    if (draftObjectRef.current && shapeAnchorRef.current) {
+      const point = getCanvasPoint();
+      if (!point) return;
+      const a = shapeAnchorRef.current;
+      let dx = point.x - a.x,
+        dy = point.y - a.y;
+      const o = draftObjectRef.current;
+      if (event?.evt.shiftKey) {
+        if (o.type === "line" || o.type === "arrow" || o.type === "stroke") {
+          const angle =
+            (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI) / 4;
+          const distance = Math.hypot(dx, dy);
+          dx = Math.cos(angle) * distance;
+          dy = Math.sin(angle) * distance;
+        } else {
+          const size = Math.max(Math.abs(dx), Math.abs(dy));
+          dx = Math.sign(dx || 1) * size;
+          dy = Math.sign(dy || 1) * size;
+        }
+      }
+      draftObjectRef.current =
+        o.type === "line" || o.type === "arrow" || o.type === "stroke"
+          ? { ...o, points: [a.x, a.y, a.x + dx, a.y + dy] }
+          : {
+              ...o,
+              ...normalizeCanvasRect({ x: a.x, y: a.y, width: dx, height: dy }),
+            };
+      rerenderTick((v) => v + 1);
+      return;
+    }
     if (panAnchorRef.current) {
       const pointer = stageRef.current?.getPointerPosition();
       if (!pointer) {
@@ -376,10 +545,15 @@ export default function CanvasStage({
     if (selectionDragRef.current) {
       const point = getCanvasPoint();
       if (!point) return;
-      const nextSelectionPreviewDelta = {
+      const rawDelta = {
         dx: point.x - selectionDragRef.current.canvasPoint.x,
         dy: point.y - selectionDragRef.current.canvasPoint.y,
       };
+      const snapped = event?.evt.altKey
+        ? { delta: rawDelta, guides: [] }
+        : snapCanvasSelection(content, effectiveSelectedObjectIds, rawDelta);
+      const nextSelectionPreviewDelta = snapped.delta;
+      setSnapGuides(snapped.guides);
       selectionPreviewDeltaRef.current = nextSelectionPreviewDelta;
       setSelectionPreviewDelta(nextSelectionPreviewDelta);
       return;
@@ -416,16 +590,30 @@ export default function CanvasStage({
   }
 
   function handlePointerUp() {
+    if (draftObjectRef.current) {
+      const object = draftObjectRef.current;
+      if (
+        object.type === "line" ||
+        object.type === "arrow" ||
+        object.type === "stroke"
+          ? Math.hypot(
+              object.points[2] - object.points[0],
+              object.points[3] - object.points[1],
+            ) > 1
+          : "width" in object && object.width > 1 && object.height > 1
+      )
+        onAddObject?.(object);
+      draftObjectRef.current = null;
+      shapeAnchorRef.current = null;
+      draftContentRef.current = null;
+      rerenderTick((v) => v + 1);
+      return;
+    }
     panAnchorRef.current = null;
 
     if (selectionDragRef.current) {
-      const point = getCanvasPoint();
-      const totalDelta = point
-        ? {
-            dx: point.x - selectionDragRef.current.canvasPoint.x,
-            dy: point.y - selectionDragRef.current.canvasPoint.y,
-          }
-        : selectionPreviewDeltaRef.current;
+      const totalDelta = selectionPreviewDeltaRef.current;
+      setSnapGuides([]);
       selectionDragRef.current = null;
       resetSelectionPreview();
       if (totalDelta.dx !== 0 || totalDelta.dy !== 0) {
@@ -437,7 +625,9 @@ export default function CanvasStage({
     if (marqueeAnchorRef.current) {
       const completedMarqueeRect = marqueeRectRef.current;
       if (completedMarqueeRect) {
-        onSelectionChange(selectCanvasObjectsInRect(content, completedMarqueeRect));
+        onSelectionChange(
+          selectCanvasObjectsInRect(content, completedMarqueeRect),
+        );
       }
       marqueeAnchorRef.current = null;
       marqueeRectRef.current = null;
@@ -466,15 +656,12 @@ export default function CanvasStage({
       return;
     }
 
-    const zoomFactor = event.evt.deltaY > 0 ? 0.92 : 1.08;
-    onViewportChange(
-      zoomViewportAtScreenPoint(content.viewport, pointer, content.viewport.scale * zoomFactor),
-    );
+    onViewportChange(viewportFromWheel(content.viewport, pointer, event.evt));
   }
 
   useEffect(() => {
     const transformer = transformerRef.current;
-    if (!transformer || !selectedImageObject) {
+    if (!transformer || !selectedImageObject || onTransformSelection) {
       transformer?.nodes([]);
       return;
     }
@@ -482,7 +669,7 @@ export default function CanvasStage({
     const node = imageNodeRefs.current[selectedImageObject.id];
     transformer.nodes(node ? [node] : []);
     transformer.getLayer()?.batchDraw();
-  }, [content.layers, loadedImages, selectedImageObject]);
+  }, [content.layers, loadedImages, selectedImageObject, onTransformSelection]);
 
   useEffect(() => {
     const activeSelectionDrag = selectionDragRef.current;
@@ -491,7 +678,8 @@ export default function CanvasStage({
       (activeSelectionDrag.content !== content ||
         activeSelectionDrag.selectionKey !== effectiveSelectionKey);
     const marqueeIsStale =
-      marqueeAnchorRef.current !== null && marqueeAnchorRef.current.content !== content;
+      marqueeAnchorRef.current !== null &&
+      marqueeAnchorRef.current.content !== content;
     const draftIsStale =
       draftContentRef.current !== null && draftContentRef.current !== content;
 
@@ -501,8 +689,8 @@ export default function CanvasStage({
   }, [cancelActiveGestures, content, effectiveSelectionKey]);
 
   useEffect(() => {
+    cancelActiveGestures();
     if (activeTool !== "select") {
-      cancelActiveGestures();
       onSelectionChangeRef.current([]);
     }
   }, [activeTool, cancelActiveGestures]);
@@ -520,6 +708,10 @@ export default function CanvasStage({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        cancelActiveGestures();
+        return;
+      }
       if (event.code !== "Space" || isTypingTarget(event.target)) return;
       event.preventDefault();
       spacePanActiveRef.current = true;
@@ -549,11 +741,63 @@ export default function CanvasStage({
     };
   }, [cancelActiveGestures]);
 
+  function commitText() {
+    const editor = textEditorRef.current;
+    if (!editor || composingRef.current) return;
+    textEditorRef.current = null;
+    draftContentRef.current = null;
+    setTextEditor(null);
+    const context = document.createElement("canvas").getContext("2d");
+    if (context) context.font = `${editor.fontSize}px sans-serif`;
+    const width = Math.max(
+      1,
+      Math.ceil(
+        Math.max(
+          ...editor.text
+            .split("\n")
+            .map((line) =>
+              context
+                ? context.measureText(line).width
+                : [...line].length * editor.fontSize,
+            ),
+        ),
+      ),
+    );
+    const height = Math.max(
+      editor.fontSize * 1.2,
+      editor.text.split("\n").length * editor.fontSize * 1.2,
+    );
+    if (editor.existing) onUpdateText?.(editor.id, editor.text, width, height);
+    else if (editor.text.trim()) onAddObject?.({ ...editor, width, height });
+  }
+
   return (
     <div
       ref={containerRef}
       className="relative h-full min-h-0 flex-1 overflow-hidden"
-      onContextMenu={(event) => event.preventDefault()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        if (
+          (event.target as HTMLElement).closest(
+            'textarea,input,[contenteditable="true"]',
+          )
+        )
+          return;
+        const rect = containerRef.current?.getBoundingClientRect();
+        const point = {
+          x: event.clientX - (rect?.left ?? 0),
+          y: event.clientY - (rect?.top ?? 0),
+        };
+        const hit = hitTestCanvasObjectId(
+          content,
+          screenPointToCanvasPoint(point, content.viewport),
+        );
+        if (hit && !selectedObjectIds.includes(hit)) onSelectionChange([hit]);
+        setContextMenu({
+          x: Math.max(8, Math.min(stageSize.width - 208, point.x)),
+          y: Math.max(8, Math.min(stageSize.height - 330, point.y)),
+        });
+      }}
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.96),_rgba(244,241,234,0.9)_36%,_rgba(238,234,226,0.98)_100%)]" />
       <div className="absolute left-5 top-5 z-10 rounded-[12px] border border-border-subtle bg-surface/88 px-3 py-2 text-[12px] text-muted shadow-card">
@@ -573,6 +817,18 @@ export default function CanvasStage({
         onTouchEnd={handlePointerUp}
         onTouchCancel={cancelActiveGestures}
         onWheel={handleWheel}
+        onDblClick={() => {
+          const point = getCanvasPoint();
+          const id = point && hitTestCanvasObjectId(content, point);
+          const object = content.layers
+            .flatMap((l) => l.objects)
+            .find((o) => o.id === id);
+          if (object?.type === "text") {
+            cancelActiveGestures();
+            draftContentRef.current = content;
+            setTextEditor({ ...object, existing: true });
+          }
+        }}
         className="relative z-0"
       >
         <Layer listening={false}>
@@ -581,7 +837,8 @@ export default function CanvasStage({
               key={`v-${position}`}
               points={[
                 position * content.viewport.scale + content.viewport.x,
-                -CANVAS_WORLD_SIZE * content.viewport.scale + content.viewport.y,
+                -CANVAS_WORLD_SIZE * content.viewport.scale +
+                  content.viewport.y,
                 position * content.viewport.scale + content.viewport.x,
                 CANVAS_WORLD_SIZE * content.viewport.scale + content.viewport.y,
               ]}
@@ -593,7 +850,8 @@ export default function CanvasStage({
             <Line
               key={`h-${position}`}
               points={[
-                -CANVAS_WORLD_SIZE * content.viewport.scale + content.viewport.x,
+                -CANVAS_WORLD_SIZE * content.viewport.scale +
+                  content.viewport.x,
                 position * content.viewport.scale + content.viewport.y,
                 CANVAS_WORLD_SIZE * content.viewport.scale + content.viewport.x,
                 position * content.viewport.scale + content.viewport.y,
@@ -604,10 +862,11 @@ export default function CanvasStage({
           ))}
         </Layer>
 
-        <Layer>
-          {renderedLayers.map((layer) => (
-            <Group key={layer.id} visible={layer.visible}>
-              {layer.objects.map((object) =>
+        {renderedLayers.map((layer) => (
+          <Layer key={layer.id} visible={layer.visible}>
+            {layer.objects
+              .filter((object) => object.id !== textEditor?.id)
+              .map((object) =>
                 renderCanvasObject(
                   object,
                   content.viewport,
@@ -618,24 +877,73 @@ export default function CanvasStage({
                   onTransformImage,
                 ),
               )}
-            </Group>
-          ))}
-
-          {draftStrokeRef.current ? (
+            {layer.id === (activeLayerId ?? content.layers[0]?.id) ? (
+              <Group>
+                {draftObjectRef.current
+                  ? renderCanvasObject(
+                      draftObjectRef.current,
+                      content.viewport,
+                      loadedImages,
+                      false,
+                      ZERO_SELECTION_DELTA,
+                      imageNodeRefs,
+                      onTransformImage,
+                    )
+                  : null}
+                {draftStrokeRef.current ? (
+                  <Line
+                    points={projectStrokePoints(
+                      draftStrokeRef.current.points,
+                      content.viewport,
+                    )}
+                    stroke={draftStrokeRef.current.color}
+                    strokeWidth={
+                      draftStrokeRef.current.size * content.viewport.scale
+                    }
+                    opacity={draftStrokeRef.current.opacity}
+                    lineCap="round"
+                    lineJoin="round"
+                    tension={0.3}
+                    globalCompositeOperation={
+                      draftStrokeRef.current.tool === "eraser"
+                        ? "destination-out"
+                        : "source-over"
+                    }
+                  />
+                ) : null}
+              </Group>
+            ) : null}
+          </Layer>
+        ))}
+        <Layer>
+          {snapGuides.map((guide) => (
             <Line
-              points={projectStrokePoints(draftStrokeRef.current.points, content.viewport)}
-              stroke={draftStrokeRef.current.color}
-              strokeWidth={draftStrokeRef.current.size * content.viewport.scale}
-              opacity={draftStrokeRef.current.opacity}
-              lineCap="round"
-              lineJoin="round"
-              tension={0.3}
-              globalCompositeOperation={
-                draftStrokeRef.current.tool === "eraser" ? "destination-out" : "source-over"
+              key={guide.axis}
+              listening={false}
+              stroke="#e879b2"
+              strokeWidth={1}
+              dash={[4, 4]}
+              points={
+                guide.axis === "x"
+                  ? [
+                      guide.position * content.viewport.scale +
+                        content.viewport.x,
+                      0,
+                      guide.position * content.viewport.scale +
+                        content.viewport.x,
+                      stageSize.height,
+                    ]
+                  : [
+                      0,
+                      guide.position * content.viewport.scale +
+                        content.viewport.y,
+                      stageSize.width,
+                      guide.position * content.viewport.scale +
+                        content.viewport.y,
+                    ]
               }
             />
-          ) : null}
-
+          ))}
           <Rect
             name="canvas-generation-frame"
             x={frameRect.x}
@@ -710,6 +1018,122 @@ export default function CanvasStage({
         </Layer>
       </Stage>
 
+      {frameEditing && onFrameChange ? (
+        <CanvasResizeOverlay
+          kind="frame"
+          bounds={framePreview ?? content.frame}
+          viewport={content.viewport}
+          identity={content}
+          onPreview={setFramePreview}
+          onCommit={(bounds) =>
+            onFrameChange({
+              ...content.frame,
+              ...bounds,
+              aspect:
+                bounds.width === content.frame.width &&
+                bounds.height === content.frame.height
+                  ? content.frame.aspect
+                  : "free",
+            })
+          }
+        />
+      ) : null}
+      {!frameEditing && combinedSelectionBounds && onTransformSelection ? (
+        <CanvasResizeOverlay
+          key={effectiveSelectionKey}
+          kind="selection"
+          keepRatio={content.layers.some((layer) =>
+            layer.objects.some(
+              (object) =>
+                effectiveSelectedObjectIdSet.has(object.id) &&
+                (object.type === "stroke" ||
+                  object.type === "line" ||
+                  object.type === "arrow" ||
+                  object.type === "text" ||
+                  ("rotation" in object && object.rotation % 360 !== 0)),
+            ),
+          )}
+          bounds={
+            resizePreview ?? {
+              ...combinedSelectionBounds,
+              x: combinedSelectionBounds.x + selectionPreviewDelta.dx,
+              y: combinedSelectionBounds.y + selectionPreviewDelta.dy,
+            }
+          }
+          viewport={content.viewport}
+          identity={content}
+          onPreview={setResizePreview}
+          onCommit={onTransformSelection}
+        />
+      ) : null}
+      {contextMenu ? (
+        <CanvasActionMenu
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          hasSelection={effectiveSelectedObjectIds.length > 0}
+          selectionCount={effectiveSelectedObjectIds.length}
+          onClose={() => setContextMenu(null)}
+          onCopySelection={onCopySelection}
+          onPasteSelection={onPasteSelection}
+          onDuplicateSelection={onDuplicateSelection}
+          onDeleteSelection={onDeleteSelection}
+          onReorderSelection={onReorderSelection}
+          onFrameFromSelection={onFrameFromSelection}
+          onSelectAll={onSelectAll}
+          canPaste={canPaste}
+        />
+      ) : null}
+      {textEditor ? (
+        <textarea
+          autoFocus
+          wrap="off"
+          aria-label={t("canvas.editText")}
+          value={textEditor.text}
+          onChange={(event) =>
+            setTextEditor({ ...textEditor, text: event.target.value })
+          }
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") {
+              textEditorRef.current = null;
+              setTextEditor(null);
+            } else if (
+              event.key === "Enter" &&
+              (event.metaKey || event.ctrlKey) &&
+              !event.nativeEvent.isComposing &&
+              !composingRef.current
+            ) {
+              event.preventDefault();
+              commitText();
+            }
+          }}
+          onBlur={() => {
+            if (document.hasFocus()) commitText();
+            else {
+              textEditorRef.current = null;
+              setTextEditor(null);
+            }
+          }}
+          className="absolute z-30 resize-none rounded border border-primary bg-surface/95 p-0 outline-none"
+          style={{
+            left: textEditor.x * content.viewport.scale + content.viewport.x,
+            top: textEditor.y * content.viewport.scale + content.viewport.y,
+            width: Math.max(240, textEditor.width) * content.viewport.scale,
+            minHeight: Math.max(80, textEditor.height) * content.viewport.scale,
+            fontFamily: "sans-serif",
+            fontSize: textEditor.fontSize * content.viewport.scale,
+            color: textEditor.color,
+            lineHeight: 1.2,
+            transform: `rotate(${textEditor.rotation}deg)`,
+            transformOrigin: "top left",
+          }}
+        />
+      ) : null}
       {selectedImageObject && selectedImageRect ? (
         <button
           type="button"
@@ -742,7 +1166,13 @@ function renderCanvasObject(
   imageNodeRefs: MutableRefObject<Record<string, Konva.Image | null>>,
   onTransformImage: (
     objectId: string,
-    transform: { x: number; y: number; width: number; height: number; rotation?: number },
+    transform: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      rotation?: number;
+    },
   ) => void,
 ) {
   if (object.type === "stroke") {
@@ -762,11 +1192,111 @@ function renderCanvasObject(
         lineCap="round"
         lineJoin="round"
         tension={0.3}
-        globalCompositeOperation={object.tool === "eraser" ? "destination-out" : "source-over"}
+        globalCompositeOperation={
+          object.tool === "eraser" ? "destination-out" : "source-over"
+        }
       />
     );
   }
 
+  const delta = isSelected ? selectionPreviewDelta : ZERO_SELECTION_DELTA;
+  if (object.type === "line" || object.type === "arrow") {
+    const props = {
+      stroke: object.color,
+      strokeWidth: object.size * viewport.scale,
+      opacity: object.opacity,
+      lineCap: "round" as const,
+      lineJoin: "round" as const,
+    };
+    return (
+      <Group key={object.id} id={object.id} name="canvas-object">
+        <Line
+          {...props}
+          points={projectStrokePoints(object.points, viewport, delta)}
+        />
+        {object.type === "arrow" ? (
+          <Line
+            {...props}
+            points={projectStrokePoints(
+              getCanvasArrowHeadPoints(object),
+              viewport,
+              delta,
+            )}
+          />
+        ) : null}
+      </Group>
+    );
+  }
+  if (
+    object.type === "rectangle" ||
+    object.type === "ellipse" ||
+    object.type === "text"
+  ) {
+    const common = {
+      id: object.id,
+      name: "canvas-object",
+      x: (object.x + delta.dx) * viewport.scale + viewport.x,
+      y: (object.y + delta.dy) * viewport.scale + viewport.y,
+      width: object.width * viewport.scale,
+      height: object.height * viewport.scale,
+      rotation: object.rotation,
+      opacity: object.opacity,
+    };
+    if (object.type === "text")
+      return (
+        <Shape
+          key={object.id}
+          {...common}
+          sceneFunc={(context) => {
+            context.setAttr(
+              "font",
+              `${object.fontSize * viewport.scale}px sans-serif`,
+            );
+            context.setAttr("fillStyle", object.color);
+            context.setAttr("textBaseline", "top");
+            object.text
+              .split("\n")
+              .forEach((line, index) =>
+                context.fillText(
+                  line,
+                  0,
+                  index * object.fontSize * viewport.scale * 1.2,
+                ),
+              );
+          }}
+          hitFunc={(context, shape) => {
+            context.beginPath();
+            context.rect(0, 0, common.width, common.height);
+            context.closePath();
+            context.fillStrokeShape(shape);
+          }}
+        />
+      );
+    if (object.type === "ellipse")
+      return (
+        <Group key={object.id} {...common}>
+          <Ellipse
+            x={common.width / 2}
+            y={common.height / 2}
+            radiusX={common.width / 2}
+            radiusY={common.height / 2}
+            stroke={object.color}
+            strokeWidth={object.size * viewport.scale}
+            fill={object.fill}
+          />
+        </Group>
+      );
+    return (
+      <Rect
+        key={object.id}
+        {...common}
+        stroke={object.color}
+        strokeWidth={object.size * viewport.scale}
+        fill={object.fill}
+      />
+    );
+  }
+  if (object.type !== "image") return null;
   const image = loadedImages[object.image_path];
   if (!image) {
     return null;
@@ -782,11 +1312,13 @@ function renderCanvasObject(
       }}
       image={image}
       x={
-        (object.x + (isSelected ? selectionPreviewDelta.dx : 0)) * viewport.scale +
+        (object.x + (isSelected ? selectionPreviewDelta.dx : 0)) *
+          viewport.scale +
         viewport.x
       }
       y={
-        (object.y + (isSelected ? selectionPreviewDelta.dy : 0)) * viewport.scale +
+        (object.y + (isSelected ? selectionPreviewDelta.dy : 0)) *
+          viewport.scale +
         viewport.y
       }
       width={object.width * viewport.scale}
@@ -822,7 +1354,9 @@ function projectStrokePoints(
   const projected: number[] = [];
   for (let index = 0; index < points.length; index += 2) {
     projected.push((points[index] + delta.dx) * viewport.scale + viewport.x);
-    projected.push((points[index + 1] + delta.dy) * viewport.scale + viewport.y);
+    projected.push(
+      (points[index + 1] + delta.dy) * viewport.scale + viewport.y,
+    );
   }
   return projected;
 }

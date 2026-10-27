@@ -420,6 +420,14 @@ pub struct CanvasObject {
     pub original_height: Option<f64>,
     #[serde(default)]
     pub rotation: Option<f64>,
+    #[serde(default)]
+    pub fill: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default, rename = "fontSize")]
+    pub font_size: Option<f64>,
+    #[serde(default, rename = "headSize")]
+    pub head_size: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -437,6 +445,8 @@ pub struct CanvasDocumentContent {
     pub viewport: CanvasViewport,
     pub frame: CanvasFrame,
     pub layers: Vec<CanvasLayer>,
+    #[serde(default)]
+    pub generation_requests: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

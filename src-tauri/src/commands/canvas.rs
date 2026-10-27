@@ -7,7 +7,7 @@ use crate::models::{
     CanvasObject, CanvasViewport,
 };
 use base64::Engine;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{Manager, State};
@@ -69,7 +69,8 @@ fn row_to_canvas_document(row: &rusqlite::Row) -> rusqlite::Result<CanvasDocumen
 
 fn default_canvas_content() -> CanvasDocumentContent {
     CanvasDocumentContent {
-        version: 1,
+        version: 2,
+        generation_requests: vec![],
         viewport: CanvasViewport {
             x: 0.0,
             y: 0.0,
@@ -390,11 +391,131 @@ pub(crate) fn save_canvas_export(
 
     let bytes = decode_base64_bytes(&png_base64)?;
     let file_path = document_dir.join(format!("{}-frame.png", uuid::Uuid::new_v4()));
-    fs::write(&file_path, bytes).map_err(|e| AppError::FileSystem {
-        message: format!("Write canvas export failed: {}", e),
-    })?;
+    write_registered_canvas_export(
+        &file_path,
+        &bytes,
+        app.state::<crate::commands::generation::SelectedImageRegistry>()
+            .inner(),
+    )
+}
 
-    Ok(file_path.to_string_lossy().to_string())
+fn write_registered_canvas_export(
+    file_path: &Path,
+    bytes: &[u8],
+    registry: &crate::commands::generation::SelectedImageRegistry,
+) -> Result<String, AppError> {
+    fs::write(file_path, bytes).map_err(|error| AppError::FileSystem {
+        message: format!("Write canvas export failed: {error}"),
+    })?;
+    // Generated canvas inputs enter the same explicit selection registry as
+    // picker imports. Keep the generic image-edit file boundary unchanged.
+    registry
+        .register_paths(&[file_path.to_path_buf()])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::Validation {
+            message: "Canvas export registration failed.".to_string(),
+        })
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct CanvasGenerationStatus {
+    generation_id: Option<String>,
+    status: String,
+    error: Option<String>,
+    images: Vec<crate::models::GeneratedImage>,
+}
+
+// Resolve by the durable request identity, including when the frontend never
+// received the submission response. Only expose jobs associated with this file.
+fn read_canvas_generation_status(
+    conn: &rusqlite::Connection,
+    document_id: &str,
+    request_id: &str,
+) -> Result<Option<CanvasGenerationStatus>, AppError> {
+    let document = read_canvas_document(conn, document_id)?;
+    let bytes = fs::read(&document.document_path)?;
+    let content: CanvasDocumentContent =
+        serde_json::from_slice(&bytes).map_err(|error| AppError::Validation {
+            message: format!("Read canvas request association failed: {error}"),
+        })?;
+    if !content.generation_requests.iter().any(|request| {
+        request
+            .get("request_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(request_id)
+    }) {
+        return Err(AppError::Validation {
+            message: "Generation request does not belong to this canvas.".to_string(),
+        });
+    }
+
+    let job = conn
+        .query_row(
+            "SELECT j.generation_id, j.status, COALESCE(j.error_message, g.error_message),
+                c.project_id, g.deleted_at, c.deleted_at
+         FROM generation_jobs j
+         JOIN generations g ON g.id = j.generation_id
+         LEFT JOIN conversations c ON c.id = g.conversation_id
+         WHERE j.client_request_id = ?1",
+            [request_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((generation_id, status, error, project_id, deleted_at, conversation_deleted_at)) = job
+    else {
+        return Ok(None);
+    };
+    if project_id.as_deref() != Some(document.project_id.as_str()) {
+        return Err(AppError::Validation {
+            message: "Generation result belongs to a different project.".to_string(),
+        });
+    }
+    if deleted_at.is_some() || conversation_deleted_at.is_some() {
+        return Ok(Some(CanvasGenerationStatus {
+            generation_id: Some(generation_id),
+            status: "failed".to_string(),
+            error: Some("The generation result has been deleted.".to_string()),
+            images: vec![],
+        }));
+    }
+    let generation = conn.query_row(
+        "SELECT * FROM generations WHERE id = ?1",
+        [&generation_id],
+        crate::gallery::row_to_generation,
+    )?;
+    let mut results = crate::gallery::generation_results_with_images(conn, vec![generation])?;
+    let images = results
+        .pop()
+        .map(|result| result.images)
+        .unwrap_or_default();
+    Ok(Some(CanvasGenerationStatus {
+        generation_id: Some(generation_id),
+        status,
+        error,
+        images,
+    }))
+}
+
+#[tauri::command]
+pub(crate) fn get_canvas_generation_status(
+    db: State<'_, Database>,
+    document_id: String,
+    request_id: String,
+) -> Result<Option<CanvasGenerationStatus>, AppError> {
+    let conn = db.conn.lock().map_err(|error| AppError::Database {
+        message: format!("Lock canvas generation status failed: {error}"),
+    })?;
+    read_canvas_generation_status(&conn, &document_id, &request_id)
 }
 
 #[allow(dead_code)]
@@ -424,6 +545,135 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
         let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+    }
+
+    fn status_fixture() -> (Database, PathBuf, PathBuf) {
+        let (db, db_path) = temp_test_db("astro-canvas-status");
+        let document_path = db_path.with_extension("json");
+        let mut content = default_canvas_content();
+        content.generation_requests.push(serde_json::json!({
+            "request_id": "canvas-request", "project_id": "default", "status": "pending"
+        }));
+        write_json_file(&document_path, &content).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            ensure_default_project(&conn).unwrap();
+            conn.execute("INSERT INTO canvas_documents (id,project_id,name,document_path,width,height,created_at,updated_at) VALUES ('status-canvas','default','Status',?1,100,100,'now','now')", params![document_path.to_string_lossy()]).unwrap();
+        }
+        (db, db_path, document_path)
+    }
+
+    fn insert_status_job(conn: &rusqlite::Connection, status: &str) {
+        conn.execute("INSERT INTO conversations (id,title,project_id,created_at,updated_at) VALUES ('status-conversation','Canvas','default','now','now')", []).unwrap();
+        conn.execute("INSERT INTO generations (id,prompt,status,conversation_id) VALUES ('status-generation','draw',?1,'status-conversation')", [status]).unwrap();
+        conn.execute("INSERT INTO generation_jobs (id,client_request_id,generation_id,source_kind,status,stage,request_json,provider_kind,provider_profile_id,endpoint_snapshot,queued_at,error_message) VALUES ('status-job','canvas-request','status-generation','edit',?1,'terminal','{}','openai','test','https://example.invalid','now',?2)", params![status, if status == "failed" { Some("provider unavailable") } else { None }]).unwrap();
+    }
+
+    #[test]
+    fn canvas_generation_status_scopes_requests_and_handles_not_yet_submitted() {
+        let (db, db_path, document_path) = status_fixture();
+        {
+            let conn = db.conn.lock().unwrap();
+            assert!(
+                read_canvas_generation_status(&conn, "status-canvas", "canvas-request")
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(matches!(
+                read_canvas_generation_status(&conn, "status-canvas", "other-request"),
+                Err(AppError::Validation { .. })
+            ));
+        }
+        drop(db);
+        fs::remove_file(document_path).unwrap();
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn canvas_generation_status_returns_exact_images_and_failure() {
+        let (db, db_path, document_path) = status_fixture();
+        {
+            let conn = db.conn.lock().unwrap();
+            insert_status_job(&conn, "completed");
+            conn.execute("INSERT INTO images (id,generation_id,file_path,thumbnail_path,width,height) VALUES ('status-image','status-generation','/result.png','/thumb.png',300,200)", []).unwrap();
+            let result = read_canvas_generation_status(&conn, "status-canvas", "canvas-request")
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.status, "completed");
+            assert_eq!(result.generation_id.as_deref(), Some("status-generation"));
+            assert_eq!(result.images.len(), 1);
+            assert_eq!(result.images[0].id, "status-image");
+            conn.execute(
+                "UPDATE generation_jobs SET status='failed',error_message='provider unavailable'",
+                [],
+            )
+            .unwrap();
+            let failed = read_canvas_generation_status(&conn, "status-canvas", "canvas-request")
+                .unwrap()
+                .unwrap();
+            assert_eq!(failed.status, "failed");
+            assert_eq!(failed.error.as_deref(), Some("provider unavailable"));
+        }
+        drop(db);
+        fs::remove_file(document_path).unwrap();
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn canvas_generation_status_rejects_cross_project_results() {
+        let (db, db_path, document_path) = status_fixture();
+        {
+            let conn = db.conn.lock().unwrap();
+            insert_status_job(&conn, "running");
+            conn.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('other-project','Other','now','now')", []).unwrap();
+            conn.execute("UPDATE conversations SET project_id='other-project' WHERE id='status-conversation'", []).unwrap();
+            assert!(matches!(
+                read_canvas_generation_status(&conn, "status-canvas", "canvas-request"),
+                Err(AppError::Validation { .. })
+            ));
+        }
+        drop(db);
+        fs::remove_file(document_path).unwrap();
+        remove_temp_test_db(db_path);
+    }
+
+    #[test]
+    fn canvas_export_registers_its_source_for_image_editing() {
+        let dir = std::env::temp_dir().join(format!(
+            "astro-canvas-export-registry-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("frame.png");
+        let registry = crate::commands::generation::SelectedImageRegistry::default();
+        let bytes = decode_base64_bytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==").unwrap();
+        let registered = write_registered_canvas_export(&file_path, &bytes, &registry).unwrap();
+        assert!(registry.contains_path(Path::new(&registered)).unwrap());
+        assert_eq!(fs::read(&registered).unwrap(), bytes);
+        assert_eq!(Path::new(&registered), file_path.canonicalize().unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn canvas_v2_shapes_and_generation_requests_roundtrip() {
+        let raw = serde_json::json!({
+            "version": 2,
+            "viewport": {"x":0,"y":0,"scale":1},
+            "frame": {"x":0,"y":0,"width":100,"height":100,"aspect":"1:1"},
+            "layers": [{"id":"l","name":"Layer","visible":true,"locked":false,"objects":[
+                {"type":"rectangle","id":"r","fill":"#f00","color":"#000","x":1,"y":2,"width":20,"height":30,"size":2,"opacity":1,"rotation":0},
+                {"type":"text","id":"t","text":"hello","fontSize":24,"x":1,"y":2,"width":20,"height":30},
+                {"type":"arrow","id":"a","points":[0,0,100,0],"size":1,"headSize":6}
+            ]}],
+            "generation_requests":[{"request_id":"req","status":"pending","image_ids":[]}]
+        });
+        let content: CanvasDocumentContent = serde_json::from_value(raw).unwrap();
+        let saved = serde_json::to_value(content).unwrap();
+        assert_eq!(saved["layers"][0]["objects"][0]["fill"], "#f00");
+        assert_eq!(saved["layers"][0]["objects"][1]["text"], "hello");
+        assert_eq!(saved["layers"][0]["objects"][1]["fontSize"], 24.0);
+        assert_eq!(saved["generation_requests"][0]["request_id"], "req");
+        assert_eq!(saved["layers"][0]["objects"][2]["headSize"], 6.0);
     }
 
     #[test]
@@ -500,7 +750,8 @@ mod tests {
         drop(conn);
 
         let content = CanvasDocumentContent {
-            version: 1,
+            version: 2,
+            generation_requests: vec![],
             viewport: CanvasViewport {
                 x: 12.0,
                 y: 24.0,
@@ -534,6 +785,10 @@ mod tests {
                     original_width: None,
                     original_height: None,
                     rotation: None,
+                    fill: None,
+                    text: None,
+                    font_size: None,
+                    head_size: None,
                 }],
             }],
         };

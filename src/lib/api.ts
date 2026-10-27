@@ -73,7 +73,7 @@ export function toAssetUrl(filePath: string): string {
 
 function defaultCanvasContent(): CanvasDocumentContent {
   return {
-    version: 1,
+    version: 2,
     viewport: { x: 0, y: 0, scale: 1 },
     frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
     layers: [
@@ -961,4 +961,18 @@ export async function installUpdate(
 
 export async function relaunchApp(): Promise<void> {
   await invoke("relaunch_app");
+}
+
+export interface CanvasGenerationStatus {
+  generation_id: string | null;
+  status: string;
+  error: string | null;
+  images: import("../types").GeneratedImage[];
+}
+export async function getCanvasGenerationStatus(
+  documentId: string,
+  requestId: string,
+): Promise<CanvasGenerationStatus | null> {
+  if (!hasTauriRuntime()) return null;
+  return invoke("get_canvas_generation_status", { documentId, requestId });
 }

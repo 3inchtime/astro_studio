@@ -16,6 +16,7 @@ import {
   deletePromptFolder,
   deletePromptFavorite,
   getCanvasDocument,
+  getCanvasGenerationStatus,
   listCanvasDocuments,
   getConversations,
   getModelProviderProfiles,
@@ -599,5 +600,20 @@ describe("asset URLs", () => {
 
     expect(csp).toContain("asset:");
     expect(csp).toContain("http://asset.localhost");
+  });
+});
+
+describe("canvas generation recovery API", () => {
+  it("looks up only the exact canvas request for recovery", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: { invoke: tauriApi.invoke },
+    });
+    tauriApi.invoke.mockReset().mockResolvedValue(null);
+    await getCanvasGenerationStatus("document-id", "request-id");
+    expect(tauriApi.invoke).toHaveBeenCalledWith(
+      "get_canvas_generation_status",
+      { documentId: "document-id", requestId: "request-id" },
+    );
   });
 });

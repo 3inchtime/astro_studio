@@ -1,5 +1,6 @@
 import { Loader2, PanelRight, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toAssetUrl } from "../../lib/api";
 import type { CanvasFrame, ImageModel } from "../../types";
 
 interface CanvasGenerationPanelProps {
@@ -9,6 +10,11 @@ interface CanvasGenerationPanelProps {
   disabled: boolean;
   isGenerating: boolean;
   environmentHint?: string | null;
+  error?: string | null;
+  results?: string[];
+  onRetry?: () => void;
+  onFrameAspectChange?: (aspect: string) => void;
+  onFrameFromSelection?: () => void;
   onPromptChange: (value: string) => void;
   onGenerate: () => void;
 }
@@ -22,6 +28,11 @@ export default function CanvasGenerationPanel({
   environmentHint,
   onPromptChange,
   onGenerate,
+  error,
+  results,
+  onRetry,
+  onFrameAspectChange,
+  onFrameFromSelection,
 }: CanvasGenerationPanelProps) {
   const { t } = useTranslation();
 
@@ -50,7 +61,34 @@ export default function CanvasGenerationPanel({
               {t("canvas.frameAspect")}
             </div>
             <div className="mt-1 text-[13px] font-medium text-foreground">
-              {frame?.aspect ?? "--"}
+              {onFrameAspectChange ? (
+                <select
+                  aria-label={t("canvas.framePreset")}
+                  value={
+                    frame?.aspect === "free"
+                      ? "custom"
+                      : (frame?.aspect ?? "1:1")
+                  }
+                  onChange={(e) => onFrameAspectChange(e.target.value)}
+                >
+                  {[
+                    "1:1",
+                    "4:3",
+                    "3:4",
+                    "16:9",
+                    "9:16",
+                    "3:2",
+                    "2:3",
+                    "custom",
+                  ].map((aspect) => (
+                    <option key={aspect} value={aspect}>
+                      {aspect === "custom" ? t("canvas.customAspect") : aspect}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                (frame?.aspect ?? "--")
+              )}
             </div>
           </div>
           <div className="rounded-[12px] border border-border-subtle bg-surface/80 px-3 py-2">
@@ -58,11 +96,22 @@ export default function CanvasGenerationPanel({
               {t("canvas.layersTitle")}
             </div>
             <div className="mt-1 text-[13px] font-medium text-foreground">
-              {frame ? `${Math.round(frame.width)} x ${Math.round(frame.height)}` : "--"}
+              {frame
+                ? `${Math.round(frame.width)} x ${Math.round(frame.height)}`
+                : "--"}
             </div>
           </div>
         </div>
 
+        {onFrameFromSelection ? (
+          <button
+            type="button"
+            className="studio-control-secondary rounded-lg p-2 text-xs"
+            onClick={onFrameFromSelection}
+          >
+            {t("canvas.frameFromSelection")}
+          </button>
+        ) : null}
         <label
           htmlFor="canvas-generation-prompt"
           className="text-[12px] font-medium text-foreground/80"
@@ -102,6 +151,38 @@ export default function CanvasGenerationPanel({
           </span>
         </button>
 
+        {error ? (
+          <div role="alert" className="text-[12px] text-red-600">
+            <p>
+              {t("canvas.generationError")}: {error}
+            </p>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={isGenerating}
+                className="mt-2 rounded-lg border border-border-subtle px-3 py-2"
+              >
+                {t("canvas.generationRetry")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {results?.length ? (
+          <div
+            aria-label={t("canvas.generationResults")}
+            className="grid grid-cols-2 gap-2"
+          >
+            {results.map((path, index) => (
+              <img
+                key={`${path}-${index}`}
+                src={toAssetUrl(path)}
+                alt={`${t("canvas.generationResults")} ${index + 1}`}
+                className="aspect-square w-full rounded-lg object-contain"
+              />
+            ))}
+          </div>
+        ) : null}
         <div className="rounded-[12px] border border-border-subtle bg-surface/75 px-4 py-3 text-[12px] leading-6 text-muted">
           {environmentHint ?? t("canvas.generationEmpty")}
         </div>

@@ -1,27 +1,28 @@
+import { useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
-  BringToFront,
   Brush,
-  Clipboard,
-  ClipboardCopy,
+  Circle,
   Eraser,
+  Frame,
   Hand,
   ImagePlus,
   Maximize2,
   Minus,
+  MoreHorizontal,
   MousePointer2,
+  MoveUpRight,
   Plus,
   Redo2,
-  SendToBack,
-  Trash2,
+  Slash,
+  Square,
+  Type,
   Undo2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { CanvasOrderDirection } from "../../lib/canvas/ordering";
 import type { CanvasTool } from "../../types";
-
-interface CanvasToolbarProps {
+import type { CanvasOrderDirection } from "../../lib/canvas/ordering";
+import CanvasActionMenu, { type CanvasActionProps } from "./CanvasActionMenu";
+interface CanvasToolbarProps extends CanvasActionProps {
   activeTool: CanvasTool;
   strokeColor: string;
   strokeSize: number;
@@ -44,248 +45,243 @@ interface CanvasToolbarProps {
   onReorderSelection: (direction: CanvasOrderDirection) => void;
   onFitFrame: () => void;
   onFitSelection: () => void;
+  onFitAll?: () => void;
+  onResetZoom?: () => void;
+  onEditFrame?: () => void;
+  frameEditing?: boolean;
+  fillColor?: string;
+  objectOpacity?: number;
+  fontSize?: number;
+  onFillColorChange?: (color: string) => void;
+  onOpacityChange?: (opacity: number) => void;
+  onFontSizeChange?: (fontSize: number) => void;
 }
 
 const TOOL_BUTTON_CLASS =
-  "studio-control focus-ring inline-flex h-10 w-10 items-center justify-center rounded-[10px] transition-colors hover:studio-control-hover";
-
-export default function CanvasToolbar({
-  activeTool,
-  strokeColor,
-  strokeSize,
-  canUndo,
-  canRedo,
-  selectedObjectCount,
-  zoomPercent,
-  canPaste,
-  onToolChange,
-  onColorChange,
-  onSizeChange,
-  onUndo,
-  onRedo,
-  onZoomIn,
-  onZoomOut,
-  onImportImage,
-  onDeleteSelection,
-  onCopySelection,
-  onPasteSelection,
-  onReorderSelection,
-  onFitFrame,
-  onFitSelection,
-}: CanvasToolbarProps) {
+  "studio-control focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground/75 transition-colors hover:bg-subtle disabled:opacity-30";
+export default function CanvasToolbar(props: CanvasToolbarProps) {
   const { t } = useTranslation();
-  const hasSelection = selectedObjectCount > 0;
-
-  const tools: Array<{
-    key: CanvasTool;
-    label: string;
-    icon: typeof MousePointer2;
-  }> = [
-    { key: "select", label: t("canvas.tool.select"), icon: MousePointer2 },
-    { key: "brush", label: t("canvas.tool.brush"), icon: Brush },
-    { key: "eraser", label: t("canvas.tool.eraser"), icon: Eraser },
-    { key: "pan", label: t("canvas.tool.pan"), icon: Hand },
+  const [actions, setActions] = useState(false);
+  const [properties, setProperties] = useState(false);
+  const [zoomMenu, setZoomMenu] = useState(false);
+  const tools: Array<[CanvasTool, typeof MousePointer2, string]> = [
+    ["select", MousePointer2, "V"],
+    ["pan", Hand, "H / Space"],
+    ["rectangle", Square, "R"],
+    ["ellipse", Circle, "O"],
+    ["line", Slash, "L"],
+    ["arrow", MoveUpRight, "A"],
+    ["brush", Brush, "P"],
+    ["eraser", Eraser, "E"],
+    ["text", Type, "T"],
   ];
-
+  const button = (
+    label: string,
+    action: (() => void) | undefined,
+    Icon: typeof MousePointer2,
+    disabled = false,
+  ) => (
+    <button
+      type="button"
+      key={label}
+      aria-label={t(label)}
+      title={t(label)}
+      onClick={action}
+      disabled={disabled || !action}
+      className={TOOL_BUTTON_CLASS}
+    >
+      <Icon size={16} strokeWidth={1.7} />
+    </button>
+  );
   return (
-    <div className="pointer-events-auto max-w-full rounded-[18px] border border-border-subtle bg-surface/90 px-3 py-2 shadow-float backdrop-blur-xl">
-      <div className="flex flex-wrap items-center justify-center gap-3">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {tools.map(({ key, label, icon: Icon }) => (
+    <div className="pointer-events-auto relative flex max-w-full flex-col items-center gap-2">
+      {properties && (
+        <div className="flex max-w-full flex-wrap items-center justify-center gap-3 rounded-xl border border-border-subtle bg-surface/95 px-3 py-2 shadow-float">
+          <label className="flex items-center gap-2 text-xs text-muted">
+            {t("canvas.strokeWidth")}
+            <input
+              aria-label={t("canvas.strokeWidth")}
+              type="range"
+              min="1"
+              max="32"
+              value={props.strokeSize}
+              onChange={(e) => props.onSizeChange(Number(e.target.value))}
+              className="w-20 accent-primary"
+            />
+            <span className="w-6 tabular-nums">{props.strokeSize}</span>
+          </label>
+          {props.onFillColorChange && (
+            <label className="flex items-center gap-2 text-xs text-muted">
+              {t("canvas.fill")}
+              <input
+                aria-label={t("canvas.fill")}
+                type="color"
+                value={
+                  props.fillColor === "transparent"
+                    ? "#ffffff"
+                    : (props.fillColor ?? "#ffffff")
+                }
+                onChange={(e) => props.onFillColorChange?.(e.target.value)}
+                className="h-6 w-6 border-0 bg-transparent"
+              />
+              <button
+                type="button"
+                onClick={() => props.onFillColorChange?.("transparent")}
+                className="text-xs hover:text-primary"
+              >
+                {t("canvas.noFill")}
+              </button>
+            </label>
+          )}
+          {props.onOpacityChange && (
+            <label className="flex items-center gap-2 text-xs text-muted">
+              {t("canvas.opacity")}
+              <input
+                aria-label={t("canvas.opacity")}
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={props.objectOpacity ?? 1}
+                onChange={(e) =>
+                  props.onOpacityChange?.(Number(e.target.value))
+                }
+                className="w-20 accent-primary"
+              />
+            </label>
+          )}
+          {props.onFontSizeChange && (
+            <label className="flex items-center gap-2 text-xs text-muted">
+              {t("canvas.fontSize")}
+              <input
+                aria-label={t("canvas.fontSize")}
+                type="number"
+                min="8"
+                max="300"
+                value={props.fontSize ?? 24}
+                onChange={(e) =>
+                  props.onFontSizeChange?.(Number(e.target.value))
+                }
+                className="w-14 rounded border border-border-subtle bg-surface px-1 py-1"
+              />
+            </label>
+          )}
+        </div>
+      )}
+      <div className="flex max-w-full items-center gap-1 rounded-2xl border border-border-subtle bg-surface/95 p-1.5 shadow-float backdrop-blur-xl">
+        <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+          {tools.map(([tool, Icon, shortcut]) => (
             <button
-              key={key}
               type="button"
-              aria-label={label}
-              title={label}
-              onClick={() => onToolChange(key)}
-              className={`${TOOL_BUTTON_CLASS} ${
-                activeTool === key ? "bg-primary/12 text-primary" : "text-foreground/80"
-              }`}
+              key={tool}
+              aria-label={t(`canvas.tool.${tool}`)}
+              title={`${t(`canvas.tool.${tool}`)} · ${shortcut}`}
+              aria-pressed={!props.frameEditing && props.activeTool === tool}
+              onClick={() => props.onToolChange(tool)}
+              className={`${TOOL_BUTTON_CLASS} ${!props.frameEditing && props.activeTool === tool ? "bg-primary/12 text-primary" : ""}`}
             >
-              <Icon size={16} strokeWidth={1.8} />
+              <Icon size={17} strokeWidth={1.7} />
             </button>
           ))}
-
-          <button
-            type="button"
-            aria-label={t("canvas.importImage")}
-            title={t("canvas.importImage")}
-            onClick={onImportImage}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <ImagePlus size={16} strokeWidth={1.8} />
-          </button>
+          {props.onEditFrame && (
+            <button
+              type="button"
+              aria-label={t("canvas.editFrame")}
+              title={t("canvas.editFrame")}
+              aria-pressed={props.frameEditing}
+              onClick={props.onEditFrame}
+              className={`${TOOL_BUTTON_CLASS} ${props.frameEditing ? "bg-primary/12 text-primary" : ""}`}
+            >
+              <Frame size={17} />
+            </button>
+          )}
+          {button("canvas.importImage", props.onImportImage, ImagePlus)}
         </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            aria-label={t("canvas.copySelection")}
-            title={t("canvas.copySelection")}
-            onClick={onCopySelection}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <ClipboardCopy size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            aria-label={t("canvas.pasteSelection")}
-            title={t("canvas.pasteSelection")}
-            onClick={onPasteSelection}
-            disabled={!canPaste}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <Clipboard size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            aria-label={t("canvas.deleteSelection")}
-            title={t("canvas.deleteSelection")}
-            onClick={onDeleteSelection}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <Trash2 size={16} strokeWidth={1.8} />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            aria-label={t("canvas.bringForward")}
-            title={t("canvas.bringForward")}
-            onClick={() => onReorderSelection("forward")}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <ArrowUp size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            aria-label={t("canvas.sendBackward")}
-            title={t("canvas.sendBackward")}
-            onClick={() => onReorderSelection("backward")}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <ArrowDown size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            aria-label={t("canvas.bringToFront")}
-            title={t("canvas.bringToFront")}
-            onClick={() => onReorderSelection("front")}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <BringToFront size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            aria-label={t("canvas.sendToBack")}
-            title={t("canvas.sendToBack")}
-            onClick={() => onReorderSelection("back")}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <SendToBack size={16} strokeWidth={1.8} />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            aria-label={t("canvas.fitFrame")}
-            title={t("canvas.fitFrame")}
-            onClick={onFitFrame}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <Maximize2 size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            aria-label={t("canvas.fitSelection")}
-            title={t("canvas.fitSelection")}
-            onClick={onFitSelection}
-            disabled={!hasSelection}
-            className={TOOL_BUTTON_CLASS}
-          >
-            <MousePointer2 size={16} strokeWidth={1.8} />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex h-10 items-center gap-2 rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground/80">
-            <span>{t("canvas.tool.brush")}</span>
-            <input
-              type="color"
-              value={strokeColor}
-              onChange={(event) => onColorChange(event.target.value)}
-              className="h-6 w-6 rounded border-0 bg-transparent p-0"
+        <span className="mx-1 h-5 w-px shrink-0 bg-border-subtle" />
+        <input
+          aria-label={t("canvas.strokeColor")}
+          title={t("canvas.strokeColor")}
+          type="color"
+          value={props.strokeColor}
+          onChange={(e) => props.onColorChange(e.target.value)}
+          className="h-7 w-7 shrink-0 cursor-pointer border-0 bg-transparent p-0.5"
+        />
+        <button
+          type="button"
+          aria-label={t("canvas.properties")}
+          title={t("canvas.properties")}
+          aria-expanded={properties}
+          onClick={() => setProperties(!properties)}
+          className={`${TOOL_BUTTON_CLASS} text-[11px] tabular-nums`}
+        >
+          {props.strokeSize}px
+        </button>
+        <div className="relative">
+          {button("canvas.actions", () => setActions(!actions), MoreHorizontal)}
+          {actions && (
+            <CanvasActionMenu
+              {...props}
+              hasSelection={props.selectedObjectCount > 0}
+              selectionCount={props.selectedObjectCount}
+              onClose={() => setActions(false)}
+              style={{ bottom: 48, right: 0 }}
             />
-          </label>
-
-          <label className="flex h-10 items-center gap-3 rounded-[10px] border border-border-subtle bg-surface px-3 text-[12px] text-foreground/80">
-            <span>{strokeSize}px</span>
-            <input
-              type="range"
-              min={2}
-              max={32}
-              step={1}
-              value={strokeSize}
-              onChange={(event) => onSizeChange(Number(event.target.value))}
-              className="w-28 accent-primary"
-            />
-          </label>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-label={t("canvas.tool.undo")}
-              title={t("canvas.tool.undo")}
-              onClick={onUndo}
-              disabled={!canUndo}
-              className={TOOL_BUTTON_CLASS}
-            >
-              <Undo2 size={16} strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              aria-label={t("canvas.tool.redo")}
-              title={t("canvas.tool.redo")}
-              onClick={onRedo}
-              disabled={!canRedo}
-              className={TOOL_BUTTON_CLASS}
-            >
-              <Redo2 size={16} strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              aria-label={t("canvas.tool.zoomOut")}
-              title={t("canvas.tool.zoomOut")}
-              onClick={onZoomOut}
-              className={TOOL_BUTTON_CLASS}
-            >
-              <Minus size={16} strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              aria-label={t("canvas.tool.zoomIn")}
-              title={t("canvas.tool.zoomIn")}
-              onClick={onZoomIn}
-              className={TOOL_BUTTON_CLASS}
-            >
-              <Plus size={16} strokeWidth={1.8} />
-            </button>
-          </div>
-
-          <div className="flex h-10 items-center gap-2 whitespace-nowrap rounded-[10px] border border-border-subtle bg-surface px-3 text-[11px] font-medium text-muted">
-            <span>{t("canvas.selectionCount", { count: selectedObjectCount })}</span>
-            <span aria-hidden="true">·</span>
-            <span>{t("canvas.zoomStatus", { zoom: zoomPercent })}</span>
-          </div>
+          )}
         </div>
+      </div>
+      <div className="flex items-center gap-0.5 rounded-xl border border-border-subtle bg-surface/90 px-1 py-0.5 shadow-card backdrop-blur-xl">
+        {button("canvas.tool.undo", props.onUndo, Undo2, !props.canUndo)}
+        {button("canvas.tool.redo", props.onRedo, Redo2, !props.canRedo)}
+        <span className="mx-1 h-4 w-px bg-border-subtle" />
+        {button("canvas.tool.zoomOut", props.onZoomOut, Minus)}
+        <div className="relative">
+          <button
+            type="button"
+            aria-label={t("canvas.zoomOptions")}
+            aria-expanded={zoomMenu}
+            onClick={() => setZoomMenu(!zoomMenu)}
+            className="focus-ring min-w-14 rounded-lg px-1 py-2 text-xs tabular-nums text-muted"
+          >
+            {props.zoomPercent}%
+          </button>
+          {zoomMenu && (
+            <div
+              role="menu"
+              className="absolute bottom-11 left-1/2 z-40 min-w-36 -translate-x-1/2 rounded-xl border border-border-subtle bg-surface p-1.5 shadow-float"
+            >
+              {[
+                ["canvas.fitFrame", props.onFitFrame],
+                [
+                  "canvas.fitSelection",
+                  props.selectedObjectCount ? props.onFitSelection : undefined,
+                ],
+                ["canvas.fitAll", props.onFitAll],
+                ["canvas.resetZoom", props.onResetZoom],
+              ].map(
+                ([label, action]) =>
+                  action && (
+                    <button
+                      key={label as string}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        (action as () => void)();
+                        setZoomMenu(false);
+                      }}
+                      className="block w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-subtle"
+                    >
+                      {t(label as string)}
+                    </button>
+                  ),
+              )}
+            </div>
+          )}
+        </div>
+        {button("canvas.tool.zoomIn", props.onZoomIn, Plus)}
+        {button("canvas.fitFrame", props.onFitFrame, Maximize2)}
+        <span className="mx-2 hidden text-[10px] text-muted sm:inline">
+          {t("canvas.selectionCount", { count: props.selectedObjectCount })}
+        </span>
       </div>
     </div>
   );

@@ -586,6 +586,7 @@ pub fn run() {
             commands::canvas::rename_canvas_document,
             commands::canvas::delete_canvas_document,
             commands::canvas::save_canvas_export,
+            commands::canvas::get_canvas_generation_status,
             commands::conversations::create_conversation,
             commands::conversations::get_conversations,
             commands::conversations::rename_conversation,

@@ -1,8 +1,16 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CanvasDocumentContent } from "../types";
 import CanvasPage from "./CanvasPage";
+import { waitForCanvasSaves } from "../lib/canvas/persistence";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -10,9 +18,7 @@ const queryClient = new QueryClient({
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 }
 
@@ -22,6 +28,7 @@ const getCanvasDocument = vi.fn();
 const saveCanvasDocument = vi.fn();
 const saveCanvasExport = vi.fn();
 const editImage = vi.fn();
+const getCanvasGenerationStatus = vi.fn().mockResolvedValue(null);
 const getImageModel = vi.fn();
 const pickSourceImages = vi.fn();
 const exportCanvasFrame = vi.fn();
@@ -29,7 +36,10 @@ const readImageSize = vi.fn();
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { count?: number; number?: number; zoom?: number }) =>
+    t: (
+      key: string,
+      options?: { count?: number; number?: number; zoom?: number },
+    ) =>
       ({
         "canvas.title": "Infinite Canvas",
         "canvas.assetsTitle": "Canvas Assets",
@@ -37,7 +47,8 @@ vi.mock("react-i18next", () => ({
         "canvas.emptyHint":
           "Sketch ideas, frame a region, and send that framed composition into image generation.",
         "canvas.generationTitle": "Generation",
-        "canvas.generationEmpty": "Prompt controls and generated results will appear here.",
+        "canvas.generationEmpty":
+          "Prompt controls and generated results will appear here.",
         "canvas.toolbarPlaceholder": "Canvas tools will live here",
         "canvas.newCanvas": "New Canvas",
         "canvas.importImage": "Import Image",
@@ -69,8 +80,10 @@ vi.mock("react-i18next", () => ({
         "canvas.tool.zoomIn": "Zoom In",
         "canvas.tool.zoomOut": "Zoom Out",
         "canvas.generate": "Generate",
-        "canvas.promptPlaceholder": "Describe how to develop this framed sketch...",
-        "canvas.noDocumentSelected": "Choose or create a canvas document to begin.",
+        "canvas.promptPlaceholder":
+          "Describe how to develop this framed sketch...",
+        "canvas.noDocumentSelected":
+          "Choose or create a canvas document to begin.",
         "canvas.loading": "Loading canvas...",
         "canvas.emptyStateTitle": "Start sketching",
         "canvas.emptyStateHint":
@@ -105,6 +118,11 @@ vi.mock("../lib/api", () => ({
   saveCanvasDocument: (...args: unknown[]) => saveCanvasDocument(...args),
   saveCanvasExport: (...args: unknown[]) => saveCanvasExport(...args),
   editImage: (...args: unknown[]) => editImage(...args),
+  getCanvasGenerationStatus: (...args: unknown[]) =>
+    getCanvasGenerationStatus(...args),
+  onGenerationComplete: () => Promise.resolve(() => {}),
+  onGenerationFailed: () => Promise.resolve(() => {}),
+  onGenerationProgress: () => Promise.resolve(() => {}),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
   hasTauriRuntime: () => true,
   pickSourceImages: (...args: unknown[]) => pickSourceImages(...args),
@@ -147,8 +165,9 @@ vi.mock("../components/canvas/CanvasStage", () => ({
       <div>Canvas stage</div>
       <div>
         Canvas objects:{" "}
-        {content.layers.flatMap((layer) => layer.objects.map((object) => object.id)).join(",") ||
-          "none"}
+        {content.layers
+          .flatMap((layer) => layer.objects.map((object) => object.id))
+          .join(",") || "none"}
       </div>
       <div>Active tool: {activeTool}</div>
       <div>Selected objects: {selectedObjectIds.join(",") || "none"}</div>
@@ -326,6 +345,7 @@ describe("CanvasPage", () => {
     saveCanvasDocument.mockReset();
     saveCanvasExport.mockReset();
     editImage.mockReset();
+    getCanvasGenerationStatus.mockReset().mockResolvedValue(null);
     getImageModel.mockReset();
     pickSourceImages.mockReset();
     exportCanvasFrame.mockReset();
@@ -407,9 +427,15 @@ describe("CanvasPage", () => {
     readImageSize.mockResolvedValue({ width: 512, height: 512 });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
     vi.useRealTimers();
+    // A failed write deliberately survives unmount for load/retry recovery.
+    // Finish that write before the next test starts a fresh mocked app session.
+    exportCanvasFrame.mockResolvedValue("preview");
+    saveCanvasDocument.mockResolvedValue({ id: "canvas-1" });
+    await waitForCanvasSaves("canvas-1", true, () => true);
+    await waitForCanvasSaves("canvas-2", true, () => true);
     vi.restoreAllMocks();
   });
 
@@ -463,16 +489,29 @@ describe("CanvasPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Mood board" }));
     fireEvent.change(
-      screen.getByPlaceholderText("Describe how to develop this framed sketch..."),
-      { target: { value: "Turn this sketch into a polished cinematic environment" } },
+      screen.getByPlaceholderText(
+        "Describe how to develop this framed sketch...",
+      ),
+      {
+        target: {
+          value: "Turn this sketch into a polished cinematic environment",
+        },
+      },
     );
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
 
-    expect(await screen.findByRole("status", { name: "Generating..." })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generating..." })).toBeDisabled();
+    expect(
+      await screen.findByRole("status", { name: "Generating..." }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Generating..." }),
+    ).toBeDisabled();
 
     await waitFor(() => {
-      expect(saveCanvasExport).toHaveBeenCalledWith("canvas-1", expect.any(String));
+      expect(saveCanvasExport).toHaveBeenCalledWith(
+        "canvas-1",
+        expect.any(String),
+      );
     });
 
     await waitFor(() => {
@@ -495,6 +534,156 @@ describe("CanvasPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
     });
+  });
+
+  it("persists a pending request before submission and inserts returned images as one undo batch", async () => {
+    editImage.mockResolvedValueOnce({
+      generation_id: "g",
+      conversation_id: "c",
+      images: [
+        {
+          id: "a",
+          generation_id: "g",
+          file_path: "/a.png",
+          thumbnail_path: "/a.png",
+          width: 200,
+          height: 100,
+          file_size: 1,
+        },
+        {
+          id: "b",
+          generation_id: "g",
+          file_path: "/b.png",
+          thumbnail_path: "/b.png",
+          width: 100,
+          height: 100,
+          file_size: 1,
+        },
+      ],
+    });
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: none");
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "Describe how to develop this framed sketch...",
+      ),
+      { target: { value: "draw" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() =>
+      expect(saveCanvasDocument).toHaveBeenCalledWith(
+        "canvas-1",
+        expect.objectContaining({
+          generation_requests: [
+            expect.objectContaining({
+              status: "completed",
+              image_ids: ["a", "b"],
+            }),
+          ],
+        }),
+        expect.any(String),
+      ),
+    );
+    expect(saveCanvasDocument.mock.invocationCallOrder[0]).toBeLessThan(
+      editImage.mock.invocationCallOrder[0],
+    );
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    await screen.findByText("Canvas objects: none");
+    fireEvent.keyDown(window, { key: "x" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(screen.getByText("Canvas objects: none")).toBeInTheDocument();
+  });
+
+  it("shows failed exports and retries with a new request identity", async () => {
+    saveCanvasExport.mockRejectedValueOnce(new Error("PNG write failed"));
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: none");
+    fireEvent.change(screen.getByLabelText("Generation prompt"), {
+      target: { value: "draw" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    expect(await screen.findByText(/PNG write failed/)).toBeInTheDocument();
+    expect(editImage).not.toHaveBeenCalled();
+    const firstId =
+      saveCanvasDocument.mock.calls[0][1].generation_requests[0].request_id;
+    fireEvent.click(
+      screen.getByRole("button", { name: "canvas.generationRetry" }),
+    );
+    await waitFor(() => expect(editImage).toHaveBeenCalled());
+    expect(editImage.mock.calls[0][0].clientRequestId).not.toBe(firstId);
+  });
+
+  it("merges late results into current edits and keeps completion metadata through undo", async () => {
+    const deferred = createDeferred<unknown>();
+    editImage.mockReturnValueOnce(deferred.promise);
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.change(screen.getByLabelText("Generation prompt"), {
+      target: { value: "draw" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(editImage).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    await act(async () =>
+      deferred.resolve({
+        generation_id: "g",
+        conversation_id: "c",
+        images: [{ id: "a", file_path: "/a.png", width: 100, height: 100 }],
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        saveCanvasDocument.mock.calls.at(-1)?.[1].layers[1].objects[0].x,
+      ).toBe(112),
+    );
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    await screen.findByText("Canvas objects: image-1");
+    vi.useFakeTimers();
+    await advanceAutosave();
+    expect(
+      saveCanvasDocument.mock.calls.at(-1)?.[1].generation_requests[0].status,
+    ).toBe("completed");
+  });
+
+  it("does not place a late result into another document", async () => {
+    const first = canvasDocumentWithIdentity(
+        "canvas-1",
+        "Mood board",
+        "image-a",
+      ),
+      second = canvasDocumentWithIdentity(
+        "canvas-2",
+        "Second canvas",
+        "image-b",
+      );
+    listCanvasDocuments.mockResolvedValue([first, second]);
+    getCanvasDocument.mockImplementation((id: string) =>
+      Promise.resolve(id === "canvas-1" ? first : second),
+    );
+    const deferred = createDeferred<unknown>();
+    editImage.mockReturnValueOnce(deferred.promise);
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-a");
+    fireEvent.change(screen.getByLabelText("Generation prompt"), {
+      target: { value: "draw" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(editImage).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
+    await screen.findByText("Canvas objects: image-b");
+    await act(async () =>
+      deferred.resolve({
+        generation_id: "g",
+        conversation_id: "c",
+        images: [{ id: "a", file_path: "/a.png", width: 100, height: 100 }],
+      }),
+    );
+    expect(screen.getByText("Canvas objects: image-b")).toBeInTheDocument();
+    expect(
+      saveCanvasDocument.mock.calls.filter((call) => call[0] === "canvas-2"),
+    ).toHaveLength(0);
   });
 
   it("gives the canvas prompt editor a larger writing area", async () => {
@@ -535,7 +724,9 @@ describe("CanvasPage", () => {
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Import Image" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Import Image" }),
+    );
 
     await waitFor(() => {
       expect(pickSourceImages).toHaveBeenCalled();
@@ -614,8 +805,8 @@ describe("CanvasPage", () => {
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+    fireEvent.keyDown(window, { key: "c", metaKey: true });
+    fireEvent.keyDown(window, { key: "v", metaKey: true });
     await advanceAutosave();
 
     expect(saveCanvasDocument).toHaveBeenCalled();
@@ -656,7 +847,8 @@ describe("CanvasPage", () => {
     expect(screen.getByText("1 selected")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "resize stage" }));
-    fireEvent.click(screen.getByRole("button", { name: "Fit Selection" }));
+    fireEvent.click(screen.getByRole("button", { name: "canvas.zoomOptions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fit Selection" }));
 
     expect(screen.getByText("400%")).toBeInTheDocument();
     await advanceAutosave();
@@ -677,15 +869,15 @@ describe("CanvasPage", () => {
     expect(await screen.findByText("2 objects")).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
-    fireEvent.click(screen.getByRole("button", { name: "Bring to Front" }));
+    fireEvent.click(screen.getByRole("button", { name: "canvas.actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bring to Front" }));
     await advanceAutosave();
 
     expect(saveCanvasDocument).toHaveBeenCalled();
     const savedContent = saveCanvasDocument.mock.calls.at(-1)?.[1];
-    expect(savedContent.layers[0].objects.map((object: { id: string }) => object.id)).toEqual([
-      "image-2",
-      "image-1",
-    ]);
+    expect(
+      savedContent.layers[0].objects.map((object: { id: string }) => object.id),
+    ).toEqual(["image-2", "image-1"]);
   });
 
   it("clears selection immediately when switching canvas documents", async () => {
@@ -696,7 +888,9 @@ describe("CanvasPage", () => {
       name: "Second canvas",
       document_path: "/tmp/canvas-2.json",
     };
-    let resolveSecondDocument: (document: typeof secondDocument) => void = () => {};
+    let resolveSecondDocument: (
+      document: typeof secondDocument,
+    ) => void = () => {};
 
     listCanvasDocuments.mockResolvedValueOnce([firstDocument, secondDocument]);
     getCanvasDocument.mockResolvedValueOnce(firstDocument);
@@ -711,7 +905,9 @@ describe("CanvasPage", () => {
 
     expect(await screen.findByText("1 object")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
-    expect(await screen.findByText("Selected objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Selected objects: image-1"),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
 
@@ -722,11 +918,17 @@ describe("CanvasPage", () => {
       resolveSecondDocument(secondDocument);
     });
 
-    expect(await screen.findByText("Selected objects: none")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Selected objects: none"),
+    ).toBeInTheDocument();
   });
 
   it("ignores stale document loads that resolve after the selected document", async () => {
-    const firstDocument = canvasDocumentWithIdentity("canvas-1", "Mood board", "image-a");
+    const firstDocument = canvasDocumentWithIdentity(
+      "canvas-1",
+      "Mood board",
+      "image-a",
+    );
     const secondDocument = canvasDocumentWithIdentity(
       "canvas-2",
       "Second canvas",
@@ -754,7 +956,9 @@ describe("CanvasPage", () => {
       secondLoad.resolve(secondDocument);
       await secondLoad.promise;
     });
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     expect(screen.getByText("Selected objects: image-1")).toBeInTheDocument();
 
@@ -765,28 +969,38 @@ describe("CanvasPage", () => {
 
     expect(screen.getByText("Canvas objects: image-1")).toBeInTheDocument();
     expect(screen.getByText("Selected objects: image-1")).toBeInTheDocument();
-    expect(screen.queryByText("Canvas objects: image-a")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Canvas objects: image-a"),
+    ).not.toBeInTheDocument();
   });
 
   it("blocks edits and autosave until the selected document finishes loading", async () => {
     const firstDocument = canvasDocumentWithImage();
-    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
+    const secondDocument = canvasDocumentWithoutObjects(
+      "canvas-2",
+      "Second canvas",
+    );
     const secondLoad = createDeferred<typeof secondDocument>();
 
     listCanvasDocuments.mockResolvedValue([firstDocument, secondDocument]);
     getCanvasDocument.mockImplementation((documentId: string) =>
-      documentId === firstDocument.id ? Promise.resolve(firstDocument) : secondLoad.promise,
+      documentId === firstDocument.id
+        ? Promise.resolve(firstDocument)
+        : secondLoad.promise,
     );
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    fireEvent.keyDown(window, { key: "c", metaKey: true });
     vi.useFakeTimers();
     saveCanvasDocument.mockClear();
 
     fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
+    await flushAsyncWork();
     expect(getCanvasDocument).toHaveBeenCalledWith("canvas-2");
     fireEvent.keyDown(window, { key: "v", code: "KeyV", ctrlKey: true });
     await advanceAutosave();
@@ -807,7 +1021,9 @@ describe("CanvasPage", () => {
       expect.objectContaining({
         layers: [
           expect.objectContaining({
-            objects: [expect.objectContaining({ image_path: "/tmp/image-1.png" })],
+            objects: [
+              expect.objectContaining({ image_path: "/tmp/image-1.png" }),
+            ],
           }),
         ],
       }),
@@ -817,17 +1033,24 @@ describe("CanvasPage", () => {
 
   it("ignores tool shortcuts until the selected document finishes loading", async () => {
     const firstDocument = canvasDocumentWithImage();
-    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
+    const secondDocument = canvasDocumentWithoutObjects(
+      "canvas-2",
+      "Second canvas",
+    );
     const secondLoad = createDeferred<typeof secondDocument>();
 
     listCanvasDocuments.mockResolvedValue([firstDocument, secondDocument]);
     getCanvasDocument.mockImplementation((documentId: string) =>
-      documentId === firstDocument.id ? Promise.resolve(firstDocument) : secondLoad.promise,
+      documentId === firstDocument.id
+        ? Promise.resolve(firstDocument)
+        : secondLoad.promise,
     );
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Select" }));
     expect(screen.getByText("Active tool: select")).toBeInTheDocument();
 
@@ -855,7 +1078,9 @@ describe("CanvasPage", () => {
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
@@ -873,7 +1098,9 @@ describe("CanvasPage", () => {
 
     expect(saveCanvasDocument).toHaveBeenCalledTimes(2);
     expect(saveCanvasDocument.mock.calls[1][0]).toBe("canvas-1");
-    expect(saveCanvasDocument.mock.calls[1][1].layers[0].objects[0]).toMatchObject({
+    expect(
+      saveCanvasDocument.mock.calls[1][1].layers[0].objects[0],
+    ).toMatchObject({
       x: 124,
       y: 66,
     });
@@ -886,16 +1113,23 @@ describe("CanvasPage", () => {
 
   it("flushes a dirty document before query reconciliation selects another", async () => {
     const firstDocument = canvasDocumentWithImage();
-    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
+    const secondDocument = canvasDocumentWithoutObjects(
+      "canvas-2",
+      "Second canvas",
+    );
 
     listCanvasDocuments.mockResolvedValue([firstDocument, secondDocument]);
     getCanvasDocument.mockImplementation((documentId: string) =>
-      Promise.resolve(documentId === firstDocument.id ? firstDocument : secondDocument),
+      Promise.resolve(
+        documentId === firstDocument.id ? firstDocument : secondDocument,
+      ),
     );
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
@@ -933,7 +1167,9 @@ describe("CanvasPage", () => {
 
   it("keeps a failed autosave dirty and retries the same snapshot", async () => {
     const document = canvasDocumentWithImage();
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     getCanvasDocument.mockResolvedValue(document);
     saveCanvasDocument.mockRejectedValueOnce(
@@ -942,7 +1178,9 @@ describe("CanvasPage", () => {
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
@@ -950,8 +1188,12 @@ describe("CanvasPage", () => {
     await flushAsyncWork();
 
     expect(screen.getByRole("alert")).toHaveTextContent("Save failed");
-    expect(screen.getByRole("button", { name: "Retry save" })).toBeInTheDocument();
-    expect(screen.queryByText(/secret backend credential/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Retry save" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/secret backend credential/i),
+    ).not.toBeInTheDocument();
     expect(consoleError).not.toHaveBeenCalled();
 
     const failedSnapshot = saveCanvasDocument.mock.calls[0][1];
@@ -961,7 +1203,9 @@ describe("CanvasPage", () => {
     expect(saveCanvasDocument).toHaveBeenCalledTimes(2);
     expect(saveCanvasDocument.mock.calls[1][0]).toBe("canvas-1");
     expect(saveCanvasDocument.mock.calls[1][1]).toEqual(failedSnapshot);
-    expect(saveCanvasDocument.mock.calls[1][1].layers[0].objects[0]).toMatchObject({
+    expect(
+      saveCanvasDocument.mock.calls[1][1].layers[0].objects[0],
+    ).toMatchObject({
       x: 112,
       y: 58,
     });
@@ -971,18 +1215,29 @@ describe("CanvasPage", () => {
 
   it("keeps the old document editable when a switch flush fails", async () => {
     const firstDocument = canvasDocumentWithImage();
-    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const secondDocument = canvasDocumentWithoutObjects(
+      "canvas-2",
+      "Second canvas",
+    );
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     listCanvasDocuments.mockResolvedValue([firstDocument, secondDocument]);
     getCanvasDocument.mockImplementation((documentId: string) =>
-      Promise.resolve(documentId === firstDocument.id ? firstDocument : secondDocument),
+      Promise.resolve(
+        documentId === firstDocument.id ? firstDocument : secondDocument,
+      ),
     );
-    saveCanvasDocument.mockRejectedValueOnce(new Error("private switch flush failure"));
+    saveCanvasDocument.mockRejectedValueOnce(
+      new Error("private switch flush failure"),
+    );
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
@@ -991,7 +1246,9 @@ describe("CanvasPage", () => {
     await flushAsyncWork();
 
     expect(screen.getByRole("alert")).toHaveTextContent("Save failed");
-    expect(screen.getByRole("button", { name: "Retry save" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Retry save" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Canvas objects: image-1")).toBeInTheDocument();
     expect(getCanvasDocument).not.toHaveBeenCalledWith("canvas-2");
     expect(saveCanvasDocument).toHaveBeenCalledWith(
@@ -1006,9 +1263,13 @@ describe("CanvasPage", () => {
       expect.any(String),
     );
     expect(
-      saveCanvasDocument.mock.calls.every(([documentId]) => documentId === "canvas-1"),
+      saveCanvasDocument.mock.calls.every(
+        ([documentId]) => documentId === "canvas-1",
+      ),
     ).toBe(true);
-    expect(screen.queryByText(/private switch flush failure/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/private switch flush failure/i),
+    ).not.toBeInTheDocument();
     expect(consoleError).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
@@ -1025,8 +1286,14 @@ describe("CanvasPage", () => {
 
   it("does not continue a queued document transition after a flush fails", async () => {
     const firstDocument = canvasDocumentWithImage();
-    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
-    const thirdDocument = canvasDocumentWithoutObjects("canvas-3", "Third canvas");
+    const secondDocument = canvasDocumentWithoutObjects(
+      "canvas-2",
+      "Second canvas",
+    );
+    const thirdDocument = canvasDocumentWithoutObjects(
+      "canvas-3",
+      "Third canvas",
+    );
     const failedFlush = createDeferred<typeof firstDocument>();
 
     listCanvasDocuments.mockResolvedValue([
@@ -1047,7 +1314,9 @@ describe("CanvasPage", () => {
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
@@ -1069,8 +1338,13 @@ describe("CanvasPage", () => {
 
   it("shows a recoverable error when the selected document load fails", async () => {
     const firstDocument = canvasDocumentWithImage();
-    const secondDocument = canvasDocumentWithoutObjects("canvas-2", "Second canvas");
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const secondDocument = canvasDocumentWithoutObjects(
+      "canvas-2",
+      "Second canvas",
+    );
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     listCanvasDocuments.mockResolvedValue([firstDocument, secondDocument]);
     getCanvasDocument.mockImplementation((documentId: string) =>
@@ -1081,17 +1355,25 @@ describe("CanvasPage", () => {
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
     await flushAsyncWork();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load this canvas.");
-    expect(screen.getByRole("button", { name: "Retry load" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't load this canvas.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Retry load" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/secret load response/i)).not.toBeInTheDocument();
     expect(consoleError).not.toHaveBeenCalled();
 
     getCanvasDocument.mockImplementation((documentId: string) =>
-      Promise.resolve(documentId === firstDocument.id ? firstDocument : secondDocument),
+      Promise.resolve(
+        documentId === firstDocument.id ? firstDocument : secondDocument,
+      ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Retry load" }));
     await flushAsyncWork();
@@ -1113,7 +1395,9 @@ describe("CanvasPage", () => {
 
     render(<CanvasPage />, { wrapper: TestWrapper });
 
-    expect(await screen.findByText("Canvas objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Canvas objects: image-1"),
+    ).toBeInTheDocument();
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
@@ -1135,6 +1419,134 @@ describe("CanvasPage", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
+  it("waits for an earlier mount's disk save before reopening and editing the document", async () => {
+    const document = canvasDocumentWithImage();
+    let disk: CanvasDocumentContent = structuredClone(document.content);
+    const oldPreview = createDeferred<string>();
+    getCanvasDocument.mockImplementation(async () => ({
+      ...document,
+      content: structuredClone(disk),
+    }));
+    exportCanvasFrame.mockImplementationOnce(() => oldPreview.promise);
+    saveCanvasDocument.mockImplementation(
+      async (_id: string, snapshot: CanvasDocumentContent) => {
+        disk = structuredClone(snapshot);
+        return document;
+      },
+    );
+    const old = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    await advanceAutosave();
+    old.unmount();
+    vi.useRealTimers();
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await flushAsyncWork();
+    expect(screen.getByText("Loading canvas...")).toBeInTheDocument();
+    expect(getCanvasDocument).toHaveBeenCalledTimes(1);
+    await act(async () => oldPreview.resolve("old-preview"));
+    await screen.findByText("Canvas objects: image-1");
+    expect(getCanvasDocument).toHaveBeenCalledTimes(2);
+    expect(disk.layers[0].objects[0]).toMatchObject({ x: 112 });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    await advanceAutosave();
+    expect(disk.layers[0].objects[0]).toMatchObject({ x: 124, y: 66 });
+  });
+
+  it("blocks reopening after an earlier mount's save fails and retries that exact save before reading", async () => {
+    const document = canvasDocumentWithImage();
+    let disk: CanvasDocumentContent = structuredClone(document.content);
+    const oldPreview = createDeferred<string>();
+    getCanvasDocument.mockImplementation(async () => ({
+      ...document,
+      content: structuredClone(disk),
+    }));
+    exportCanvasFrame.mockImplementationOnce(() => oldPreview.promise);
+    saveCanvasDocument.mockImplementation(
+      async (_id: string, snapshot: CanvasDocumentContent) => {
+        disk = structuredClone(snapshot);
+        return document;
+      },
+    );
+    const old = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    await advanceAutosave();
+    old.unmount();
+    vi.useRealTimers();
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await flushAsyncWork();
+    await act(async () => oldPreview.reject(new Error("preview unavailable")));
+    expect(
+      await screen.findByText("Couldn't load this canvas."),
+    ).toBeInTheDocument();
+    expect(getCanvasDocument).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Retry load" }));
+    await screen.findByText("Canvas objects: image-1");
+    expect(disk.layers[0].objects[0]).toMatchObject({ x: 112, y: 58 });
+    expect(getCanvasDocument).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an ambiguously rejected submission pending and recovers its successful backend result", async () => {
+    editImage.mockRejectedValueOnce(new Error("IPC reply lost"));
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "durable-job",
+      status: "running",
+      error: null,
+      images: [],
+    });
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: none");
+    fireEvent.change(screen.getByLabelText("Generation prompt"), {
+      target: { value: "draw" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() =>
+      expect(getCanvasGenerationStatus).toHaveBeenCalledWith(
+        "canvas-1",
+        expect.any(String),
+      ),
+    );
+    expect(await screen.findByText(/IPC reply lost/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Generating..." }),
+    ).toBeDisabled();
+    expect(
+      saveCanvasDocument.mock.calls.at(-1)?.[1].generation_requests[0],
+    ).toMatchObject({ status: "pending", generation_id: "durable-job" });
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "durable-job",
+      status: "completed",
+      error: null,
+      images: [
+        {
+          id: "recovered",
+          file_path: "/recovered.png",
+          width: 100,
+          height: 100,
+        },
+      ],
+    });
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText(/Canvas objects: canvas-result:/),
+        ).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    await flushAsyncWork();
+    expect(editImage).toHaveBeenCalledTimes(1);
+    expect(
+      saveCanvasDocument.mock.calls.at(-1)?.[1].generation_requests[0].status,
+    ).toBe("completed");
+  });
+
   it("clears external selection when its layer becomes locked", async () => {
     getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
 
@@ -1142,10 +1554,14 @@ describe("CanvasPage", () => {
 
     expect(await screen.findByText("1 object")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
-    expect(await screen.findByText("Selected objects: image-1")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Selected objects: image-1"),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Lock Layer" }));
 
-    expect(await screen.findByText("Selected objects: none")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Selected objects: none"),
+    ).toBeInTheDocument();
   });
 });
