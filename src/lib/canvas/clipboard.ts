@@ -1,5 +1,9 @@
+import { isCanvasPathObject } from "./document";
 import type { CanvasDocumentContent, CanvasObject } from "../../types";
-import { cloneCanvasDocumentContent, isCanvasLayerSelectable } from "./document";
+import {
+  cloneCanvasDocumentContent,
+  isCanvasLayerSelectable,
+} from "./document";
 
 export interface CanvasClipboardEntry {
   layerId: string;
@@ -48,7 +52,9 @@ export function pasteCanvasObjects(
   offset = 24,
 ): { content: CanvasDocumentContent; pastedObjectIds: string[] } {
   const clonedContent = cloneCanvasDocumentContent(content);
-  const requestedActiveLayer = clonedContent.layers.find((layer) => layer.id === activeLayerId);
+  const requestedActiveLayer = clonedContent.layers.find(
+    (layer) => layer.id === activeLayerId,
+  );
   if (requestedActiveLayer && !isCanvasLayerSelectable(requestedActiveLayer)) {
     return { content: clonedContent, pastedObjectIds: [] };
   }
@@ -63,7 +69,9 @@ export function pasteCanvasObjects(
   const fallbackEntries: CanvasClipboardEntry[] = [];
 
   clipboard.entries.forEach((entry) => {
-    const originalLayer = clonedContent.layers.find((layer) => layer.id === entry.layerId);
+    const originalLayer = clonedContent.layers.find(
+      (layer) => layer.id === entry.layerId,
+    );
 
     if (!originalLayer) {
       fallbackEntries.push(entry);
@@ -80,9 +88,9 @@ export function pasteCanvasObjects(
   });
 
   if (activeLayer && fallbackEntries.length) {
-    const pastedFallbackObjects = getEntriesInReverseLayerOrder(fallbackEntries).map((entry) =>
-      createPastedObject(entry.object, offset),
-    );
+    const pastedFallbackObjects = getEntriesInReverseLayerOrder(
+      fallbackEntries,
+    ).map((entry) => createPastedObject(entry.object, offset));
 
     activeLayer.objects = [...activeLayer.objects, ...pastedFallbackObjects];
     pastedObjectIds.push(...pastedFallbackObjects.map((object) => object.id));
@@ -98,7 +106,10 @@ function cloneCanvasObject(object: CanvasObject): CanvasObject {
   return JSON.parse(JSON.stringify(object)) as CanvasObject;
 }
 
-function createPastedObject(object: CanvasObject, offset: number): CanvasObject {
+function createPastedObject(
+  object: CanvasObject,
+  offset: number,
+): CanvasObject {
   return offsetCanvasObject(
     {
       ...cloneCanvasObject(object),
@@ -108,8 +119,11 @@ function createPastedObject(object: CanvasObject, offset: number): CanvasObject 
   );
 }
 
-function offsetCanvasObject(object: CanvasObject, offset: number): CanvasObject {
-  if (object.type === "image") {
+function offsetCanvasObject(
+  object: CanvasObject,
+  offset: number,
+): CanvasObject {
+  if (!isCanvasPathObject(object)) {
     return {
       ...object,
       x: object.x + offset,
@@ -123,9 +137,13 @@ function offsetCanvasObject(object: CanvasObject, offset: number): CanvasObject 
   };
 }
 
-function getEntriesInReverseLayerOrder(entries: CanvasClipboardEntry[]): CanvasClipboardEntry[] {
+function getEntriesInReverseLayerOrder(
+  entries: CanvasClipboardEntry[],
+): CanvasClipboardEntry[] {
   const layerOrder = [...new Set(entries.map((entry) => entry.layerId))];
-  const layerRank = new Map(layerOrder.map((layerId, index) => [layerId, index]));
+  const layerRank = new Map(
+    layerOrder.map((layerId, index) => [layerId, index]),
+  );
 
   return [...entries].sort((first, second) => {
     const firstRank = layerRank.get(first.layerId) ?? 0;

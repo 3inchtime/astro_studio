@@ -1,0 +1,24 @@
+{
+  "stage": "native-completed",
+  "documentId": "0ca27d6a-85a6-473f-869a-34dd26e4526e",
+  "generationId": "4707c789-bf2e-c919-48bd-d5f530420e03",
+  "status": "completed",
+  "resultCount": 1,
+  "inputPreserved": true,
+  "resultPositions": [
+    {
+      "x": 544,
+      "y": 0,
+      "width": 512,
+      "height": 512
+    }
+  ],
+  "frame": {
+    "aspect": "1:1",
+    "height": 512,
+    "width": 512,
+    "x": 0,
+    "y": 0
+  },
+  "visibleUI": "\n\n画布资产\n2 个画布\n\n\nREA 画布验收\n512x512\n\nUntitled Canvas\n1024x1024\n使用底部工具栏进行绘制、平移和取景，然后把这块画面送进生成。\n已保存\n\n\n\n\n\n\n\n\n\n\n\n6px\n\n\n\n\n60%\n\n\n已选择 0 项\n生成\n模型\ngpt-image-2\n取景框\n\n图层\n512 x 512\n生成提示词\n\n开始生成\n\n提示词参数和生成结果会显示在这里。\n图层\n\n\n将画布中的蓝色矩形设计成一个简洁的蓝色立体方块图标，浅色背景，不要文字。\n1 个对象\n\n\n\nSketch\n2 个对象\n\n"
+}

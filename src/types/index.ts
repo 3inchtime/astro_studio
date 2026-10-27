@@ -62,7 +62,16 @@ export interface Project {
   image_count: number;
 }
 
-export type CanvasTool = "select" | "brush" | "eraser" | "pan";
+export type CanvasTool =
+  | "select"
+  | "brush"
+  | "eraser"
+  | "pan"
+  | "rectangle"
+  | "ellipse"
+  | "line"
+  | "arrow"
+  | "text";
 
 export interface CanvasStrokeObject {
   type: "stroke";
@@ -88,7 +97,50 @@ export interface CanvasImageObject {
   opacity: number;
 }
 
-export type CanvasObject = CanvasStrokeObject | CanvasImageObject;
+export interface CanvasShapeObject {
+  type: "rectangle" | "ellipse";
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  color: string;
+  size: number;
+  opacity: number;
+  fill: string;
+}
+
+export interface CanvasLineObject {
+  type: "line" | "arrow";
+  id: string;
+  points: number[];
+  color: string;
+  size: number;
+  opacity: number;
+  headSize?: number;
+}
+
+export interface CanvasTextObject {
+  type: "text";
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  text: string;
+  fontSize: number;
+  color: string;
+  opacity: number;
+}
+
+export type CanvasObject =
+  | CanvasStrokeObject
+  | CanvasImageObject
+  | CanvasShapeObject
+  | CanvasLineObject
+  | CanvasTextObject;
 
 export interface CanvasLayer {
   id: string;
@@ -112,11 +164,24 @@ export interface CanvasFrame {
   aspect: string;
 }
 
+export interface CanvasGenerationRequest {
+  request_id: string;
+  generation_id?: string;
+  project_id: string | null;
+  frame: CanvasFrame;
+  prompt: string;
+  status: "pending" | "completed" | "failed";
+  image_ids: string[];
+  error?: string;
+  created_at: string;
+}
+
 export interface CanvasDocumentContent {
   version: number;
   viewport: CanvasViewport;
   frame: CanvasFrame;
   layers: CanvasLayer[];
+  generation_requests?: CanvasGenerationRequest[];
 }
 
 export interface CanvasDocument {

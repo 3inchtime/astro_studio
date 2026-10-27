@@ -1,5 +1,9 @@
+import { isCanvasPathObject } from "./document";
 import type { CanvasDocumentContent } from "../../types";
-import { cloneCanvasDocumentContent, isCanvasLayerSelectable } from "./document";
+import {
+  cloneCanvasDocumentContent,
+  isCanvasLayerSelectable,
+} from "./document";
 
 export function translateCanvasObjects(
   content: CanvasDocumentContent,
@@ -19,7 +23,7 @@ export function translateCanvasObjects(
               return object;
             }
 
-            if (object.type === "image") {
+            if (!isCanvasPathObject(object)) {
               return {
                 ...object,
                 x: object.x + offset.dx,

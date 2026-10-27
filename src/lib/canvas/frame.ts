@@ -59,7 +59,7 @@ export function panViewportFromPointerDelta(
 }
 
 export function isSecondaryButtonPan(button: number): boolean {
-  return button === 2;
+  return button === 1 || button === 2;
 }
 
 export function zoomViewportAtScreenPoint(
@@ -93,5 +93,30 @@ export function resizeFrameByAspect(
     ...frame,
     height,
     aspect,
+  };
+}
+
+export function viewportFromWheel(
+  viewport: CanvasViewport,
+  point: { x: number; y: number },
+  wheel: {
+    deltaX: number;
+    deltaY: number;
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    deltaMode?: number;
+  },
+): CanvasViewport {
+  const unit = wheel.deltaMode === 1 ? 16 : wheel.deltaMode === 2 ? 800 : 1;
+  if (wheel.ctrlKey || wheel.metaKey)
+    return zoomViewportAtScreenPoint(
+      viewport,
+      point,
+      viewport.scale * Math.exp(-wheel.deltaY * unit * 0.002),
+    );
+  return {
+    ...viewport,
+    x: viewport.x - wheel.deltaX * unit,
+    y: viewport.y - wheel.deltaY * unit,
   };
 }

@@ -66,10 +66,10 @@ describe("canvas frame helpers", () => {
     });
   });
 
-  it("treats only the secondary mouse button as temporary canvas pan", () => {
+  it("treats middle and secondary mouse buttons as temporary canvas pan", () => {
     expect(isSecondaryButtonPan(2)).toBe(true);
     expect(isSecondaryButtonPan(0)).toBe(false);
-    expect(isSecondaryButtonPan(1)).toBe(false);
+    expect(isSecondaryButtonPan(1)).toBe(true);
   });
 
   it("zooms viewport around the current pointer position", () => {

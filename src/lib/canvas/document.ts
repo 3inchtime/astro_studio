@@ -5,6 +5,7 @@ import type {
   CanvasLayer,
   CanvasObject,
   CanvasStrokeObject,
+  CanvasLineObject,
   CanvasTool,
   CanvasViewport,
 } from "../../types";
@@ -54,29 +55,36 @@ export function createCanvasDocumentContent(
   overrides: Partial<CanvasDocumentContent> = {},
 ): CanvasDocumentContent {
   return {
-    version: 1,
+    version: 2,
+    generation_requests: overrides.generation_requests ?? [],
     viewport: createCanvasViewport(overrides.viewport),
     frame: createCanvasFrame(overrides.frame),
     layers: overrides.layers ?? [createCanvasLayer({ id: "layer-1" })],
   };
 }
 
-export function getCanvasLayersBackToFront(layers: CanvasLayer[]): CanvasLayer[] {
+export function getCanvasLayersBackToFront(
+  layers: CanvasLayer[],
+): CanvasLayer[] {
   return [...layers].reverse();
 }
 
-export function isCanvasLayerSelectable(layer: Pick<CanvasLayer, "visible" | "locked">): boolean {
+export function isCanvasLayerSelectable(
+  layer: Pick<CanvasLayer, "visible" | "locked">,
+): boolean {
   return layer.visible && !layer.locked;
 }
 
-export function createStrokeObject(params: {
-  color?: string;
-  size?: number;
-  opacity?: number;
-  points?: number[];
-  tool?: Extract<CanvasTool, "brush" | "eraser">;
-  id?: string;
-} = {}): CanvasStrokeObject {
+export function createStrokeObject(
+  params: {
+    color?: string;
+    size?: number;
+    opacity?: number;
+    points?: number[];
+    tool?: Extract<CanvasTool, "brush" | "eraser">;
+    id?: string;
+  } = {},
+): CanvasStrokeObject {
   return {
     type: "stroke",
     id: params.id ?? crypto.randomUUID(),
@@ -129,7 +137,8 @@ export function sanitizeCanvasDocumentContent(
   }
 
   return {
-    version: content.version ?? 1,
+    version: 2,
+    generation_requests: content.generation_requests ?? [],
     viewport: createCanvasViewport(content.viewport),
     frame: createCanvasFrame(content.frame),
     layers:
@@ -157,6 +166,56 @@ function sanitizeCanvasObject(object: CanvasObject): CanvasObject {
     });
   }
 
+  if (object.type === "line" || object.type === "arrow") {
+    return {
+      type: object.type,
+      id: object.id,
+      points: object.points ?? [],
+      color: object.color ?? DEFAULT_BRUSH_COLOR,
+      size: object.size ?? DEFAULT_BRUSH_SIZE,
+      opacity: object.opacity ?? 1,
+      ...(object.type === "arrow"
+        ? {
+            headSize:
+              object.headSize ??
+              Math.max(12, (object.size ?? DEFAULT_BRUSH_SIZE) * 3),
+          }
+        : {}),
+    };
+  }
+  if (object.type === "text") {
+    return {
+      type: object.type,
+      id: object.id,
+      x: object.x ?? 0,
+      y: object.y ?? 0,
+      width: object.width ?? 240,
+      height: object.height ?? 30,
+      rotation: object.rotation ?? 0,
+      text: object.text ?? "",
+      fontSize: object.fontSize ?? 24,
+      color: object.color ?? DEFAULT_BRUSH_COLOR,
+      opacity: object.opacity ?? 1,
+    };
+  }
+  if (object.type === "rectangle" || object.type === "ellipse") {
+    return {
+      type: object.type,
+      id: object.id,
+      x: object.x ?? 0,
+      y: object.y ?? 0,
+      width: object.width ?? 1,
+      height: object.height ?? 1,
+      rotation: object.rotation ?? 0,
+      fill: object.fill ?? "transparent",
+      color: object.color ?? DEFAULT_BRUSH_COLOR,
+      size: object.size ?? DEFAULT_BRUSH_SIZE,
+      opacity: object.opacity ?? 1,
+    };
+  }
+
+  if (object.type !== "image")
+    throw new Error(`Unsupported canvas object: ${object.type}`);
   return createImageObject({
     id: object.id,
     image_path: object.image_path,
@@ -174,7 +233,9 @@ function sanitizeCanvasObject(object: CanvasObject): CanvasObject {
 export function updateImageObject(
   content: CanvasDocumentContent,
   objectId: string,
-  updates: Partial<Pick<CanvasImageObject, "x" | "y" | "width" | "height" | "rotation">>,
+  updates: Partial<
+    Pick<CanvasImageObject, "x" | "y" | "width" | "height" | "rotation">
+  >,
 ): CanvasDocumentContent {
   const clonedContent = cloneCanvasDocumentContent(content);
 
@@ -227,7 +288,8 @@ export function resetImageObjectAspect(
     }
 
     const object = layer.objects.find(
-      (entry): entry is CanvasImageObject => entry.type === "image" && entry.id === objectId,
+      (entry): entry is CanvasImageObject =>
+        entry.type === "image" && entry.id === objectId,
     );
     if (object) {
       target = object;
@@ -262,5 +324,17 @@ export function getActiveLayer(
     return content.layers[0];
   }
 
-  return content.layers.find((layer) => layer.id === layerId) ?? content.layers[0];
+  return (
+    content.layers.find((layer) => layer.id === layerId) ?? content.layers[0]
+  );
+}
+
+export function isCanvasPathObject(
+  object: CanvasObject,
+): object is CanvasStrokeObject | CanvasLineObject {
+  return (
+    object.type === "stroke" ||
+    object.type === "line" ||
+    object.type === "arrow"
+  );
 }

@@ -97,6 +97,7 @@ const konva = vi.hoisted(() => {
     stageProps: null as KonvaProps | null,
     resizeCallback: null as ResizeObserverCallback | null,
     imageProps: new Map<string, KonvaProps>(),
+    shapeProps: new Map<string, KonvaProps>(),
     imageNodes: new Map<string, FakeImageNode>(),
     transformer,
     transformerParent: transformer,
@@ -129,6 +130,7 @@ const konva = vi.hoisted(() => {
       harness.resizeCallback = value;
     },
     imageProps: harness.imageProps,
+    shapeProps: harness.shapeProps,
     imageNodes: harness.imageNodes,
     transformer: harness.transformer,
     transformerParent: harness.transformerParent,
@@ -142,6 +144,7 @@ const konva = vi.hoisted(() => {
       harness.stageProps = null;
       harness.resizeCallback = null;
       harness.imageProps.clear();
+      harness.shapeProps.clear();
       harness.imageNodes.clear();
       harness.transformer.attachedNodes = [];
       harness.transformer.nodes.mockClear();
@@ -242,7 +245,14 @@ vi.mock("react-konva", async () => {
     Group: primitive("group"),
     Layer: primitive("layer"),
     Line: primitive("line"),
+    Shape: (props: Record<string, unknown>) => {
+      konva.shapeProps.set(String(props.id), props);
+      return React.createElement(primitive("rect"), props);
+    },
     Rect: primitive("rect"),
+    Ellipse: primitive("rect"),
+    Arrow: primitive("line"),
+    Text: primitive("rect"),
   };
 });
 
@@ -402,7 +412,9 @@ function createContent(
   };
 }
 
-function baseProps(overrides: Partial<CanvasStageProps> = {}): CanvasStageProps {
+function baseProps(
+  overrides: Partial<CanvasStageProps> = {},
+): CanvasStageProps {
   return {
     content: createContent(),
     activeLayerId: "top-layer",
@@ -420,7 +432,9 @@ function ControlledStage({
   onSelectionChange,
   ...props
 }: CanvasStageProps) {
-  const [selectedObjectIds, setSelectedObjectIds] = useState(initialSelectedObjectIds);
+  const [selectedObjectIds, setSelectedObjectIds] = useState(
+    initialSelectedObjectIds,
+  );
 
   return (
     <CanvasStage
@@ -523,12 +537,15 @@ function objectNode(id: string) {
 }
 
 function lineNodeWithPoints(points: number[]) {
-  return [...document.querySelectorAll<HTMLElement>('[data-konva-kind="line"]')].find(
-    (node) => node.dataset.points === JSON.stringify(points),
-  );
+  return [
+    ...document.querySelectorAll<HTMLElement>('[data-konva-kind="line"]'),
+  ].find((node) => node.dataset.points === JSON.stringify(points));
 }
 
-function dispatchSpace(target: EventTarget, type: "keydown" | "keyup" = "keydown") {
+function dispatchSpace(
+  target: EventTarget,
+  type: "keydown" | "keyup" = "keydown",
+) {
   const event = new KeyboardEvent(type, {
     key: " ",
     code: "Space",
@@ -564,7 +581,10 @@ class ControlledWindowImage {
 
   set src(value: string) {
     this.source = value;
-    this.onload?.call(this as unknown as GlobalEventHandlers, new Event("load"));
+    this.onload?.call(
+      this as unknown as GlobalEventHandlers,
+      new Event("load"),
+    );
   }
 
   get src() {
@@ -576,6 +596,15 @@ describe("CanvasStage", () => {
   beforeEach(() => {
     konva.reset();
     Object.values(callbacks).forEach((callback) => callback.mockClear());
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      font: "",
+      measureText: (text: string) => ({
+        width: [...text].reduce(
+          (sum, char) => sum + (char.charCodeAt(0) > 255 ? 24 : 12),
+          0,
+        ),
+      }),
+    } as unknown as CanvasRenderingContext2D);
     vi.stubGlobal("ResizeObserver", ControlledResizeObserver);
     vi.stubGlobal("Image", ControlledWindowImage);
   });
@@ -595,8 +624,14 @@ describe("CanvasStage", () => {
       width: 800,
       height: 320,
     });
-    expect(screen.getByTestId("konva-stage")).toHaveAttribute("data-width", "800");
-    expect(screen.getByTestId("konva-stage")).toHaveAttribute("data-height", "320");
+    expect(screen.getByTestId("konva-stage")).toHaveAttribute(
+      "data-width",
+      "800",
+    );
+    expect(screen.getByTestId("konva-stage")).toHaveAttribute(
+      "data-height",
+      "320",
+    );
   });
 
   it("selects the topmost visible unlocked hit and clears on an empty click", () => {
@@ -748,7 +783,9 @@ describe("CanvasStage", () => {
     act(() => pointerMove(50, 45));
     expect(objectNode("image-top")).toHaveAttribute("data-x", "40");
 
-    view.rerender(<CanvasStage {...props} selectedObjectIds={["image-second"]} />);
+    view.rerender(
+      <CanvasStage {...props} selectedObjectIds={["image-second"]} />,
+    );
 
     expect(objectNode("image-second")).toHaveAttribute("data-x", "140");
     act(() => pointerUp());
@@ -927,7 +964,9 @@ describe("CanvasStage", () => {
         konva.imageNodes.get("image-top"),
       ]);
     });
-    expect(screen.getByRole("button", { name: "Reset aspect" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reset aspect" }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Reset aspect" }));
     expect(callbacks.onResetImageAspect).toHaveBeenCalledWith("image-top");
@@ -986,9 +1025,11 @@ describe("CanvasStage", () => {
 
     act(() => pointerDown(30, 30));
     act(() => pointerMove(60, 50));
-    expect(objectNode("image-top")).toHaveAttribute("data-x", "50");
+    expect(objectNode("image-top")).toHaveAttribute("data-x", "52.5");
 
-    view.rerender(<ControlledStage {...props} activeTool={"brush" as CanvasTool} />);
+    view.rerender(
+      <ControlledStage {...props} activeTool={"brush" as CanvasTool} />,
+    );
 
     expect(callbacks.onSelectionChange).toHaveBeenLastCalledWith([]);
     expect(konvaNodeByName("canvas-selection-outline")).toBeNull();
@@ -1010,4 +1051,324 @@ describe("CanvasStage", () => {
       "false",
     );
   });
+
+  describe("canvas editor operations", () => {
+    it("pans ordinary wheel input instead of zooming", () => {
+      renderStage();
+      konva.pointer = { x: 100, y: 100 };
+      act(() =>
+        getStageHandler("onWheel")({
+          evt: { deltaX: 12, deltaY: 20, preventDefault: vi.fn() },
+        }),
+      );
+      expect(callbacks.onViewportChange).toHaveBeenCalledWith(
+        expect.objectContaining({ scale: 1, x: -12, y: -20 }),
+      );
+    });
+    it("creates a constrained rectangle in one transaction", () => {
+      const onAddObject = vi.fn();
+      renderStage({ activeTool: "rectangle", onAddObject });
+      act(() => {
+        pointerDown(10, 20);
+        konva.pointer = { x: 80, y: 50 };
+        getStageHandler("onMousemove")({ evt: { shiftKey: true } });
+      });
+      expect(onAddObject).not.toHaveBeenCalled();
+      act(() => pointerUp());
+      expect(onAddObject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "rectangle",
+          x: 10,
+          y: 20,
+          width: 70,
+          height: 70,
+        }),
+      );
+    });
+    it("edits native multiline text and commits with command Enter", () => {
+      const onAddObject = vi.fn();
+      renderStage({ activeTool: "text", onAddObject });
+      act(() => pointerDown(20, 30));
+      const editor = screen.getByRole("textbox");
+      fireEvent.change(editor, { target: { value: "Hello\nworld" } });
+      fireEvent.compositionStart(editor);
+      fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+      expect(onAddObject).not.toHaveBeenCalled();
+      fireEvent.compositionEnd(editor);
+      fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+      expect(onAddObject).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "text", text: "Hello\nworld" }),
+      );
+      expect(callbacks.onAddStroke).not.toHaveBeenCalled();
+    });
+    it("cancels a shape preview on escape", () => {
+      const onAddObject = vi.fn();
+      renderStage({ activeTool: "ellipse", onAddObject });
+      act(() => {
+        pointerDown(10, 10);
+        pointerMove(70, 60);
+      });
+      fireEvent.keyDown(window, { key: "Escape" });
+      act(() => pointerUp());
+      expect(onAddObject).not.toHaveBeenCalled();
+    });
+  });
+
+  it("commits snapped final drag rather than the unsnapped pointer delta", () => {
+    const content = createContent();
+    content.layers[0].objects = [
+      {
+        type: "rectangle",
+        id: "box",
+        x: 20,
+        y: 20,
+        width: 40,
+        height: 40,
+        rotation: 0,
+        fill: "transparent",
+        color: "#000",
+        size: 2,
+        opacity: 1,
+      },
+    ];
+    renderStage({ content, selectedObjectIds: ["box"] });
+    act(() => {
+      pointerDown(30, 30);
+      pointerMove(13, 13);
+      pointerUp();
+    });
+    expect(callbacks.onMoveSelection).toHaveBeenCalledWith({
+      dx: -20,
+      dy: -20,
+    });
+  });
+  it("resizes the selection once and cancels an unfinished frame resize", () => {
+    const content = createContent();
+    content.layers[0].objects = [
+      {
+        type: "rectangle",
+        id: "box",
+        x: 20,
+        y: 20,
+        width: 40,
+        height: 40,
+        rotation: 0,
+        fill: "transparent",
+        color: "#000",
+        size: 2,
+        opacity: 1,
+      },
+    ];
+    const onTransformSelection = vi.fn(),
+      onFrameChange = vi.fn();
+    const view = renderStage({
+      content,
+      selectedObjectIds: ["box"],
+      onTransformSelection,
+    });
+    fireEvent.mouseDown(
+      screen.getByRole("button", {
+        name: "canvas.resizeSelection bottom-right",
+      }),
+      { clientX: 60, clientY: 60 },
+    );
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 100 });
+    expect(onTransformSelection).not.toHaveBeenCalled();
+    fireEvent.mouseUp(window);
+    expect(onTransformSelection).toHaveBeenCalledWith({
+      x: 20,
+      y: 20,
+      width: 80,
+      height: 80,
+    });
+    view.unmount();
+    renderStage({ content, frameEditing: true, onFrameChange });
+    fireEvent.mouseDown(
+      screen.getByRole("button", { name: "canvas.resizeFrame bottom-right" }),
+      { clientX: 60, clientY: 60 },
+    );
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 100 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.mouseUp(window);
+    expect(onFrameChange).not.toHaveBeenCalled();
+  });
+
+  it("offers contextual selected object actions on right click without drawing", () => {
+    const onCopySelection = vi.fn();
+    renderStage({ onCopySelection });
+    fireEvent.contextMenu(screen.getByTestId("konva-stage"), {
+      clientX: 30,
+      clientY: 30,
+    });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "canvas.copySelection" }),
+    );
+    expect(onCopySelection).toHaveBeenCalledOnce();
+    expect(callbacks.onAddStroke).not.toHaveBeenCalled();
+  });
+
+  it("cancels text on window blur and on content switch", () => {
+    const onAddObject = vi.fn();
+    const props = baseProps({ activeTool: "text", onAddObject });
+    const view = render(<ControlledStage {...props} />);
+    act(() => pointerDown(20, 30));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "discard" },
+    });
+    fireEvent.blur(window);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(onAddObject).not.toHaveBeenCalled();
+    act(() => pointerDown(20, 30));
+    view.rerender(
+      <ControlledStage
+        {...props}
+        content={{ ...props.content, layers: [...props.content.layers] }}
+      />,
+    );
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+  it("renders arrow shafts and open heads in the same isolated document layer", () => {
+    const content = createContent();
+    content.layers[0].objects = [
+      {
+        type: "arrow",
+        id: "arrow",
+        points: [0, 0, 100, 0],
+        color: "#000",
+        size: 2,
+        opacity: 1,
+      },
+    ];
+    renderStage({ content });
+    const arrow = document.getElementById("arrow");
+    expect(arrow?.parentElement?.dataset.konvaKind).toBe("layer");
+    expect(arrow?.querySelectorAll('[data-konva-kind="line"]')).toHaveLength(2);
+  });
+  it("renders text using the same explicit multiline fillText layout as export", () => {
+    const content = createContent();
+    content.layers[0].objects = [
+      {
+        type: "text",
+        id: "label",
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 10,
+        rotation: 0,
+        text: "Long first line\n第二行",
+        fontSize: 20,
+        color: "#123456",
+        opacity: 1,
+      },
+    ];
+    renderStage({ content });
+    const context = { setAttr: vi.fn(), fillText: vi.fn() };
+    const draw = konva.shapeProps.get("label")?.sceneFunc as (
+      ctx: typeof context,
+    ) => void;
+    expect(draw).toBeTypeOf("function");
+    draw(context);
+    expect(context.fillText).toHaveBeenNthCalledWith(
+      1,
+      "Long first line",
+      0,
+      0,
+    );
+    expect(context.fillText).toHaveBeenNthCalledWith(2, "第二行", 0, 24);
+  });
+  it("right mouse down and drag never mutate drawing before the context menu opens", () => {
+    const onAddObject = vi.fn(),
+      onCopySelection = vi.fn();
+    renderStage({ activeTool: "brush", onAddObject, onCopySelection });
+    act(() => {
+      pointerDown(30, 30, { button: 2 });
+      pointerMove(70, 60);
+      pointerUp();
+    });
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
+    expect(callbacks.onAddStroke).not.toHaveBeenCalled();
+    expect(onAddObject).not.toHaveBeenCalled();
+    fireEvent.contextMenu(screen.getByTestId("konva-stage"), {
+      clientX: 30,
+      clientY: 30,
+    });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+  it("measures Chinese text in the rendering font rather than estimating Latin character width", () => {
+    const onAddObject = vi.fn();
+    renderStage({ activeTool: "text", fontSize: 24, onAddObject });
+    act(() => pointerDown(20, 30));
+    const editor = screen.getByRole("textbox");
+    expect(editor).toHaveAttribute("wrap", "off");
+    expect(editor).toHaveStyle({ fontFamily: "sans-serif" });
+    fireEvent.change(editor, { target: { value: "一二三四五六七八九十" } });
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+    expect(onAddObject).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "text", width: 240, height: 24 * 1.2 }),
+    );
+  });
+  it("discards unfinished frame resize when frame editing is closed and reopened", () => {
+    const onFrameChange = vi.fn();
+    const props = baseProps({ frameEditing: true, onFrameChange });
+    const view = render(<ControlledStage {...props} />);
+    fireEvent.mouseDown(
+      screen.getByRole("button", { name: "canvas.resizeFrame bottom-right" }),
+      { clientX: 512, clientY: 512 },
+    );
+    fireEvent.mouseMove(window, { clientX: 600, clientY: 600 });
+    expect(konvaNodeByName("canvas-generation-frame")).toHaveAttribute(
+      "data-width",
+      "600",
+    );
+    view.rerender(<ControlledStage {...props} frameEditing={false} />);
+    expect(konvaNodeByName("canvas-generation-frame")).toHaveAttribute(
+      "data-width",
+      "512",
+    );
+    view.rerender(<ControlledStage {...props} frameEditing />);
+    fireEvent.mouseUp(window);
+    expect(konvaNodeByName("canvas-generation-frame")).toHaveAttribute(
+      "data-width",
+      "512",
+    );
+    expect(onFrameChange).not.toHaveBeenCalled();
+  });
+  it("prevents native pointer focus from immediately dismissing the new text editor", () => {
+    renderStage({ activeTool: "text" });
+    setPointer(20, 30);
+    const event = createPointerEvent();
+    act(() => getStageHandler("onMouseDown")(event));
+    expect(event.evt.preventDefault).toHaveBeenCalledOnce();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+  it("never inserts unsupported text nodes into native Konva groups", () => {
+    renderStage();
+    const groups = [...document.querySelectorAll('[data-konva-kind="group"]')];
+    expect(
+      groups.some((group) =>
+        [...group.childNodes].some(
+          (child) => child.nodeType === Node.TEXT_NODE,
+        ),
+      ),
+    ).toBe(false);
+  });
+  it.each(["rectangle", "brush"] as const)(
+    "cancels %s drawing when switching to selection",
+    (activeTool) => {
+      const onAddObject = vi.fn();
+      const props = baseProps({ activeTool, onAddObject });
+      const view = render(<ControlledStage {...props} />);
+      act(() => {
+        pointerDown(100, 100);
+        pointerMove(150, 150);
+      });
+      view.rerender(<ControlledStage {...props} activeTool="select" />);
+      act(() => {
+        pointerMove(200, 200);
+        pointerUp();
+      });
+      expect(onAddObject).not.toHaveBeenCalled();
+      expect(callbacks.onAddStroke).not.toHaveBeenCalled();
+    },
+  );
 });

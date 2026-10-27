@@ -15,7 +15,7 @@ describe("canvas document helpers", () => {
   it("creates a default canvas document content payload", () => {
     const content = createCanvasDocumentContent();
 
-    expect(content.version).toBe(1);
+    expect(content.version).toBe(2);
     expect(content.frame.width).toBe(1024);
     expect(content.layers).toHaveLength(1);
     expect(content.layers[0].name).toBe("Sketch");

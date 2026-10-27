@@ -1,4 +1,10 @@
-import type { CanvasDocumentContent, CanvasObject, CanvasViewport } from "../../types";
+import { isCanvasPathObject } from "./document";
+import type {
+  CanvasDocumentContent,
+  CanvasObject,
+  CanvasLineObject,
+  CanvasViewport,
+} from "../../types";
 
 interface CanvasRectShape {
   x: number;
@@ -16,7 +22,13 @@ export interface CanvasScreenRect extends CanvasRectShape {
 }
 
 export function getCanvasObjectBounds(object: CanvasObject): CanvasRect | null {
-  if (object.type === "image") {
+  if (!isCanvasPathObject(object)) {
+    if (
+      ![object.x, object.y, object.width, object.height, object.rotation].every(
+        Number.isFinite,
+      )
+    )
+      return null;
     if (object.rotation === 0) {
       return {
         x: object.x,
@@ -31,7 +43,14 @@ export function getCanvasObjectBounds(object: CanvasObject): CanvasRect | null {
     const sin = normalizeFloatingPoint(Math.sin(radians));
     const corners = [
       { x: object.x, y: object.y },
-      rotateImageCorner(object.x + object.width, object.y, object.x, object.y, cos, sin),
+      rotateImageCorner(
+        object.x + object.width,
+        object.y,
+        object.x,
+        object.y,
+        cos,
+        sin,
+      ),
       rotateImageCorner(
         object.x + object.width,
         object.y + object.height,
@@ -40,7 +59,14 @@ export function getCanvasObjectBounds(object: CanvasObject): CanvasRect | null {
         cos,
         sin,
       ),
-      rotateImageCorner(object.x, object.y + object.height, object.x, object.y, cos, sin),
+      rotateImageCorner(
+        object.x,
+        object.y + object.height,
+        object.x,
+        object.y,
+        cos,
+        sin,
+      ),
     ];
     const xs = corners.map((corner) => corner.x);
     const ys = corners.map((corner) => corner.y);
@@ -57,15 +83,24 @@ export function getCanvasObjectBounds(object: CanvasObject): CanvasRect | null {
     };
   }
 
-  if (object.points.length < 2) {
+  if (
+    object.points.length < 2 ||
+    object.points.length % 2 !== 0 ||
+    !object.points.every(Number.isFinite) ||
+    !Number.isFinite(object.size)
+  ) {
     return null;
   }
 
+  const points =
+    object.type === "arrow"
+      ? [...object.points, ...getCanvasArrowHeadPoints(object)]
+      : object.points;
   const xs: number[] = [];
   const ys: number[] = [];
-  for (let index = 0; index < object.points.length; index += 2) {
-    xs.push(object.points[index]);
-    ys.push(object.points[index + 1]);
+  for (let index = 0; index < points.length; index += 2) {
+    xs.push(points[index]);
+    ys.push(points[index + 1]);
   }
 
   const padding = object.size / 2;
@@ -172,4 +207,23 @@ function rotateImageCorner(
 
 function normalizeFloatingPoint(value: number): number {
   return Math.abs(value) < Number.EPSILON ? 0 : value;
+}
+
+/** The same open V arrowhead geometry used by both canvas renderers. */
+export function getCanvasArrowHeadPoints(object: CanvasLineObject): number[] {
+  const points = object.points;
+  if (object.type !== "arrow" || points.length < 4) return [];
+  const n = points.length,
+    x = points[n - 2],
+    y = points[n - 1];
+  const angle = Math.atan2(y - points[n - 3], x - points[n - 4]);
+  const head = object.headSize ?? Math.max(12, object.size * 3);
+  return [
+    x - head * Math.cos(angle - Math.PI / 6),
+    y - head * Math.sin(angle - Math.PI / 6),
+    x,
+    y,
+    x - head * Math.cos(angle + Math.PI / 6),
+    y - head * Math.sin(angle + Math.PI / 6),
+  ];
 }
