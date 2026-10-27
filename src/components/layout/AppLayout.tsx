@@ -394,8 +394,8 @@ export default function AppLayout() {
                 className={({ isActive }) =>
                   `focus-ring relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[12px] border transition-all duration-200 ${
                     isActive
-                      ? "border-white/70 bg-surface text-primary shadow-float ring-1 ring-primary/12"
-                      : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground hover:shadow-card"
+                      ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
+                      : "border-transparent text-muted dark:text-foreground/80 hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
                   }`
                 }
               >
@@ -430,8 +430,8 @@ export default function AppLayout() {
               onClick={() => setThemePickerOpen((open) => !open)}
               className={`focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
                 themePickerOpen
-                  ? "border-white/70 bg-surface text-primary shadow-float ring-1 ring-primary/12"
-                  : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground hover:shadow-card"
+                  ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
+                  : "border-transparent text-muted dark:text-foreground/80 hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
               }`}
             >
               <motion.div
@@ -450,8 +450,8 @@ export default function AppLayout() {
               className={({ isActive }) =>
                 `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                   isActive
-                    ? "border-white/70 bg-surface text-primary shadow-float ring-1 ring-primary/12"
-                    : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/72 hover:text-foreground hover:shadow-card"
+                    ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
+                    : "border-transparent text-muted dark:text-foreground/80 hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
                 }`
               }
             >

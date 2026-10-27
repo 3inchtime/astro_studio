@@ -149,13 +149,6 @@ export function ModelSettingsPanel({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13px] font-semibold text-foreground">{entry.label}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-muted/65">
-                          {entry.supportsEdit ? t("settings.modelSupportsEdit") : t("settings.modelGenerateOnly")}
-                          {" · "}
-                          {entry.connectionDefaults.generationUrl === entry.connectionDefaults.editUrl
-                            ? t("settings.modelSharedEndpoint")
-                            : t("settings.modelSeparateEndpoints")}
-                        </span>
                       </span>
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
                         active
@@ -283,13 +276,6 @@ export function ModelSettingsPanel({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13px] font-semibold text-foreground">{entry.label}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-muted/65">
-                          {entry.supportsEdit ? t("settings.modelSupportsEdit") : t("settings.modelGenerateOnly")}
-                          {" · "}
-                          {entry.connectionDefaults.generationUrl === entry.connectionDefaults.editUrl
-                            ? t("settings.modelSharedEndpoint")
-                            : t("settings.modelSeparateEndpoints")}
-                        </span>
                       </span>
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
                         active
