@@ -488,6 +488,15 @@
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.16)),
     var(--color-rail);
+
+  @variant dark {
+    background: var(--color-rail);
+  }
+}
+
+.dark .studio-nav-rail .focus-ring:focus-visible {
+  outline: 2px solid var(--color-foreground);
+  outline-offset: 3px;
 }
 
 @utility studio-panel {
