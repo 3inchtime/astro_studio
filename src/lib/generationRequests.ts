@@ -1,6 +1,7 @@
-import { getImageModelCatalogEntry } from "./modelCatalog";
+import { getImageModelCatalogEntry, isGptImage26 } from "./modelCatalog";
 import type {
   GenerationParams,
+  ImageAdvancedOptions,
   ImageInputFidelity,
   ImageModel,
   RetryGenerationRequest,
@@ -18,6 +19,20 @@ export function buildGenerationParams(
   ).parameterCapabilities;
 
   const params: GenerationParams = {
+    ...(isGptImage26(request.model) && request.advancedOptions
+      ? {
+          advancedOptions: normalizeAdvancedOptions(
+            request.advancedOptions,
+            request.outputFormat,
+            false,
+          ),
+        }
+      : {}),
+    ...(isGptImage26(request.model) &&
+    ["jpeg", "webp"].includes(request.outputFormat) &&
+    request.outputCompression !== undefined
+      ? { outputCompression: request.outputCompression }
+      : {}),
     prompt: request.prompt,
     model: request.model,
     size: request.size,
@@ -78,8 +93,54 @@ export function buildEditParams(
   return {
     ...buildGenerationParams(request),
     sourceImagePaths: request.editSources.map((source) => source.path),
+    ...(isGptImage26(request.model) && request.advancedOptions
+      ? {
+          advancedOptions: normalizeAdvancedOptions(
+            request.advancedOptions,
+            request.outputFormat,
+            true,
+          ),
+        }
+      : {}),
     ...(capabilities.inputFidelityOptions.length > 1
       ? { inputFidelity: request.inputFidelity }
+      : {}),
+  };
+}
+
+export function normalizeAdvancedOptions(
+  options: ImageAdvancedOptions,
+  format: string,
+  editing: boolean,
+): ImageAdvancedOptions {
+  return {
+    ...(options.complexity ? { complexity: options.complexity } : {}),
+    ...(format === "gif"
+      ? {
+          ...(options.frameCount !== undefined
+            ? { frameCount: options.frameCount }
+            : {}),
+          ...(options.frameDurationMs !== undefined
+            ? { frameDurationMs: options.frameDurationMs }
+            : {}),
+        }
+      : {}),
+    ...(format === "svg" && options.svg?.model.trim()
+      ? { svg: options.svg }
+      : {}),
+    ...(!["gif", "svg"].includes(format) && options.stream !== undefined
+      ? {
+          stream: options.stream,
+          ...(options.stream && options.partialImages !== undefined
+            ? { partialImages: options.partialImages }
+            : {}),
+        }
+      : {}),
+    ...(editing && options.markupPath
+      ? { markupPath: options.markupPath }
+      : {}),
+    ...(editing && format !== "gif" && options.maskPath
+      ? { maskPath: options.maskPath }
       : {}),
   };
 }

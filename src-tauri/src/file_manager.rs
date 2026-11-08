@@ -1,4 +1,5 @@
 use crate::error::AppError;
+pub(crate) use crate::image_assets::decode_image_for_preview;
 use image::{GenericImageView, ImageFormat};
 use std::fs::File;
 use std::io::Write;
@@ -378,6 +379,8 @@ pub fn extension_for_output_format(output_format: &str) -> &'static str {
     match output_format {
         "jpeg" | "jpg" => "jpeg",
         "webp" => "webp",
+        "gif" => "gif",
+        "svg" => "svg",
         _ => "png",
     }
 }
@@ -398,6 +401,7 @@ pub fn detected_image_extension(data: &[u8]) -> Option<&'static str> {
     image::guess_format(data)
         .ok()
         .and_then(extension_for_image_format)
+        .or_else(|| crate::image_assets::is_safe_svg(data).then_some("svg"))
 }
 
 fn temporary_output_path(path: &Path) -> PathBuf {
@@ -512,8 +516,8 @@ impl FileManager {
         {
             return Err("Generation output identity is invalid".to_string());
         }
-        if images_data.is_empty() || images_data.len() > 4 {
-            return Err("Generation response must contain between one and four images".to_string());
+        if images_data.is_empty() || images_data.len() > 10 {
+            return Err("Generation response must contain between one and ten images".to_string());
         }
 
         let date_path = chrono::DateTime::parse_from_rfc3339(created_at)
@@ -545,7 +549,7 @@ impl FileManager {
         let attempt_token = uuid::Uuid::new_v4().simple().to_string();
 
         for (index, data) in images_data.iter().enumerate() {
-            let image = image::load_from_memory(data)
+            let image = decode_image_for_preview(data)
                 .map_err(|error| format!("Decode staged image failed: {error}"))?;
             let (width, height) = image.dimensions();
             let extension = detected_image_extension(data)
@@ -613,7 +617,7 @@ impl FileManager {
             })
             .unwrap_or_else(|| chrono::Local::now().format("%Y/%m/%d").to_string());
         let img =
-            image::load_from_memory(data).map_err(|e| format!("Decode image failed: {}", e))?;
+            decode_image_for_preview(data).map_err(|e| format!("Decode image failed: {}", e))?;
         let (width, height) = img.dimensions();
         let extension = detected_image_extension(data)
             .unwrap_or_else(|| extension_for_output_format(output_format));
@@ -742,6 +746,108 @@ mod tests {
     #[test]
     fn detects_image_extension_from_response_bytes() {
         assert_eq!(detected_image_extension(&jpeg_bytes()), Some("jpeg"));
+    }
+
+    fn svg_bytes() -> Vec<u8> {
+        br##"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"><rect width="32" height="16" fill="#ff0000"/></svg>"##.to_vec()
+    }
+
+    fn animated_gif_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            encoder
+                .set_repeat(image::codecs::gif::Repeat::Infinite)
+                .unwrap();
+            for color in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        image::RgbaImage::from_pixel(32, 16, image::Rgba(color)),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(200, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn svg_and_gif_output_extensions_are_supported() {
+        assert_eq!(extension_for_output_format("svg"), "svg");
+        assert_eq!(extension_for_output_format("gif"), "gif");
+        assert_eq!(detected_image_extension(&svg_bytes()), Some("svg"));
+        assert_eq!(detected_image_extension(&animated_gif_bytes()), Some("gif"));
+    }
+
+    #[test]
+    fn saves_and_stages_svg_and_animated_gif_without_reencoding() {
+        use image::AnimationDecoder;
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        for (format, source) in [("svg", svg_bytes()), ("gif", animated_gif_bytes())] {
+            let saved = manager
+                .save_image_at(format, &source, "png", Some("2026-04-29T06:18:01Z"))
+                .unwrap();
+            assert!(saved.file_path.ends_with(&format!(".{format}")));
+            assert_eq!((saved.width, saved.height), (32, 16));
+            assert_eq!(std::fs::read(&saved.file_path).unwrap(), source);
+            assert_eq!(
+                image::open(&saved.thumbnail_path).unwrap().dimensions(),
+                (256, 128)
+            );
+            let promoted = manager
+                .stage_generation_images(
+                    format,
+                    std::slice::from_ref(&source),
+                    "png",
+                    "2026-04-29T06:18:01Z",
+                )
+                .unwrap()
+                .promote()
+                .unwrap();
+            let staged = &promoted.saved_images()[0];
+            let stored = std::fs::read(&staged.file_path).unwrap();
+            assert!(staged.file_path.ends_with(&format!(".{format}")));
+            assert_eq!(stored, source);
+            assert_eq!(
+                image::open(&staged.thumbnail_path).unwrap().dimensions(),
+                (256, 128)
+            );
+            if format == "gif" {
+                let frames = image::codecs::gif::GifDecoder::new(Cursor::new(stored))
+                    .unwrap()
+                    .into_frames()
+                    .collect_frames()
+                    .unwrap();
+                assert_eq!(frames.len(), 2);
+                assert_ne!(frames[0].buffer(), frames[1].buffer());
+                assert_eq!(frames[1].delay(), image::Delay::from_numer_denom_ms(200, 1));
+            }
+        }
+        std::fs::remove_dir_all(base_dir).unwrap();
+    }
+
+    #[test]
+    fn stages_ten_outputs_but_rejects_eleven() {
+        let base_dir = test_base_dir();
+        let manager = FileManager::new(base_dir.clone());
+        let sources = vec![jpeg_bytes(); 10];
+        let staged = manager
+            .stage_generation_images("ten", &sources, "jpeg", "2026-04-29T06:18:01Z")
+            .unwrap();
+        assert_eq!(staged.len(), 10);
+        drop(staged);
+        assert!(manager
+            .stage_generation_images(
+                "eleven",
+                &vec![jpeg_bytes(); 11],
+                "jpeg",
+                "2026-04-29T06:18:01Z"
+            )
+            .is_err());
+        std::fs::remove_dir_all(base_dir).unwrap();
     }
 
     #[test]

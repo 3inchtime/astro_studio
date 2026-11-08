@@ -271,6 +271,8 @@ impl GenerationJobRequestKind {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct GenerationJobOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) advanced_options: Option<crate::models::ImageAdvancedOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) aspect_ratio: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) resolution: Option<String>,
@@ -363,6 +365,8 @@ enum GenerationJobSourceRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct CanonicalGenerationMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    advanced_options: Option<crate::models::ImageAdvancedOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     aspect_ratio: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1297,7 +1301,8 @@ fn validate_job_projection(
         && source_image_paths
             .iter()
             .all(|path| nonempty(path) && public_string_is_safe(path));
-    let metadata_matches = metadata.aspect_ratio == request.options.aspect_ratio
+    let metadata_matches = metadata.advanced_options == request.options.advanced_options
+        && metadata.aspect_ratio == request.options.aspect_ratio
         && metadata.resolution == request.options.resolution
         && metadata.request_kind == request.kind
         && metadata.conversation_id == linked_conversation_id.as_str()
@@ -1314,7 +1319,7 @@ fn validate_job_projection(
         && metadata.source_image_count == source_image_paths.len()
         && metadata.output_compression <= 100
         && metadata.partial_images <= 3
-        && (1..=4).contains(&metadata.image_count)
+        && (1..=10).contains(&metadata.image_count)
         && request
             .options
             .stream
@@ -1726,8 +1731,39 @@ fn request_options_shape_valid(options: &GenerationJobOptions) -> bool {
         && options.output_compression.is_none_or(|value| value <= 100)
         && options
             .image_count
-            .is_none_or(|value| (1..=4).contains(&value))
+            .is_none_or(|value| (1..=10).contains(&value))
         && options.partial_images.is_none_or(|value| value <= 3)
+        && options.advanced_options.as_ref().is_none_or(|a| {
+            a.complexity
+                .as_deref()
+                .is_none_or(|v| ["low", "medium", "high"].contains(&v))
+                && a.frame_count.is_none_or(|v| (2..=16).contains(&v))
+                && a.frame_duration_ms.is_none_or(|v| v >= 20)
+                && a.partial_images.is_none_or(|v| v <= 3)
+                && !(a.markup_path.is_some() && a.mask_path.is_some())
+                && [&a.markup_path, &a.mask_path]
+                    .into_iter()
+                    .flatten()
+                    .all(|p| {
+                        p.len() <= 32_768
+                            && std::path::Path::new(p).is_absolute()
+                            && public_string_is_safe(p)
+                            && !p.chars().any(char::is_control)
+                    })
+                && a.svg.as_ref().is_none_or(|svg| {
+                    nonempty(&svg.model)
+                        && svg.model.len() <= 256
+                        && public_string_is_safe(&svg.model)
+                        && svg.reasoning.as_ref().is_none_or(|r| {
+                            ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                                .contains(&r.effort.as_str())
+                        })
+                })
+                && a.stream
+                    .is_none_or(|v| options.stream.is_none_or(|stream| v == stream))
+                && a.partial_images
+                    .is_none_or(|v| options.partial_images.is_none_or(|partial| v == partial))
+        })
 }
 
 fn request_options_match_prepared(request: &PreparedGenerationJob) -> bool {
@@ -1760,6 +1796,10 @@ fn request_options_match_prepared(request: &PreparedGenerationJob) -> bool {
             .input_fidelity
             .as_deref()
             .is_none_or(|value| value == request.input_fidelity)
+        && options.advanced_options.as_ref().is_none_or(|a| {
+            a.stream.is_none_or(|v| v == request.stream)
+                && a.partial_images.is_none_or(|v| v == request.partial_images)
+        })
         && options.stream.is_none_or(|value| value == request.stream)
         && options
             .partial_images
@@ -1783,6 +1823,8 @@ pub(crate) fn terminal_message_for_code(code: &str) -> &'static str {
         "provider_profile_missing" => "The selected provider profile is unavailable",
         "provider_configuration_invalid" => "The provider configuration is invalid",
         "source_image_invalid" => "A source image is unavailable or invalid",
+        "image_parameters_rejected" => "The provider rejected the image settings. Reduce GIF frames, dimensions, or image count and retry.",
+        "moderation_blocked" => "The image provider blocked this request under its moderation policy.",
         "request_rejected" | "invalid_request" => "The generation request was rejected",
         "rate_limited" => "The provider rate limit was reached",
         "provider_unavailable" => "The provider is temporarily unavailable",
@@ -2007,6 +2049,7 @@ fn canonical_metadata(
     identity: &ResolvedConversationIdentity,
 ) -> Result<CanonicalGenerationMetadata, AppError> {
     Ok(CanonicalGenerationMetadata {
+        advanced_options: request.request_options.advanced_options.clone(),
         aspect_ratio: request.request_options.aspect_ratio.clone(),
         resolution: request.request_options.resolution.clone(),
         request_kind: GenerationJobRequestKind::parse(&request.request_kind)?,
@@ -2077,7 +2120,7 @@ fn validate_prepared_job(request: &PreparedGenerationJob) -> Result<(), AppError
         && request.auto_attempt >= 0
         && request.max_auto_attempts >= 0
         && request.auto_attempt <= request.max_auto_attempts
-        && (1..=4).contains(&request.image_count)
+        && (1..=10).contains(&request.image_count)
         && request.partial_images <= 3
         && (0..=100).contains(&request.output_compression);
     let snapshot_is_public = endpoint_snapshot_is_public(&request.endpoint_snapshot);
@@ -3289,6 +3332,9 @@ pub(crate) fn load_generation_execution_snapshot_for_stage_in_transaction(
             serde_json::from_str(value).map_err(|_| AppError::GenerationJobCorruptPersistedData)
         })?;
     let runtime_options = GptImageRequestOptions {
+        advanced_options: request.options.advanced_options.clone(),
+        prepared_overlay: None,
+        progress_context: Some((job.generation_id.clone(), job.client_request_id.clone())),
         aspect_ratio: request.options.aspect_ratio.clone(),
         resolution: request.options.resolution.clone(),
         size: generation.size.clone(),

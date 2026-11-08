@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-pub(crate) const MAX_SOURCE_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+pub(crate) const MAX_SOURCE_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(Default)]
 pub(crate) struct SelectedImageRegistry {
@@ -93,7 +93,7 @@ pub(crate) fn validate_source_image_data(
     let media_type = source_image_media_type_for_path(path)?;
     if data.len() as u64 > MAX_SOURCE_IMAGE_BYTES {
         return Err(AppError::Validation {
-            message: format!("Image '{}' exceeds 10MB limit", path.display()),
+            message: format!("Image '{}' exceeds 50MB limit", path.display()),
         });
     }
 
@@ -113,13 +113,51 @@ pub(crate) fn validate_source_image_data(
     Ok(media_type)
 }
 
+pub(crate) fn validate_edit_overlay(source: &[u8], overlay: &[u8]) -> Result<(), AppError> {
+    use image::{GenericImageView, ImageDecoder};
+    let invalid = || {
+        AppError::Validation { message: "Overlay must be a transparent PNG matching the first oriented image, at most 50 MB and 16,777,216 pixels.".into() }
+    };
+    if overlay.len() as u64 > MAX_SOURCE_IMAGE_BYTES || !overlay.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(invalid());
+    }
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(source))
+        .with_guessed_format()
+        .map_err(|_| invalid())?
+        .into_decoder()
+        .map_err(|_| invalid())?;
+    let source_dimensions = decoder.dimensions();
+    if u64::from(source_dimensions.0) * u64::from(source_dimensions.1) > 16_777_216 {
+        return Err(invalid());
+    }
+    let orientation = decoder.orientation().map_err(|_| invalid())?;
+    let mut source = image::DynamicImage::from_decoder(decoder).map_err(|_| invalid())?;
+    source.apply_orientation(orientation);
+    let reader = image::ImageReader::new(std::io::Cursor::new(overlay))
+        .with_guessed_format()
+        .map_err(|_| invalid())?;
+    let dimensions = reader.into_dimensions().map_err(|_| invalid())?;
+    if u64::from(dimensions.0) * u64::from(dimensions.1) > 16_777_216
+        || dimensions != source.dimensions()
+    {
+        return Err(invalid());
+    }
+    let overlay = image::load_from_memory(overlay)
+        .map_err(|_| invalid())?
+        .to_rgba8();
+    if !overlay.pixels().any(|pixel| pixel[3] < 255) {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
 fn validate_source_image_file(path: &Path) -> Result<(), AppError> {
     let metadata = std::fs::metadata(path).map_err(|e| AppError::Validation {
         message: format!("Read selected image metadata failed: {}", e),
     })?;
     if metadata.len() > MAX_SOURCE_IMAGE_BYTES {
         return Err(AppError::Validation {
-            message: format!("Image '{}' exceeds 10MB limit", path.display()),
+            message: format!("Image '{}' exceeds 50MB limit", path.display()),
         });
     }
 
@@ -157,6 +195,66 @@ pub(crate) fn resolve_source_image_paths(
     Ok(resolved_paths)
 }
 
+// Restart retries may reuse only the exact source list and overlay pair from a
+// validated failed job. Picker registration still governs every other request.
+fn persisted_edit_paths_match(
+    request: &serde_json::Value,
+    model: &str,
+    sources: &[String],
+    advanced: Option<&ImageAdvancedOptions>,
+) -> bool {
+    let saved_sources: Option<Vec<String>> =
+        serde_json::from_value(request["source_image_paths"].clone()).ok();
+    let saved_advanced: Option<ImageAdvancedOptions> =
+        serde_json::from_value(request["options"]["advanced_options"].clone()).ok();
+    request["model"].as_str() == Some(model)
+        && saved_sources.as_deref() == Some(sources)
+        && saved_advanced.as_ref().and_then(|a| a.markup_path.as_ref())
+            == advanced.and_then(|a| a.markup_path.as_ref())
+        && saved_advanced.as_ref().and_then(|a| a.mask_path.as_ref())
+            == advanced.and_then(|a| a.mask_path.as_ref())
+}
+
+pub(crate) fn persisted_retry_authorizes_edit(
+    db: &Database,
+    model: Option<&str>,
+    sources: &[String],
+    advanced: Option<&ImageAdvancedOptions>,
+) -> Result<bool, AppError> {
+    let Some(model @ (ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST)) = model else {
+        return Ok(false);
+    };
+    let conn = db.conn.lock().map_err(|_| AppError::Validation {
+        message: "Cannot read saved edit authorization.".into(),
+    })?;
+    let ids = {
+        let mut query = conn.prepare("SELECT j.id FROM generation_jobs j JOIN generations g ON g.id=j.generation_id WHERE j.status IN ('failed','interrupted') AND g.deleted_at IS NULL AND g.engine=?1 AND g.source_image_paths=?2")
+            .map_err(|e| AppError::Database { message: e.to_string() })?;
+        let rows = query
+            .query_map(
+                rusqlite::params![model, serde_json::to_string(sources).unwrap_or_default()],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|e| AppError::Database {
+                message: e.to_string(),
+            })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database {
+                message: e.to_string(),
+            })?
+    };
+    for id in ids {
+        // This validates the job, linked generation and canonical metadata as
+        // one read transaction before its paths can confer authority.
+        if let Ok(job) = crate::generation_jobs::get_job(&conn, &id) {
+            if persisted_edit_paths_match(&job.request, model, sources, advanced) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -168,6 +266,7 @@ pub(crate) async fn generate_image(
     prompt: String,
     client_request_id: Option<String>,
     model: Option<String>,
+    advanced_options: Option<ImageAdvancedOptions>,
     aspect_ratio: Option<String>,
     resolution: Option<String>,
     size: Option<String>,
@@ -185,6 +284,7 @@ pub(crate) async fn generate_image(
         db.inner(),
         engine_state.inner(),
         GenerationExecutionRequest {
+            advanced_options,
             aspect_ratio,
             resolution,
             kind: GenerationLifecycleKind::Generate,
@@ -219,6 +319,7 @@ pub(crate) async fn edit_image(
     prompt: String,
     model: Option<String>,
     source_image_paths: Vec<String>,
+    advanced_options: Option<ImageAdvancedOptions>,
     aspect_ratio: Option<String>,
     resolution: Option<String>,
     size: Option<String>,
@@ -237,18 +338,74 @@ pub(crate) async fn edit_image(
             message: "Please select at least one source image.".to_string(),
         });
     }
-    let source_image_paths = resolve_source_image_paths(
-        &app,
+    let persisted_retry = persisted_retry_authorizes_edit(
         db.inner(),
-        selected_images.inner(),
+        model.as_deref(),
         &source_image_paths,
+        advanced_options.as_ref(),
     )?;
+    let source_image_paths = if persisted_retry {
+        source_image_paths
+            .iter()
+            .map(|path| {
+                let canonical = canonicalize_source_image_path(Path::new(path))?;
+                if canonical.to_string_lossy() != *path {
+                    return Err(AppError::Validation {
+                        message: "Saved source path changed.".into(),
+                    });
+                }
+                validate_source_image_file(&canonical)?;
+                Ok(path.clone())
+            })
+            .collect::<Result<Vec<_>, AppError>>()?
+    } else {
+        resolve_source_image_paths(
+            &app,
+            db.inner(),
+            selected_images.inner(),
+            &source_image_paths,
+        )?
+    };
 
+    let mut advanced_options = advanced_options;
+    if let Some(advanced) = &mut advanced_options {
+        for path in [&mut advanced.markup_path, &mut advanced.mask_path]
+            .into_iter()
+            .flatten()
+        {
+            if persisted_retry {
+                let canonical = canonicalize_source_image_path(Path::new(path))?;
+                if canonical.to_string_lossy() != *path {
+                    return Err(AppError::Validation {
+                        message: "Saved overlay path changed.".into(),
+                    });
+                }
+                validate_source_image_file(&canonical)?;
+            } else {
+                let resolved = resolve_source_image_paths(
+                    &app,
+                    db.inner(),
+                    selected_images.inner(),
+                    std::slice::from_ref(path),
+                )?;
+                *path = resolved[0].clone();
+            }
+            let source =
+                std::fs::read(&source_image_paths[0]).map_err(|_| AppError::Validation {
+                    message: "Cannot read source image.".into(),
+                })?;
+            let overlay = std::fs::read(&*path).map_err(|_| AppError::Validation {
+                message: "Cannot read overlay image.".into(),
+            })?;
+            validate_edit_overlay(&source, &overlay)?;
+        }
+    }
     submit_generation_request(
         &app,
         db.inner(),
         engine_state.inner(),
         GenerationExecutionRequest {
+            advanced_options,
             aspect_ratio,
             resolution,
             kind: GenerationLifecycleKind::Edit,
@@ -319,9 +476,7 @@ pub(crate) fn copy_image_to_clipboard(
     let data = std::fs::read(&image_path).map_err(|e| AppError::FileSystem {
         message: format!("Read image failed: {}", e),
     })?;
-    let img = image::load_from_memory(&data).map_err(|e| AppError::FileSystem {
-        message: format!("Decode image failed: {}", e),
-    })?;
+    let img = file_manager::decode_image_for_preview(&data)?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
 
@@ -355,7 +510,7 @@ pub(crate) async fn save_image_to_file(
 
     let save_path = rfd::AsyncFileDialog::new()
         .set_file_name(file_name)
-        .add_filter("Image", &["png", "jpg", "jpeg", "webp"])
+        .add_filter("Image", &["png", "jpg", "jpeg", "webp", "gif", "svg"])
         .save_file()
         .await
         .ok_or_else(|| AppError::Validation {
@@ -465,5 +620,56 @@ mod path_boundary_tests {
 
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod image26_overlay_tests {
+    use super::*;
+    fn png(w: u32, h: u32, alpha: u8) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, alpha]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        bytes.into_inner()
+    }
+    #[test]
+    fn persisted_retry_does_not_authorize_another_source_or_overlay() {
+        let request = serde_json::json!({"model":"gpt-image-2.6-flare","source_image_paths":["/source.png"],"options":{"advanced_options":{"markupPath":"/overlay.png"}}});
+        let a: ImageAdvancedOptions =
+            serde_json::from_value(serde_json::json!({"markupPath":"/overlay.png"})).unwrap();
+        assert!(persisted_edit_paths_match(
+            &request,
+            "gpt-image-2.6-flare",
+            &["/source.png".into()],
+            Some(&a)
+        ));
+        assert!(!persisted_edit_paths_match(
+            &request,
+            "gpt-image-2.6-flare",
+            &["/other.png".into()],
+            Some(&a)
+        ));
+        let mut other = a.clone();
+        other.markup_path = Some("/secret.png".into());
+        assert!(!persisted_edit_paths_match(
+            &request,
+            "gpt-image-2.6-flare",
+            &["/source.png".into()],
+            Some(&other)
+        ));
+        assert!(!persisted_edit_paths_match(
+            &request,
+            "gpt-image-2.6-sunburst",
+            &["/source.png".into()],
+            Some(&a)
+        ));
+    }
+    #[test]
+    fn overlay_requires_transparency_and_matching_dimensions() {
+        let source = png(8, 8, 255);
+        assert!(validate_edit_overlay(&source, &png(8, 8, 0)).is_ok());
+        assert!(validate_edit_overlay(&source, &png(8, 8, 255)).is_err());
+        assert!(validate_edit_overlay(&source, &png(4, 8, 0)).is_err());
+        assert!(validate_edit_overlay(&source, b"not png").is_err());
     }
 }

@@ -16,9 +16,11 @@ pub(crate) enum ImageProvider {
 pub(crate) fn provider_for_model(model: &str) -> ImageProvider {
     use crate::models::*;
     match model {
-        ENGINE_GPT_IMAGE_2 | ENGINE_GPT_IMAGE_FLARE | ENGINE_GPT_IMAGE_SUNBURST => {
-            ImageProvider::OpenAi
-        }
+        ENGINE_GPT_IMAGE_26_FLARE
+        | ENGINE_GPT_IMAGE_26_SUNBURST
+        | ENGINE_GPT_IMAGE_2
+        | ENGINE_GPT_IMAGE_FLARE
+        | ENGINE_GPT_IMAGE_SUNBURST => ImageProvider::OpenAi,
         ENGINE_GROK => ImageProvider::Xai,
         ENGINE_SEEDREAM_PRO | ENGINE_SEEDREAM_FLASH => ImageProvider::Seedream,
         _ if model_registry::is_gemini_model(model) => ImageProvider::Gemini,

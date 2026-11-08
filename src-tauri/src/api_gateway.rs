@@ -8,6 +8,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Aggregate raw provider response bound, shared with durable recovery artifacts.
+pub(crate) const MAX_PROVIDER_RESPONSE_BODY_BYTES: usize = 256 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RetryAfterHint {
     DelaySeconds(u64),
@@ -123,6 +126,21 @@ impl EngineCallError {
         }
     }
 
+    fn with_provider_error(mut self, value: &Value) -> Self {
+        let error = value.get("error").unwrap_or(value);
+        if error["code"] == "moderation_blocked" {
+            self.code = "moderation_blocked".into();
+            self.safe_to_retry = false;
+            self.sanitized_message =
+                "The image provider blocked this request under its moderation policy.".into();
+        } else if error["type"] == "image_generation_user_error" {
+            self.code = "image_parameters_rejected".into();
+            self.safe_to_retry = false;
+            self.sanitized_message = "The provider rejected the image settings. Reduce GIF frames, dimensions, or image count and retry.".into();
+        }
+        self
+    }
+
     fn from_send_error(error: &reqwest::Error) -> Self {
         if error.is_timeout() {
             Self::provider_outcome_unknown("provider request timed out")
@@ -133,6 +151,90 @@ impl EngineCallError {
         } else {
             Self::provider_outcome_unknown("provider request did not complete")
         }
+    }
+}
+
+/// Incremental SSE parser. Only completed images enter the durable response;
+/// partial images are ephemeral progress and never become recoverable output.
+#[derive(Default)]
+struct ImageEventStream {
+    pending: Vec<u8>,
+    completed: Vec<Value>,
+    total_bytes: usize,
+}
+impl ImageEventStream {
+    fn push(&mut self, chunk: &[u8]) -> Result<Vec<Value>, EngineCallError> {
+        self.total_bytes = self.total_bytes.saturating_add(chunk.len());
+        if self.total_bytes > MAX_PROVIDER_RESPONSE_BODY_BYTES {
+            return Err(EngineCallError::provider_outcome_unknown(
+                "stream too large",
+            ));
+        }
+        self.pending.extend_from_slice(chunk);
+        let mut partials = Vec::new();
+        loop {
+            let boundary = self
+                .pending
+                .windows(2)
+                .position(|b| b == b"\n\n")
+                .map(|n| (n, 2))
+                .into_iter()
+                .chain(
+                    self.pending
+                        .windows(4)
+                        .position(|b| b == b"\r\n\r\n")
+                        .map(|n| (n, 4)),
+                )
+                .min_by_key(|v| v.0);
+            let Some((end, separator)) = boundary else {
+                break;
+            };
+            let frame: Vec<u8> = self.pending.drain(..end + separator).collect();
+            let frame = std::str::from_utf8(&frame)
+                .map_err(|_| EngineCallError::provider_outcome_unknown("invalid stream UTF8"))?;
+            let data = frame
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:"))
+                .map(str::trim_start)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            let value: Value = serde_json::from_str(&data)
+                .map_err(|_| EngineCallError::provider_outcome_unknown("invalid stream JSON"))?;
+            let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+            if kind == "error" || kind.ends_with(".error") || value.get("error").is_some() {
+                return Err(EngineCallError::request_rejected().with_provider_error(&value));
+            }
+            if matches!(
+                kind,
+                "image_generation.partial_image" | "image_edit.partial_image"
+            ) {
+                if value.get("b64_json").and_then(Value::as_str).is_some() {
+                    partials.push(value);
+                }
+            } else if matches!(kind, "image_generation.completed" | "image_edit.completed") {
+                if let Some(data) = value.get("data").and_then(Value::as_array) {
+                    self.completed.extend(data.iter().cloned());
+                } else if value.get("b64_json").and_then(Value::as_str).is_some() {
+                    self.completed.push(value);
+                } else {
+                    return Err(EngineCallError::provider_outcome_unknown(
+                        "completed stream missing image",
+                    ));
+                }
+            }
+        }
+        Ok(partials)
+    }
+    fn finish(self) -> Result<String, EngineCallError> {
+        if self.completed.is_empty() || !self.pending.iter().all(u8::is_ascii_whitespace) {
+            return Err(EngineCallError::provider_outcome_unknown(
+                "stream incomplete",
+            ));
+        }
+        Ok(serde_json::json!({"data":self.completed}).to_string())
     }
 }
 
@@ -149,10 +251,17 @@ pub(crate) struct ProviderAttemptBody {
 ///
 /// The bytes deliberately have no pathname-based fallback, and this type does
 /// not implement `Debug` or `Serialize` because source images may be private.
+#[derive(Clone)]
 pub struct PreparedEditImage {
     file_name: String,
     mime_type: String,
     bytes: Vec<u8>,
+}
+
+impl std::fmt::Debug for PreparedEditImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PreparedEditImage([private])")
+    }
 }
 
 impl PreparedEditImage {
@@ -202,6 +311,7 @@ pub trait ImageEngine: Send + Sync {
 
 #[derive(Clone)]
 pub struct GptImageEngine {
+    app: Arc<std::sync::OnceLock<tauri::AppHandle>>,
     client: reqwest::Client,
     edit_client: reqwest::Client,
     download_client: reqwest::Client,
@@ -224,6 +334,9 @@ impl reqwest::dns::Resolve for SafeDownloadDnsResolver {
 }
 
 impl GptImageEngine {
+    pub(crate) fn attach_app(&self, app: tauri::AppHandle) {
+        let _ = self.app.set(app);
+    }
     pub fn new(config: &ApiConfig) -> Result<Self, String> {
         let timeout_secs = Self::normalize_timeout_secs(config.timeout_secs);
         let client = Self::build_client(timeout_secs)?;
@@ -231,6 +344,7 @@ impl GptImageEngine {
         let download_client = Self::build_download_client()?;
 
         Ok(Self {
+            app: Arc::new(std::sync::OnceLock::new()),
             client,
             edit_client,
             download_client,
@@ -285,22 +399,71 @@ impl GptImageEngine {
     }
 
     async fn read_attempt_response(
-        response: reqwest::Response,
-        requested_image_count: u8,
+        &self,
+        mut response: reqwest::Response,
+        options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
         let status = response.status();
         let retry_after = retry_after_from_headers(response.headers());
         if !status.is_success() {
-            return Err(EngineCallError::from_http_status(
-                status.as_u16(),
-                retry_after,
-            ));
+            let mut error = EngineCallError::from_http_status(status.as_u16(), retry_after);
+            // Never publish provider-supplied prose or secrets; keep actionable,
+            // allowlisted image error categories while disabling unsafe retries.
+            let mut body = Vec::new();
+            while let Ok(Some(chunk)) = response.chunk().await {
+                if body.len() + chunk.len() > 64 * 1024 {
+                    break;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                error = error.with_provider_error(&value);
+            }
+            return Err(error);
         }
 
-        let body_text = response
-            .text()
+        let requested_image_count = options.image_count;
+        if response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.starts_with("text/event-stream"))
+        {
+            let mut decoder = ImageEventStream::default();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| EngineCallError::provider_outcome_unknown("stream read failed"))?
+            {
+                for partial in decoder.push(&chunk)? {
+                    if let (Some(app), Some((generation_id, client_request_id))) =
+                        (self.app.get(), &options.progress_context)
+                    {
+                        use tauri::Emitter;
+                        let _ = app.emit("generation:partial", serde_json::json!({"generation_id":generation_id,"client_request_id":client_request_id,"partial_image_index":partial["partial_image_index"],"b64_json":partial["b64_json"],"output_format":options.output_format}));
+                    }
+                }
+            }
+            return Ok(ProviderAttemptBody {
+                body_text: decoder.finish()?,
+                requested_image_count,
+            });
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|_| EngineCallError::provider_outcome_unknown("response body read failed"))?;
+            .map_err(|_| EngineCallError::provider_outcome_unknown("response body read failed"))?
+        {
+            if bytes.len().saturating_add(chunk.len()) > MAX_PROVIDER_RESPONSE_BODY_BYTES {
+                return Err(EngineCallError::provider_outcome_unknown(
+                    "response body exceeds storage bound",
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body_text = String::from_utf8(bytes)
+            .map_err(|_| EngineCallError::provider_outcome_unknown("response body is not UTF8"))?;
         Ok(ProviderAttemptBody {
             body_text,
             requested_image_count,
@@ -346,7 +509,7 @@ impl GptImageEngine {
             .await
             .map_err(|error| EngineCallError::from_send_error(&error))?;
 
-        Self::read_attempt_response(response, options.image_count).await
+        self.read_attempt_response(response, options).await
     }
 
     async fn request_native_images(
@@ -374,7 +537,7 @@ impl GptImageEngine {
             .send()
             .await
             .map_err(|error| EngineCallError::from_send_error(&error))?;
-        Self::read_attempt_response(response, options.image_count).await
+        self.read_attempt_response(response, options).await
     }
 
     pub(crate) async fn decode_images_from_response(
@@ -430,6 +593,22 @@ impl GptImageEngine {
                 .mime_str(image.mime_type())
                 .map_err(|_| EngineCallError::request_rejected())?;
             form = form.part(openai::edit_image_part_field_name(), part);
+        }
+        if let Some(overlay) = &options.prepared_overlay {
+            let field = if options
+                .advanced_options
+                .as_ref()
+                .is_some_and(|a| a.markup_path.is_some())
+            {
+                "markup"
+            } else {
+                "mask"
+            };
+            let part = Part::bytes(overlay.bytes().to_vec())
+                .file_name(overlay.file_name().to_string())
+                .mime_str("image/png")
+                .map_err(|_| EngineCallError::request_rejected())?;
+            form = form.part(field, part);
         }
         Ok(form)
     }
@@ -624,7 +803,7 @@ impl ImageEngine for GptImageEngine {
             .send()
             .await
             .map_err(|error| EngineCallError::from_send_error(&error))?;
-        Self::read_attempt_response(response, options.image_count).await
+        self.read_attempt_response(response, options).await
     }
 
     async fn edit(
@@ -674,7 +853,7 @@ impl ImageEngine for GptImageEngine {
             .send()
             .await
             .map_err(|error| EngineCallError::from_send_error(&error))?;
-        Self::read_attempt_response(response, options.image_count).await
+        self.read_attempt_response(response, options).await
     }
 }
 
@@ -739,6 +918,9 @@ mod tests {
 
     fn test_options(image_count: u8) -> GptImageRequestOptions {
         GptImageRequestOptions {
+            advanced_options: None,
+            prepared_overlay: None,
+            progress_context: None,
             aspect_ratio: None,
             resolution: None,
             size: DEFAULT_IMAGE_SIZE.to_string(),
@@ -756,6 +938,7 @@ mod tests {
 
     fn local_test_engine(timeout_secs: Option<u64>) -> GptImageEngine {
         GptImageEngine {
+            app: Arc::new(std::sync::OnceLock::new()),
             client: GptImageEngine::build_client_with_proxy_policy(timeout_secs, true)
                 .expect("build local test client"),
             edit_client: GptImageEngine::build_client_with_proxy_policy(timeout_secs, true)
@@ -869,6 +1052,44 @@ mod tests {
             server.await.expect("join server");
             assert_eq!(submissions.load(Ordering::SeqCst), 1, "model {model}");
         }
+    }
+
+    #[tokio::test]
+    async fn image26_sse_response_decodes_only_completed_image() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_complete_http_request(&mut stream).await;
+            assert!(String::from_utf8_lossy(&request).contains("\"stream\":true"));
+            let body="data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cA==\",\"partial_image_index\":0}\n\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"Zg==\"}\n\n";
+            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());
+            stream.write_all(headers.as_bytes()).await.unwrap();
+            for chunk in body.as_bytes().chunks(7) {
+                stream.write_all(chunk).await.unwrap();
+            }
+        });
+        let engine = local_test_engine(Some(2));
+        let mut options = test_options(1);
+        options.stream = true;
+        options.partial_images = 1;
+        let response = engine
+            .generate(
+                ENGINE_GPT_IMAGE_26_FLARE,
+                "test-key",
+                &format!("http://{address}/images/generations"),
+                "draw",
+                &options,
+            )
+            .await
+            .unwrap();
+        let decoded = engine
+            .decode_images_from_response(&response.body_text, &|| false)
+            .await
+            .unwrap();
+        assert_eq!(decoded, vec![b"f".to_vec()]);
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -1400,5 +1621,42 @@ mod tests {
             .decode_images_from_response(thought_and_result, &|| true)
             .await
             .is_err());
+    }
+}
+
+#[cfg(test)]
+mod image26_stream_tests {
+    use super::*;
+    #[test]
+    fn image26_stream_errors_preserve_safe_actionable_categories() {
+        for (value, code) in [
+            (
+                serde_json::json!({"type":"error","code":"moderation_blocked","message":"sk-secret"}),
+                "moderation_blocked",
+            ),
+            (
+                serde_json::json!({"type":"error","error":{"type":"image_generation_user_error","message":"sk-secret"}}),
+                "image_parameters_rejected",
+            ),
+        ] {
+            let frame = format!("data: {value}\n\n");
+            let error = ImageEventStream::default()
+                .push(frame.as_bytes())
+                .unwrap_err();
+            assert_eq!(error.code, code);
+            assert!(!error.safe_to_retry);
+            assert!(!error.sanitized_message.contains("sk-secret"));
+        }
+    }
+    #[test]
+    fn stream_decoder_keeps_final_images_and_rejects_unfinished_streams() {
+        let mut decoder = ImageEventStream::default();
+        assert!(decoder.push(b"event: image_generation.partial_image\ndata: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"eA==\",\"partial_image_index\":0}\n\n").unwrap()[0]["partial_image_index"] == 0);
+        assert!(decoder.finish().is_err());
+        let mut decoder = ImageEventStream::default();
+        decoder.push(b"event: image_generation.completed\r\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"eA==\"}\r\n").unwrap();
+        decoder.push(b"\r\n").unwrap();
+        let body: Value = serde_json::from_str(&decoder.finish().unwrap()).unwrap();
+        assert_eq!(body["data"][0]["b64_json"], "eA==");
     }
 }

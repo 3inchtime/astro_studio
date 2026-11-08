@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import {
   clearLogs,
+  onGenerationPartial,
   addPromptFavoriteToFolders,
   archiveConversation,
   createCanvasDocument,
@@ -104,10 +105,22 @@ describe("api updater commands", () => {
     localStorageMock.clear();
   });
 
+  it("does not subscribe to desktop generation events in a browser preview", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
+    const unlisten = await onGenerationPartial(vi.fn());
+    expect(tauriEvent.listen).not.toHaveBeenCalled();
+    expect(typeof unlisten).toBe("function");
+  });
+
   it("passes a Tauri channel to the install update command", async () => {
     const onEvent = vi.fn();
     tauriApi.invoke.mockImplementation(async (_command, args) => {
-      const channel = (args as { onEvent: InstanceType<typeof tauriApi.Channel> }).onEvent;
+      const channel = (
+        args as { onEvent: InstanceType<typeof tauriApi.Channel> }
+      ).onEvent;
       channel.onmessage({
         event: "Progress",
         data: { chunkLength: 4, totalDownloaded: 12 },
@@ -147,7 +160,9 @@ describe("api log commands", () => {
 
     await clearLogs(0);
 
-    expect(tauriApi.invoke).toHaveBeenCalledWith("clear_logs", { beforeDays: 0 });
+    expect(tauriApi.invoke).toHaveBeenCalledWith("clear_logs", {
+      beforeDays: 0,
+    });
   });
 });
 
@@ -244,9 +259,13 @@ describe("api prompt favorite commands", () => {
       query: "forest",
       folderId: "folder-1",
     });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "delete_prompt_favorite", {
-      id: "favorite-1",
-    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      2,
+      "delete_prompt_favorite",
+      {
+        id: "favorite-1",
+      },
+    );
   });
 
   it("extracts prompts from an image through Tauri IPC", async () => {
@@ -353,24 +372,40 @@ describe("api prompt agent commands", () => {
     await cancelPromptAgentSession("session-a");
     await getPromptAgentSession("session-a");
 
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "send_prompt_agent_message", {
-      request: {
-        session_id: "session-a",
-        message: "Make it dusk",
-        config_id: "llm-a",
-        source_image_paths: [],
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      1,
+      "send_prompt_agent_message",
+      {
+        request: {
+          session_id: "session-a",
+          message: "Make it dusk",
+          config_id: "llm-a",
+          source_image_paths: [],
+        },
       },
-    });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "accept_prompt_agent_draft", {
-      sessionId: "session-a",
-      acceptedPrompt: "Final prompt",
-    });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(3, "cancel_prompt_agent_session", {
-      sessionId: "session-a",
-    });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(4, "get_prompt_agent_session", {
-      sessionId: "session-a",
-    });
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      2,
+      "accept_prompt_agent_draft",
+      {
+        sessionId: "session-a",
+        acceptedPrompt: "Final prompt",
+      },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      3,
+      "cancel_prompt_agent_session",
+      {
+        sessionId: "session-a",
+      },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      4,
+      "get_prompt_agent_session",
+      {
+        sessionId: "session-a",
+      },
+    );
   });
 });
 
@@ -508,13 +543,21 @@ describe("api project and conversation commands", () => {
     await deleteCanvasDocument("canvas-1");
     await saveCanvasExport("canvas-1", "data:image/png;base64,Zm9v");
 
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(1, "create_canvas_document", {
-      projectId: "project-1",
-      name: "Mood board",
-    });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(2, "list_canvas_documents", {
-      projectId: "project-1",
-    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      1,
+      "create_canvas_document",
+      {
+        projectId: "project-1",
+        name: "Mood board",
+      },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      2,
+      "list_canvas_documents",
+      {
+        projectId: "project-1",
+      },
+    );
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(3, "get_canvas_document", {
       id: "canvas-1",
     });
@@ -528,13 +571,21 @@ describe("api project and conversation commands", () => {
       },
       previewPngBase64: null,
     });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(5, "rename_canvas_document", {
-      id: "canvas-1",
-      name: "Renamed canvas",
-    });
-    expect(tauriApi.invoke).toHaveBeenNthCalledWith(6, "delete_canvas_document", {
-      id: "canvas-1",
-    });
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      5,
+      "rename_canvas_document",
+      {
+        id: "canvas-1",
+        name: "Renamed canvas",
+      },
+    );
+    expect(tauriApi.invoke).toHaveBeenNthCalledWith(
+      6,
+      "delete_canvas_document",
+      {
+        id: "canvas-1",
+      },
+    );
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(7, "save_canvas_export", {
       documentId: "canvas-1",
       pngBase64: "data:image/png;base64,Zm9v",
@@ -560,7 +611,10 @@ describe("api project and conversation commands", () => {
       },
       "data:image/png;base64,Zm9v",
     );
-    const exported = await saveCanvasExport(created.id, "data:image/png;base64,Zm9v");
+    const exported = await saveCanvasExport(
+      created.id,
+      "data:image/png;base64,Zm9v",
+    );
 
     expect(created.name).toBe("Browser canvas");
     expect(listed).toHaveLength(1);
@@ -589,7 +643,8 @@ describe("asset URLs", () => {
   });
 
   it("passes macOS file paths to Tauri unchanged", () => {
-    const imagePath = "/Users/chen/Library/Application Support/com.astrostudio.desktop/images/2026/04/28/image.png";
+    const imagePath =
+      "/Users/chen/Library/Application Support/com.astrostudio.desktop/images/2026/04/28/image.png";
 
     expect(toAssetUrl(imagePath)).toBe(imagePath);
     expect(tauriApi.convertFileSrc).toHaveBeenCalledWith(imagePath);
@@ -598,6 +653,7 @@ describe("asset URLs", () => {
   it("allows the Windows asset protocol host in the Tauri CSP", () => {
     const csp = tauriConfig.app.security.csp;
 
+    expect(csp).toMatch(/img-src[^;]*data:/);
     expect(csp).toContain("asset:");
     expect(csp).toContain("http://asset.localhost");
   });

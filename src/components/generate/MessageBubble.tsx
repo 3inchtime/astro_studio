@@ -233,7 +233,15 @@ export default function MessageBubble({
               transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
               className="overflow-hidden rounded-[16px] rounded-bl-[5px]"
             >
-              <GenerationLoadingScene />
+              {message.partialPreview ? (
+                <img
+                  src={message.partialPreview}
+                  alt={t("generate.advanced.partialImages")}
+                  className="max-h-[420px] w-full object-contain"
+                />
+              ) : (
+                <GenerationLoadingScene />
+              )}
             </motion.div>
           )}
 

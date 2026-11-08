@@ -152,3 +152,72 @@ describe("completeGenerationMessage", () => {
     });
   });
 });
+
+it("restores failed 2.6 retry options from persisted metadata", () => {
+  const result = generationResult("gif", "failed");
+  result.generation.engine = "gpt-image-2.6-flare";
+  result.generation.output_format = "gif";
+  result.generation.request_metadata = JSON.stringify({
+    model: "gpt-image-2.6-flare",
+    project_id: "p1",
+    conversation_id: "c1",
+    advanced_options: {
+      complexity: "low",
+      frameCount: 12,
+      frameDurationMs: 80,
+    },
+  });
+  expect(generationsToMessages([result])[1].retryRequest).toMatchObject({
+    model: "gpt-image-2.6-flare",
+    outputFormat: "gif",
+    projectId: "p1",
+    conversationId: "c1",
+    advancedOptions: { complexity: "low", frameCount: 12, frameDurationMs: 80 },
+  });
+  result.generation.request_metadata = "invalid";
+  expect(() => generationsToMessages([result])).not.toThrow();
+  expect(generationsToMessages([result])[1].retryRequest).toBeUndefined();
+});
+
+it("matches streamed previews by client request identity and ignores completed requests", async () => {
+  const { applyGenerationPartial } = await import("./generationMessages");
+  const pending: Message = {
+    id: "assistant-client",
+    role: "assistant",
+    content: "",
+    status: "processing",
+    generationId: "client",
+    createdAt: "",
+  };
+  const event = {
+    generation_id: "server",
+    client_request_id: "client",
+    partial_image_index: 0,
+    b64_json: "aGVsbG8=",
+    output_format: "webp",
+  };
+  expect(applyGenerationPartial([pending], event)[0]).toMatchObject({
+    generationId: "server",
+    partialPreview: "data:image/webp;base64,aGVsbG8=",
+  });
+  expect(
+    applyGenerationPartial([{ ...pending, status: "complete" }], event)[0],
+  ).not.toHaveProperty("partialPreview");
+});
+
+it("shows interrupted requests as retryable failures instead of endless loading", () => {
+  const result = generationResult(
+    "interrupted",
+    "interrupted",
+    "Provider outcome unknown",
+  );
+  result.generation.engine = "gpt-image-2.6-flare";
+  result.generation.request_metadata = JSON.stringify({
+    model: result.generation.engine,
+    project_id: "p1",
+    conversation_id: "c1",
+  });
+  const message = generationsToMessages([result])[1];
+  expect(message.status).toBe("failed");
+  expect(message.retryRequest?.model).toBe("gpt-image-2.6-flare");
+});

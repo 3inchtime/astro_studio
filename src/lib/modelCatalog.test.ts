@@ -61,3 +61,29 @@ it("separates new model capabilities instead of exposing OpenAI controls everywh
       .generationUrl,
   ).toMatch(/\/interactions$/);
 });
+
+it.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"])(
+  "exposes the complete 2.6 catalog for %s without rewriting 2.5 profiles",
+  (model) => {
+    const entry = getImageModelCatalogEntry(model);
+    expect(entry.providerModelId).toBe(model);
+    expect(entry.parameterCapabilities.outputFormats).toEqual([
+      "png",
+      "jpeg",
+      "webp",
+      "svg",
+      "gif",
+    ]);
+    expect(entry.parameterCapabilities.qualities).toContain("max");
+    expect(entry.parameterCapabilities.imageCounts).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    ]);
+    expect(entry.parameterCapabilities.moderationLevels).toEqual([
+      "auto",
+      "low",
+    ]);
+    expect(
+      getImageModelCatalogEntry("gpt-image-2.5-flare").providerModelId,
+    ).toBe("gpt-image-2.5-flare");
+  },
+);

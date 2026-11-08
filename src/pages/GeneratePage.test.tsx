@@ -28,6 +28,7 @@ const editImage = vi.fn();
 const pickSourceImages = vi.fn();
 const onGenerationComplete = vi.fn();
 const onGenerationFailed = vi.fn();
+const onGenerationPartial = vi.fn().mockResolvedValue(() => {});
 const createPromptFavorite = vi.fn();
 const getPromptFavorites = vi.fn();
 const deletePromptFavorite = vi.fn();
@@ -150,6 +151,7 @@ vi.mock("../lib/api", () => ({
     cancelPromptAgentSession(...args),
   getPromptAgentSession: (...args: unknown[]) => getPromptAgentSession(...args),
   onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
+  onGenerationPartial: (...args: unknown[]) => onGenerationPartial(...args),
   onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
   messageImageToEditSource: (image: {
@@ -1301,6 +1303,83 @@ describe("GeneratePage", () => {
           aspectRatio: "16:9",
         }),
       ),
+    );
+  });
+  it("submits 2.6 GIF settings from the composer without stale streaming controls", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+    await waitFor(() => expect(getImageModel).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "gpt-image-2.6-flare" },
+    });
+    fireEvent.click(screen.getByLabelText("generate.advanced.stream"));
+    fireEvent.change(screen.getByLabelText("Format"), {
+      target: { value: "gif" },
+    });
+    fireEvent.change(screen.getByLabelText("generate.advanced.complexity"), {
+      target: { value: "low" },
+    });
+    fireEvent.change(screen.getByLabelText("generate.advanced.frameCount"), {
+      target: { value: "12" },
+    });
+    fireEvent.change(screen.getByLabelText("generate.advanced.frameDuration"), {
+      target: { value: "100" },
+    });
+    fireEvent.change(screen.getByLabelText("Count"), {
+      target: { value: "10" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A looping sunrise" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() =>
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-image-2.6-flare",
+          outputFormat: "gif",
+          size: "auto",
+          imageCount: 10,
+          advancedOptions: {
+            complexity: "low",
+            frameCount: 12,
+            frameDurationMs: 100,
+          },
+        }),
+      ),
+    );
+    expect(generateImage.mock.calls[0][0]).not.toHaveProperty(
+      "outputCompression",
+    );
+  });
+  it("switches SVG to one output and keeps author controls optional", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+    await waitFor(() => expect(getImageModel).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "gpt-image-2.6-sunburst" },
+    });
+    fireEvent.change(screen.getByLabelText("Count"), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByLabelText("Format"), {
+      target: { value: "svg" },
+    });
+    expect(screen.getByLabelText("Count")).toHaveValue("1");
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe the image you want to generate..."),
+      { target: { value: "A vector logo" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() =>
+      expect(generateImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-image-2.6-sunburst",
+          outputFormat: "svg",
+          imageCount: 1,
+        }),
+      ),
+    );
+    expect(generateImage.mock.calls[0][0].advancedOptions).not.toHaveProperty(
+      "svg",
     );
   });
 });

@@ -6,6 +6,8 @@ pub use crate::prompt_agent::types::{
     SendPromptAgentMessageRequest, StartPromptAgentSessionRequest,
 };
 
+pub const ENGINE_GPT_IMAGE_26_SUNBURST: &str = "gpt-image-2.6-sunburst";
+pub const ENGINE_GPT_IMAGE_26_FLARE: &str = "gpt-image-2.6-flare";
 pub const ENGINE_GPT_IMAGE_2: &str = "gpt-image-2";
 pub const ENGINE_GPT_IMAGE_SUNBURST: &str = "gpt-image-2.5-sunburst";
 pub const ENGINE_GPT_IMAGE_FLARE: &str = "gpt-image-2.5-flare";
@@ -60,7 +62,7 @@ pub const SETTING_TRASH_RETENTION_DAYS: &str = "trash_retention_days";
 pub const DEFAULT_TRASH_RETENTION_DAYS: u32 = 30;
 pub const SETTING_FONT_SIZE: &str = "font_size";
 pub const DEFAULT_FONT_SIZE: &str = "medium";
-pub const DEFAULT_IMAGE_MODEL: &str = ENGINE_GPT_IMAGE_FLARE;
+pub const DEFAULT_IMAGE_MODEL: &str = ENGINE_GPT_IMAGE_26_FLARE;
 pub const SETTING_LLM_CONFIGS: &str = "llm_configs";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,8 +127,46 @@ pub struct ModelProviderProfilesState {
     pub profiles: Vec<ModelProviderProfile>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImageAdvancedOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_count: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_duration_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub svg: Option<SvgAuthorOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markup_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_images: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SvgAuthorOptions {
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<SvgReasoningOptions>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SvgReasoningOptions {
+    pub effort: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct GptImageRequestOptions {
+    pub advanced_options: Option<ImageAdvancedOptions>,
+    pub(crate) progress_context: Option<(String, String)>,
+    pub(crate) prepared_overlay: Option<crate::api_gateway::PreparedEditImage>,
     pub(crate) aspect_ratio: Option<String>,
     pub(crate) resolution: Option<String>,
     pub size: String,

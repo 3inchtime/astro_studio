@@ -1,9 +1,18 @@
 import { Loader2, PanelRight, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toAssetUrl } from "../../lib/api";
+import ImageAdvancedControls from "../generate/ImageAdvancedControls";
+import {
+  getImageModelCatalogEntry,
+  isGptImage26,
+} from "../../lib/modelCatalog";
+import type { GenerationParams } from "../../types";
 import type { CanvasFrame, ImageModel } from "../../types";
 
 interface CanvasGenerationPanelProps {
+  partialPreview?: string;
+  parameters?: GenerationParams;
+  onParametersChange?: (value: GenerationParams) => void;
   prompt: string;
   imageModel: ImageModel;
   frame: CanvasFrame | null;
@@ -20,6 +29,9 @@ interface CanvasGenerationPanelProps {
 }
 
 export default function CanvasGenerationPanel({
+  parameters,
+  onParametersChange,
+  partialPreview,
   prompt,
   imageModel,
   frame,
@@ -112,6 +124,105 @@ export default function CanvasGenerationPanel({
             {t("canvas.frameFromSelection")}
           </button>
         ) : null}
+        {isGptImage26(imageModel) && parameters && onParametersChange && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-muted">
+                {t("generate.formatLabel")}
+                <select
+                  className="studio-input mt-1 w-full rounded-lg p-2"
+                  value={parameters.outputFormat ?? "png"}
+                  onChange={(e) =>
+                    onParametersChange({
+                      ...parameters,
+                      outputFormat: e.target
+                        .value as GenerationParams["outputFormat"],
+                      ...(e.target.value === "gif"
+                        ? {
+                            size: "auto",
+                            background: "auto",
+                            advancedOptions: {
+                              ...parameters.advancedOptions,
+                              maskPath: undefined,
+                            },
+                          }
+                        : {}),
+                    })
+                  }
+                >
+                  {["png", "jpeg", "webp", "gif"].map((format) => (
+                    <option key={format} value={format}>
+                      {format.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-muted">
+                {t("generate.qualityLabel")}
+                <select
+                  className="studio-input mt-1 w-full rounded-lg p-2"
+                  value={parameters.quality ?? "auto"}
+                  onChange={(e) =>
+                    onParametersChange({
+                      ...parameters,
+                      quality: e.target.value as GenerationParams["quality"],
+                    })
+                  }
+                >
+                  {getImageModelCatalogEntry(
+                    imageModel,
+                  ).parameterCapabilities.qualities.map((quality) => (
+                    <option key={quality} value={quality}>
+                      {t(`generate.quality.${quality}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-muted">
+                {t("generate.countLabel")}
+                <select
+                  className="studio-input mt-1 w-full rounded-lg p-2"
+                  value={parameters.imageCount ?? 1}
+                  onChange={(e) =>
+                    onParametersChange({
+                      ...parameters,
+                      imageCount: Number(e.target.value),
+                    })
+                  }
+                >
+                  {Array.from({ length: 10 }, (_, index) => index + 1).map(
+                    (count) => (
+                      <option key={count} value={count}>
+                        {count}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+            </div>
+            <ImageAdvancedControls
+              value={parameters.advancedOptions ?? {}}
+              onChange={(advancedOptions) =>
+                onParametersChange({ ...parameters, advancedOptions })
+              }
+              format={parameters.outputFormat ?? "png"}
+              editing
+              size={parameters.size ?? "auto"}
+              onSizeChange={(size) =>
+                onParametersChange({ ...parameters, size })
+              }
+              compression={parameters.outputCompression}
+              onCompressionChange={(outputCompression) =>
+                onParametersChange({ ...parameters, outputCompression })
+              }
+            />
+            {parameters.outputFormat === "gif" && (
+              <p className="text-xs text-muted">
+                {t("generate.advanced.canvasStillHint")}
+              </p>
+            )}
+          </div>
+        )}
         <label
           htmlFor="canvas-generation-prompt"
           className="text-[12px] font-medium text-foreground/80"
@@ -168,6 +279,13 @@ export default function CanvasGenerationPanel({
             ) : null}
           </div>
         ) : null}
+        {partialPreview && (
+          <img
+            src={partialPreview}
+            alt={t("generate.advanced.partialImages")}
+            className="w-full rounded-lg object-contain"
+          />
+        )}
         {results?.length ? (
           <div
             aria-label={t("canvas.generationResults")}

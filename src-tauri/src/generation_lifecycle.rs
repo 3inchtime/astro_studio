@@ -84,6 +84,7 @@ impl From<GenerationJobRequestKind> for GenerationLifecycleKind {
 }
 
 pub(crate) struct GenerationLifecycleRequest {
+    pub(crate) advanced_options: Option<crate::models::ImageAdvancedOptions>,
     pub(crate) aspect_ratio: Option<String>,
     pub(crate) resolution: Option<String>,
     pub(crate) kind: GenerationLifecycleKind,
@@ -321,6 +322,7 @@ pub(crate) struct PreparedProviderAttempt {
     context: GenerationExecutionContext,
     request: GenerationJobRequest,
     payload: PreparedProviderPayload,
+    overlay: Option<PreparedEditImage>,
 }
 
 #[derive(Clone, Default)]
@@ -384,7 +386,7 @@ impl ImageResponseDecoder for EngineImageResponseDecoder {
         if response.response_size != response.body_text.len() as u64
             || response.response_sha256
                 != FileResponseArtifactStore::response_hash(&response.body_text)
-            || !(1..=4).contains(&response.requested_image_count)
+            || !(1..=10).contains(&response.requested_image_count)
         {
             return Err(GenerationExecutionError::response_artifact());
         }
@@ -516,7 +518,8 @@ enum ResponseDirectoryOpenStage {
 
 impl FileResponseArtifactStore {
     const ENVELOPE_VERSION: u64 = 1;
-    const MAX_RESPONSE_BODY_BYTES: u64 = 64 * 1024 * 1024;
+    const MAX_RESPONSE_BODY_BYTES: u64 =
+        crate::api_gateway::MAX_PROVIDER_RESPONSE_BODY_BYTES as u64;
     const MAX_RESPONSE_ENVELOPE_BYTES: u64 = Self::MAX_RESPONSE_BODY_BYTES * 2;
 
     pub(crate) fn new(root_dir: PathBuf) -> Self {
@@ -690,7 +693,7 @@ impl FileResponseArtifactStore {
             .get("requested_image_count")
             .and_then(serde_json::Value::as_u64)
             .and_then(|value| u8::try_from(value).ok())
-            .filter(|value| (1..=4).contains(value))
+            .filter(|value| (1..=10).contains(value))
             .ok_or_else(GenerationExecutionError::response_artifact)?;
         if response_size != body_text.len() as u64
             || response_size > Self::MAX_RESPONSE_BODY_BYTES
@@ -803,7 +806,7 @@ impl FileResponseArtifactStore {
     ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
         let response_size = body.body_text.len() as u64;
         if response_size > Self::MAX_RESPONSE_BODY_BYTES
-            || !(1..=4).contains(&body.requested_image_count)
+            || !(1..=10).contains(&body.requested_image_count)
         {
             return Err(GenerationExecutionError::response_artifact());
         }
@@ -1057,7 +1060,26 @@ pub(crate) async fn prepare_provider_attempt(
             prepare_edit_source_images(&snapshot.request.source_image_paths).await?,
         ),
     };
+    let overlay = if let Some(path) = snapshot
+        .request
+        .options
+        .advanced_options
+        .as_ref()
+        .and_then(|a| a.markup_path.as_ref().or(a.mask_path.as_ref()))
+    {
+        let overlay = prepare_persisted_edit_image(path)?;
+        let PreparedProviderPayload::Edit(images) = &payload else {
+            return Err(source_image_invalid());
+        };
+        let source = images.first().ok_or_else(source_image_invalid)?;
+        crate::commands::generation::validate_edit_overlay(source.bytes(), overlay.bytes())
+            .map_err(|_| source_image_invalid())?;
+        Some(overlay)
+    } else {
+        None
+    };
     Ok(PreparedProviderAttempt {
+        overlay,
         context: snapshot.context.clone(),
         request: snapshot.request.clone(),
         payload,
@@ -1099,7 +1121,7 @@ fn verified_response_shape_matches(
 ) -> bool {
     let actual_path = Path::new(&response.response_file);
     if response.requested_image_count != requested_image_count
-        || !(1..=4).contains(&response.requested_image_count)
+        || !(1..=10).contains(&response.requested_image_count)
         || response.response_size != response.body_text.len() as u64
         || response.response_size > FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES
         || response.response_sha256.len() != 64
@@ -1232,6 +1254,23 @@ pub(crate) fn validate_provider_execution_snapshot(
         || snapshot.request.model != snapshot.context.model
         || snapshot.request.conversation_id != snapshot.context.conversation_id
         || snapshot.output_format != snapshot.runtime_options.output_format
+        || snapshot.request.options.advanced_options != snapshot.runtime_options.advanced_options
+        || snapshot
+            .runtime_options
+            .advanced_options
+            .as_ref()
+            .is_some_and(|a| {
+                a.stream
+                    .is_some_and(|v| v != snapshot.runtime_options.stream)
+                    || a.partial_images
+                        .is_some_and(|v| v != snapshot.runtime_options.partial_images)
+            })
+        || crate::model_registry::validate_request_options(
+            &snapshot.context.model,
+            &snapshot.runtime_options,
+            snapshot.request.source_image_paths.len(),
+        )
+        .is_err()
         || !executable_provider_snapshot_is_valid(
             &snapshot.context.provider_kind,
             &snapshot.context.provider_profile_id,
@@ -1263,6 +1302,8 @@ pub(crate) async fn perform_provider_http_attempt(
         ));
     }
 
+    let mut runtime_options = snapshot.runtime_options.clone();
+    runtime_options.prepared_overlay = prepared.overlay.clone();
     let body = match snapshot.request.kind {
         GenerationJobRequestKind::Generate => {
             if !matches!(&prepared.payload, PreparedProviderPayload::Generate) {
@@ -1276,7 +1317,7 @@ pub(crate) async fn perform_provider_http_attempt(
                     credentials.expose_for_engine(),
                     &snapshot.context.endpoint_url,
                     &snapshot.request.prompt,
-                    &snapshot.runtime_options,
+                    &runtime_options,
                 )
                 .await
         }
@@ -1300,7 +1341,7 @@ pub(crate) async fn perform_provider_http_attempt(
                     &snapshot.context.endpoint_url,
                     &snapshot.request.prompt,
                     source_images,
-                    &snapshot.runtime_options,
+                    &runtime_options,
                 )
                 .await
         }
@@ -1319,7 +1360,7 @@ pub(crate) async fn persist_provider_attempt_response(
     body: ProviderAttemptBody,
 ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
     if body.requested_image_count != snapshot.runtime_options.image_count
-        || !(1..=4).contains(&body.requested_image_count)
+        || !(1..=10).contains(&body.requested_image_count)
         || body.body_text.len() as u64 > FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES
     {
         return Err(GenerationExecutionError::response_artifact());
@@ -2025,7 +2066,7 @@ impl<'a> PromotedImageCommit<'a> {
         let images = promoted.saved_images();
         let mut image_ids = HashSet::with_capacity(images.len());
         if images.is_empty()
-            || images.len() > 4
+            || images.len() > 10
             || images.iter().any(|image| {
                 !generation_image_projection_is_valid(image, generation_id)
                     || !image_ids.insert(image.id.as_str())
@@ -2760,6 +2801,9 @@ pub(crate) fn image_request_options(
     image_count: Option<u8>,
 ) -> GptImageRequestOptions {
     GptImageRequestOptions {
+        advanced_options: None,
+        prepared_overlay: None,
+        progress_context: None,
         aspect_ratio: None,
         resolution: None,
         size: size.unwrap_or_else(|| DEFAULT_IMAGE_SIZE.to_string()),
@@ -2779,7 +2823,7 @@ pub(crate) fn image_request_options(
         .to_string(),
         stream: DEFAULT_IMAGE_STREAM,
         partial_images: DEFAULT_PARTIAL_IMAGES,
-        image_count: image_count.unwrap_or(DEFAULT_IMAGE_COUNT).clamp(1, 4),
+        image_count: image_count.unwrap_or(DEFAULT_IMAGE_COUNT),
     }
 }
 
@@ -2820,6 +2864,19 @@ fn prepare_compatibility_job(
             request.image_count,
         ),
     );
+    runtime_options.advanced_options = request.advanced_options.clone();
+    if let Some(advanced) = &request.advanced_options {
+        runtime_options.stream = advanced.stream.unwrap_or(false);
+        runtime_options.partial_images = advanced.partial_images.unwrap_or(0);
+    }
+    if provider_for_model(&model) == ImageProvider::OpenAi
+        && request.output_compression.is_some()
+        && !["jpeg", "webp"].contains(&runtime_options.output_format.as_str())
+    {
+        return Err(AppError::Validation {
+            message: "Output compression is supported only for JPEG and WebP.".into(),
+        });
+    }
     runtime_options.aspect_ratio = request.aspect_ratio.clone();
     runtime_options.resolution =
         request
@@ -2837,6 +2894,7 @@ fn prepare_compatibility_job(
     )?;
     let capability_omits_controls = is_gemini_model(&model);
     let request_options = GenerationJobOptions {
+        advanced_options: request.advanced_options.clone(),
         aspect_ratio: runtime_options.aspect_ratio.clone(),
         resolution: runtime_options.resolution.clone(),
         size: request.size.as_ref().map(|_| runtime_options.size.clone()),
@@ -2887,8 +2945,11 @@ fn prepare_compatibility_job(
                     .map(|_| runtime_options.input_fidelity.clone())
             })
             .flatten(),
-        stream: None,
-        partial_images: None,
+        stream: request.advanced_options.as_ref().and_then(|a| a.stream),
+        partial_images: request
+            .advanced_options
+            .as_ref()
+            .and_then(|a| a.partial_images),
         image_count: request.image_count.map(|_| runtime_options.image_count),
     };
     let queued_at = current_timestamp();
@@ -3572,6 +3633,7 @@ mod tests {
 
     fn compatibility_request(model: &str) -> GenerationLifecycleRequest {
         GenerationLifecycleRequest {
+            advanced_options: None,
             aspect_ratio: None,
             resolution: None,
             kind: GenerationLifecycleKind::Generate,
@@ -3590,6 +3652,113 @@ mod tests {
             conversation_id: None,
             project_id: Some("default".to_string()),
         }
+    }
+
+    #[test]
+    fn image26_durable_response_budget_supports_large_multi_image_responses() {
+        assert_eq!(
+            FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES,
+            256 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn image26_restart_retry_requires_intact_persisted_source_and_overlay_authority() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_26_FLARE);
+        request.kind = GenerationLifecycleKind::Edit;
+        request.source_image_paths = vec!["/saved/source.png".into()];
+        request.advanced_options = Some(
+            serde_json::from_value(serde_json::json!({"markupPath":"/saved/overlay.png"})).unwrap(),
+        );
+        let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        assert_eq!(prepared.status, GenerationJobStatus::Failed);
+        {
+            let mut conn = fixture.db.conn.lock().unwrap();
+            enqueue_job(&mut conn, &prepared).unwrap();
+        }
+        let allowed = |sources: &[String], advanced: Option<&ImageAdvancedOptions>| {
+            crate::commands::generation::persisted_retry_authorizes_edit(
+                &fixture.db,
+                Some(ENGINE_GPT_IMAGE_26_FLARE),
+                sources,
+                advanced,
+            )
+            .unwrap()
+        };
+        assert!(allowed(
+            &request.source_image_paths,
+            request.advanced_options.as_ref()
+        ));
+        assert!(!allowed(
+            &["/other/source.png".into()],
+            request.advanced_options.as_ref()
+        ));
+        let mut other = request.advanced_options.clone().unwrap();
+        other.markup_path = Some("/other/overlay.png".into());
+        assert!(!allowed(&request.source_image_paths, Some(&other)));
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            conn.execute("UPDATE generations SET request_metadata=json_set(request_metadata,'$.advanced_options.markupPath','/changed/overlay.png') WHERE id=?1",params![prepared.generation_id]).unwrap();
+        }
+        assert!(!allowed(
+            &request.source_image_paths,
+            request.advanced_options.as_ref()
+        ));
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn image26_advanced_options_roundtrip_and_snapshot_tamper_is_rejected() {
+        let fixture = CompatibilityPreparationFixture::new();
+        fixture.save_profiles(
+            ENGINE_GPT_IMAGE_26_FLARE,
+            ModelProviderProfilesState {
+                active_provider_id: "provider-a".into(),
+                profiles: vec![ModelProviderProfile {
+                    id: "provider-a".into(),
+                    name: "Provider A".into(),
+                    api_key: "test-key".into(),
+                    endpoint_settings: default_endpoint_settings_for_model(
+                        ENGINE_GPT_IMAGE_26_FLARE,
+                    ),
+                }],
+            },
+        );
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_26_FLARE);
+        request.output_compression = None;
+        request.output_format = Some("gif".into());
+        request.background = Some("auto".into());
+        request.image_count = Some(10);
+        request.advanced_options = Some(
+            serde_json::from_value(
+                serde_json::json!({"complexity":"high","frameCount":16,"frameDurationMs":655350}),
+            )
+            .unwrap(),
+        );
+        let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        let mut snapshot =
+            start_compatibility_job(&fixture.db, &CompatibilityEventSink::new(None), prepared)
+                .unwrap();
+        assert_eq!(snapshot.runtime_options.image_count, 10);
+        assert_eq!(
+            snapshot.runtime_options.advanced_options,
+            request.advanced_options
+        );
+        assert!(validate_provider_execution_snapshot(&snapshot).is_ok());
+        snapshot
+            .runtime_options
+            .advanced_options
+            .as_mut()
+            .unwrap()
+            .frame_count = Some(9);
+        assert!(validate_provider_execution_snapshot(&snapshot).is_err());
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            conn.execute("UPDATE generations SET request_metadata=json_set(request_metadata,'$.advanced_options.frameCount',9) WHERE id=?1",params![snapshot.context.generation_id]).unwrap();
+            assert!(get_job(&conn, &snapshot.context.job_id).is_err());
+        }
+        fixture.cleanup();
     }
 
     #[test]
@@ -3627,7 +3796,7 @@ mod tests {
             "https://provider-a.example.test/images/generations"
         );
         assert_eq!(prepared.output_compression, 100);
-        assert_eq!(prepared.image_count, 4);
+        assert_eq!(prepared.image_count, 9);
         assert_eq!(
             prepared.request_options.output_compression,
             Some(prepared.output_compression as u8)
@@ -3640,7 +3809,7 @@ mod tests {
             prepared.request_options.input_fidelity.as_deref(),
             Some(DEFAULT_INPUT_FIDELITY)
         );
-        assert_eq!(prepared.request_options.image_count, Some(4));
+        assert_eq!(prepared.request_options.image_count, Some(9));
         let public_snapshot = serde_json::json!({
             "job_id": prepared.job_id,
             "client_request_id": prepared.client_request_id,
@@ -5158,6 +5327,7 @@ mod tests {
                 partial_images: 0,
                 source_image_paths,
                 request_options: GenerationJobOptions {
+                    advanced_options: None,
                     aspect_ratio: None,
                     resolution: None,
                     size: Some("1024x1024".to_string()),
@@ -10151,6 +10321,7 @@ mod tests {
             context: snapshot.context.clone(),
             request: snapshot.request.clone(),
             payload: PreparedProviderPayload::Edit(Vec::new()),
+            overlay: None,
         };
         let variant_error = match perform_provider_http_attempt(
             &FakeSingleAttemptEngine {

@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { image26ValidationError } from "../lib/image26Options";
+import { normalizeAdvancedOptions } from "../lib/generationRequests";
+import { isGptImage26 } from "../lib/modelCatalog";
 import { useTranslation } from "react-i18next";
 import {
   createCanvasDocument,
@@ -8,6 +11,7 @@ import {
   getCanvasGenerationStatus,
   hasTauriRuntime,
   pickSourceImages,
+  onGenerationPartial,
   saveCanvasDocument,
   saveCanvasExport,
 } from "../lib/api";
@@ -75,6 +79,7 @@ import type {
   CanvasObject,
   CanvasTool,
   ImageModel,
+  GenerationParams,
 } from "../types";
 
 export default function CanvasPage() {
@@ -84,7 +89,20 @@ export default function CanvasPage() {
     null,
   );
   const [prompt, setPrompt] = useState("");
-  const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
+  const [imageModel, setImageModel] = useState<ImageModel>(
+    "gpt-image-2.6-flare",
+  );
+  const [partialPreview, setPartialPreview] = useState<{
+    documentId: string;
+    url: string;
+  } | null>(null);
+  const [generationParameters, setGenerationParameters] =
+    useState<GenerationParams>({
+      prompt: "",
+      size: "auto",
+      outputFormat: "png",
+      quality: "auto",
+    });
   const [submittingDocumentId, setSubmittingDocumentId] = useState<
     string | null
   >(null);
@@ -252,10 +270,55 @@ export default function CanvasPage() {
   }, [history.present, isDirty, loadedDocumentId, selectedDocumentId]);
 
   const content = history.present;
+  useEffect(() => {
+    setGenerationParameters((current) =>
+      current.advancedOptions?.markupPath || current.advancedOptions?.maskPath
+        ? {
+            ...current,
+            advancedOptions: {
+              ...current.advancedOptions,
+              markupPath: undefined,
+              maskPath: undefined,
+            },
+          }
+        : current,
+    );
+  }, [selectedDocumentId, content.frame, content.layers]);
+  useEffect(() => {
+    if (!isDesktopRuntime) return;
+    let disposed = false;
+    const subscription = onGenerationPartial((event) => {
+      if (
+        disposed ||
+        !event.client_request_id ||
+        !liveRequestsRef.current.has(event.client_request_id)
+      )
+        return;
+      const documentId = loadedDocumentIdRef.current;
+      if (
+        !documentId ||
+        !historyPresentRef.current.generation_requests?.some(
+          (r) =>
+            r.request_id === event.client_request_id && r.status === "pending",
+        )
+      )
+        return;
+      if (!["png", "jpeg", "webp"].includes(event.output_format ?? "png"))
+        return;
+      setPartialPreview({
+        documentId,
+        url: `data:image/${event.output_format ?? "png"};base64,${event.b64_json}`,
+      });
+    });
+    return () => {
+      disposed = true;
+      void subscription.then((unlisten) => unlisten());
+    };
+  }, [isDesktopRuntime]);
   const isEditorReady = Boolean(
     selectedDocumentId &&
-      loadedDocumentId === selectedDocumentId &&
-      !isTransitioning,
+    loadedDocumentId === selectedDocumentId &&
+    !isTransitioning,
   );
   const isGenerating =
     Boolean(
@@ -327,9 +390,9 @@ export default function CanvasPage() {
   function isDocumentReady(documentId: string | null): documentId is string {
     return Boolean(
       documentId &&
-        selectedDocumentIdRef.current === documentId &&
-        loadedDocumentIdRef.current === documentId &&
-        !isTransitioningRef.current,
+      selectedDocumentIdRef.current === documentId &&
+      loadedDocumentIdRef.current === documentId &&
+      !isTransitioningRef.current,
     );
   }
 
@@ -611,19 +674,33 @@ export default function CanvasPage() {
       !isDesktopRuntime
     )
       return;
+    const retrySourcePath = retryPrompt
+      ? latestRequest?.source_image_path
+      : undefined;
+    const parameters =
+      retryPrompt && latestRequest?.parameters
+        ? latestRequest.parameters
+        : { ...generationParameters, model: imageModel };
     const snapshot = cloneCanvasDocumentContent(historyPresentRef.current);
     const requestId = crypto.randomUUID();
     const projectId =
       documents.find((d) => d.id === documentId)?.project_id ?? activeProjectId;
     const request = {
       request_id: requestId,
+      parameters,
       project_id: projectId,
-      frame: { ...snapshot.frame },
+      frame: {
+        ...(retrySourcePath && latestRequest
+          ? latestRequest.frame
+          : snapshot.frame),
+      },
+      source_image_path: retrySourcePath,
       prompt: submittedPrompt,
       status: "pending" as const,
       image_ids: [],
       created_at: new Date().toISOString(),
     };
+    setPartialPreview(null);
     liveRequestsRef.current.add(requestId);
     setSubmittingDocumentId(documentId);
     const pending = {
@@ -636,17 +713,58 @@ export default function CanvasPage() {
     updateContent(pending, { replace: true }, documentId);
     let submissionStarted = false;
     try {
+      const invalid = image26ValidationError({
+        model: parameters.model ?? imageModel,
+        format: parameters.outputFormat ?? "png",
+        size: parameters.size ?? "auto",
+        count: parameters.imageCount ?? 1,
+        background: parameters.background ?? "auto",
+        editing: true,
+        options: parameters.advancedOptions ?? {},
+        compression: parameters.outputCompression,
+      });
+      if (invalid) throw new Error(t(`generate.advanced.${invalid}`));
       await persistDocument(documentId, pending);
       if (!mountedRef.current || !isDocumentReady(documentId)) return;
-      const pngBase64 = await exportCanvasFrame(snapshot);
-      if (!mountedRef.current || !isDocumentReady(documentId)) return;
-      const exportedPath = await saveCanvasExport(documentId, pngBase64);
+      let exportedPath = retrySourcePath;
+      if (!exportedPath) {
+        const pngBase64 = await exportCanvasFrame(snapshot);
+        if (!mountedRef.current || !isDocumentReady(documentId)) return;
+        exportedPath = await saveCanvasExport(documentId, pngBase64);
+        if (!mountedRef.current || !isDocumentReady(documentId)) return;
+      }
+      const withSource = {
+        ...historyPresentRef.current,
+        generation_requests: historyPresentRef.current.generation_requests?.map(
+          (r) =>
+            r.request_id === requestId
+              ? { ...r, source_image_path: exportedPath }
+              : r,
+        ),
+      };
+      updateContent(withSource, { replace: true }, documentId);
+      await persistDocument(documentId, withSource);
       if (!mountedRef.current || !isDocumentReady(documentId)) return;
       submissionStarted = true;
       const result = await editImage({
+        ...(isGptImage26(parameters.model ?? imageModel)
+          ? {
+              ...parameters,
+              advancedOptions: normalizeAdvancedOptions(
+                parameters.advancedOptions ?? {},
+                parameters.outputFormat ?? "png",
+                true,
+              ),
+              outputCompression: ["jpeg", "webp"].includes(
+                parameters.outputFormat ?? "png",
+              )
+                ? parameters.outputCompression
+                : undefined,
+            }
+          : {}),
         prompt: submittedPrompt,
         clientRequestId: requestId,
-        model: imageModel,
+        model: parameters.model ?? imageModel,
         sourceImagePaths: [exportedPath],
         projectId,
       });
@@ -1305,6 +1423,8 @@ export default function CanvasPage() {
             <CanvasGenerationPanel
               prompt={prompt}
               imageModel={imageModel}
+              parameters={generationParameters}
+              onParametersChange={setGenerationParameters}
               frame={frame}
               disabled={
                 !isEditorReady ||
@@ -1313,6 +1433,12 @@ export default function CanvasPage() {
                 !isDesktopRuntime
               }
               isGenerating={isGenerating}
+              partialPreview={
+                isGenerating &&
+                partialPreview?.documentId === selectedDocumentId
+                  ? partialPreview.url
+                  : undefined
+              }
               environmentHint={
                 isDesktopRuntime
                   ? null

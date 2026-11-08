@@ -15,6 +15,7 @@ mod generation_lifecycle;
 // while compatibility execution remains the supported production path.
 #[allow(dead_code)]
 mod generation_worker_lease;
+mod image_assets;
 mod image_engines;
 mod llm;
 mod model_registry;
@@ -639,6 +640,8 @@ pub fn run() {
         ])
         .setup(|app| {
             runtime_logs::attach_app_handle(app.handle().clone());
+            app.state::<api_gateway::GptImageEngine>()
+                .attach_app(app.handle().clone());
 
             let app_data_dir = app
                 .path()

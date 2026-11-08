@@ -258,6 +258,9 @@ export async function generateImage(
     background: params.background,
     outputFormat: params.outputFormat,
     outputCompression: params.outputCompression,
+    ...(params.advancedOptions
+      ? { advancedOptions: params.advancedOptions }
+      : {}),
     moderation: params.moderation,
     imageCount: params.imageCount,
     conversationId: params.conversationId ?? null,
@@ -288,6 +291,9 @@ export async function editImage(
     inputFidelity: params.inputFidelity,
     outputFormat: params.outputFormat,
     outputCompression: params.outputCompression,
+    ...(params.advancedOptions
+      ? { advancedOptions: params.advancedOptions }
+      : {}),
     moderation: params.moderation,
     imageCount: params.imageCount,
     conversationId: params.conversationId ?? null,
@@ -738,6 +744,7 @@ export function messageImageToEditSource(image: {
 }
 
 function onGenerationEvent<T>(event: string, handler: (data: T) => void) {
+  if (!hasTauriRuntime()) return Promise.resolve(() => {});
   return listen(event, (e) => handler(e.payload as T));
 }
 
@@ -745,6 +752,14 @@ export function onGenerationProgress(
   handler: (data: { generation_id: string; status: string }) => void,
 ) {
   return onGenerationEvent("generation:progress", handler);
+}
+
+export function onGenerationPartial(
+  handler: (
+    data: import("./generationMessages").GenerationPartialEvent,
+  ) => void,
+) {
+  return onGenerationEvent("generation:partial", handler);
 }
 
 export function onGenerationComplete(

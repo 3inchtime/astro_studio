@@ -2,6 +2,8 @@ use crate::models::*;
 
 pub(crate) fn normalize_image_model(model: &str) -> &'static str {
     match model {
+        ENGINE_GPT_IMAGE_26_FLARE => ENGINE_GPT_IMAGE_26_FLARE,
+        ENGINE_GPT_IMAGE_26_SUNBURST => ENGINE_GPT_IMAGE_26_SUNBURST,
         ENGINE_GPT_IMAGE_2 => ENGINE_GPT_IMAGE_2,
         ENGINE_GPT_IMAGE_SUNBURST => ENGINE_GPT_IMAGE_SUNBURST,
         ENGINE_GPT_IMAGE_FLARE => ENGINE_GPT_IMAGE_FLARE,
@@ -270,7 +272,13 @@ pub(crate) fn validate_request_options(
     }
     let quality_ok = match provider {
         ImageProvider::OpenAi
-            if matches!(model, ENGINE_GPT_IMAGE_FLARE | ENGINE_GPT_IMAGE_SUNBURST) =>
+            if matches!(
+                model,
+                ENGINE_GPT_IMAGE_FLARE
+                    | ENGINE_GPT_IMAGE_SUNBURST
+                    | ENGINE_GPT_IMAGE_26_FLARE
+                    | ENGINE_GPT_IMAGE_26_SUNBURST
+            ) =>
         {
             ["auto", "low", "medium", "high", "xhigh", "max"].contains(&options.quality.as_str())
         }
@@ -280,10 +288,53 @@ pub(crate) fn validate_request_options(
         ImageProvider::Xai => ["auto", "low", "medium"].contains(&options.quality.as_str()),
         _ => options.quality == "auto",
     };
+    let image26 = matches!(
+        model,
+        ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST
+    );
+    let extended_format = image26 && ["gif", "svg"].contains(&options.output_format.as_str());
+    if !(1..=10).contains(&options.image_count)
+        || options.output_compression > 100
+        || !["auto", "low"].contains(&options.moderation.as_str())
+        || options.partial_images > 3
+        || (options.partial_images > 0 && !options.stream)
+        || (extended_format
+            && (options.stream || options.partial_images != 0 || options.output_compression != 100))
+        || (options.output_format == "svg" && (source_count > 0 || options.image_count != 1))
+    {
+        return Err(invalid());
+    }
+    if let Some(a) = &options.advanced_options {
+        if !image26
+            || a.complexity
+                .as_deref()
+                .is_some_and(|v| !["low", "medium", "high"].contains(&v))
+            || a.frame_count.is_some_and(|v| !(2..=16).contains(&v))
+            || a.frame_duration_ms.is_some_and(|v| v < 20)
+            || ((a.frame_count.is_some() || a.frame_duration_ms.is_some())
+                && options.output_format != "gif")
+            || (a.svg.is_some() && options.output_format != "svg")
+            || (a.markup_path.is_some() && a.mask_path.is_some())
+            || ((a.markup_path.is_some() || a.mask_path.is_some()) && source_count == 0)
+            || (a.mask_path.is_some() && options.output_format == "gif")
+            || a.svg.as_ref().is_some_and(|svg| {
+                svg.model.trim().is_empty()
+                    || svg.model.len() > 256
+                    || svg.model.chars().any(char::is_control)
+                    || svg.reasoning.as_ref().is_some_and(|r| {
+                        !["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                            .contains(&r.effort.as_str())
+                    })
+            })
+        {
+            return Err(invalid());
+        }
+    }
     if !quality_ok
         || !["auto", "opaque", "transparent"].contains(&options.background.as_str())
-        || !["png", "jpeg", "webp"].contains(&options.output_format.as_str())
-        || (options.background == "transparent" && options.output_format == "jpeg")
+        || (!extended_format && !["png", "jpeg", "webp"].contains(&options.output_format.as_str()))
+        || (options.background == "transparent"
+            && ["jpeg", "gif"].contains(&options.output_format.as_str()))
         || (provider == ImageProvider::Seedream && options.output_format == "webp")
     {
         return Err(invalid());
@@ -324,6 +375,12 @@ pub(crate) fn validate_request_options(
             .split_once('x')
             .and_then(|(w, h)| Some((w.parse::<u64>().ok()?, h.parse::<u64>().ok()?)))
             .ok_or_else(invalid)?;
+        if options.output_format == "gif" {
+            if w == 0 || h == 0 || w % 16 != 0 || h % 16 != 0 {
+                return Err(invalid());
+            }
+            return Ok(());
+        }
         if w == 0
             || h == 0
             || w > 3840
@@ -454,6 +511,9 @@ mod tests {
         let options = sanitize_request_options_for_model(
             ENGINE_NANO_BANANA,
             GptImageRequestOptions {
+                advanced_options: None,
+                prepared_overlay: None,
+                progress_context: None,
                 aspect_ratio: None,
                 resolution: None,
                 size: "1536x1024".to_string(),
@@ -516,6 +576,9 @@ mod tests {
             );
         }
         let mut options = GptImageRequestOptions {
+            advanced_options: None,
+            prepared_overlay: None,
+            progress_context: None,
             aspect_ratio: Some("16:9".to_string()),
             resolution: Some("2K".to_string()),
             size: "auto".into(),
@@ -539,5 +602,112 @@ mod tests {
         assert!(validate_request_options(ENGINE_GPT_IMAGE_2, &options, 1).is_err());
         options.size = "999999999999999999999999x2".into();
         assert!(validate_request_options(ENGINE_GPT_IMAGE_FLARE, &options, 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod image26_tests {
+    use super::*;
+    #[test]
+    fn image26_models_remain_distinct_and_default_to_flare() {
+        for model in [
+            "gpt-image-2.6-flare",
+            "gpt-image-2.6-sunburst",
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+        ] {
+            assert_eq!(normalize_image_model(model), model);
+            assert_eq!(
+                crate::image_engines::provider_for_model(model),
+                crate::image_engines::ImageProvider::OpenAi
+            );
+        }
+        assert_eq!(DEFAULT_IMAGE_MODEL, "gpt-image-2.6-flare");
+    }
+    #[test]
+    fn advanced_options_survive_job_serialization() {
+        let json = serde_json::json!({"advanced_options":{"complexity":"high","frameCount":12,"frameDurationMs":200,"stream":false}});
+        let options: crate::generation_jobs::GenerationJobOptions =
+            serde_json::from_value(json.clone()).expect("typed advanced options supported");
+        assert_eq!(serde_json::to_value(options).unwrap(), json);
+    }
+    #[test]
+    fn image26_gif_svg_and_count_controls_are_validated() {
+        let mut o = crate::generation_lifecycle::image_request_options(
+            None,
+            None,
+            None,
+            Some("gif".into()),
+            None,
+            None,
+            None,
+            Some(10),
+        );
+        assert_eq!(o.image_count, 10);
+        o.size = "256x256".into();
+        assert!(validate_request_options("gpt-image-2.6-flare", &o, 0).is_ok());
+        o.output_format = "svg".into();
+        o.size = "auto".into();
+        o.image_count = 1;
+        assert!(validate_request_options("gpt-image-2.6-flare", &o, 0).is_ok());
+        assert!(validate_request_options("gpt-image-2.6-flare", &o, 1).is_err());
+        o.image_count = 2;
+        assert!(validate_request_options("gpt-image-2.6-flare", &o, 0).is_err());
+    }
+    #[test]
+    fn image26_gif_duration_accepts_api_range_above_guide_examples() {
+        let mut options = crate::generation_lifecycle::image_request_options(
+            None,
+            None,
+            None,
+            Some("gif".into()),
+            None,
+            None,
+            None,
+            None,
+        );
+        for duration in [20, 2001, 655350, u32::MAX] {
+            options.advanced_options = Some(ImageAdvancedOptions {
+                frame_duration_ms: Some(duration),
+                ..ImageAdvancedOptions::default()
+            });
+            assert!(
+                validate_request_options(ENGINE_GPT_IMAGE_26_FLARE, &options, 0).is_ok(),
+                "duration {duration}"
+            );
+        }
+        options.advanced_options.as_mut().unwrap().frame_duration_ms = Some(19);
+        assert!(validate_request_options(ENGINE_GPT_IMAGE_26_FLARE, &options, 0).is_err());
+    }
+
+    #[test]
+    fn image26_rejects_incompatible_advanced_controls() {
+        let base = crate::generation_lifecycle::image_request_options(
+            None, None, None, None, None, None, None, None,
+        );
+        for value in [
+            serde_json::json!({"complexity":"max"}),
+            serde_json::json!({"frameCount":9}),
+            serde_json::json!({"svg":{"model":"gpt-5"}}),
+            serde_json::json!({"markupPath":"/a.png","maskPath":"/b.png"}),
+            serde_json::json!({"partialImages":1,"stream":false}),
+        ] {
+            let mut o = base.clone();
+            o.advanced_options = Some(serde_json::from_value(value).unwrap());
+            if let Some(a) = &o.advanced_options {
+                o.stream = a.stream.unwrap_or(false);
+                o.partial_images = a.partial_images.unwrap_or(0);
+            }
+            assert!(validate_request_options(ENGINE_GPT_IMAGE_26_FLARE, &o, 0).is_err());
+        }
+        for quality in ["auto", "low", "medium", "high", "xhigh", "max"] {
+            let mut o = base.clone();
+            o.quality = quality.into();
+            assert!(validate_request_options(ENGINE_GPT_IMAGE_26_SUNBURST, &o, 0).is_ok());
+        }
+        let mut o = base;
+        o.output_format = "gif".into();
+        o.background = "transparent".into();
+        assert!(validate_request_options(ENGINE_GPT_IMAGE_26_FLARE, &o, 0).is_err());
     }
 }

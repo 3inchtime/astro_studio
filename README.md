@@ -41,7 +41,7 @@ If you do not want your workflow tied to a single platform, Astro Studio is buil
 
 ## Compatibility Progress
 
-- [x] `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`
+- [x] `gpt-image-2.6-flare`, `gpt-image-2.6-sunburst`, plus GPT Image 2 / 2.5
 - [x] `nano banana`
 - [x] `nano banana 2`
 - [x] `nano banana pro` (GA)
@@ -200,15 +200,21 @@ This project is licensed under the [MIT License](LICENSE).
 
 | Provider | Models | Default API base URL |
 | --- | --- | --- |
-| OpenAI | GPT Image 2, GPT Image 2.5 Flare / Sunburst | `https://api.openai.com/v1` |
+| OpenAI | GPT Image 2.6 Flare / Sunburst, GPT Image 2 / 2.5 | `https://api.openai.com/v1` |
 | Google | Nano Banana, Nano Banana 2 / Pro (GA), Nano Banana 2.1 | `https://generativelanguage.googleapis.com/v1beta/models` (legacy models); `https://generativelanguage.googleapis.com/v1beta` (2.1 Interactions) |
 | xAI | Grok Imagine Image 2.0 | `https://api.x.ai/v1` |
 | Volcengine Ark | Seedream 5.0 Pro / Flash | `https://ark.cn-beijing.volces.com/api/v3` |
 
 Configure each model's API key and named provider profiles in **Settings → Model configuration**. Custom base URLs and full generation/edit URLs must implement that provider's native protocol. Grok edits use JSON, OpenAI edits use multipart, and Seedream generation and edits share `/images/generations`. Local reference images are sent as inline data; no public image hosting is needed.
 
-The composer shows only model-supported controls. GPT Image 2.5 adds `xhigh` and `max`; Google and Grok separate aspect ratio from resolution. Seedream Pro/Flash offer `1K`, `1.5K`, `2K`, and `auto`, PNG/JPEG output, and at most 10 reference images. Grok supports up to 5 references. Google and Seedream requests produce one image per submission in this release; no automatic paid fan-out is performed.
+The composer shows only model-supported controls. GPT Image 2.5 / 2.6 support `xhigh` and `max`; Google and Grok separate aspect ratio from resolution. Seedream Pro/Flash offer `1K`, `1.5K`, `2K`, and `auto`, PNG/JPEG output, and at most 10 reference images. Grok supports up to 5 references. Google and Seedream requests produce one image per submission in this release; no automatic paid fan-out is performed.
 
-New installations default to GPT Image 2.5 Flare. Existing model selections and legacy GPT Image 2 configuration are retained. Retired Google preview IDs resolve to GA models; only exact official default URLs are upgraded automatically. Custom gateway URLs and submitted job snapshots remain unchanged. Persisted responses can be recovered locally without resubmitting image generation.
+New installations default to GPT Image 2.6 Flare. Existing model selections and legacy GPT Image 2 configuration are retained. Retired Google preview IDs resolve to GA models; only exact official default URLs are upgraded automatically. Custom gateway URLs and submitted job snapshots remain unchanged. Persisted responses can be recovered locally without resubmitting image generation.
 
 Official protocols: [OpenAI](https://developers.openai.com/api/docs/guides/image-generation), [Google](https://ai.google.dev/gemini-api/docs/image-generation), [xAI](https://docs.x.ai/developers/model-capabilities/images/generation), [Seedream](https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=en).
+
+### GPT Image 2.6 (v0.0.31)
+
+Flare and Sunburst now expose image complexity, SVG vector output (including transparent backgrounds), animated GIF output, markup-guided edits, masks, JPEG/WebP compression, up to ten outputs, and streaming partial previews. Advanced controls are available in the composer and for supported canvas edits. SVG is generation-only and always produces one image; GIF supports 2–16 frames and frame delays of at least 20 ms (encoded delay caps at 655,350 ms). New format controls are preserved through retries and recovery.
+
+GIF access and SVG author model selection depend on your provider/account. Original GIF/SVG files are preserved when exporting. The canvas shows GIFs as still frames; open the original to play them. SVG rendering accepts a bounded static subset. See [supported options, constraints, and validation](doc/gpt-image-2.6.md).
