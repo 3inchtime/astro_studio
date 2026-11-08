@@ -26,13 +26,13 @@ export default function GallerySearchBar({
 }: GallerySearchBarProps) {
   return (
     <div className="studio-toolbar px-6 py-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+      <div className="flex flex-col gap-4">
         <div className="flex shrink-0 items-center gap-3 pb-0.5">
-          <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
+          <h2 className="text-[20px] font-semibold tracking-tight text-foreground">
             {config.title}
           </h2>
           {total > 0 && (
-            <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted">
+            <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium tabular-nums text-muted">
               {total}
             </span>
           )}
@@ -40,13 +40,13 @@ export default function GallerySearchBar({
 
         <div
           role="search"
-          aria-label={`${config.title} filters`}
-          className="flex w-full min-w-0 flex-wrap items-center gap-2 xl:flex-1 xl:justify-end"
+          aria-label={config.title}
+          className="flex w-full min-w-0 flex-wrap items-center gap-2"
         >
-          <label className="relative min-w-[220px] flex-[1_1_260px]">
+          <label className="relative min-w-[180px] flex-[1_1_260px]">
             <Search
               size={13}
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60"
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
               strokeWidth={2}
             />
             <input
@@ -59,7 +59,7 @@ export default function GallerySearchBar({
                 }
               }}
               placeholder={config.searchPlaceholder}
-              className="studio-input focus-ring h-[34px] w-full rounded-[10px] pl-7 pr-3 text-[12px] placeholder:text-muted/50"
+              className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
             />
           </label>
 
@@ -93,14 +93,14 @@ export default function GallerySearchBar({
                 >
                   <SlidersHorizontal
                     size={13}
-                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/55"
+                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
                     strokeWidth={2}
                   />
                   <select
                     value={field.value}
                     aria-label={field.label}
                     onChange={(event) => field.onChange(event.target.value)}
-                    className="select-control studio-input focus-ring h-[34px] w-full min-w-0 rounded-[10px] pl-7 pr-8 text-[12px]"
+                    className="select-control studio-input focus-ring h-9 w-full min-w-0 rounded-[8px] pl-7 pr-8 text-[12px]"
                   >
                     {field.options.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -120,7 +120,7 @@ export default function GallerySearchBar({
             <button
               type="button"
               onClick={onSearch}
-              className="studio-control-primary focus-ring inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[10px] px-4 text-[12px] font-medium"
+              className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-[12px] font-medium"
             >
               <Filter size={13} />
               {config.applyFilters}
@@ -129,7 +129,7 @@ export default function GallerySearchBar({
               type="button"
               onClick={onReset}
               disabled={!hasActiveFilters}
-              className="studio-control focus-ring inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[10px] px-4 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
+              className="studio-control focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RotateCcw size={13} />
               {config.resetFilters}

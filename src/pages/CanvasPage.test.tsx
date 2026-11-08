@@ -733,21 +733,103 @@ describe("CanvasPage", () => {
       "Describe how to develop this framed sketch...",
     );
 
-    expect(promptEditor).toHaveClass("min-h-[320px]");
+    expect(promptEditor).toHaveClass("min-h-[144px]");
   });
 
   it("uses the professional editor layout with floating canvas tools", async () => {
     render(<CanvasPage />, { wrapper: TestWrapper });
 
     expect(await screen.findByLabelText("Canvas workspace")).toHaveClass(
-      "min-w-[836px]",
-      "grid-cols-[220px_minmax(276px,1fr)_300px]",
+      "min-w-0",
+      "min-[1100px]:grid-cols-[220px_minmax(0,1fr)_300px]",
     );
     await screen.findByText("Canvas stage");
     expect(screen.getByText("1 canvas")).toBeInTheDocument();
     expect(screen.getByText("0 objects")).toBeInTheDocument();
     expect(screen.getByLabelText("Generation and layers")).toBeInTheDocument();
     expect(screen.getByTestId("canvas-floating-toolbar")).toBeInTheDocument();
+  });
+
+  it("opens one compact panel at a time and restores focus on Escape", async () => {
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas stage");
+    const documents = screen.getByRole("button", {
+      name: "studio.canvas.documents",
+    });
+    const inspector = screen.getByRole("button", {
+      name: "studio.canvas.inspector",
+    });
+    expect(documents).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(documents);
+    expect(documents).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(inspector);
+    expect(documents).toHaveAttribute("aria-expanded", "false");
+    expect(inspector).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(inspector).toHaveAttribute("aria-expanded", "false");
+    expect(inspector).toHaveFocus();
+    expect(screen.getByText("Canvas stage")).toBeInTheDocument();
+  });
+
+  it("focuses the compact inspector and suspends canvas shortcuts until it closes", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("1 object");
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    const inspector = screen.getByRole("button", {
+      name: "studio.canvas.inspector",
+    });
+    inspector.focus();
+    fireEvent.click(inspector);
+    const panel = document.getElementById("canvas-inspector")!;
+    expect(panel).toContainElement(document.activeElement as HTMLElement);
+    fireEvent.keyDown(window, { key: "Delete" });
+    fireEvent.keyDown(window, { key: "b" });
+    expect(screen.getByText("1 object")).toBeInTheDocument();
+    expect(screen.getByText("Active tool: select")).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(inspector).toHaveFocus();
+    expect(inspector).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(window, { key: "b" });
+    expect(screen.getByText("Active tool: brush")).toBeInTheDocument();
+  });
+
+  it("releases the compact panel when resizing to the docked layout", async () => {
+    const originalMatchMedia = window.matchMedia;
+    let docked = false;
+    let onResize = () => {};
+    const mediaSpy = vi
+      .spyOn(window, "matchMedia")
+      .mockImplementation((query) =>
+        query === "(min-width: 1100px)"
+          ? {
+              ...originalMatchMedia(query),
+              get matches() {
+                return docked;
+              },
+              addEventListener: (_event, listener) => {
+                onResize = listener as () => void;
+              },
+            }
+          : originalMatchMedia(query),
+      );
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas stage");
+    fireEvent.click(
+      screen.getByRole("button", { name: "studio.canvas.inspector" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Generation and layers" }),
+    ).toHaveAttribute("aria-modal", "true");
+    act(() => {
+      docked = true;
+      onResize();
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "b" });
+    expect(screen.getByText("Active tool: brush")).toBeInTheDocument();
+    mediaSpy.mockRestore();
   });
 
   it("localizes the default name when adding a new layer", async () => {

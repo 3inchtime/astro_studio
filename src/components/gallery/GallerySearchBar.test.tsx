@@ -60,7 +60,7 @@ describe("GallerySearchBar", () => {
     );
 
     const filterRow = screen.getByRole("search", {
-      name: "Gallery filters",
+      name: "Gallery",
     });
 
     expect(filterRow).toHaveClass("flex", "flex-wrap", "items-center");

@@ -8,6 +8,7 @@ import { useLayoutContext } from "../components/layout/AppLayout";
 import type { GenerationResult, GenerationSearchFilters } from "../types";
 import { useTranslation } from "react-i18next";
 import FolderSelector from "../components/favorites/FolderSelector";
+import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
@@ -43,9 +44,11 @@ export default function GalleryPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
   const searchRequestIdRef = useRef(0);
+  const appliedSearch = useRef<{ query: string; filters: GenerationSearchFilters }>({ query: "", filters: {} });
   const [viewMode, setViewMode] = useStoredGalleryViewMode(
     "astro-gallery-view-mode",
   );
@@ -84,7 +87,9 @@ export default function GalleryPage() {
       mode: "replace" | "append" = "replace",
     ) => {
       const requestId = ++searchRequestIdRef.current;
+      if (mode === "replace") appliedSearch.current = { query: nextQuery, filters: nextFilters };
       setIsLoading(true);
+      setLoadError(false);
       try {
         const result = await searchGenerations(
           nextQuery.trim() || undefined,
@@ -105,6 +110,8 @@ export default function GalleryPage() {
         if (mode === "replace") {
           setSelected(null);
         }
+      } catch {
+        if (requestId === searchRequestIdRef.current) setLoadError(true);
       } finally {
         if (requestId === searchRequestIdRef.current) {
           setIsLoading(false);
@@ -116,6 +123,7 @@ export default function GalleryPage() {
 
   useEffect(() => {
     void performSearch(1, "", {});
+    return () => { searchRequestIdRef.current++; };
   }, [performSearch]);
 
   async function handleSearch() {
@@ -124,7 +132,7 @@ export default function GalleryPage() {
 
   async function handleDelete(id: string) {
     await deleteGeneration(id);
-    await performSearch(page, query, filters);
+    await performSearch(1, appliedSearch.current.query, appliedSearch.current.filters);
     if (selected?.generation.id === id) setSelected(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
       closeLightbox();
@@ -165,17 +173,17 @@ export default function GalleryPage() {
 
   const hasMore = page * pageSize < total;
   const loadMoreRef = useInfiniteScroll({
-    enabled: results.length > 0,
+    enabled: results.length > 0 && !loadError,
     hasMore,
     isLoading,
     onLoadMore: () => {
-      void performSearch(page + 1, query, filters, "append");
+      void performSearch(page + 1, appliedSearch.current.query, appliedSearch.current.filters, "append");
     },
   });
 
   return (
-    <div className="flex h-full overflow-hidden bg-transparent">
-      <div className="flex flex-1 flex-col">
+    <div className="flex h-full overflow-hidden bg-background">
+      <div className="flex min-w-0 flex-1 flex-col">
         <GallerySearchBar
           config={searchConfig}
           total={total}
@@ -188,12 +196,13 @@ export default function GalleryPage() {
         />
 
         <div className="flex-1 overflow-y-auto p-5">
-          {results.length === 0 ? (
+          <CollectionStatus loading={isLoading} error={loadError} onRetry={() => void handleSearch()} />
+          {results.length === 0 ? (!isLoading && !loadError && (
             <EmptyCollectionState
               title={t("gallery.noImages")}
               subtitle={t("gallery.emptyHint")}
             />
-          ) : (
+          )) : (
             <GenerationGrid
               results={results}
               viewMode={viewMode}

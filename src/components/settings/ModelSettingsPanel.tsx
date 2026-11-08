@@ -102,14 +102,14 @@ export function ModelSettingsPanel({
             className="studio-card rounded-[12px] p-4"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
+              <h3 className="text-[20px] font-semibold leading-tight text-foreground">
                 {t("settings.imageGenerationConfig")}
               </h3>
               <motion.button
                 type="button"
                 onClick={onSaveModel}
                 whileTap={{ scale: 0.97 }}
-                className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-primary/20 bg-primary/10 px-3 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
               >
                 {modelSaved ? (
                   <>
@@ -123,7 +123,7 @@ export function ModelSettingsPanel({
             </div>
 
             <div className="grid gap-4">
-              <div className="grid gap-4 xl:grid-cols-[240px_repeat(3,minmax(0,1fr))]">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {IMAGE_MODEL_CATALOG.map((entry) => {
                   const active = imageModel === entry.id;
 
@@ -134,23 +134,23 @@ export function ModelSettingsPanel({
                       aria-pressed={active}
                       aria-label={`Select ${entry.label} model`}
                       onClick={() => onSelectImageModel(entry.id)}
-                      className={`group flex min-h-[68px] items-center gap-3 rounded-[12px] border p-3 text-left transition-all ${
+                      className={`group flex min-h-[52px] items-center gap-3 rounded-[12px] border p-3 text-left transition-colors ${
                         active
                           ? "border-primary/35 bg-primary/6 shadow-card"
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-[12px] font-bold text-white ${
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold text-surface ${
                         entry.provider === "openai"
-                          ? "bg-[#151515]"
-                          : "bg-gradient-to-br from-[#4285F4] to-[#34A853]"
+                          ? "bg-foreground"
+                          : "bg-accent"
                       }`}>
                         {formatProviderName(entry.provider).charAt(0)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-semibold text-foreground">{entry.label}</span>
+                        <span className="block truncate text-[14px] font-semibold text-foreground">{entry.label}</span>
                       </span>
-                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                         active
                           ? "border-primary bg-primary text-white"
                           : "border-border-subtle text-transparent group-hover:border-border"
@@ -166,14 +166,14 @@ export function ModelSettingsPanel({
                 <div className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providers")}</h4>
-                      <p className="mt-1 text-[11px] leading-relaxed text-muted/60">{t("settings.providersDesc")}</p>
+                      <h4 className="text-[14px] font-semibold text-foreground">{t("settings.providers")}</h4>
+                      <p className="mt-1 text-[12px] leading-relaxed text-muted">{t("settings.providersDesc")}</p>
                     </div>
                     <button
                       type="button"
                       onClick={onCreateProvider}
                       aria-label={t("settings.newProvider")}
-                      className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[9px] border border-border-subtle bg-surface text-muted transition-all hover:border-border hover:text-foreground"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-surface text-muted transition-colors hover:border-border hover:text-foreground"
                     >
                       <Plus size={14} />
                     </button>
@@ -181,12 +181,12 @@ export function ModelSettingsPanel({
                 </div>
 
                 <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[12px] border border-dashed border-border-subtle bg-surface text-center">
-                  <p className="text-[12px] text-muted/60">{t("settings.providersDesc")}</p>
+                  <p className="text-[12px] text-muted">{t("settings.providersDesc")}</p>
                   <motion.button
                     type="button"
                     onClick={onCreateProvider}
                     whileTap={{ scale: 0.97 }}
-                    className="mt-3 flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/10 px-4 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15"
+                    className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
                   >
                     <Plus size={13} />
                     {t("settings.newProvider")}
@@ -229,14 +229,14 @@ export function ModelSettingsPanel({
           className="studio-card rounded-[12px] p-4"
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="relative pl-3 text-[18px] font-bold leading-tight text-foreground before:absolute before:bottom-0.5 before:left-0 before:top-0.5 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-primary before:to-accent">
+            <h3 className="text-[20px] font-semibold leading-tight text-foreground">
               {t("settings.imageGenerationConfig")}
             </h3>
             <motion.button
               type="button"
               onClick={onSaveModel}
               whileTap={{ scale: 0.97 }}
-              className="flex h-[34px] shrink-0 items-center justify-center gap-1.5 rounded-[9px] border border-primary/20 bg-primary/10 px-3 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15"
+              className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
             >
               {modelSaved ? (
                 <>
@@ -250,7 +250,7 @@ export function ModelSettingsPanel({
           </div>
 
           <div className="grid gap-4">
-            <div className="grid gap-4 xl:grid-cols-[240px_repeat(3,minmax(0,1fr))]">
+            <div className="grid gap-2 sm:grid-cols-2">
                 {IMAGE_MODEL_CATALOG.map((entry) => {
                   const active = imageModel === entry.id;
 
@@ -261,23 +261,23 @@ export function ModelSettingsPanel({
                       aria-pressed={active}
                       aria-label={`Select ${entry.label} model`}
                       onClick={() => onSelectImageModel(entry.id)}
-                      className={`group flex min-h-[68px] items-center gap-3 rounded-[12px] border p-3 text-left transition-all ${
+                      className={`group flex min-h-[52px] items-center gap-3 rounded-[12px] border p-3 text-left transition-colors ${
                         active
                           ? "border-primary/35 bg-primary/6 shadow-card"
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-[12px] font-bold text-white ${
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold text-surface ${
                         entry.provider === "openai"
-                          ? "bg-[#151515]"
-                          : "bg-gradient-to-br from-[#4285F4] to-[#34A853]"
+                          ? "bg-foreground"
+                          : "bg-accent"
                       }`}>
                         {formatProviderName(entry.provider).charAt(0)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-semibold text-foreground">{entry.label}</span>
+                        <span className="block truncate text-[14px] font-semibold text-foreground">{entry.label}</span>
                       </span>
-                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ${
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                         active
                           ? "border-primary bg-primary text-white"
                           : "border-border-subtle text-transparent group-hover:border-border"
@@ -293,14 +293,14 @@ export function ModelSettingsPanel({
               <div className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h4 className="text-[13px] font-semibold text-foreground">{t("settings.providers")}</h4>
-                    <p className="mt-1 text-[11px] leading-relaxed text-muted/60">{t("settings.providersDesc")}</p>
+                    <h4 className="text-[14px] font-semibold text-foreground">{t("settings.providers")}</h4>
+                    <p className="mt-1 text-[12px] leading-relaxed text-muted">{t("settings.providersDesc")}</p>
                   </div>
                   <button
                     type="button"
                     onClick={onCreateProvider}
                     aria-label={t("settings.newProvider")}
-                    className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[9px] border border-border-subtle bg-surface text-muted transition-all hover:border-border hover:text-foreground"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-surface text-muted transition-colors hover:border-border hover:text-foreground"
                   >
                     <Plus size={14} />
                   </button>
@@ -324,7 +324,7 @@ export function ModelSettingsPanel({
                             onSelectProvider(provider.id);
                           }
                         }}
-                        className={`rounded-[10px] border p-3 text-left transition-all ${
+                        className={`rounded-lg border p-3 text-left transition-colors ${
                           selected
                             ? "border-primary/35 bg-primary/6 shadow-card"
                             : "border-border-subtle bg-surface hover:border-border hover:bg-subtle/25"
@@ -333,7 +333,7 @@ export function ModelSettingsPanel({
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="truncate text-[12px] font-semibold text-foreground">{provider.name}</p>
-                            <p className="mt-1 truncate font-mono text-[10.5px] text-muted/55">
+                            <p className="mt-1 truncate font-mono text-[12px] text-muted">
                               {provider.api_key ? maskKey(provider.api_key) : t("settings.noApiKey")}
                             </p>
                           </div>
@@ -344,7 +344,7 @@ export function ModelSettingsPanel({
                               </span>
                             )}
                             {active && (
-                              <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                              <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[12px] font-medium text-primary">
                                 {t("settings.activeProvider")}
                               </span>
                             )}
@@ -358,25 +358,25 @@ export function ModelSettingsPanel({
 
             <div className="min-w-0 space-y-3 rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
               <div>
-                <h4 className="text-[13px] font-semibold text-foreground">{selectedProvider.name}</h4>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted/60">{t("settings.endpointDesc")}</p>
+                <h4 className="text-[14px] font-semibold text-foreground">{selectedProvider.name}</h4>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.endpointDesc")}</p>
               </div>
 
               <div className="min-w-0 space-y-3">
                 <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-surface/55 p-4">
                   <div className="grid gap-2 sm:grid-cols-2">
                   <label className="grid gap-1.5">
-                    <span className="text-[11px] font-medium text-muted/70">{t("settings.providerName")}</span>
+                    <span className="text-[12px] font-medium text-muted">{t("settings.providerName")}</span>
                     <input
                       type="text"
                       value={selectedProvider.name}
                       onChange={(e) => onProviderNameChange(e.target.value)}
                       placeholder={t("settings.providerNamePlaceholder")}
-                      className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
+                      className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                     />
                   </label>
                   <label className="grid gap-1.5">
-                    <span className="text-[11px] font-medium text-muted/70">{t("settings.apiKey")}</span>
+                    <span className="text-[12px] font-medium text-muted">{t("settings.apiKey")}</span>
                     <div className="relative min-w-0">
                       <input
                         type={showKey ? "text" : "password"}
@@ -384,14 +384,14 @@ export function ModelSettingsPanel({
                         onChange={(e) => onProviderApiKeyChange(e.target.value)}
                         onFocus={() => { if (!showKey) onShowKeyChange(true); }}
                         placeholder={t("settings.apiKeyPlaceholder")}
-                        className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 pr-9 text-[12px] placeholder:text-muted/40"
+                        className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-[14px] placeholder:text-muted"
                       />
                       <button
                         type="button"
                         onClick={() => onShowKeyChange(!showKey)}
                         title={showKey ? t("settings.hideKey") : t("settings.showKey")}
                         aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                        className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted/40 transition-colors hover:bg-subtle hover:text-muted"
+                        className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-muted transition-colors hover:bg-subtle hover:text-muted"
                       >
                         {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
                       </button>
@@ -403,21 +403,21 @@ export function ModelSettingsPanel({
                 <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-surface/55 p-4">
                   <div>
                     <h5 className="text-[12px] font-semibold text-foreground">{t("settings.endpoint")}</h5>
-                    <p className="mt-1 text-[11px] leading-relaxed text-muted/60">
+                    <p className="mt-1 text-[12px] leading-relaxed text-muted">
                       {t("settings.endpointModeHint")}
                     </p>
                   </div>
 
-                  <div className="grid gap-2 rounded-[10px] border border-border-subtle bg-surface p-1 sm:grid-cols-2">
+                  <div className="grid gap-2 rounded-lg border border-border-subtle bg-surface p-1 sm:grid-cols-2">
                     {(["base_url", "full_url"] as EndpointMode[]).map((mode) => (
                       <button
                         key={mode}
                         type="button"
                         onClick={() => onProviderEndpointModeChange(mode)}
-                        className={`h-[34px] rounded-[8px] px-3 text-[12px] font-medium transition-all ${
+                        className={`h-9 rounded-[8px] px-3 text-[12px] font-medium transition-colors ${
                           endpointSettings.mode === mode
                             ? "bg-subtle text-foreground shadow-card"
-                            : "text-muted/60 hover:text-foreground"
+                            : "text-muted hover:text-foreground"
                         }`}
                       >
                         {t(mode === "base_url" ? "settings.endpointBaseUrlMode" : "settings.endpointFullUrlMode")}
@@ -427,36 +427,36 @@ export function ModelSettingsPanel({
 
                   {endpointSettings.mode === "base_url" ? (
                     <label className="grid gap-1.5">
-                      <span className="text-[11px] font-medium text-muted/70">{t("settings.endpoint")}</span>
+                      <span className="text-[12px] font-medium text-muted">{t("settings.endpoint")}</span>
                       <input
                         type="text"
                         value={endpointSettings.base_url}
                         onChange={(e) => onProviderBaseUrlChange(e.target.value)}
                         placeholder={defaultBaseUrlForModel(imageModel)}
-                        className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
+                        className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                       />
                     </label>
                   ) : (
                     <div className="grid gap-2">
                       <label className="grid gap-1.5">
-                        <span className="text-[11px] font-medium text-muted/70">{t("settings.generationUrl")}</span>
+                        <span className="text-[12px] font-medium text-muted">{t("settings.generationUrl")}</span>
                         <input
                           type="text"
                           value={endpointSettings.generation_url}
                           onChange={(e) => onProviderGenerationUrlChange(e.target.value)}
                           placeholder={defaultGenerationUrlForModel(imageModel)}
-                          className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
+                          className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                         />
                       </label>
                       {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
                         <label className="grid gap-1.5">
-                          <span className="text-[11px] font-medium text-muted/70">{t("settings.editUrl")}</span>
+                          <span className="text-[12px] font-medium text-muted">{t("settings.editUrl")}</span>
                           <input
                             type="text"
                             value={endpointSettings.edit_url}
                             onChange={(e) => onProviderEditUrlChange(e.target.value)}
                             placeholder={defaultEditUrlForModel(imageModel)}
-                            className="studio-input focus-ring h-[38px] w-full rounded-[10px] px-3 text-[12px] placeholder:text-muted/40"
+                            className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                           />
                         </label>
                       )}
@@ -465,7 +465,7 @@ export function ModelSettingsPanel({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
-                  <p className="text-[11px] text-muted/60">
+                  <p className="text-[12px] text-muted">
                     {selectedProviderIsActive
                       ? `${selectedProvider.name} · ${t("settings.activeProvider")}`
                       : `${selectedProvider.name} · ${t("settings.providers")}`}
@@ -476,7 +476,7 @@ export function ModelSettingsPanel({
                         type="button"
                         onClick={() => onSetActiveProvider(selectedProvider.id)}
                         whileTap={{ scale: 0.97 }}
-                        className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/10 px-4 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                        className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                       >
                         <Check size={13} />
                         {t("settings.activateProvider")}
@@ -486,7 +486,7 @@ export function ModelSettingsPanel({
                       type="button"
                       onClick={onSaveProvider}
                       whileTap={{ scale: 0.97 }}
-                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary/10 px-4 text-[12px] font-medium text-primary transition-all hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                     >
                       {providerSaved ? (
                         <>
@@ -501,7 +501,7 @@ export function ModelSettingsPanel({
                       type="button"
                       onClick={onCancelProviderEdit}
                       whileTap={{ scale: 0.97 }}
-                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground lg:min-w-[104px]"
+                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
                     >
                       <X size={13} />
                       {t("settings.cancelEdit")}
@@ -510,7 +510,7 @@ export function ModelSettingsPanel({
                       type="button"
                       onClick={() => onDeleteProvider(selectedProvider.id)}
                       whileTap={{ scale: 0.97 }}
-                      className="flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-error/20 bg-error/5 px-4 text-[12px] font-medium text-error transition-all hover:border-error/30 hover:bg-error/10"
+                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
                     >
                       <Trash2 size={13} />
                       {t("settings.deleteProvider")}

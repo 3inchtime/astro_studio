@@ -49,30 +49,30 @@ export default function CanvasGenerationPanel({
   const { t } = useTranslation();
 
   return (
-    <section className="rounded-[16px] border border-border-subtle bg-surface/92 shadow-card">
-      <div className="border-b border-border-subtle px-4 py-4">
-        <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+    <section className="rounded-xl border border-border-subtle bg-surface shadow-card">
+      <div className="border-b border-border-subtle px-3 py-3">
+        <div className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
           <PanelRight size={14} strokeWidth={1.8} />
           <span>{t("canvas.generationTitle")}</span>
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-col gap-3 p-3">
         <div className="space-y-2">
           <label className="block text-[12px] font-medium text-foreground/80">
             {t("generate.modelLabel")}
           </label>
-          <div className="rounded-[12px] border border-border-subtle bg-surface px-3 py-2 text-[13px] text-foreground">
+          <div className="rounded-[12px] border border-border-subtle bg-surface px-3 py-2 text-[14px] text-foreground">
             {imageModel}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-[12px] border border-border-subtle bg-surface/80 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-[0.04em] text-muted">
+            <div className="text-[12px] uppercase tracking-[0.04em] text-muted">
               {t("canvas.frameAspect")}
             </div>
-            <div className="mt-1 text-[13px] font-medium text-foreground">
+            <div className="mt-1 text-[14px] font-medium text-foreground">
               {onFrameAspectChange ? (
                 <select
                   aria-label={t("canvas.framePreset")}
@@ -104,10 +104,10 @@ export default function CanvasGenerationPanel({
             </div>
           </div>
           <div className="rounded-[12px] border border-border-subtle bg-surface/80 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-[0.04em] text-muted">
+            <div className="text-[12px] uppercase tracking-[0.04em] text-muted">
               {t("canvas.layersTitle")}
             </div>
-            <div className="mt-1 text-[13px] font-medium text-foreground">
+            <div className="mt-1 text-[14px] font-medium text-foreground">
               {frame
                 ? `${Math.round(frame.width)} x ${Math.round(frame.height)}`
                 : "--"}
@@ -234,7 +234,7 @@ export default function CanvasGenerationPanel({
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
           placeholder={t("canvas.promptPlaceholder")}
-          className="studio-input -mt-2 min-h-[320px] w-full resize-y rounded-[14px] px-4 py-3 text-[14px] leading-[1.65]"
+          className="studio-input -mt-2 min-h-[144px] w-full resize-y rounded-xl px-4 py-3 text-[14px] leading-[1.65]"
         />
 
         <button
@@ -242,7 +242,7 @@ export default function CanvasGenerationPanel({
           onClick={onGenerate}
           disabled={disabled}
           aria-busy={isGenerating}
-          className="studio-control-primary focus-ring inline-flex items-center justify-center gap-2 rounded-[12px] px-4 py-3 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+          className="studio-control-primary focus-ring inline-flex items-center justify-center gap-2 h-9 rounded-lg px-4 text-[14px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isGenerating ? (
             <Loader2

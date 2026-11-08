@@ -1,3 +1,5 @@
+import { contrastRatio, readableColor } from "./themeContrast";
+
 export type ThemeAppearance = "light" | "dark";
 
 export type ThemeId =
@@ -369,6 +371,31 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     },
   ),
 ];
+
+// Complete every preset with the same semantic surface/contrast contract.
+for (const theme of THEME_CATALOG) {
+  const v = theme.variables;
+  const ink = theme.appearance === "dark" ? "#ffffff" : "#000000";
+  if (theme.id === "pure-light") {
+    v["--color-primary"] = "#315EEA";
+    v["--color-background"] = "#F5F6F8";
+    v["--color-subtle"] = "#EFF1F4";
+    v["--color-border"] = "#DCE0E6";
+    v["--color-border-subtle"] = "#E7E9EE";
+  }
+  v["--color-canvas"] = v["--color-background"];
+  v["--color-rail"] = v["--color-subtle"];
+  v["--color-surface-muted"] = v["--color-background"];
+  const surfaces = [v["--color-background"], v["--color-surface"], v["--color-subtle"], v["--color-surface-elevated"]];
+  for (const key of ["--color-muted", "--color-primary", "--color-error", "--color-success", "--color-warning"]) {
+    v[key] = readableColor(v[key], surfaces, ink, 4.5);
+  }
+  v["--color-control-border"] = readableColor(v["--color-border"], surfaces, ink, 3);
+  v["--color-primary-foreground"] = contrastRatio(v["--color-primary"], "#FFFFFF") >= 4.5 ? "#FFFFFF" : "#111111";
+  v["--shadow-focus"] = "0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent)";
+  v["--shadow-card"] = theme.appearance === "dark" ? "0 1px 3px rgba(0,0,0,.18)" : "0 1px 3px rgba(20,30,50,.04)";
+  v["--shadow-float"] = theme.appearance === "dark" ? "0 8px 28px rgba(0,0,0,.32)" : "0 8px 28px rgba(20,30,50,.12)";
+}
 
 export const DEFAULT_THEME_ID: ThemeId = "pure-light";
 

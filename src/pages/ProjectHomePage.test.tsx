@@ -1,4 +1,4 @@
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   act,
   fireEvent,
@@ -72,6 +72,10 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+vi.mock("../components/favorites/FolderSelector", () => ({
+  default: () => null,
+}));
+
 describe("ProjectHomePage", () => {
   let promptSpy: { mockRestore: () => void };
 
@@ -134,6 +138,102 @@ describe("ProjectHomePage", () => {
   afterEach(() => {
     promptSpy.mockRestore();
   });
+
+  it("offers a direct way to continue creating inside the project", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes>
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "studio.project.continue" }),
+    );
+    expect(navigate).toHaveBeenCalledWith(ROUTES.projectChat("project-1"));
+  });
+
+  it("distinguishes an unavailable project from a missing project and retries", async () => {
+    getProjects.mockRejectedValueOnce(new Error("offline"));
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes>
+          <Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("alert");
+    expect(screen.queryByText("projects.notFound")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "studio.collection.retry" }),
+    );
+    expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
+  });
+
+  it.each([
+    { action: "pin", fails: false },
+    { action: "unpin", fails: false },
+    { action: "pin", fails: true },
+    { action: "unpin", fails: true },
+  ])(
+    "ignores delayed $action (failure=$fails) after navigating to another project",
+    async ({ action, fails }) => {
+      const pending = deferred();
+      (action === "pin" ? pinProject : unpinProject).mockReturnValueOnce(
+        pending.promise,
+      );
+      getProjects.mockResolvedValue([
+        {
+          id: "project-1",
+          name: "Project A",
+          pinned_at: action === "unpin" ? "2026-01-01" : null,
+          image_count: 0,
+          conversation_count: 0,
+        },
+        {
+          id: "project-2",
+          name: "Project B",
+          pinned_at: null,
+          image_count: 0,
+          conversation_count: 0,
+        },
+      ]);
+      render(
+        <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+          <Link to={ROUTES.projectHome("project-2")}>Visit Project B</Link>
+          <Routes>
+            <Route
+              path={ROUTE_PATHS.projectHome}
+              element={<ProjectHomePage />}
+            />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await screen.findByRole("heading", { name: "Project A" });
+      fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: `projects.${action}` }),
+      );
+      fireEvent.click(screen.getByRole("link", { name: "Visit Project B" }));
+      await screen.findByRole("heading", { name: "Project B" });
+      await act(async () => {
+        if (fails) pending.reject(new Error("Old project failed"));
+        else pending.resolve();
+      });
+      expect(
+        screen.queryByText("projects.actionError"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Project B" }),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole("button", { name: "studio.project.continue" }),
+      );
+      expect(navigate).toHaveBeenLastCalledWith(
+        ROUTES.projectChat("project-2"),
+      );
+    },
+  );
 
   it("loads the project overview, recent conversations, and project-scoped images", async () => {
     render(

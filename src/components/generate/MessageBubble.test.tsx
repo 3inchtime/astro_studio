@@ -31,6 +31,28 @@ vi.mock("./GenerationLoadingScene", () => ({
 }));
 
 describe("MessageBubble", () => {
+  it("expands and collapses a long prompt without losing its content", () => {
+    const content = "Detailed lighting and composition. ".repeat(20);
+    render(
+      <MessageBubble
+        message={{
+          id: "long",
+          role: "user",
+          content,
+          status: "complete",
+          createdAt: "2026-05-01",
+        }}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "studio.expandPrompt" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(
+      screen.getByRole("button", { name: "studio.collapsePrompt" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(content.trim())).not.toHaveClass("line-clamp-3");
+  });
+
   it("limits source image max height to 80% of the chat viewport height", () => {
     const message: Message = {
       id: "user-2",
@@ -82,12 +104,16 @@ describe("MessageBubble", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
 
     expect(onEditPrompt).toHaveBeenCalledWith(message);
-    expect(screen.getByText("A cinematic portrait of a fox astronaut").closest("[data-message-role='user']")).toHaveClass(
-      "justify-end",
-    );
     expect(
-      screen.getByText("A cinematic portrait of a fox astronaut").closest("div"),
-    ).toHaveClass("rounded-[999px]", "shadow-card");
+      screen
+        .getByText("A cinematic portrait of a fox astronaut")
+        .closest("[data-message-role='user']"),
+    ).toHaveClass("justify-end");
+    expect(
+      screen
+        .getByText("A cinematic portrait of a fox astronaut")
+        .closest("div"),
+    ).toHaveClass("rounded-xl", "bg-surface");
   });
 
   it("shows a retry button for failed messages with retry data", () => {
@@ -127,8 +153,8 @@ describe("MessageBubble", () => {
 
     expect(onRetry).toHaveBeenCalledWith(message);
     expect(screen.getByText("Network error").parentElement).toHaveClass(
-      "rounded-[16px]",
-      "rounded-bl-[5px]",
+      "rounded-xl",
+      "border-error/20",
     );
   });
 
@@ -152,12 +178,14 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} onImageClick={vi.fn()} />);
 
-    expect(screen.getByTestId("image-grid").closest("[data-message-role='assistant']")).toHaveClass(
-      "justify-start",
-    );
+    expect(
+      screen
+        .getByTestId("image-grid")
+        .closest("[data-message-role='assistant']"),
+    ).toHaveClass("justify-start");
     expect(screen.getByTestId("image-grid").parentElement).toHaveClass(
-      "rounded-[20px]",
-      "ring-1",
+      "rounded-xl",
+      "border-border-subtle",
     );
   });
 
@@ -181,7 +209,9 @@ describe("MessageBubble", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Accept and generate" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Accept and generate" }),
+    );
 
     expect(onAccept).toHaveBeenCalled();
     expect(

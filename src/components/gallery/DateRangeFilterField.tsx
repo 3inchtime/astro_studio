@@ -10,6 +10,7 @@ import {
   type DateRangePresetId,
 } from "../../lib/dateRangeFilters";
 import { cn } from "../../lib/utils";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 interface DateRangeFilterFieldProps {
   label: string;
@@ -48,6 +49,7 @@ export default function DateRangeFilterField({
 }: DateRangeFilterFieldProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogFocus({ open, onClose: () => setOpen(false) });
   const selectedRange = useMemo(() => toDayPickerRange(value), [value]);
   const displayStartMonth = useMemo(() => getPreviousMonthStart(), [open]);
   const hasValue = Boolean(value.from || value.to);
@@ -61,17 +63,9 @@ export default function DateRangeFilterField({
       }
     };
 
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
     };
   }, [open]);
 
@@ -92,24 +86,28 @@ export default function DateRangeFilterField({
         aria-label={`${label}: ${displayValue}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) => {
+          // Safari does not focus pointer-activated buttons automatically.
+          if (!open) event.currentTarget.focus();
+          setOpen((current) => !current);
+        }}
         className={cn(
-          "studio-control focus-ring group flex h-[34px] w-full items-center gap-2 rounded-[10px] px-2.5 text-left",
+          "studio-control focus-ring group flex h-9 w-full items-center gap-2 rounded-[8px] px-2.5 text-left",
           hasValue
             ? "border-border bg-surface text-foreground"
             : "border-border-subtle bg-subtle/45",
           "hover:studio-control-hover",
           open
-            ? "border-primary/25 bg-surface shadow-[0_0_0_4px_rgba(79,106,255,0.12),inset_0_1px_0_rgba(255,255,255,0.75)]"
+            ? "border-primary bg-surface"
             : "",
         )}
       >
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] bg-primary/[0.08] text-primary/70 transition-colors group-hover:bg-primary/[0.12]">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] bg-primary/[0.08] text-primary transition-colors group-hover:bg-primary/[0.12]">
           <CalendarDays size={14} strokeWidth={1.9} />
         </span>
 
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[11px] font-medium text-foreground">
+          <span className="block truncate text-[12px] font-medium text-foreground">
             {displayValue}
           </span>
         </span>
@@ -118,7 +116,7 @@ export default function DateRangeFilterField({
           size={14}
           strokeWidth={1.9}
           className={cn(
-            "shrink-0 text-muted/50 transition-transform duration-150",
+            "shrink-0 text-muted transition-transform duration-150",
             open ? "rotate-180" : "",
           )}
         />
@@ -126,26 +124,28 @@ export default function DateRangeFilterField({
 
       {open && (
         <div
+          ref={dialogRef}
           role="dialog"
-          aria-modal="false"
+          aria-modal="true"
           aria-label={label}
-          className="studio-floating-panel absolute right-0 top-[calc(100%+8px)] z-30 w-[min(456px,calc(100vw-132px))] overflow-hidden rounded-[16px] p-2.5"
+          tabIndex={-1}
+          className="studio-floating-panel absolute right-0 top-[calc(100%+8px)] z-30 w-[min(456px,calc(100vw-132px))] overflow-hidden rounded-[12px] p-2.5"
         >
-          <div className="mb-2 flex flex-nowrap gap-1 overflow-hidden">
+          <div className="mb-2 flex flex-wrap gap-1">
             {presetOrder.map((presetId) => (
               <button
                 key={presetId}
                 type="button"
                 onClick={() => onChange(buildPresetRange(presetId))}
                 aria-label={presetLabels[presetId]}
-                className="focus-ring min-w-0 rounded-full border border-primary/12 bg-primary/[0.06] px-2 py-0.5 text-[9px] font-medium text-primary/80 transition-colors hover:bg-primary/[0.12]"
+                className="focus-ring min-w-0 rounded-[8px] border border-border bg-subtle px-2 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-surface"
               >
                 {presetLabels[presetId]}
               </button>
             ))}
           </div>
 
-          <div className="overflow-hidden rounded-[14px] border border-border-subtle bg-gradient-to-b from-surface to-subtle/35 p-1.5">
+          <div className="overflow-hidden rounded-[12px] border border-border-subtle bg-surface p-1.5">
             <div className="astro-day-picker-scale">
               <DayPicker
                 mode="range"
@@ -165,10 +165,10 @@ export default function DateRangeFilterField({
 
           <div className="mt-2 flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-[11px] font-medium text-foreground">
+              <p className="truncate text-[12px] font-medium text-foreground">
                 {displayValue}
               </p>
-              <p className="text-[9px] text-muted/65">
+              <p className="text-[12px] text-muted">
                 {value.from && value.to
                   ? `${value.from} → ${value.to}`
                   : label}
@@ -179,14 +179,14 @@ export default function DateRangeFilterField({
               <button
                 type="button"
                 onClick={() => onChange({ from: "", to: "" })}
-                className="studio-control focus-ring rounded-[9px] px-2 py-1 text-[10px] font-medium hover:studio-control-hover"
+                className="studio-control focus-ring rounded-[8px] px-2 py-1 text-[12px] font-medium hover:studio-control-hover"
               >
                 {presets.clear}
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="studio-control-primary focus-ring rounded-[9px] px-2.5 py-1 text-[10px] font-semibold"
+                className="studio-control-primary focus-ring rounded-[8px] px-2.5 py-1 text-[12px] font-semibold"
               >
                 {presets.done}
               </button>

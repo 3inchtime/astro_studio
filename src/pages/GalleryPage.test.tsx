@@ -256,6 +256,16 @@ describe("GalleryPage", () => {
     vi.stubGlobal("Date", MockDate);
   });
 
+  it("shows a retryable failure instead of an empty collection and preserves the query", async () => {
+    searchGenerations.mockRejectedValueOnce(new Error("offline"));
+    render(<GalleryPage />);
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("gallery.search"), { target: { value: "moon" } });
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.retry" }));
+    await waitFor(() => expect(searchGenerations).toHaveBeenLastCalledWith("moon", 1, false, {}, undefined));
+  });
+
   it("searches with prompt, model, and a preset date range", async () => {
     render(<GalleryPage />);
 
@@ -496,6 +506,15 @@ describe("GalleryPage", () => {
 
     expect(screen.getByTestId("lightbox-index")).toHaveTextContent("0");
     expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
+  });
+
+  it("paginates the submitted search even while a new draft is being typed", async () => {
+    searchGenerations.mockResolvedValueOnce({ generations: [buildResult("1")], total: 2, page: 1, page_size: 1 }).mockResolvedValueOnce({ generations: [buildResult("2")], total: 2, page: 2, page_size: 1 });
+    render(<GalleryPage />);
+    await screen.findByTestId("grid");
+    fireEvent.change(screen.getByPlaceholderText("gallery.search"), { target: { value: "unsent draft" } });
+    await act(async () => triggerIntersection());
+    expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 2, false, {}, undefined);
   });
 
   it("loads the next gallery page when the waterfall sentinel becomes visible", async () => {

@@ -34,7 +34,7 @@ export default function ViewModeToggle({
   return (
     <div
       aria-label={t("gallery.viewMode")}
-      className="studio-control flex h-[34px] shrink-0 items-center rounded-[10px] p-0.5"
+      className="studio-control flex h-9 shrink-0 items-center rounded-[8px] p-0.5"
       role="group"
     >
       {options.map((option) => {

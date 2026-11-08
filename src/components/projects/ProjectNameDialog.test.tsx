@@ -73,6 +73,26 @@ describe("ProjectNameDialog", () => {
     expect(defaultProps.onSubmit).toHaveBeenCalledWith("Launch Visuals");
   });
 
+  it("does not submit Enter used by an IME composition", () => {
+    render(<ProjectNameDialog {...defaultProps} initialName="项目" />);
+    const input = screen.getByLabelText("Project name");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(defaultProps.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("blocks submission and all dismissal paths while pending", () => {
+    render(<ProjectNameDialog {...defaultProps} initialName="Project" loading />);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.submit(screen.getByLabelText("Project name").closest("form")!);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.click(dialog.parentElement!);
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(defaultProps.onSubmit).not.toHaveBeenCalled();
+    expect(defaultProps.onCancel).not.toHaveBeenCalled();
+    expect(dialog).toHaveFocus();
+  });
+
   it("renders a form and submits through form submission", () => {
     render(<ProjectNameDialog {...defaultProps} />);
 

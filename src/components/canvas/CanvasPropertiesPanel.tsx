@@ -13,16 +13,17 @@ export default function CanvasPropertiesPanel({
   const first = objects[0];
   const all = (key: string) => objects.every((o) => key in o);
   return (
-    <section className="rounded-[16px] border border-border-subtle bg-surface/92 p-4 shadow-card">
-      <h3 className="mb-3 text-[13px] font-semibold">
+    <section className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
+      <h3 className="mb-3 text-[14px] font-semibold">
         {t("canvas.propertiesTitle")}
       </h3>
       <div className="flex flex-col gap-3 text-[12px]">
         {all("color") && "color" in first ? (
-          <label>
+          <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
             {t("canvas.strokeColor")}
             <input
               aria-label={t("canvas.strokeColor")}
+              className="h-9 w-12 rounded-lg border border-border-subtle bg-surface p-1"
               type="color"
               value={first.color}
               onChange={(e) => onChange({ color: e.target.value })}
@@ -30,10 +31,11 @@ export default function CanvasPropertiesPanel({
           </label>
         ) : null}
         {all("fill") && "fill" in first ? (
-          <label>
+          <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
             {t("canvas.fillColor")}
             <input
               aria-label={t("canvas.fillColor")}
+              className="h-9 w-12 rounded-lg border border-border-subtle bg-surface p-1"
               type="color"
               value={first.fill === "transparent" ? "#ffffff" : first.fill}
               onChange={(e) => onChange({ fill: e.target.value })}
@@ -41,10 +43,11 @@ export default function CanvasPropertiesPanel({
           </label>
         ) : null}
         {all("size") && "size" in first ? (
-          <label>
+          <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
             {t("canvas.strokeWidth")}
             <input
               aria-label={t("canvas.strokeWidth")}
+              className="studio-input focus-ring h-9 w-20 rounded-lg px-2 text-sm text-foreground"
               type="number"
               min="1"
               value={first.size}
@@ -53,10 +56,11 @@ export default function CanvasPropertiesPanel({
           </label>
         ) : null}
         {all("fontSize") && "fontSize" in first ? (
-          <label>
+          <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
             {t("canvas.fontSize")}
             <input
               aria-label={t("canvas.fontSize")}
+              className="studio-input focus-ring h-9 w-20 rounded-lg px-2 text-sm text-foreground"
               type="number"
               min="1"
               value={first.fontSize}
@@ -64,7 +68,7 @@ export default function CanvasPropertiesPanel({
             />
           </label>
         ) : null}
-        <label>
+        <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
           {t("canvas.opacity")}
           <input
             aria-label={t("canvas.opacity")}

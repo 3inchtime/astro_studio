@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PanelLeft, PanelRight } from "lucide-react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { image26ValidationError } from "../lib/image26Options";
 import { normalizeAdvancedOptions } from "../lib/generationRequests";
 import { isGptImage26 } from "../lib/modelCatalog";
@@ -84,6 +86,42 @@ import type {
 
 export default function CanvasPage() {
   const { t } = useTranslation();
+  const [compactPanel, setCompactPanel] = useState<
+    "documents" | "inspector" | null
+  >(null);
+  const documentsToggleRef = useRef<HTMLButtonElement>(null);
+  const inspectorToggleRef = useRef<HTMLButtonElement>(null);
+  const [isCompact, setIsCompact] = useState(
+    () => !window.matchMedia("(min-width: 1100px)").matches,
+  );
+  const previousCompactPanel = useRef(compactPanel);
+  const documentsPanelRef = useDialogFocus({
+    open: isCompact && compactPanel === "documents",
+    onClose: () => setCompactPanel(null),
+  });
+  const inspectorPanelRef = useDialogFocus({
+    open: isCompact && compactPanel === "inspector",
+    onClose: () => setCompactPanel(null),
+  });
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1100px)");
+    const update = () => {
+      setIsCompact(!media.matches);
+      if (media.matches) setCompactPanel(null);
+    };
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    const previous = previousCompactPanel.current;
+    previousCompactPanel.current = compactPanel;
+    if (isCompact && previous && !compactPanel) {
+      (previous === "documents"
+        ? documentsToggleRef
+        : inspectorToggleRef
+      ).current?.focus();
+    }
+  }, [compactPanel, isCompact]);
   const { activeProjectId } = useLayoutContext();
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     null,
@@ -317,8 +355,8 @@ export default function CanvasPage() {
   }, [isDesktopRuntime]);
   const isEditorReady = Boolean(
     selectedDocumentId &&
-    loadedDocumentId === selectedDocumentId &&
-    !isTransitioning,
+      loadedDocumentId === selectedDocumentId &&
+      !isTransitioning,
   );
   const isGenerating =
     Boolean(
@@ -390,9 +428,9 @@ export default function CanvasPage() {
   function isDocumentReady(documentId: string | null): documentId is string {
     return Boolean(
       documentId &&
-      selectedDocumentIdRef.current === documentId &&
-      loadedDocumentIdRef.current === documentId &&
-      !isTransitioningRef.current,
+        selectedDocumentIdRef.current === documentId &&
+        loadedDocumentIdRef.current === documentId &&
+        !isTransitioningRef.current,
     );
   }
 
@@ -1089,10 +1127,12 @@ export default function CanvasPage() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (isCompact && compactPanel) return;
       const target = event.target;
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
         (target instanceof HTMLElement && target.isContentEditable)
       ) {
         return;
@@ -1216,6 +1256,8 @@ export default function CanvasPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     activeLayer?.id,
+    compactPanel,
+    isCompact,
     clipboard,
     content,
     history.future.length,
@@ -1226,19 +1268,75 @@ export default function CanvasPage() {
   ]);
 
   return (
-    <div className="h-full min-h-0 overflow-x-auto bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3 min-[1100px]:hidden">
+        <button
+          ref={documentsToggleRef}
+          type="button"
+          aria-controls="canvas-documents"
+          aria-expanded={compactPanel === "documents"}
+          onClick={() =>
+            setCompactPanel(compactPanel === "documents" ? null : "documents")
+          }
+          className="focus-ring flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-foreground hover:bg-subtle"
+        >
+          <PanelLeft size={16} />
+          {t("studio.canvas.documents", { defaultValue: "Documents" })}
+        </button>
+        <button
+          ref={inspectorToggleRef}
+          type="button"
+          aria-controls="canvas-inspector"
+          aria-expanded={compactPanel === "inspector"}
+          onClick={() =>
+            setCompactPanel(compactPanel === "inspector" ? null : "inspector")
+          }
+          className="focus-ring flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-foreground hover:bg-subtle"
+        >
+          <PanelRight size={16} />
+          {t("studio.canvas.inspector", { defaultValue: "Inspector" })}
+        </button>
+      </div>
       <div
         aria-label={t("canvas.workspaceLabel")}
-        className="grid h-full min-w-[836px] min-h-0 grid-cols-[220px_minmax(276px,1fr)_300px] gap-0 bg-[linear-gradient(180deg,_rgba(255,255,255,0.72),_rgba(248,247,244,0.94))]"
+        className="relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] bg-background min-[1100px]:grid-cols-[220px_minmax(0,1fr)_300px]"
       >
-        <CanvasAssetSidebar
-          documents={documents}
-          selectedDocumentId={selectedDocumentId}
-          onSelectDocument={handleSelectDocument}
-          onCreateDocument={() => void handleCreateDocument()}
-        />
-
-        <section className="min-h-0 bg-background">
+        {compactPanel ? (
+          <button
+            type="button"
+            aria-label={t("studio.canvas.closePanel", {
+              defaultValue: "Close panel",
+            })}
+            onClick={() => setCompactPanel(null)}
+            className="absolute inset-0 z-30 bg-background/40 min-[1100px]:hidden"
+          />
+        ) : null}
+        <div
+          ref={documentsPanelRef}
+          tabIndex={-1}
+          role={
+            isCompact && compactPanel === "documents" ? "dialog" : undefined
+          }
+          aria-modal={
+            isCompact && compactPanel === "documents" ? true : undefined
+          }
+          aria-label={t("studio.canvas.documents", {
+            defaultValue: "Documents",
+          })}
+          id="canvas-documents"
+          className={`${compactPanel === "documents" ? "block" : "hidden"} absolute inset-y-0 left-0 z-40 w-[220px] max-w-full bg-surface shadow-float min-[1100px]:static min-[1100px]:block min-[1100px]:min-h-0 min-[1100px]:shadow-none`}
+        >
+          <CanvasAssetSidebar
+            documents={documents}
+            selectedDocumentId={selectedDocumentId}
+            onSelectDocument={(id) => {
+              handleSelectDocument(id);
+              setCompactPanel(null);
+            }}
+            onCreateDocument={() => void handleCreateDocument()}
+          />
+        </div>
+        <section className="min-h-0 min-w-0 bg-background">
           {selectedDocumentId ? (
             isEditorReady ? (
               <div className="relative h-full min-h-0 overflow-hidden border-x border-border-subtle bg-canvas">
@@ -1291,7 +1389,7 @@ export default function CanvasPage() {
                 </div>
                 <div
                   data-testid="canvas-floating-toolbar"
-                  className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-5"
+                  className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3"
                 >
                   <CanvasToolbar
                     activeTool={activeTool}
@@ -1402,7 +1500,7 @@ export default function CanvasPage() {
             <div className="flex h-full min-h-0 items-center justify-center border-x border-border-subtle px-6">
               <div
                 data-testid="canvas-empty-state-card"
-                className="w-[min(360px,calc(100%-48px))] max-w-full rounded-[18px] border border-border-subtle bg-surface/92 px-8 py-10 text-center shadow-float"
+                className="w-[min(360px,calc(100%-48px))] max-w-full rounded-xl border border-border-subtle bg-surface/92 px-8 py-10 text-center shadow-card"
               >
                 <h1 className="text-[22px] font-semibold text-foreground">
                   {t("canvas.title")}
@@ -1416,10 +1514,19 @@ export default function CanvasPage() {
         </section>
 
         <aside
+          ref={inspectorPanelRef}
+          tabIndex={-1}
+          role={
+            isCompact && compactPanel === "inspector" ? "dialog" : undefined
+          }
+          aria-modal={
+            isCompact && compactPanel === "inspector" ? true : undefined
+          }
+          id="canvas-inspector"
           aria-label={t("canvas.inspectorLabel")}
-          className="min-h-0 overflow-y-auto bg-surface-muted/72 px-4 py-4"
+          className={`${compactPanel === "inspector" ? "block" : "hidden"} absolute inset-y-0 right-0 z-40 w-[300px] max-w-full min-h-0 overflow-y-auto border-l border-border-subtle bg-surface p-3 shadow-float min-[1100px]:static min-[1100px]:block min-[1100px]:shadow-none`}
         >
-          <div className="flex min-h-full flex-col gap-4">
+          <div className="flex min-h-full flex-col gap-3">
             <CanvasGenerationPanel
               prompt={prompt}
               imageModel={imageModel}

@@ -86,6 +86,14 @@ describe("ProjectsPage", () => {
     ]);
   });
 
+  it("can retry a failed project listing", async () => {
+    getProjects.mockRejectedValueOnce(new Error("offline"));
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.retry" }));
+    expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
+  });
+
   it("shows user-facing projects and hides the default project", async () => {
     render(
       <MemoryRouter>

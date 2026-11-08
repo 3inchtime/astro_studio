@@ -799,8 +799,8 @@ export default function CanvasStage({
         });
       }}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.96),_rgba(244,241,234,0.9)_36%,_rgba(238,234,226,0.98)_100%)]" />
-      <div className="absolute left-5 top-5 z-10 rounded-[12px] border border-border-subtle bg-surface/88 px-3 py-2 text-[12px] text-muted shadow-card">
+      <div className="absolute inset-0 bg-canvas" />
+      <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-[calc(100%-180px)] line-clamp-2 text-[12px] text-muted">
         {t("canvas.emptyStateHint")}
       </div>
 
@@ -842,7 +842,7 @@ export default function CanvasStage({
                 position * content.viewport.scale + content.viewport.x,
                 CANVAS_WORLD_SIZE * content.viewport.scale + content.viewport.y,
               ]}
-              stroke="rgba(95,88,74,0.06)"
+              stroke="rgba(128,128,128,0.16)"
               strokeWidth={1}
             />
           ))}
@@ -856,7 +856,7 @@ export default function CanvasStage({
                 CANVAS_WORLD_SIZE * content.viewport.scale + content.viewport.x,
                 position * content.viewport.scale + content.viewport.y,
               ]}
-              stroke="rgba(95,88,74,0.06)"
+              stroke="rgba(128,128,128,0.16)"
               strokeWidth={1}
             />
           ))}

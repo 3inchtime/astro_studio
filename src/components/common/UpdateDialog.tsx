@@ -1,3 +1,4 @@
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Download, CheckCircle, AlertCircle } from "lucide-react";
@@ -64,6 +65,8 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
     onClose();
   }, [status, onClose]);
 
+  const dialogRef = useDialogFocus({ open: open && !!update, onClose: handleClose, busy: status === "downloading" });
+
   if (!update) return null;
 
   const progressPercent = progress.total > 0
@@ -89,11 +92,13 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
           onClick={handleClose}
         >
           <motion.div
+            ref={dialogRef}
+            tabIndex={-1}
             initial={{ opacity: 0, y: 12, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="w-full max-w-md rounded-[20px] border border-border-subtle bg-surface p-6 shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+            className="w-full max-w-md rounded-[12px] border border-border-subtle bg-surface p-6 shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -107,7 +112,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                 >
                   {t("update.title")}
                 </h2>
-                <p className="mt-1 text-[13px] text-muted/65">
+                <p className="mt-1 text-[13px] text-muted">
                   {t("update.available", { version: update.version })}
                 </p>
               </div>
@@ -124,7 +129,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
 
             {update.body && (
               <div className="mt-4 max-h-[200px] overflow-y-auto rounded-[10px] border border-border-subtle bg-subtle/30 p-3">
-                <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/80">
+                <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground">
                   {update.body}
                 </p>
               </div>
@@ -132,7 +137,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
 
             {status === "downloading" && (
               <div className="mt-5">
-                <div className="flex items-center justify-between text-[12px] text-muted/65">
+                <div className="flex items-center justify-between text-[12px] text-muted">
                   <span>{t("update.downloading")}</span>
                   <span>
                     {progress.total > 0
@@ -149,7 +154,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                   />
                 </div>
                 {progress.total > 0 && (
-                  <p className="mt-1 text-center text-[11px] text-muted/50">
+                  <p className="mt-1 text-center text-[11px] text-muted">
                     {progressPercent}%
                   </p>
                 )}
@@ -177,7 +182,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                 <>
                   <button
                     onClick={handleClose}
-                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground/75 transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
+                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
                   >
                     {t("update.later")}
                   </button>
@@ -214,7 +219,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                 <>
                   <button
                     onClick={handleClose}
-                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground/75 transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
+                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
                   >
                     {t("update.close")}
                   </button>

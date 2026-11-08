@@ -43,10 +43,10 @@ function ImagePreview({
     <img
       src={toAssetUrl(src)}
       alt="Generated"
-      className={`block h-full transition-transform duration-500 group-hover:scale-[1.03] ${
+      className={`block h-full ${
         isMultiImage
-          ? "w-full object-cover"
-          : "w-auto max-w-full object-cover object-center"
+          ? "w-full object-contain"
+          : "w-auto max-w-full object-contain object-center"
       }`}
       loading="lazy"
       onError={() => {
@@ -83,72 +83,81 @@ export default function ImageGrid({
     >
       {images.map((img, i) => (
         <div key={img.path} className={isMultiImage ? "min-w-0" : "w-fit"}>
-          <div
-            onClick={() => onImageClick(images, i)}
-            className={`group relative cursor-pointer overflow-hidden rounded-[18px] bg-subtle/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] ${
-              isMultiImage
-                ? "h-60 w-full"
-                : "inline-block h-72 w-fit max-w-[min(76vw,36rem)]"
-            }`}
-          >
-            <ImagePreview image={img} isMultiImage={isMultiImage} />
-            <div className="absolute bottom-3 left-1/2 mx-auto flex w-fit -translate-x-1/2 items-center justify-center gap-1 rounded-full border border-white/55 bg-surface/86 px-1.5 py-1 opacity-0 shadow-float backdrop-blur-xl transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:opacity-100">
+          <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
             <button
-              onClick={(event) => {
-                event.stopPropagation();
-                void copyImageToClipboard(img.path);
-              }}
-              aria-label={t("lightbox.copy")}
-              title={t("lightbox.copy")}
-              className="focus-ring p-2 rounded-full text-muted transition-colors hover:bg-subtle hover:text-foreground"
+              type="button"
+              aria-label={t("studio.openImage", {
+                defaultValue: "Open image {{number}}",
+                number: i + 1,
+              })}
+              onClick={() => onImageClick(images, i)}
+              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden bg-background ${
+                isMultiImage
+                  ? "h-60 w-full"
+                  : "inline-block h-72 w-fit max-w-[min(76vw,36rem)]"
+              }`}
             >
-              <Copy size={16} />
+              <ImagePreview image={img} isMultiImage={isMultiImage} />
             </button>
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                void saveImageToFile(img.path);
-              }}
-              aria-label={t("lightbox.download")}
-              title={t("lightbox.download")}
-              className="focus-ring p-2 rounded-full text-muted transition-colors hover:bg-subtle hover:text-foreground"
-            >
-              <Download size={16} />
-            </button>
-            {onEditImage && (
+            <div className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-1 border-t border-border-subtle px-2 py-1.5">
               <button
                 onClick={(event) => {
                   event.stopPropagation();
-                  onEditImage(img);
+                  void copyImageToClipboard(img.path);
                 }}
-                aria-label={t("lightbox.edit")}
-                title={t("lightbox.edit")}
-                className="focus-ring p-2 rounded-full text-muted transition-colors hover:bg-subtle hover:text-foreground"
+                aria-label={t("lightbox.copy")}
+                title={t("lightbox.copy")}
+                className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
               >
-                <Wand2 size={16} />
+                <Copy size={16} />
               </button>
-            )}
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                onDelete?.(img.generationId);
-              }}
-              aria-label={t("lightbox.delete")}
-              title={t("lightbox.delete")}
-              className="focus-ring p-2 rounded-full text-muted transition-colors hover:bg-subtle hover:text-foreground"
-            >
-              <Trash2 size={16} />
-            </button>
-            <div className="w-px h-5 bg-border mx-1" />
-            <div onClick={(event) => event.stopPropagation()}>
-            <FavoriteButton
-              imageId={img.imageId}
-              size={16}
-              openSelector={
-                onFavoriteClick ? () => onFavoriteClick(img.imageId) : undefined
-              }
-            />
-            </div>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void saveImageToFile(img.path);
+                }}
+                aria-label={t("lightbox.download")}
+                title={t("lightbox.download")}
+                className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+              >
+                <Download size={16} />
+              </button>
+              {onEditImage && (
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onEditImage(img);
+                  }}
+                  aria-label={t("lightbox.edit")}
+                  title={t("lightbox.edit")}
+                  className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+                >
+                  <Wand2 size={16} />
+                </button>
+              )}
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete?.(img.generationId);
+                }}
+                aria-label={t("lightbox.delete")}
+                title={t("lightbox.delete")}
+                className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+              >
+                <Trash2 size={16} />
+              </button>
+              <div className="w-px h-5 bg-border mx-1" />
+              <div onClick={(event) => event.stopPropagation()}>
+                <FavoriteButton
+                  imageId={img.imageId}
+                  size={16}
+                  openSelector={
+                    onFavoriteClick
+                      ? () => onFavoriteClick(img.imageId)
+                      : undefined
+                  }
+                />
+              </div>
             </div>
           </div>
         </div>

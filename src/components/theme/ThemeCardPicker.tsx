@@ -11,7 +11,7 @@ import {
 interface ThemeCardPickerProps {
   selectedThemeId: ThemeId;
   activeLabel: string;
-  t: (key: string) => string;
+  t: (key: string, options?: { name: string }) => string;
   gridClassName?: string;
   compact?: boolean;
   onSelect: (themeId: ThemeId, event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -36,7 +36,7 @@ export function ThemeCardPicker({
           <button
             key={theme.id}
             type="button"
-            aria-label={`Select ${name} theme`}
+            aria-label={t("theme.select", { name })}
             aria-pressed={active}
             onClick={(event) => onSelect(theme.id, event)}
             className={cn(
@@ -68,8 +68,7 @@ export function ThemeCardPicker({
                 {name}
               </div>
               <p className={cn(
-                "mt-1 leading-relaxed text-muted/70",
-                compact ? "text-[10.5px]" : "text-[11px]",
+                "mt-1 text-[12px] leading-relaxed text-muted",
               )}
               >
                 {description}

@@ -1,12 +1,14 @@
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Calendar, Download, RotateCcw, Trash2, Wand2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { saveImageToFile, toAssetUrl } from "../../lib/api";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { formatLocalDateTime } from "../../lib/utils";
 import type { GenerationResult } from "../../types";
 
 interface GenerationDetailPanelProps {
+  busy?: boolean;
   result: GenerationResult;
   title: string;
   showSaveButton?: boolean;
@@ -27,6 +29,7 @@ interface GenerationDetailPanelProps {
 }
 
 export default function GenerationDetailPanel({
+  busy = false,
   result,
   title,
   showSaveButton = false,
@@ -42,6 +45,15 @@ export default function GenerationDetailPanel({
   deletedAtLabel,
 }: GenerationDetailPanelProps) {
   const { t } = useTranslation();
+  const titleId = useId();
+  const [docked, setDocked] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
+  const panelRef = useDialogFocus({ open: true, onClose, busy, modal: !docked });
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1280px)");
+    const update = () => setDocked(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const image = result.images[selectedIndex] ?? result.images[0];
   const generation = result.generation;
@@ -57,20 +69,29 @@ export default function GenerationDetailPanel({
   }, [result.generation.id]);
 
   return (
+    <>
+    {!docked && <div aria-hidden="true" onClick={() => { if (!busy) onClose(); }} className="fixed inset-0 z-40 bg-black/35" />}
     <motion.div
+      ref={panelRef}
+      role={docked ? "complementary" : "dialog"}
+      aria-modal={docked ? undefined : true}
+      aria-labelledby={titleId}
+      tabIndex={-1}
       initial={{ x: 340, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 340, opacity: 0 }}
       transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-      className="studio-panel-strong h-full w-[340px] shrink-0 overflow-y-auto overflow-hidden rounded-l-[16px] border-y-0 border-r-0"
+      className={`studio-panel-strong h-full w-[320px] max-w-[calc(100vw-24px)] shrink-0 overflow-y-auto border-y-0 border-r-0 ${docked ? "relative" : "fixed inset-y-0 right-0 z-50 shadow-2xl"}`}
     >
       <div className="p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-[13px] font-semibold text-foreground tracking-tight">
+          <h3 id={titleId} className="text-[14px] font-semibold text-foreground tracking-tight">
             {title}
           </h3>
           <button
             onClick={onClose}
+            disabled={busy}
+            aria-label={t("studio.collection.closeDetail", { defaultValue: "Close details" })}
             className="focus-ring flex h-6 w-6 cursor-pointer items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle"
           >
             <X size={14} />
@@ -89,7 +110,7 @@ export default function GenerationDetailPanel({
                 <button
                   type="button"
                   onClick={() => onPreview(selectedIndex)}
-                  aria-label={`Preview ${result.generation.prompt}`}
+                  aria-label={`${t("lightbox.preview")} ${result.generation.prompt}`}
                   className="focus-ring block w-full cursor-zoom-in text-left"
                 >
                   <img
@@ -114,7 +135,7 @@ export default function GenerationDetailPanel({
                     key={item.id}
                     onClick={() => setSelectedIndex(index)}
                     aria-label={`${t("lightbox.preview")} ${index + 1}`}
-                    className={`focus-ring overflow-hidden rounded-[10px] border transition-all ${
+                    className={`focus-ring overflow-hidden rounded-[8px] border transition-all ${
                       index === selectedIndex
                         ? "border-primary shadow-card"
                         : "border-border-subtle hover:border-border"
@@ -134,10 +155,10 @@ export default function GenerationDetailPanel({
 
         <div className="space-y-3">
           <div>
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
+            <span className="text-[12px] font-medium uppercase tracking-wider text-muted">
               {t("gallery.prompt")}
             </span>
-            <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">
+            <p className="mt-1 text-[14px] leading-relaxed text-foreground">
               {generation.prompt}
             </p>
           </div>
@@ -192,15 +213,15 @@ export default function GenerationDetailPanel({
             <MetaRow label={t("gallery.status")} value={generation.status} />
           </div>
           <div className="flex items-center gap-1.5">
-            <Calendar size={11} className="text-muted/40" />
-            <span className="text-[11px] text-muted/60">
+            <Calendar size={11} className="text-muted" />
+            <span className="text-[12px] text-muted">
               {formatLocalDateTime(generation.created_at)}
             </span>
           </div>
           {generation.deleted_at && (
             <div className="flex items-center gap-1.5">
-              <Trash2 size={11} className="text-muted/40" />
-              <span className="text-[11px] text-muted/60">
+              <Trash2 size={11} className="text-muted" />
+              <span className="text-[12px] text-muted">
                 {deletedAtLabel || t("trash.deletedAt")}:{" "}
                 {formatLocalDateTime(generation.deleted_at)}
               </span>
@@ -208,14 +229,14 @@ export default function GenerationDetailPanel({
           )}
           {generation.source_image_paths.length > 0 && (
             <div className="rounded-[12px] border border-border-subtle bg-subtle/25 p-3">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted/50">
+              <span className="text-[12px] font-medium uppercase tracking-wider text-muted">
                 {t("gallery.sourceImages")}
               </span>
               <div className="mt-2 space-y-1.5">
                 {generation.source_image_paths.map((path) => (
                   <p
                     key={path}
-                    className="truncate text-[11px] text-foreground/70"
+                    className="truncate text-[12px] text-foreground/70"
                     title={path}
                   >
                     {path}
@@ -232,7 +253,7 @@ export default function GenerationDetailPanel({
               onClick={() =>
                 onEditImage(image.file_path, image.id, generation.id)
               }
-              className="focus-ring flex w-full cursor-pointer items-center justify-center gap-2 rounded-[10px] border border-primary/20 py-2.5 text-[12px] font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
+              className="focus-ring flex w-full cursor-pointer items-center justify-center gap-2 rounded-[8px] border border-primary/20 py-2.5 text-[12px] font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
             >
               <Wand2 size={13} />
               {t("gallery.editImage")}
@@ -241,7 +262,7 @@ export default function GenerationDetailPanel({
           {showManageFolders && image && (
             <button
               onClick={() => onManageFolders?.(image.id)}
-              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
             >
               {t("favorites.manageFolders")}
             </button>
@@ -249,7 +270,7 @@ export default function GenerationDetailPanel({
           {showSaveButton && image && (
             <button
               onClick={() => void saveImageToFile(image.file_path)}
-              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
             >
               <Download size={13} />
               {t("gallery.saveImage")}
@@ -257,16 +278,18 @@ export default function GenerationDetailPanel({
           )}
           {onRestore && (
             <button
+              disabled={busy}
               onClick={() => onRestore(generation.id)}
-              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
             >
               <RotateCcw size={13} />
               {restoreLabel || t("trash.restore")}
             </button>
           )}
           <button
+            disabled={busy}
             onClick={() => onDelete(generation.id)}
-            className="studio-control-danger focus-ring flex w-full items-center justify-center gap-2 rounded-[10px] py-2.5 text-[12px] font-medium"
+            className="studio-control-danger focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium"
           >
             <Trash2 size={13} />
             {deleteLabel || t("gallery.delete")}
@@ -274,16 +297,17 @@ export default function GenerationDetailPanel({
         </div>
       </div>
     </motion.div>
+    </>
   );
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[10px] border border-border-subtle bg-subtle/20 px-3 py-2">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted/45">
+    <div className="rounded-[8px] border border-border-subtle bg-subtle/20 px-3 py-2">
+      <span className="text-[12px] font-medium uppercase tracking-wider text-muted">
         {label}
       </span>
-      <p className="mt-0.5 truncate text-[12px] text-foreground/80">{value}</p>
+      <p className="mt-0.5 truncate text-[12px] text-foreground">{value}</p>
     </div>
   );
 }

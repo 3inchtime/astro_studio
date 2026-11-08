@@ -213,6 +213,12 @@ New installations default to GPT Image 2.6 Flare. Existing model selections and 
 
 Official protocols: [OpenAI](https://developers.openai.com/api/docs/guides/image-generation), [Google](https://ai.google.dev/gemini-api/docs/image-generation), [xAI](https://docs.x.ai/developers/model-capabilities/images/generation), [Seedream](https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=en).
 
+### Studio workbench refresh (v0.0.32)
+
+The frontend now uses a consistent desktop workbench layout across generation, prompt extraction, canvas, projects, gallery, favorites, trash, and settings. Navigation and context panels adapt to smaller windows, with keyboard-resizable sidebars and compact detail drawers. All twelve themes and eight interface languages remain available.
+
+The generation composer separates reference images, prompt input, and actions, with common parameters visible and advanced controls collapsed. Enter adds a new line; Cmd/Ctrl+Enter submits outside IME composition. Dialogs restore focus, Escape closes only the top dialog, failed saves retain edits, and stale responses cannot overwrite feedback after navigation.
+
 ### GPT Image 2.6 (v0.0.31)
 
 Flare and Sunburst now expose image complexity, SVG vector output (including transparent backgrounds), animated GIF output, markup-guided edits, masks, JPEG/WebP compression, up to ten outputs, and streaming partial previews. Advanced controls are available in the composer and for supported canvas edits. SVG is generation-only and always produces one image; GIF supports 2–16 frames and frame delays of at least 20 ms (encoded delay caps at 655,350 ms). New format controls are preserved through retries and recovery.

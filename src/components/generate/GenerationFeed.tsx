@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Image as ImageIcon, Sparkles } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Message, MessageImage, PromptAgentMessage } from "../../types";
 import MessageBubble from "./MessageBubble";
@@ -62,10 +62,8 @@ export default function GenerationFeed({
   }
 
   return (
-    <div className="space-y-7 relative min-h-full w-full overflow-hidden px-6 py-7">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_58%_42%_at_54%_18%,rgba(79,106,255,0.075),transparent_72%),radial-gradient(ellipse_44%_36%_at_88%_8%,rgba(212,145,42,0.055),transparent_68%)]" />
-      <div className="pointer-events-none absolute inset-x-8 top-6 h-px bg-gradient-to-r from-transparent via-primary/12 to-transparent" />
-      <div className="relative mx-auto flex min-h-full w-full max-w-[980px] flex-col justify-center gap-7">
+    <div className="space-y-7 relative min-h-full w-full bg-background px-6 py-6">
+      <div className="relative mx-auto flex min-h-full w-full max-w-[980px] flex-col gap-6">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
             <MessageBubble
@@ -101,25 +99,21 @@ function EmptyState() {
   const { t } = useTranslation();
   return (
     <div className="relative flex h-full flex-col items-center justify-center overflow-hidden px-6">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_50%_38%_at_50%_32%,rgba(79,106,255,0.085),transparent_70%),radial-gradient(ellipse_38%_32%_at_62%_26%,rgba(212,145,42,0.06),transparent_72%)]" />
       <motion.div
-        initial={{ opacity: 0, y: 16, filter: "blur(8px)" }}
-        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="studio-empty relative flex max-w-[420px] flex-col items-center rounded-[22px] px-9 py-9 text-center shadow-float"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+        className="relative flex max-w-[440px] flex-col items-center px-6 py-8 text-center"
       >
         <div className="relative mb-6">
-          <div className="flex h-20 w-20 items-center justify-center rounded-[20px] border border-border-subtle bg-gradient-to-br from-primary/8 via-surface to-warning/8">
-            <ImageIcon size={32} className="text-lavender" strokeWidth={1.4} />
-          </div>
-          <div className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border border-white/70 bg-surface text-primary shadow-card">
-            <Sparkles size={13} />
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-border-subtle bg-surface">
+            <ImageIcon size={26} className="text-muted" strokeWidth={1.4} />
           </div>
         </div>
-        <p className="text-[15px] font-semibold text-foreground tracking-tight">
+        <p className="text-[20px] font-semibold text-foreground tracking-tight">
           {t("generate.emptyTitle")}
         </p>
-        <p className="mt-2 max-w-[260px] text-[13px] leading-relaxed text-muted">
+        <p className="mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted">
           {t("generate.emptySubtitle")}
         </p>
       </motion.div>

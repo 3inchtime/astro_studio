@@ -16,17 +16,17 @@ export default function PaginationControls({ page, totalPages, onPageChange }: P
       <button
         onClick={() => onPageChange(page - 1)}
         disabled={page <= 1}
-        className="studio-control focus-ring h-[28px] rounded-[8px] px-3 text-[11px] hover:studio-control-hover disabled:opacity-30"
+        className="studio-control focus-ring h-[28px] rounded-[8px] px-3 text-[12px] hover:studio-control-hover disabled:opacity-30"
       >
         {t("gallery.prev")}
       </button>
-      <span className="px-2 text-[11px] text-muted tabular-nums">
+      <span className="px-2 text-[12px] text-muted tabular-nums">
         {page} / {totalPages}
       </span>
       <button
         onClick={() => onPageChange(page + 1)}
         disabled={page >= totalPages}
-        className="studio-control focus-ring h-[28px] rounded-[8px] px-3 text-[11px] hover:studio-control-hover disabled:opacity-30"
+        className="studio-control focus-ring h-[28px] rounded-[8px] px-3 text-[12px] hover:studio-control-hover disabled:opacity-30"
       >
         {t("gallery.next")}
       </button>

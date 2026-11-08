@@ -31,8 +31,8 @@ vi.mock("react-i18next", () => ({
       language: "en",
       resolvedLanguage: "en",
     },
-    t: (key: string, options?: { count?: number }) =>
-      options?.count === undefined ? key : `${key} ${options.count}`,
+    t: (key: string, options?: { count?: number; name?: string }) =>
+      key === "theme.select" ? `Select ${options?.name} theme` : options?.count === undefined ? key : `${key} ${options.count}`,
   }),
 }));
 
@@ -591,6 +591,25 @@ describe("SettingsPage logs", () => {
     expect(await screen.findByDisplayValue("Gemini Official")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
     expect(screen.getByDisplayValue("gemini-key")).toBeInTheDocument();
+  });
+
+  it("keeps provider edits after a failed save and supports retry with pending feedback", async () => {
+    const save = createDeferred<typeof openAiProviderState>();
+    saveModelProviderProfiles.mockRejectedValueOnce(new Error("Offline"));
+    saveModelProviderProfiles.mockReturnValueOnce(save.promise);
+    renderSettingsPage();
+    fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
+    await screen.findByDisplayValue("OpenAI Official");
+    fireEvent.change(screen.getByDisplayValue("OpenAI Official"), { target: { value: "My provider" } });
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("studio.settings.saveFailed");
+    expect(screen.getByDisplayValue("My provider")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "studio.settings.retry" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("studio.settings.saving");
+    expect(screen.getByRole("button", { name: "settings.saveProvider" })).toBeDisabled();
+    await act(async () => { save.resolve(openAiProviderState); });
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(saveModelProviderProfiles).toHaveBeenCalledTimes(2);
   });
 
   it("saves edits to the selected provider profile", async () => {

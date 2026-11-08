@@ -105,6 +105,7 @@ export const HIDE_SIDEBAR_PATHS = [
   ROUTES.canvas,
   ROUTES.gallery,
   ROUTES.favorites,
+  ROUTES.trash,
 ] as const;
 
 const HIDE_SIDEBAR_KINDS = new Set([
@@ -113,6 +114,7 @@ const HIDE_SIDEBAR_KINDS = new Set([
   "canvas",
   "gallery",
   "favorites",
+  "trash",
 ]);
 
 export const ROUTE_LAYOUTS: Record<RouteCategory, RouteLayout> = {
@@ -153,7 +155,7 @@ export const ROUTE_LAYOUTS: Record<RouteCategory, RouteLayout> = {
   },
   trash: {
     kind: "trash",
-    sidebar: { type: "conversations", useProjectFromPath: false },
+    sidebar: { type: "hidden", useProjectFromPath: false },
     clearProjectOnEnter: true,
   },
   favorites: {

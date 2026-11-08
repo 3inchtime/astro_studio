@@ -210,8 +210,18 @@ export default function GenerationComposer({
         setShowConfigDropdown(false);
       }
     };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowConfigDropdown(false);
+        configDropdownRef.current?.querySelector("button")?.focus();
+      }
+    };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [showConfigDropdown]);
 
   const hasEditSources = editSources.length > 0;
@@ -314,7 +324,7 @@ export default function GenerationComposer({
   });
   const showQuality = parameterCapabilities.qualities.length > 1;
   const showBackground = parameterCapabilities.backgrounds.length > 1;
-  const showImageCount = parameterCapabilities.imageCounts.length > 1;
+  const showImageCount = parameterCapabilities.imageCounts.length > 0;
   const showOutputFormat = parameterCapabilities.outputFormats.length > 1;
   const showModeration = parameterCapabilities.moderationLevels.length > 1;
   const showSourceEditing = modelCatalogEntry.supportsEdit;
@@ -322,35 +332,56 @@ export default function GenerationComposer({
     showSourceEditing &&
     editSources.length > 0 &&
     parameterCapabilities.inputFidelityOptions.length > 1;
-  const parameterColumnCount = [
-    true,
-    parameterCapabilities.sizes.length > 1 &&
-      !parameterCapabilities.aspectRatios,
-    Boolean(parameterCapabilities.aspectRatios),
-    Boolean(parameterCapabilities.resolutions),
-    showQuality,
-    showBackground,
-    showImageCount,
-    showOutputFormat,
-    showModeration,
-    showInputFidelity,
-  ].filter(Boolean).length;
+  const hasAdvancedSettings =
+    showQuality ||
+    showBackground ||
+    showOutputFormat ||
+    showModeration ||
+    showInputFidelity ||
+    isGptImage26(imageModel);
+  const providerLabel =
+    (
+      {
+        google: "Google",
+        openai: "OpenAI",
+        xai: "xAI",
+        volcengine: "Volcengine",
+      } as Record<string, string>
+    )[modelCatalogEntry.provider] ?? modelCatalogEntry.provider;
+  const cannotSubmit =
+    !!validationError ||
+    !prompt.trim() ||
+    isGenerating ||
+    optimizeMutation.isPending ||
+    isPromptAgentRunning;
+  const submit =
+    composerMode === "deep-thinking" ? onDeepThinkingSend : onGenerate;
 
   return (
     <>
-      <div className="border-t border-border-subtle bg-surface/74 px-4 py-2.5 shadow-panel backdrop-blur-xl sm:px-6">
+      <div className="max-h-[40vh] shrink-0 overflow-y-auto border-t border-border-subtle bg-surface px-4 pb-2 pt-4 sm:px-6">
         <div
           role="toolbar"
           data-variant="parameter-rail"
           aria-label={t("generate.parametersLabel")}
-          className="studio-toolbar mx-auto w-full max-w-[980px] overflow-hidden rounded-[16px] border border-border-subtle bg-surface/76 px-2 py-1.5 shadow-card"
+          className="studio-toolbar mx-auto w-full max-w-[980px] rounded-xl"
         >
+          <div className="mb-3 flex items-center justify-between gap-3 text-[12px] text-muted">
+            <span>
+              {t("studio.imageProvider", { defaultValue: "Image provider" })}:{" "}
+              <span className="font-medium text-foreground">
+                {providerLabel}
+              </span>
+            </span>
+            <span>
+              {t("studio.supportedParameters", {
+                defaultValue: "Available settings for this model",
+              })}
+            </span>
+          </div>
           <div
             data-testid="generation-parameter-row"
-            className="grid w-full min-w-0 grid-rows-1 items-center gap-1.5 whitespace-nowrap"
-            style={{
-              gridTemplateColumns: `repeat(${parameterColumnCount}, minmax(0, 1fr))`,
-            }}
+            className="grid w-full min-w-0 grid-cols-2 items-end gap-3 md:grid-cols-4"
           >
             <SelectField
               label={t("generate.modelLabel")}
@@ -404,37 +435,6 @@ export default function GenerationComposer({
                 }))}
               />
             )}
-            {showQuality && (
-              <SelectField
-                label={t("generate.qualityLabel")}
-                value={quality}
-                onChange={(value) => onQualityChange(value as ImageQuality)}
-                options={parameterCapabilities.qualities.map((value) => ({
-                  value,
-                  label: t(`generate.quality.${value}`),
-                }))}
-              />
-            )}
-            {showBackground && (
-              <SelectField
-                label={t("generate.backgroundLabel")}
-                value={background}
-                onChange={(value) =>
-                  onBackgroundChange(value as ImageBackground)
-                }
-                options={backgroundOptions
-                  .filter((value) =>
-                    parameterCapabilities.backgrounds.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.background.${value}`),
-                    disabled:
-                      !["png", "webp", "svg"].includes(outputFormat) &&
-                      value === "transparent",
-                  }))}
-              />
-            )}
             {showImageCount && (
               <SelectField
                 label={t("generate.countLabel")}
@@ -451,74 +451,119 @@ export default function GenerationComposer({
                   }))}
               />
             )}
-            {showOutputFormat && (
-              <SelectField
-                label={t("generate.formatLabel")}
-                value={outputFormat}
-                onChange={(value) =>
-                  onOutputFormatChange(value as ImageOutputFormat)
-                }
-                options={outputFormatOptions
-                  .filter(
-                    (value) =>
-                      parameterCapabilities.outputFormats.includes(value) &&
-                      !(hasEditSources && value === "svg"),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.format.${value}`),
-                    disabled:
-                      background === "transparent" &&
-                      !["png", "webp", "svg"].includes(value),
-                  }))}
-              />
-            )}
-            {showModeration && (
-              <SelectField
-                label={t("generate.moderationLabel")}
-                value={moderation}
-                onChange={(value) =>
-                  onModerationChange(value as ImageModeration)
-                }
-                options={moderationOptions
-                  .filter((value) =>
-                    parameterCapabilities.moderationLevels.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.moderation.${value}`),
-                  }))}
-              />
-            )}
-            {showInputFidelity && (
-              <SelectField
-                label={t("generate.inputFidelityLabel")}
-                value={inputFidelity}
-                onChange={(value) =>
-                  onInputFidelityChange(value as ImageInputFidelity)
-                }
-                options={inputFidelityOptions
-                  .filter((value) =>
-                    parameterCapabilities.inputFidelityOptions.includes(value),
-                  )
-                  .map((value) => ({
-                    value,
-                    label: t(`generate.inputFidelity.${value}`),
-                  }))}
-              />
-            )}
           </div>
-          {isGptImage26(imageModel) && onAdvancedOptionsChange && (
-            <ImageAdvancedControls
-              value={advancedOptions}
-              onChange={onAdvancedOptionsChange}
-              format={outputFormat}
-              editing={hasEditSources}
-              size={size}
-              onSizeChange={onSizeChange}
-              compression={outputCompression}
-              onCompressionChange={onOutputCompressionChange}
-            />
+          {hasAdvancedSettings && (
+            <details className="mt-3 border-t border-border-subtle pt-3">
+              <summary className="focus-ring cursor-pointer rounded-lg text-[12px] font-medium text-muted">
+                {t("studio.advancedSettings", {
+                  defaultValue: "Advanced settings",
+                })}
+              </summary>
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+                {showQuality && (
+                  <SelectField
+                    label={t("generate.qualityLabel")}
+                    value={quality}
+                    onChange={(value) => onQualityChange(value as ImageQuality)}
+                    options={parameterCapabilities.qualities.map((value) => ({
+                      value,
+                      label: t(`generate.quality.${value}`),
+                    }))}
+                  />
+                )}
+                {showBackground && (
+                  <SelectField
+                    label={t("generate.backgroundLabel")}
+                    value={background}
+                    onChange={(value) =>
+                      onBackgroundChange(value as ImageBackground)
+                    }
+                    options={backgroundOptions
+                      .filter((value) =>
+                        parameterCapabilities.backgrounds.includes(value),
+                      )
+                      .map((value) => ({
+                        value,
+                        label: t(`generate.background.${value}`),
+                        disabled:
+                          !["png", "webp", "svg"].includes(outputFormat) &&
+                          value === "transparent",
+                      }))}
+                  />
+                )}
+                {showOutputFormat && (
+                  <SelectField
+                    label={t("generate.formatLabel")}
+                    value={outputFormat}
+                    onChange={(value) =>
+                      onOutputFormatChange(value as ImageOutputFormat)
+                    }
+                    options={outputFormatOptions
+                      .filter(
+                        (value) =>
+                          parameterCapabilities.outputFormats.includes(value) &&
+                          !(hasEditSources && value === "svg"),
+                      )
+                      .map((value) => ({
+                        value,
+                        label: t(`generate.format.${value}`),
+                        disabled:
+                          background === "transparent" &&
+                          !["png", "webp", "svg"].includes(value),
+                      }))}
+                  />
+                )}
+                {showModeration && (
+                  <SelectField
+                    label={t("generate.moderationLabel")}
+                    value={moderation}
+                    onChange={(value) =>
+                      onModerationChange(value as ImageModeration)
+                    }
+                    options={moderationOptions
+                      .filter((value) =>
+                        parameterCapabilities.moderationLevels.includes(value),
+                      )
+                      .map((value) => ({
+                        value,
+                        label: t(`generate.moderation.${value}`),
+                      }))}
+                  />
+                )}
+                {showInputFidelity && (
+                  <SelectField
+                    label={t("generate.inputFidelityLabel")}
+                    value={inputFidelity}
+                    onChange={(value) =>
+                      onInputFidelityChange(value as ImageInputFidelity)
+                    }
+                    options={inputFidelityOptions
+                      .filter((value) =>
+                        parameterCapabilities.inputFidelityOptions.includes(
+                          value,
+                        ),
+                      )
+                      .map((value) => ({
+                        value,
+                        label: t(`generate.inputFidelity.${value}`),
+                      }))}
+                  />
+                )}
+              </div>
+              {isGptImage26(imageModel) && onAdvancedOptionsChange && (
+                <ImageAdvancedControls
+                  embedded
+                  value={advancedOptions}
+                  onChange={onAdvancedOptionsChange}
+                  format={outputFormat}
+                  editing={hasEditSources}
+                  size={size}
+                  onSizeChange={onSizeChange}
+                  compression={outputCompression}
+                  onCompressionChange={onOutputCompressionChange}
+                />
+              )}
+            </details>
           )}
           {validationError && (
             <p role="alert" className="px-2 pt-2 text-xs text-error">
@@ -528,11 +573,11 @@ export default function GenerationComposer({
         </div>
       </div>
 
-      <div className="bg-surface/88 px-6 pb-5 pt-3 shadow-panel">
+      <div className="shrink-0 bg-surface px-4 pb-4 pt-2 sm:px-6">
         <div className="mx-auto w-full max-w-[980px]">
           <div
             data-testid="generation-command-surface"
-            className="studio-panel-strong shadow-float relative rounded-[22px] p-3 transition-all duration-200 focus-within:border-primary/40 focus-within:shadow-[0_0_0_4px_rgba(79,106,255,0.1),var(--shadow-float)]"
+            className="studio-panel-strong relative rounded-xl p-3 focus-within:border-primary/50"
           >
             {editingPromptMessageId && (
               <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
@@ -553,7 +598,8 @@ export default function GenerationComposer({
                 <div className="flex rounded-md border border-border/60 bg-surface/80 p-0.5">
                   <button
                     type="button"
-                    className={`rounded px-2.5 py-1 text-[12px] font-medium transition ${
+                    aria-pressed={composerMode === "direct"}
+                    className={`focus-ring rounded-lg px-2.5 py-1 text-[12px] font-medium transition ${
                       composerMode === "direct"
                         ? "bg-foreground text-background"
                         : "text-muted hover:text-foreground"
@@ -564,7 +610,8 @@ export default function GenerationComposer({
                   </button>
                   <button
                     type="button"
-                    className={`rounded px-2.5 py-1 text-[12px] font-medium transition ${
+                    aria-pressed={composerMode === "deep-thinking"}
+                    className={`focus-ring rounded-lg px-2.5 py-1 text-[12px] font-medium transition ${
                       composerMode === "deep-thinking"
                         ? "bg-foreground text-background"
                         : "text-muted hover:text-foreground"
@@ -577,7 +624,7 @@ export default function GenerationComposer({
                 {showSourceEditing && (
                   <button
                     onClick={onAddUploadedSources}
-                    className="studio-control focus-ring inline-flex items-center gap-2 rounded-full px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
+                    className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
                   >
                     <ImagePlus size={14} />
                     {t("generate.uploadSource")}
@@ -588,7 +635,7 @@ export default function GenerationComposer({
               {editSources.length > 0 && (
                 <button
                   onClick={onClearEditSources}
-                  className="studio-control-subtle focus-ring rounded-full px-2.5 py-1 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
+                  className="studio-control-subtle focus-ring rounded-lg px-2.5 py-1 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
                 >
                   {t("generate.clearSources")}
                 </button>
@@ -601,7 +648,7 @@ export default function GenerationComposer({
                   <Wand2 size={14} className="text-primary" />
                   {t("generate.editingSources", { count: editSources.length })}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
                   {editSources.map((source) => (
                     <div
                       key={source.id}
@@ -614,12 +661,13 @@ export default function GenerationComposer({
                       />
                       <button
                         onClick={() => onRemoveEditSource(source.id)}
-                        className="focus-ring absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-black/60 text-white transition-colors hover:bg-black/80"
+                        className="focus-ring absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-black/60 text-white transition-colors hover:bg-black/80"
+                        aria-label={t("generate.removeSource")}
                         title={t("generate.removeSource")}
                       >
                         <X size={12} />
                       </button>
-                      <div className="max-w-20 truncate px-2 py-1 text-[10px] text-muted">
+                      <div className="max-w-20 truncate px-2 py-1 text-[12px] text-muted">
                         {source.label}
                       </div>
                     </div>
@@ -637,20 +685,38 @@ export default function GenerationComposer({
                   ? t("generate.editPlaceholder")
                   : t("generate.placeholder")
               }
-              rows={2}
-              className="studio-input w-full resize-none rounded-[16px] border-transparent bg-surface-muted/42 px-4 py-3 pr-[190px] text-[14px] leading-[1.6] text-foreground placeholder:text-muted/50 focus:border-primary/18 focus:bg-surface focus:outline-none"
+              aria-label={t("studio.prompt", { defaultValue: "Prompt" })}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "Enter" ||
+                  !(event.metaKey || event.ctrlKey) ||
+                  event.nativeEvent.isComposing ||
+                  event.keyCode === 229
+                )
+                  return;
+                event.preventDefault();
+                if (!cannotSubmit) submit();
+              }}
+              rows={3}
+              className="studio-input block min-h-[100px] max-h-[240px] w-full resize-y rounded-lg border-transparent bg-background px-3 py-3 text-[14px] leading-relaxed text-foreground placeholder:text-muted focus:border-primary focus:outline-none"
             />
-            <div className="absolute right-3 bottom-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle pt-3">
+              <span className="mr-auto text-[12px] text-muted">
+                {t("studio.submitShortcut", {
+                  defaultValue: "⌘ / Ctrl + Enter to send",
+                })}
+              </span>
               {/* Config selector — visible only when multiple enabled configs of the active type */}
               {hasEditSources
                 ? enabledMultimodalConfigs.length > 1 && (
                     <div className="relative" ref={configDropdownRef}>
                       <button
                         type="button"
+                        aria-expanded={showConfigDropdown}
                         onClick={() =>
                           setShowConfigDropdown(!showConfigDropdown)
                         }
-                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-full px-2 text-[11px] font-medium hover:studio-control-hover"
+                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-lg px-2 text-[12px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedMultimodalConfigId
@@ -671,7 +737,7 @@ export default function GenerationComposer({
                                 setSelectedMultimodalConfigId(config.id);
                                 setShowConfigDropdown(false);
                               }}
-                              className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors hover:bg-subtle ${
+                              className={`w-full px-3 py-2 text-left text-[12px] font-medium transition-colors hover:bg-subtle ${
                                 selectedMultimodalConfigId === config.id
                                   ? "text-primary"
                                   : "text-foreground/80"
@@ -688,10 +754,11 @@ export default function GenerationComposer({
                     <div className="relative" ref={configDropdownRef}>
                       <button
                         type="button"
+                        aria-expanded={showConfigDropdown}
                         onClick={() =>
                           setShowConfigDropdown(!showConfigDropdown)
                         }
-                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-full px-2 text-[11px] font-medium hover:studio-control-hover"
+                        className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-lg px-2 text-[12px] font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
                           {selectedConfigId
@@ -712,7 +779,7 @@ export default function GenerationComposer({
                                 setSelectedConfigId(config.id);
                                 setShowConfigDropdown(false);
                               }}
-                              className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors hover:bg-subtle ${
+                              className={`w-full px-3 py-2 text-left text-[12px] font-medium transition-colors hover:bg-subtle ${
                                 selectedConfigId === config.id
                                   ? "text-primary"
                                   : "text-foreground/80"
@@ -739,7 +806,7 @@ export default function GenerationComposer({
                 }
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
-                className="focus-ring flex cursor-pointer items-center justify-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
+                className="focus-ring flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2 text-[12px] font-medium text-primary/80 transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
               >
                 {optimizeMutation.isPending ? (
                   <Loader2 size={14} className="animate-spin" />
@@ -753,30 +820,25 @@ export default function GenerationComposer({
 
               {/* Send button */}
               <motion.button
-                onClick={
-                  composerMode === "deep-thinking"
-                    ? onDeepThinkingSend
-                    : onGenerate
-                }
-                disabled={
-                  !!validationError ||
-                  !prompt.trim() ||
-                  isGenerating ||
-                  optimizeMutation.isPending ||
-                  isPromptAgentRunning
-                }
+                onClick={submit}
+                disabled={cannotSubmit}
                 aria-label={t("generate.submit")}
                 whileHover={{ scale: 1.02, y: -1 }}
                 whileTap={{ scale: 0.97 }}
-                className="studio-control-primary focus-ring breathe flex h-11 w-11 items-center justify-center rounded-full text-[13px] font-semibold disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none disabled:[animation:none]"
+                className="studio-control-primary focus-ring flex h-9 items-center justify-center gap-2 rounded-lg px-4 text-[14px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <ArrowUp size={15} strokeWidth={2.5} />
+                {isGenerating || isPromptAgentRunning ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <ArrowUp size={15} />
+                )}
+                {t("generate.submit")}
               </motion.button>
             </div>
 
             {/* Inline optimize error */}
             {optimizeError && (
-              <div className="mt-2 rounded-[8px] border border-error/15 bg-error/5 px-3 py-1.5 text-[11px] text-error">
+              <div className="mt-2 rounded-[8px] border border-error/15 bg-error/5 px-3 py-1.5 text-[12px] text-error">
                 {optimizeError}
               </div>
             )}
@@ -809,17 +871,15 @@ interface SelectFieldProps {
 
 function SelectField({ label, value, onChange, options }: SelectFieldProps) {
   return (
-    <label className="studio-control focus-ring flex h-[34px] min-w-0 items-center gap-1 rounded-full px-2.5 text-[12px] text-foreground focus-within:border-primary/35">
-      <span
-        className="max-w-[58px] shrink truncate text-[10px] font-medium uppercase tracking-[0.08em] text-muted/60"
-        title={label}
-      >
+    <label className="flex min-w-0 flex-col gap-1.5 text-[12px] text-muted">
+      <span className="font-medium" title={label}>
         {label}
       </span>
       <select
         value={value}
+        disabled={options.length === 1}
         onChange={(e) => onChange(e.target.value)}
-        className="select-control min-w-0 flex-1 cursor-pointer truncate bg-transparent pr-8 text-[12px] font-medium text-foreground focus:outline-none"
+        className="studio-input focus-ring select-control h-9 w-full min-w-0 cursor-pointer truncate rounded-lg px-3 pr-8 text-[14px] text-foreground"
       >
         {options.map((option) => (
           <option

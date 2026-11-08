@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -9,6 +9,8 @@ import {
   searchGenerations,
 } from "../lib/api";
 import type { GenerationResult } from "../types";
+import ConfirmDialog from "../components/common/ConfirmDialog";
+import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
@@ -26,76 +28,138 @@ export default function TrashPage() {
   const [selected, setSelected] = useState<GenerationResult | null>(null);
   const [retentionDays, setRetentionDays] = useState(30);
 
-  async function loadTrash(p: number, q?: string) {
-    const result = await searchGenerations(q || query || undefined, p, true);
-    setResults(result.generations);
-    setTotal(result.total);
-    setPage(result.page);
-    setPageSize(result.page_size);
+  const requestIdRef = useRef(0);
+  const appliedQueryRef = useRef("");
+  const mutationBusyRef = useRef(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function loadTrash(p: number, q = query) {
+    const requestId = ++requestIdRef.current;
+    appliedQueryRef.current = q;
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const result = await searchGenerations(q.trim() || undefined, p, true);
+      if (requestId !== requestIdRef.current) return;
+      setResults(result.generations);
+      setTotal(result.total);
+      setPage(result.page);
+      setPageSize(result.page_size);
+      setSelected(null);
+    } catch {
+      if (requestId === requestIdRef.current) setLoadError(true);
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
+    }
   }
 
   useEffect(() => {
-    loadTrash(1);
-    getTrashSettings().then((settings) => setRetentionDays(settings.retention_days));
+    void loadTrash(1);
+    getTrashSettings()
+      .then((settings) => setRetentionDays(settings.retention_days))
+      .catch(() => {});
+    return () => {
+      requestIdRef.current++;
+    };
   }, []);
 
   function handleSearch() {
-    loadTrash(1, query);
+    void loadTrash(1, query);
   }
 
   async function handleRestore(id: string) {
-    await restoreGeneration(id);
-    refreshConversations();
-    await loadTrash(page, query);
-    if (selected?.generation.id === id) setSelected(null);
+    if (mutationBusyRef.current) return;
+    mutationBusyRef.current = true;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await restoreGeneration(id);
+      refreshConversations();
+      await loadTrash(1, appliedQueryRef.current);
+      setSelected(null);
+    } catch {
+      setActionError(
+        t("studio.collection.actionError", {
+          defaultValue: "The change could not be saved. Please try again.",
+        }),
+      );
+    } finally {
+      mutationBusyRef.current = false;
+      setBusy(false);
+    }
   }
 
-  async function handlePermanentDelete(id: string) {
-    await permanentlyDeleteGeneration(id);
-    refreshConversations();
-    await loadTrash(page, query);
-    if (selected?.generation.id === id) setSelected(null);
+  async function handlePermanentDelete() {
+    if (!deleteTarget || mutationBusyRef.current) return;
+    mutationBusyRef.current = true;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await permanentlyDeleteGeneration(deleteTarget);
+      refreshConversations();
+      setDeleteTarget(null);
+      await loadTrash(1, appliedQueryRef.current);
+      setSelected(null);
+    } catch {
+      setActionError(
+        t("studio.collection.actionError", {
+          defaultValue: "The change could not be saved. Please try again.",
+        }),
+      );
+    } finally {
+      mutationBusyRef.current = false;
+      setBusy(false);
+    }
   }
 
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="flex h-full overflow-hidden bg-transparent">
-      <div className="flex flex-1 flex-col">
+    <div className="flex h-full overflow-hidden bg-background">
+      <div className="flex min-w-0 flex-1 flex-col">
         <div className="studio-toolbar flex flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <h2 className="text-[15px] font-semibold text-foreground tracking-tight">
+            <h2 className="text-[20px] font-semibold text-foreground tracking-tight">
               {t("trash.title")}
             </h2>
             {total > 0 && (
-              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[10px] font-medium text-muted tabular-nums">
+              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium text-muted tabular-nums">
                 {total}
               </span>
             )}
           </div>
 
           <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60" strokeWidth={2} />
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+              strokeWidth={2}
+            />
             <input
+              aria-label={t("trash.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               placeholder={t("trash.search")}
-              className="studio-input focus-ring h-[30px] w-52 rounded-[8px] pl-7 pr-3 text-[12px] placeholder:text-muted/50"
+              className="studio-input focus-ring h-9 w-52 rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
             />
           </div>
         </div>
 
         <div className="border-b border-border-subtle bg-subtle/20 px-6 py-3">
           <div className="studio-card flex items-start gap-3 rounded-[12px] px-4 py-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-error/10 bg-error/5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-error/10 bg-error/5">
               <Trash2 size={14} className="text-error/70" />
             </div>
             <div>
               <p className="text-[12px] font-medium text-foreground">
                 {t("trash.autoDeleteNotice", { days: retentionDays })}
               </p>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted/70">
+              <p className="mt-1 text-[12px] leading-relaxed text-muted">
                 {t("trash.settingsHint")}
               </p>
             </div>
@@ -103,13 +167,37 @@ export default function TrashPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
+          <CollectionStatus
+            loading={loading}
+            error={loadError}
+            onRetry={handleSearch}
+          />
+          {actionError && !deleteTarget && (
+            <p role="alert" className="mb-4 text-sm text-error">
+              {actionError}
+            </p>
+          )}
           {results.length === 0 ? (
-            <EmptyCollectionState title={t("trash.emptyTitle")} subtitle={t("trash.emptyHint")} />
+            !loading &&
+            !loadError && (
+              <EmptyCollectionState
+                title={t("trash.emptyTitle")}
+                subtitle={t("trash.emptyHint")}
+              />
+            )
           ) : (
-            <GenerationGrid results={results} favoriteMode="hidden" onSelect={setSelected} />
+            <GenerationGrid
+              results={results}
+              favoriteMode="hidden"
+              onSelect={setSelected}
+            />
           )}
 
-          <PaginationControls page={page} totalPages={totalPages} onPageChange={(p) => loadTrash(p, query)} />
+          <PaginationControls
+            page={page}
+            totalPages={totalPages}
+            onPageChange={(p) => loadTrash(p, query)}
+          />
         </div>
       </div>
 
@@ -121,7 +209,11 @@ export default function TrashPage() {
             showSaveButton
             showManageFolders={false}
             onClose={() => setSelected(null)}
-            onDelete={(id) => void handlePermanentDelete(id)}
+            onDelete={(id) => {
+              setActionError(null);
+              setDeleteTarget(id);
+            }}
+            busy={busy}
             onRestore={(id) => void handleRestore(id)}
             deleteLabel={t("trash.deleteNow")}
             restoreLabel={t("trash.restore")}
@@ -129,6 +221,24 @@ export default function TrashPage() {
           />
         )}
       </AnimatePresence>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={t("studio.trash.confirmDelete", {
+          defaultValue: "Permanently delete this generation and its images?",
+        })}
+        description={t("studio.trash.cannotUndo", {
+          defaultValue:
+            "These files will be removed from your device. This cannot be undone.",
+        })}
+        confirmLabel={t("trash.deleteNow")}
+        cancelLabel={t("projects.deleteCancel")}
+        loading={busy}
+        error={actionError}
+        onConfirm={() => void handlePermanentDelete()}
+        onCancel={() => {
+          if (!busy) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }
