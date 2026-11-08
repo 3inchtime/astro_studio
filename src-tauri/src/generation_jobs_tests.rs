@@ -275,6 +275,7 @@ impl JobFixture {
             partial_images: 0,
             source_image_paths: Vec::new(),
             request_options: GenerationJobOptions {
+                advanced_options: None,
                 aspect_ratio: None,
                 resolution: None,
                 size: Some("1024x1024".to_string()),

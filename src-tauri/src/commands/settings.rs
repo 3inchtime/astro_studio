@@ -1083,7 +1083,7 @@ mod tests {
         ));
         let db = Database::open(&path).unwrap();
         db.run_migrations().unwrap();
-        assert_eq!(current_image_model(&db).unwrap(), ENGINE_GPT_IMAGE_FLARE);
+        assert_eq!(current_image_model(&db).unwrap(), ENGINE_GPT_IMAGE_26_FLARE);
         db.set_setting(SETTING_API_KEY, "legacy-key").unwrap();
         assert_eq!(current_image_model(&db).unwrap(), ENGINE_GPT_IMAGE_2);
         db.set_setting(SETTING_IMAGE_MODEL, ENGINE_NANO_BANANA)

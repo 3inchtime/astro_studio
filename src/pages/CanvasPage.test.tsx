@@ -121,6 +121,7 @@ vi.mock("../lib/api", () => ({
   getCanvasGenerationStatus: (...args: unknown[]) =>
     getCanvasGenerationStatus(...args),
   onGenerationComplete: () => Promise.resolve(() => {}),
+  onGenerationPartial: () => Promise.resolve(() => {}),
   onGenerationFailed: () => Promise.resolve(() => {}),
   onGenerationProgress: () => Promise.resolve(() => {}),
   getImageModel: (...args: unknown[]) => getImageModel(...args),
@@ -611,6 +612,45 @@ describe("CanvasPage", () => {
     );
     await waitFor(() => expect(editImage).toHaveBeenCalled());
     expect(editImage.mock.calls[0][0].clientRequestId).not.toBe(firstId);
+  });
+
+  it("retries a saved request using its original export instead of the changed canvas", async () => {
+    const document = canvasDocumentWithImage();
+    document.content.generation_requests = [
+      {
+        request_id: "old-request",
+        project_id: "project-1",
+        prompt: "original edit",
+        frame: { ...document.content.frame },
+        status: "failed",
+        image_ids: [],
+        created_at: "",
+        error: "failed",
+        source_image_path: "/tmp/original-export.png",
+        parameters: {
+          prompt: "original edit",
+          model: "gpt-image-2.6-flare",
+          advancedOptions: { markupPath: "/tmp/original-markup.png" },
+        },
+      },
+    ];
+    getCanvasDocument.mockResolvedValueOnce(document);
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "canvas.generationRetry" }),
+    );
+    await waitFor(() =>
+      expect(editImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceImagePaths: ["/tmp/original-export.png"],
+          advancedOptions: { markupPath: "/tmp/original-markup.png" },
+        }),
+      ),
+    );
+    expect(saveCanvasExport).not.toHaveBeenCalled();
   });
 
   it("merges late results into current edits and keeps completion metadata through undo", async () => {

@@ -15,6 +15,7 @@ import { toAssetUrl } from "../../lib/api";
 import {
   IMAGE_MODEL_CATALOG,
   getImageModelCatalogEntry,
+  isGptImage26,
 } from "../../lib/modelCatalog";
 import {
   useLlmConfigsQuery,
@@ -22,6 +23,7 @@ import {
 } from "../../lib/queries/llm";
 import type {
   ComposerMode,
+  ImageAdvancedOptions,
   EditSourceImage,
   ImageBackground,
   ImageInputFidelity,
@@ -31,15 +33,27 @@ import type {
   ImageQuality,
   ImageSize,
 } from "../../types";
+import ImageAdvancedControls from "./ImageAdvancedControls";
+import { image26ValidationError } from "../../lib/image26Options";
 import OptimizePromptModal from "./OptimizePromptModal";
 
-const outputFormatOptions: ImageOutputFormat[] = ["png", "jpeg", "webp"];
+const outputFormatOptions: ImageOutputFormat[] = [
+  "png",
+  "jpeg",
+  "webp",
+  "svg",
+  "gif",
+];
 const backgroundOptions: ImageBackground[] = ["auto", "opaque", "transparent"];
 const moderationOptions: ImageModeration[] = ["auto", "low"];
 const inputFidelityOptions: ImageInputFidelity[] = ["high", "low"];
-const imageCountOptions = [1, 2, 3, 4];
+const imageCountOptions = Array.from({ length: 10 }, (_, index) => index + 1);
 
 interface GenerationComposerProps {
+  advancedOptions?: ImageAdvancedOptions;
+  onAdvancedOptionsChange?: (options: ImageAdvancedOptions) => void;
+  outputCompression?: number;
+  onOutputCompressionChange?: (value: number) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   prompt: string;
   imageModel: ImageModel;
@@ -79,6 +93,10 @@ interface GenerationComposerProps {
 }
 
 export default function GenerationComposer({
+  advancedOptions = {},
+  onAdvancedOptionsChange,
+  outputCompression,
+  onOutputCompressionChange,
   textareaRef,
   prompt,
   imageModel,
@@ -284,6 +302,16 @@ export default function GenerationComposer({
   // ── Model catalog ───────────────────────────────────────────────────────────
   const modelCatalogEntry = getImageModelCatalogEntry(imageModel);
   const { parameterCapabilities } = modelCatalogEntry;
+  const validationError = image26ValidationError({
+    model: imageModel,
+    format: outputFormat,
+    size,
+    count: imageCount,
+    background,
+    editing: hasEditSources,
+    options: advancedOptions,
+    compression: outputCompression,
+  });
   const showQuality = parameterCapabilities.qualities.length > 1;
   const showBackground = parameterCapabilities.backgrounds.length > 1;
   const showImageCount = parameterCapabilities.imageCounts.length > 1;
@@ -337,12 +365,21 @@ export default function GenerationComposer({
               !parameterCapabilities.aspectRatios && (
                 <SelectField
                   label={t("generate.sizeLabel")}
-                  value={size}
-                  onChange={(value) => onSizeChange?.(value as ImageSize)}
-                  options={parameterCapabilities.sizes.map((value) => ({
-                    value,
-                    label: value,
-                  }))}
+                  value={
+                    parameterCapabilities.sizes.includes(size) ? size : "custom"
+                  }
+                  onChange={(value) =>
+                    value !== "custom" && onSizeChange?.(value as ImageSize)
+                  }
+                  options={[
+                    ...parameterCapabilities.sizes.map((value) => ({
+                      value,
+                      label: value,
+                    })),
+                    ...(!parameterCapabilities.sizes.includes(size)
+                      ? [{ value: "custom", label: size }]
+                      : []),
+                  ]}
                 />
               )}
             {parameterCapabilities.aspectRatios && (
@@ -393,7 +430,8 @@ export default function GenerationComposer({
                     value,
                     label: t(`generate.background.${value}`),
                     disabled:
-                      outputFormat === "jpeg" && value === "transparent",
+                      !["png", "webp", "svg"].includes(outputFormat) &&
+                      value === "transparent",
                   }))}
               />
             )}
@@ -409,6 +447,7 @@ export default function GenerationComposer({
                   .map((value) => ({
                     value: String(value),
                     label: t("generate.countValue", { count: value }),
+                    disabled: outputFormat === "svg" && value !== 1,
                   }))}
               />
             )}
@@ -420,13 +459,17 @@ export default function GenerationComposer({
                   onOutputFormatChange(value as ImageOutputFormat)
                 }
                 options={outputFormatOptions
-                  .filter((value) =>
-                    parameterCapabilities.outputFormats.includes(value),
+                  .filter(
+                    (value) =>
+                      parameterCapabilities.outputFormats.includes(value) &&
+                      !(hasEditSources && value === "svg"),
                   )
                   .map((value) => ({
                     value,
                     label: t(`generate.format.${value}`),
-                    disabled: background === "transparent" && value === "jpeg",
+                    disabled:
+                      background === "transparent" &&
+                      !["png", "webp", "svg"].includes(value),
                   }))}
               />
             )}
@@ -465,6 +508,23 @@ export default function GenerationComposer({
               />
             )}
           </div>
+          {isGptImage26(imageModel) && onAdvancedOptionsChange && (
+            <ImageAdvancedControls
+              value={advancedOptions}
+              onChange={onAdvancedOptionsChange}
+              format={outputFormat}
+              editing={hasEditSources}
+              size={size}
+              onSizeChange={onSizeChange}
+              compression={outputCompression}
+              onCompressionChange={onOutputCompressionChange}
+            />
+          )}
+          {validationError && (
+            <p role="alert" className="px-2 pt-2 text-xs text-error">
+              {t(`generate.advanced.${validationError}`)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -699,6 +759,7 @@ export default function GenerationComposer({
                     : onGenerate
                 }
                 disabled={
+                  !!validationError ||
                   !prompt.trim() ||
                   isGenerating ||
                   optimizeMutation.isPending ||

@@ -133,6 +133,31 @@ function createOpenAi25Entry(
   };
 }
 
+export function isGptImage26(model: string): boolean {
+  return model === "gpt-image-2.6-flare" || model === "gpt-image-2.6-sunburst";
+}
+
+function createOpenAi26Entry(
+  id: "gpt-image-2.6-sunburst" | "gpt-image-2.6-flare",
+  label: string,
+  i18nKey: string,
+): ImageModelCatalogEntry {
+  return {
+    ...GPT_IMAGE_2_ENTRY,
+    id,
+    label,
+    i18nKey,
+    providerModelId: id,
+    parameterCapabilities: {
+      ...GPT_IMAGE_2_ENTRY.parameterCapabilities,
+      qualities: ["auto", "low", "medium", "high", "xhigh", "max"],
+      outputFormats: ["png", "jpeg", "webp", "svg", "gif"],
+      moderationLevels: ["auto", "low"],
+      imageCounts: Array.from({ length: 10 }, (_, index) => index + 1),
+    },
+  };
+}
+
 function createNativeEntry(
   id: ImageModel,
   label: string,
@@ -228,6 +253,16 @@ NANO_BANANA_21_ENTRY.parameterCapabilities.aspectRatios = [
 NANO_BANANA_21_ENTRY.parameterCapabilities.outputFormats = ["png", "jpeg"];
 
 export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
+  createOpenAi26Entry(
+    "gpt-image-2.6-flare",
+    "GPT Image 2.6 Flare",
+    "models.gptImage26Flare",
+  ),
+  createOpenAi26Entry(
+    "gpt-image-2.6-sunburst",
+    "GPT Image 2.6 Sunburst",
+    "models.gptImage26Sunburst",
+  ),
   createOpenAi25Entry(
     "gpt-image-2.5-flare",
     "GPT Image 2.5 Flare",

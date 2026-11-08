@@ -128,3 +128,79 @@ it("preserves ratio and resolution across generation and reference-image retry r
     ),
   ).toMatchObject({ imageCount: 1 });
 });
+
+it("round trips 2.6 GIF controls and removes stale raster controls", () => {
+  const params = buildEditParams(
+    request({
+      model: "gpt-image-2.6-flare",
+      outputFormat: "gif",
+      background: "auto",
+      imageCount: 10,
+      outputCompression: 50,
+      advancedOptions: {
+        complexity: "medium",
+        frameCount: 12,
+        frameDurationMs: 80,
+        stream: true,
+        partialImages: 3,
+        svg: { model: "author" },
+      },
+    }),
+  );
+  expect(params).toMatchObject({
+    model: "gpt-image-2.6-flare",
+    outputFormat: "gif",
+    imageCount: 10,
+    advancedOptions: {
+      complexity: "medium",
+      frameCount: 12,
+      frameDurationMs: 80,
+    },
+  });
+  expect(params).not.toHaveProperty("outputCompression");
+  expect(params.advancedOptions).not.toHaveProperty("stream");
+  expect(params.advancedOptions).not.toHaveProperty("svg");
+});
+
+it("keeps SVG author settings and omits them for raster requests", () => {
+  const retry = request({
+    model: "gpt-image-2.6-sunburst",
+    outputFormat: "svg",
+    background: "auto",
+    imageCount: 1,
+    editSources: [],
+    advancedOptions: {
+      complexity: "high",
+      svg: { model: "author", reasoning: { effort: "high" } },
+      frameCount: 9,
+    },
+  });
+  expect(buildGenerationParams(retry).advancedOptions).toEqual({
+    complexity: "high",
+    svg: { model: "author", reasoning: { effort: "high" } },
+  });
+  expect(
+    buildGenerationParams({
+      ...retry,
+      outputFormat: "webp",
+      outputCompression: 72,
+    }).outputCompression,
+  ).toBe(72);
+  expect(
+    buildGenerationParams({ ...retry, outputFormat: "webp" }).advancedOptions,
+  ).toEqual({ complexity: "high" });
+});
+
+it("keeps edit annotations on retries but never sends them to generation or other providers", () => {
+  const retry = request({
+    model: "gpt-image-2.6-flare",
+    advancedOptions: { markupPath: "/tmp/markup.png", complexity: "low" },
+  });
+  expect(buildEditParams(retry).advancedOptions).toEqual(retry.advancedOptions);
+  expect(buildGenerationParams(retry).advancedOptions).toEqual({
+    complexity: "low",
+  });
+  expect(
+    buildEditParams({ ...retry, model: "nano-banana" }),
+  ).not.toHaveProperty("advancedOptions");
+});

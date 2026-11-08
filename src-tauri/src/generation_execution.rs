@@ -18,6 +18,7 @@ pub(crate) enum GenerationExecutionMode {
 
 #[derive(Debug, Clone)]
 pub(crate) struct GenerationExecutionRequest {
+    pub(crate) advanced_options: Option<crate::models::ImageAdvancedOptions>,
     pub(crate) aspect_ratio: Option<String>,
     pub(crate) resolution: Option<String>,
     pub(crate) kind: GenerationLifecycleKind,
@@ -41,6 +42,7 @@ pub(crate) struct GenerationExecutionRequest {
 impl GenerationExecutionRequest {
     pub(crate) fn into_lifecycle_request(self) -> GenerationLifecycleRequest {
         GenerationLifecycleRequest {
+            advanced_options: self.advanced_options,
             aspect_ratio: self.aspect_ratio,
             resolution: self.resolution,
             kind: self.kind,
@@ -65,6 +67,7 @@ impl GenerationExecutionRequest {
 impl Default for GenerationExecutionRequest {
     fn default() -> Self {
         Self {
+            advanced_options: None,
             aspect_ratio: None,
             resolution: None,
             kind: GenerationLifecycleKind::Generate,

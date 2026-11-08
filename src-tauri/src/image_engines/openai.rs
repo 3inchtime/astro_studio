@@ -7,7 +7,7 @@ pub(crate) fn build_generation_request_body(
     prompt: &str,
     options: &GptImageRequestOptions,
 ) -> Value {
-    build_generation_request_body_with_controls(
+    let mut body = build_generation_request_body_with_controls(
         model,
         prompt,
         &options.size,
@@ -19,7 +19,23 @@ pub(crate) fn build_generation_request_body(
         options.stream,
         options.partial_images,
         options.image_count,
-    )
+    );
+    if let Some(a) = &options.advanced_options {
+        let fields = body.as_object_mut().expect("object");
+        if let Some(v) = &a.complexity {
+            fields.insert("complexity".into(), serde_json::json!(v));
+        }
+        if let Some(v) = a.frame_count {
+            fields.insert("frame_count".into(), serde_json::json!(v));
+        }
+        if let Some(v) = a.frame_duration_ms {
+            fields.insert("frame_duration_ms".into(), serde_json::json!(v));
+        }
+        if let Some(v) = &a.svg {
+            fields.insert("svg".into(), serde_json::json!(v));
+        }
+    }
+    body
 }
 
 #[allow(clippy::too_many_arguments)] // Mirrors provider request fields without an allocation-only adapter.
@@ -50,8 +66,12 @@ pub(crate) fn build_generation_request_body_with_controls(
         "partial_images": partial_images,
     });
     let fields = body.as_object_mut().expect("request object");
-    if output_format == "png" {
+    if !["jpeg", "webp"].contains(&output_format) {
         fields.remove("output_compression");
+    }
+    if ["gif", "svg"].contains(&output_format) {
+        fields.remove("stream");
+        fields.remove("partial_images");
     }
     if !stream {
         fields.remove("partial_images");
@@ -64,7 +84,7 @@ pub(crate) fn build_edit_text_fields(
     prompt: &str,
     options: &GptImageRequestOptions,
 ) -> Vec<(&'static str, String)> {
-    build_edit_text_fields_with_controls(
+    let mut fields = build_edit_text_fields_with_controls(
         model,
         prompt,
         &options.size,
@@ -77,7 +97,19 @@ pub(crate) fn build_edit_text_fields(
         options.stream,
         options.partial_images,
         options.image_count,
-    )
+    );
+    if let Some(a) = &options.advanced_options {
+        if let Some(v) = &a.complexity {
+            fields.push(("complexity", v.clone()));
+        }
+        if let Some(v) = a.frame_count {
+            fields.push(("frame_count", v.to_string()));
+        }
+        if let Some(v) = a.frame_duration_ms {
+            fields.push(("frame_duration_ms", v.to_string()));
+        }
+    }
+    fields
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,8 +143,10 @@ pub(crate) fn build_edit_text_fields_with_controls(
     ];
     fields.retain(|(name, _)| {
         *name != "input_fidelity"
-            && !(output_format == "png" && *name == "output_compression")
+            && (["jpeg", "webp"].contains(&output_format) || *name != "output_compression")
             && (stream || *name != "partial_images")
+            && !(["gif", "svg"].contains(&output_format)
+                && ["stream", "partial_images"].contains(name))
     });
     fields
 }
@@ -314,5 +348,40 @@ mod tests {
     #[test]
     fn edit_image_parts_use_documented_image_field_name_for_every_source() {
         assert_eq!(edit_image_part_field_name(), "image");
+    }
+}
+
+#[cfg(test)]
+mod image26_tests {
+    use super::*;
+    #[test]
+    fn generation_and_edit_encode_advanced_controls_without_compression() {
+        let mut o = crate::generation_lifecycle::image_request_options(
+            None,
+            None,
+            None,
+            Some("gif".into()),
+            None,
+            None,
+            None,
+            None,
+        );
+        o.advanced_options = Some(
+            serde_json::from_value(
+                serde_json::json!({"complexity":"high","frameCount":12,"frameDurationMs":200}),
+            )
+            .unwrap(),
+        );
+        let body = build_generation_request_body("gpt-image-2.6-flare", "animate", &o);
+        assert_eq!(body["frame_count"], 12);
+        assert_eq!(body["complexity"], "high");
+        assert!(body.get("output_compression").is_none());
+        assert!(body.get("stream").is_none());
+        let fields: std::collections::HashMap<_, _> =
+            build_edit_text_fields("gpt-image-2.6-flare", "animate", &o)
+                .into_iter()
+                .collect();
+        assert_eq!(fields["frame_count"], "12");
+        assert!(!fields.contains_key("output_compression"));
     }
 }

@@ -18,12 +18,14 @@ import {
   messageImageToEditSource,
   onGenerationComplete,
   onGenerationFailed,
+  onGenerationPartial,
   pickSourceImages,
 } from "../lib/api";
 import { consumePendingEditSources } from "../lib/editSources";
 import { consumePendingPrompt } from "../lib/pendingPrompt";
 import {
   completeGenerationMessage,
+  applyGenerationPartial,
   failGenerationMessage,
   generationsToMessages,
 } from "../lib/generationMessages";
@@ -70,9 +72,11 @@ import type {
   MessageImage,
   PromptAgentMessage,
   RetryGenerationRequest,
+  ImageAdvancedOptions,
 } from "../types";
+import { image26ValidationError } from "../lib/image26Options";
 import { useTranslation } from "react-i18next";
-const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2.5-flare";
+const DEFAULT_IMAGE_MODEL: ImageModel = "gpt-image-2.6-flare";
 const DEFAULT_IMAGE_MODEL_ENTRY =
   getImageModelCatalogEntry(DEFAULT_IMAGE_MODEL);
 
@@ -90,6 +94,10 @@ export default function GeneratePage() {
   const [size, setSize] = useState<ImageSize>(
     DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.size,
   );
+  const [advancedOptions, setAdvancedOptions] = useState<ImageAdvancedOptions>(
+    {},
+  );
+  const [outputCompression, setOutputCompression] = useState(100);
   const [aspectRatio, setAspectRatio] = useState<string | undefined>();
   const [resolution, setResolution] = useState<string | undefined>();
   const [quality, setQuality] = useState<ImageQuality>(
@@ -112,6 +120,13 @@ export default function GeneratePage() {
   );
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_IMAGE_MODEL);
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
+  const firstSourcePath = editSources[0]?.path;
+  useEffect(() => {
+    setAdvancedOptions((current) => {
+      if (!current.markupPath && !current.maskPath) return current;
+      return { ...current, markupPath: undefined, maskPath: undefined };
+    });
+  }, [firstSourcePath]);
   const [composerMode, setComposerMode] = useState<ComposerMode>("direct");
   const [promptAgentSessionId, setPromptAgentSessionId] = useState<
     string | null
@@ -176,6 +191,8 @@ export default function GeneratePage() {
     const { parameterDefaults, supportsEdit } =
       getImageModelCatalogEntry(model);
 
+    setAdvancedOptions({});
+    setOutputCompression(100);
     setAspectRatio(parameterDefaults.aspectRatio);
     setResolution(parameterDefaults.resolution);
     setSize(parameterDefaults.size);
@@ -303,6 +320,11 @@ export default function GeneratePage() {
       refreshConversations();
     };
 
+    const partialUnlisten = onGenerationPartial((event) => {
+      if (!cancelled) {
+        setMessages((current) => applyGenerationPartial(current, event));
+      }
+    });
     const completeUnlisten = onGenerationComplete(() => {
       if (!cancelled) {
         refreshActiveConversation();
@@ -316,6 +338,7 @@ export default function GeneratePage() {
 
     return () => {
       cancelled = true;
+      void partialUnlisten.then((unlisten) => unlisten());
       void completeUnlisten.then((unlisten) => unlisten());
       void failedUnlisten.then((unlisten) => unlisten());
     };
@@ -433,7 +456,10 @@ export default function GeneratePage() {
     (value: ImageBackground) => {
       markComposerDraftStarted();
       setBackground(value);
-      if (value === "transparent" && outputFormat === "jpeg") {
+      if (
+        value === "transparent" &&
+        !["png", "webp", "svg"].includes(outputFormat)
+      ) {
         setOutputFormat("png");
       }
     },
@@ -444,7 +470,15 @@ export default function GeneratePage() {
     (value: ImageOutputFormat) => {
       markComposerDraftStarted();
       setOutputFormat(value);
-      if (value === "jpeg" && background === "transparent") {
+      if (value === "svg") setImageCount(1);
+      if (value === "gif") {
+        setSize("auto");
+        setAdvancedOptions((current) => ({ ...current, maskPath: undefined }));
+      }
+      if (
+        !["png", "webp", "svg"].includes(value) &&
+        background === "transparent"
+      ) {
         setBackground("auto");
       }
     },
@@ -530,6 +564,17 @@ export default function GeneratePage() {
       autoScrollRef.current = true;
 
       try {
+        const invalid = image26ValidationError({
+          model: normalizedRequest.model,
+          format: normalizedRequest.outputFormat,
+          size: normalizedRequest.size,
+          count: normalizedRequest.imageCount,
+          background: normalizedRequest.background,
+          editing: normalizedRequest.editSources.length > 0,
+          options: normalizedRequest.advancedOptions ?? {},
+          compression: normalizedRequest.outputCompression,
+        });
+        if (invalid) throw new Error(t(`generate.advanced.${invalid}`));
         const maxSources =
           getImageModelCatalogEntry(normalizedRequest.model)
             .maxReferenceImages ?? 16;
@@ -575,6 +620,8 @@ export default function GeneratePage() {
     setEditingPromptMessageId(null);
     await submitGenerationRequest({
       prompt: promptText,
+      advancedOptions,
+      outputCompression,
       model: imageModel,
       size,
       aspectRatio,
@@ -678,6 +725,8 @@ export default function GeneratePage() {
 
       await submitGenerationRequest({
         prompt: acceptedPrompt,
+        advancedOptions,
+        outputCompression,
         model: nextModel,
         size: nextSize,
         aspectRatio:
@@ -701,6 +750,10 @@ export default function GeneratePage() {
       });
     },
     [
+      advancedOptions,
+      outputCompression,
+      aspectRatio,
+      resolution,
       acceptPromptAgentDraftMutation,
       activeConversationId,
       activeProjectId,
@@ -877,6 +930,16 @@ export default function GeneratePage() {
       </div>
 
       <GenerationComposer
+        advancedOptions={advancedOptions}
+        onAdvancedOptionsChange={(value) => {
+          markComposerDraftStarted();
+          setAdvancedOptions(value);
+        }}
+        outputCompression={outputCompression}
+        onOutputCompressionChange={(value) => {
+          markComposerDraftStarted();
+          setOutputCompression(value);
+        }}
         textareaRef={textareaRef}
         prompt={prompt}
         imageModel={imageModel}

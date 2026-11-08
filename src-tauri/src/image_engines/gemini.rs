@@ -145,6 +145,9 @@ mod tests {
             "Draw a striped glass tiger",
             &[],
             &GptImageRequestOptions {
+                advanced_options: None,
+                prepared_overlay: None,
+                progress_context: None,
                 aspect_ratio: None,
                 resolution: None,
                 size: DEFAULT_IMAGE_SIZE.to_string(),
@@ -183,6 +186,9 @@ mod tests {
                 data: "cmVmZXJlbmNlLWJ5dGVz".to_string(),
             }],
             &GptImageRequestOptions {
+                advanced_options: None,
+                prepared_overlay: None,
+                progress_context: None,
                 aspect_ratio: None,
                 resolution: None,
                 size: "1536x1024".to_string(),
@@ -228,6 +234,9 @@ mod tests {
             "Draw a square icon",
             &[],
             &GptImageRequestOptions {
+                advanced_options: None,
+                prepared_overlay: None,
+                progress_context: None,
                 aspect_ratio: None,
                 resolution: None,
                 size: "auto".to_string(),

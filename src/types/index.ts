@@ -165,6 +165,8 @@ export interface CanvasFrame {
 }
 
 export interface CanvasGenerationRequest {
+  source_image_path?: string;
+  parameters?: GenerationParams;
   request_id: string;
   generation_id?: string;
   project_id: string | null;
@@ -214,7 +216,24 @@ export interface GenerationSearchFilters {
   created_to?: string;
 }
 
+export interface ImageAdvancedOptions {
+  complexity?: "low" | "medium" | "high";
+  frameCount?: number;
+  frameDurationMs?: number;
+  svg?: {
+    model: string;
+    reasoning?: {
+      effort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+    };
+  };
+  markupPath?: string;
+  maskPath?: string;
+  stream?: boolean;
+  partialImages?: number;
+}
+
 export interface GenerationParams {
+  advancedOptions?: ImageAdvancedOptions;
   prompt: string;
   clientRequestId?: string;
   model?: ImageModel;
@@ -290,6 +309,8 @@ export interface EditSourceImage {
 }
 
 export interface RetryGenerationRequest {
+  advancedOptions?: ImageAdvancedOptions;
+  outputCompression?: number;
   prompt: string;
   clientRequestId?: string;
   model: ImageModel;
@@ -308,6 +329,7 @@ export interface RetryGenerationRequest {
 }
 
 export interface Message {
+  partialPreview?: string;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -321,6 +343,7 @@ export interface Message {
 }
 
 export type ImageSize =
+  | `${number}x${number}`
   | "1024x1024"
   | "1536x1024"
   | "1024x1536"
@@ -333,7 +356,7 @@ export type ImageQuality = "low" | "medium" | "high" | "xhigh" | "max" | "auto";
 export type ImageBackground = "auto" | "opaque" | "transparent";
 export type ImageModeration = "auto" | "low";
 export type ImageInputFidelity = "low" | "high";
-export type ImageOutputFormat = "png" | "jpeg" | "webp";
+export type ImageOutputFormat = "png" | "jpeg" | "webp" | "svg" | "gif";
 
 export interface GenerateResponse {
   generation_id: string;
@@ -400,6 +423,8 @@ export interface TrashSettings {
 
 export type AppFontSize = "small" | "medium" | "large";
 export type ImageModel =
+  | "gpt-image-2.6-sunburst"
+  | "gpt-image-2.6-flare"
   | "gpt-image-2.5-sunburst"
   | "gpt-image-2.5-flare"
   | "gemini-nano-banana-2.1"
