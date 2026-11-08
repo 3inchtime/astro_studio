@@ -1,0 +1,2 @@
+# Preserve vendored skill sources, including Windows launcher line endings.
+.agents/skills/** -whitespace

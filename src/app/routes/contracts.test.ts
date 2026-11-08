@@ -91,7 +91,7 @@ describe("routes/contracts", () => {
     expect(shouldHideSidebarForContext(extract)).toBe(true);
     expect(shouldHideSidebarForContext(gallery)).toBe(true);
     expect(shouldHideSidebarForContext(projects)).toBe(false);
-    expect(shouldHideSidebarForContext(trash)).toBe(false);
+    expect(shouldHideSidebarForContext(trash)).toBe(true);
     expect(shouldHideSidebarForContext(favorites)).toBe(true);
     expect(shouldHideSidebarForContext(settings)).toBe(true);
   });
@@ -138,7 +138,7 @@ describe("routes/contracts", () => {
 
     expect(getRouteLayout("trash")).toEqual({
       kind: "trash",
-      sidebar: { type: "conversations", useProjectFromPath: false },
+      sidebar: { type: "hidden", useProjectFromPath: false },
       clearProjectOnEnter: true,
     });
 

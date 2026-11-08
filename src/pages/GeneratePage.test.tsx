@@ -797,7 +797,8 @@ describe("GeneratePage", () => {
 
   it("reloads the active conversation when a generation completion event arrives", async () => {
     let completeHandler:
-      ((data: { generation_id: string; status: string }) => void) | undefined;
+      | ((data: { generation_id: string; status: string }) => void)
+      | undefined;
     onGenerationComplete.mockImplementation((handler) => {
       completeHandler = handler;
       return Promise.resolve(vi.fn());
@@ -877,7 +878,7 @@ describe("GeneratePage", () => {
     });
 
     expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Count")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Count")).toBeDisabled();
     expect(screen.queryByLabelText("Quality")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Background")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Format")).not.toBeInTheDocument();
@@ -1106,7 +1107,7 @@ describe("GeneratePage", () => {
     expect(screen.getByRole("option", { name: "Transparent" })).toBeDisabled();
   });
 
-  it("keeps generation parameters in a single row inside the page boundary", async () => {
+  it("keeps common generation parameters in a responsive grid", async () => {
     render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
@@ -1115,14 +1116,14 @@ describe("GeneratePage", () => {
 
     expect(
       screen.getByRole("toolbar", { name: "Generation parameters" }),
-    ).toHaveClass("overflow-hidden");
+    ).toHaveClass("w-full");
     expect(
       screen.getByRole("toolbar", { name: "Generation parameters" }),
     ).not.toHaveClass("overflow-x-auto");
     expect(screen.getByTestId("generation-parameter-row")).toHaveClass(
       "grid",
       "min-w-0",
-      "whitespace-nowrap",
+      "grid-cols-2",
     );
     expect(screen.getByTestId("generation-parameter-row")).not.toHaveClass(
       "w-max",
@@ -1166,7 +1167,7 @@ describe("GeneratePage", () => {
       .closest("[data-testid='generation-command-surface']");
 
     expect(toolbar).toHaveAttribute("data-variant", "parameter-rail");
-    expect(commandSurface).toHaveClass("rounded-[22px]", "shadow-float");
+    expect(commandSurface).toHaveClass("rounded-xl");
   });
 
   it("lets the generate surface stretch across the available main panel", async () => {

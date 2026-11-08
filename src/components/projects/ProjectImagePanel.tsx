@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Image as ImageIcon } from "lucide-react";
+import CollectionStatus from "../gallery/CollectionStatus";
 import type { GenerationResult, GenerationSearchFilters } from "../../types";
 import GallerySearchBar from "../gallery/GallerySearchBar";
 import GenerationGrid from "../gallery/GenerationGrid";
@@ -10,6 +10,8 @@ import { createGallerySearchConfig } from "../../lib/galleryFilterConfig";
 import { compactFilters, isFilterActive, updateFilterValue } from "../../lib/galleryFilters";
 
 export default function ProjectImagePanel({
+  loading = false,
+  error = false,
   results,
   total,
   page,
@@ -19,6 +21,8 @@ export default function ProjectImagePanel({
   onPreview,
   onManageFolders,
 }: {
+  loading?: boolean;
+  error?: boolean;
   results: GenerationResult[];
   total: number;
   page: number;
@@ -50,22 +54,6 @@ export default function ProjectImagePanel({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Gallery Header */}
-      <div className="shrink-0 px-6 pt-5 pb-3">
-        <div className="flex items-center justify-between gap-4 mb-3">
-          <div className="flex items-center gap-2">
-            <ImageIcon size={15} className="text-muted" strokeWidth={1.8} />
-            <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
-              {t("projects.imagesTitle")}
-            </h2>
-            {total > 0 && (
-              <span className="text-[11px] text-muted tabular-nums">
-                {total}
-              </span>
-            )}
-          </div>
-        </div>
-
         <GallerySearchBar
           config={config}
           total={total}
@@ -79,16 +67,16 @@ export default function ProjectImagePanel({
             void onSearch("", {}, 1);
           }}
         />
-      </div>
 
       {/* Gallery Grid */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6">
-        {results.length === 0 ? (
+      <div className="flex-1 overflow-y-auto p-6">
+        <CollectionStatus loading={loading} error={error} onRetry={() => void onSearch(query, compactFilters(filters), page)} />
+        {results.length === 0 ? (!loading && !error && (
           <EmptyCollectionState
             title={t("projects.imagesEmptyTitle")}
             subtitle={t("projects.imagesEmptyHint")}
           />
-        ) : (
+        )) : (
           <>
             <GenerationGrid
               results={results}

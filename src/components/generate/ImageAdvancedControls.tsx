@@ -8,6 +8,7 @@ import type {
 } from "../../types";
 
 interface Props {
+  embedded?: boolean;
   value: ImageAdvancedOptions;
   onChange: (value: ImageAdvancedOptions) => void;
   format: ImageOutputFormat;
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function ImageAdvancedControls({
+  embedded = false,
   value,
   onChange,
   format,
@@ -33,7 +35,8 @@ export default function ImageAdvancedControls({
   const update = (patch: Partial<ImageAdvancedOptions>) =>
     onChange({ ...value, ...patch });
   const raster = format !== "gif" && format !== "svg";
-  const field = "studio-input mt-1 w-full rounded-lg px-2 py-1.5 text-xs";
+  const field =
+    "studio-input focus-ring mt-1 w-full rounded-lg px-3 py-2 text-[14px]";
   const label = "text-xs text-muted";
   const chooseOverlay = async (kind: "markupPath" | "maskPath") => {
     try {
@@ -50,11 +53,14 @@ export default function ImageAdvancedControls({
       setError(String(cause));
     }
   };
+  const Container = embedded ? "div" : "details";
   return (
-    <details className="mt-2 rounded-xl border border-border-subtle bg-surface/70 px-3 py-2">
-      <summary className="cursor-pointer text-xs font-medium text-foreground">
-        {t("generate.advanced.title")}
-      </summary>
+    <Container className="mt-2 rounded-xl border border-border-subtle bg-surface px-3 py-2">
+      {!embedded && (
+        <summary className="focus-ring cursor-pointer rounded-lg text-xs font-medium text-foreground">
+          {t("generate.advanced.title")}
+        </summary>
+      )}
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <label className={label}>
           {t("generate.advanced.complexity")}
@@ -271,6 +277,6 @@ export default function ImageAdvancedControls({
           {error}
         </p>
       )}
-    </details>
+    </Container>
   );
 }

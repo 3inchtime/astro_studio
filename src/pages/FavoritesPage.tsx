@@ -26,6 +26,8 @@ import { useLayoutContext } from "../components/layout/AppLayout";
 import type { GenerationResult, MessageImage, PromptFavorite } from "../types";
 import FolderSelector from "../components/favorites/FolderSelector";
 import PromptFolderSelector from "../components/favorites/PromptFolderSelector";
+import ConfirmDialog from "../components/common/ConfirmDialog";
+import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
 import GenerationGrid from "../components/gallery/GenerationGrid";
@@ -53,7 +55,10 @@ export default function FavoritesPage() {
   const [imageTotal, setImageTotal] = useState(0);
   const [imagePage, setImagePage] = useState(1);
   const [imagePageSize, setImagePageSize] = useState(20);
-  const [isLoadingImages, setIsLoadingImages] = useState(false);
+  const [isLoadingImages, setIsLoadingImages] = useState(true);
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState(true);
+  const [imageLoadError, setImageLoadError] = useState(false);
+  const [promptLoadError, setPromptLoadError] = useState(false);
   const [imageViewMode, setImageViewMode] = useStoredGalleryViewMode(
     "astro-favorites-image-view-mode",
   );
@@ -61,6 +66,7 @@ export default function FavoritesPage() {
     null,
   );
   const imageFavoritesRequestIdRef = useRef(0);
+  const appliedImageSearch = useRef({ query: "", folderId: "" });
   const promptFavoritesRequestIdRef = useRef(0);
   const {
     lightbox,
@@ -77,6 +83,10 @@ export default function FavoritesPage() {
   const [promptFolderSelectorFavoriteId, setPromptFolderSelectorFavoriteId] =
     useState<string | null>(null);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [deletePromptTarget, setDeletePromptTarget] = useState<string | null>(null);
+  const [deletePromptBusy, setDeletePromptBusy] = useState(false);
+  const [deletePromptError, setDeletePromptError] = useState<string | null>(null);
+  const deletePromptBusyRef = useRef(false);
 
   const loadImageFavorites = useCallback(
     async (
@@ -86,11 +96,13 @@ export default function FavoritesPage() {
       mode: "replace" | "append" = "replace",
     ) => {
       const requestId = ++imageFavoritesRequestIdRef.current;
+      if (mode === "replace") appliedImageSearch.current = { query: query ?? imageQuery, folderId: folderId ?? selectedImageFolderId };
       setIsLoadingImages(true);
+      setImageLoadError(false);
       try {
         const result = await getFavoriteImages(
-          folderId || selectedImageFolderId || undefined,
-          query?.trim() || imageQuery.trim() || undefined,
+          (folderId ?? selectedImageFolderId) || undefined,
+          (query ?? imageQuery).trim() || undefined,
           page,
         );
         if (requestId !== imageFavoritesRequestIdRef.current) return;
@@ -105,6 +117,8 @@ export default function FavoritesPage() {
         if (mode === "replace") {
           setSelectedImage(null);
         }
+      } catch {
+        if (requestId === imageFavoritesRequestIdRef.current) setImageLoadError(true);
       } finally {
         if (requestId === imageFavoritesRequestIdRef.current) {
           setIsLoadingImages(false);
@@ -117,12 +131,20 @@ export default function FavoritesPage() {
   const loadPromptFavorites = useCallback(
     async (query?: string, folderId?: string) => {
       const requestId = ++promptFavoritesRequestIdRef.current;
-      const favorites = await getPromptFavorites(
-        query?.trim() || promptQuery.trim() || undefined,
-        folderId || selectedPromptFolderId || undefined,
-      );
-      if (requestId !== promptFavoritesRequestIdRef.current) return;
-      setPromptFavorites(favorites);
+      setIsLoadingPrompts(true);
+      setPromptLoadError(false);
+      try {
+        const favorites = await getPromptFavorites(
+          (query ?? promptQuery).trim() || undefined,
+          (folderId ?? selectedPromptFolderId) || undefined,
+        );
+        if (requestId !== promptFavoritesRequestIdRef.current) return;
+        setPromptFavorites(favorites);
+      } catch {
+        if (requestId === promptFavoritesRequestIdRef.current) setPromptLoadError(true);
+      } finally {
+        if (requestId === promptFavoritesRequestIdRef.current) setIsLoadingPrompts(false);
+      }
     },
     [promptQuery, selectedPromptFolderId],
   );
@@ -130,6 +152,7 @@ export default function FavoritesPage() {
   useEffect(() => {
     loadImageFavorites(1).catch(() => {});
     loadPromptFavorites().catch(() => {});
+    return () => { imageFavoritesRequestIdRef.current++; promptFavoritesRequestIdRef.current++; };
   }, []);
 
   function handleSearch() {
@@ -180,11 +203,21 @@ export default function FavoritesPage() {
     [handleEditImage, closeLightbox],
   );
 
-  async function handleDeletePromptFavorite(id: string) {
-    await deletePromptFavorite(id);
-    setPromptFavorites((current) =>
-      current.filter((favorite) => favorite.id !== id),
-    );
+  async function handleDeletePromptFavorite() {
+    if (!deletePromptTarget || deletePromptBusyRef.current) return;
+    deletePromptBusyRef.current = true;
+    setDeletePromptBusy(true);
+    setDeletePromptError(null);
+    try {
+      await deletePromptFavorite(deletePromptTarget);
+      setPromptFavorites((current) => current.filter((favorite) => favorite.id !== deletePromptTarget));
+      setDeletePromptTarget(null);
+    } catch {
+      setDeletePromptError(t("studio.collection.actionError", { defaultValue: "The change could not be saved. Please try again." }));
+    } finally {
+      deletePromptBusyRef.current = false;
+      setDeletePromptBusy(false);
+    }
   }
 
   async function handleCopyPrompt(favorite: PromptFavorite) {
@@ -226,35 +259,36 @@ export default function FavoritesPage() {
   const activeQuery = activeKind === "images" ? imageQuery : promptQuery;
   const hasMoreImages = imagePage * imagePageSize < imageTotal;
   const loadMoreImagesRef = useInfiniteScroll({
-    enabled: activeKind === "images" && imageResults.length > 0,
+    enabled: activeKind === "images" && imageResults.length > 0 && !imageLoadError,
     hasMore: hasMoreImages,
     isLoading: isLoadingImages,
     onLoadMore: () => {
       void loadImageFavorites(
         imagePage + 1,
-        imageQuery,
-        selectedImageFolderId,
+        appliedImageSearch.current.query,
+        appliedImageSearch.current.folderId,
         "append",
       );
     },
   });
 
   return (
-    <div className="flex h-full overflow-hidden bg-transparent">
-      <div className="flex flex-1 flex-col">
+    <div className="flex h-full overflow-hidden bg-background">
+      <div className="flex min-w-0 flex-1 flex-col">
         <div className="studio-toolbar flex flex-col gap-3 px-6 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <h2 className="text-[15px] font-semibold text-foreground tracking-tight">
+            <h2 className="text-[20px] font-semibold text-foreground tracking-tight">
               {t("favorites.title")}
             </h2>
             {activeTotal > 0 && (
-              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[10px] font-medium text-muted tabular-nums">
+              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium text-muted tabular-nums">
                 {activeTotal}
               </span>
             )}
             <div className="studio-control flex rounded-[8px] p-0.5">
               <button
-                onClick={() => setActiveKind("images")}
+                aria-pressed={activeKind === "images"}
+                onClick={() => { setSelectedImage(null); setActiveKind("images"); }}
                 className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
                   activeKind === "images"
                     ? "bg-surface text-foreground shadow-sm"
@@ -265,7 +299,8 @@ export default function FavoritesPage() {
                 {t("favorites.imagesTab")}
               </button>
               <button
-                onClick={() => setActiveKind("prompts")}
+                aria-pressed={activeKind === "prompts"}
+                onClick={() => { setSelectedImage(null); setActiveKind("prompts"); }}
                 className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
                   activeKind === "prompts"
                     ? "bg-surface text-foreground shadow-sm"
@@ -291,7 +326,7 @@ export default function FavoritesPage() {
                 size={13}
                 className={cn(
                   "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 transition-colors",
-                  activeFolderId ? "text-primary/80" : "text-muted/60",
+                  activeFolderId ? "text-primary/80" : "text-muted",
                 )}
                 strokeWidth={2}
               />
@@ -301,7 +336,7 @@ export default function FavoritesPage() {
                   handleFolderFilterChange(event.target.value)
                 }
                 className={cn(
-                  "select-control studio-input focus-ring h-[34px] w-full rounded-[10px] pl-7 pr-8 text-[12px] font-medium xl:w-44",
+                  "select-control studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-8 text-[12px] font-medium xl:w-44",
                   activeFolderId
                     ? "border-primary/20 bg-surface text-foreground shadow-[0_10px_24px_rgba(79,106,255,0.08)]"
                     : "border-border-subtle bg-subtle/55 text-muted hover:border-border hover:bg-surface/92 hover:text-foreground",
@@ -327,10 +362,11 @@ export default function FavoritesPage() {
             <div className="relative min-w-0 flex-1 xl:flex-none">
               <Search
                 size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/60"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
                 strokeWidth={2}
               />
               <input
+                aria-label={activeKind === "images" ? t("favorites.search") : t("favorites.searchPrompts")}
                 value={activeQuery}
                 onChange={(event) =>
                   activeKind === "images"
@@ -345,21 +381,26 @@ export default function FavoritesPage() {
                     ? t("favorites.search")
                     : t("favorites.searchPrompts")
                 }
-                className="studio-input focus-ring h-[30px] w-full rounded-[8px] pl-7 pr-3 text-[12px] placeholder:text-muted/50 xl:w-52"
+                className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted xl:w-52"
               />
             </div>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
+          <CollectionStatus
+            loading={activeKind === "images" ? isLoadingImages : isLoadingPrompts}
+            error={activeKind === "images" ? imageLoadError : promptLoadError}
+            onRetry={handleSearch}
+          />
           {activeKind === "images" ? (
             <>
-              {imageResults.length === 0 ? (
+              {imageResults.length === 0 ? (!isLoadingImages && !imageLoadError && (
                 <EmptyCollectionState
                   title={t("favorites.noImages")}
                   subtitle={t("favorites.emptyHint")}
                 />
-              ) : (
+              )) : (
                 <GenerationGrid
                   results={imageResults}
                   viewMode={imageViewMode}
@@ -369,15 +410,15 @@ export default function FavoritesPage() {
               )}
               <div ref={loadMoreImagesRef} aria-hidden="true" className="h-1" />
             </>
-          ) : (
+          ) : (!isLoadingPrompts && !promptLoadError && (
             <PromptFavoritesList
               favorites={promptFavorites}
               copiedPromptId={copiedPromptId}
               onCopy={(favorite) => void handleCopyPrompt(favorite)}
               onManageFolders={setPromptFolderSelectorFavoriteId}
-              onDelete={(id) => void handleDeletePromptFavorite(id)}
+              onDelete={(id) => { setDeletePromptError(null); setDeletePromptTarget(id); }}
             />
-          )}
+          ))}
         </div>
       </div>
 
@@ -416,6 +457,16 @@ export default function FavoritesPage() {
         />
       )}
 
+      <ConfirmDialog
+        open={deletePromptTarget !== null}
+        title={t("studio.collection.deletePrompt", { defaultValue: "Permanently remove this saved prompt?" })}
+        confirmLabel={t("favorites.deletePrompt")}
+        cancelLabel={t("projects.deleteCancel")}
+        loading={deletePromptBusy}
+        error={deletePromptError}
+        onConfirm={() => void handleDeletePromptFavorite()}
+        onCancel={() => { if (!deletePromptBusy) setDeletePromptTarget(null); }}
+      />
       {promptFolderSelectorFavoriteId && (
         <PromptFolderSelector
           favoriteId={promptFolderSelectorFavoriteId}
@@ -455,13 +506,13 @@ function PromptFavoritesList({
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       {favorites.map((favorite) => (
-        <article key={favorite.id} className="studio-card rounded-[10px] p-4">
-          <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/85">
+        <article key={favorite.id} className="studio-card rounded-[12px] p-5">
+          <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground/85">
             {favorite.prompt}
           </p>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-[11px] text-muted/60">
+            <span className="min-w-0 truncate text-[12px] text-muted">
               {formatLocalDateTime(favorite.updated_at)}
             </span>
 

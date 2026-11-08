@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { MotionConfig } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { getVersion } from "@tauri-apps/api/app";
 import {
@@ -84,6 +84,20 @@ const SETTINGS_TABS = [
 export default function SettingsPage() {
   const navigate = useNavigate();
   const { checkForUpdates, updateSupported } = useLayoutContext();
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const retrySettingsRef = useRef<(() => Promise<void>) | null>(null);
+  const settingsPendingRef = useRef(false);
+  async function runSettingsAction(action: () => Promise<void>) {
+    if (settingsPendingRef.current) return;
+    settingsPendingRef.current = true;
+    setSavingSettings(true);
+    setSaveError(false);
+    retrySettingsRef.current = action;
+    try { await action(); retrySettingsRef.current = null; }
+    catch { setSaveError(true); }
+    finally { settingsPendingRef.current = false; setSavingSettings(false); }
+  }
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">(
     "general",
   );
@@ -214,8 +228,8 @@ export default function SettingsPage() {
   }, [imageModel]);
 
   useEffect(() => {
-    getLogSettings().then(setLogSettings);
-    getTrashSettings().then(setTrashSettings);
+    getLogSettings().then(setLogSettings).catch(() => {});
+    getTrashSettings().then(setTrashSettings).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -513,73 +527,28 @@ export default function SettingsPage() {
     SETTINGS_TABS[0];
 
   return (
-    <div className="h-full overflow-y-auto bg-transparent">
-      <div className="mx-auto w-full max-w-[1320px] p-6 md:p-8">
-        <motion.header
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="studio-panel mb-6 rounded-[16px] px-5 py-5"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h2 className="text-[18px] font-semibold tracking-tight text-foreground">
-                {t("settings.title")}
-              </h2>
-              <p className="mt-1.5 max-w-3xl text-[12px] leading-relaxed text-muted/65">
-                {t(activeSection.descriptionKey)}
-              </p>
-            </div>
-            <div className="rounded-full border border-border-subtle bg-subtle/30 px-3 py-1.5 text-[11px] font-medium text-muted/75">
-              {t(activeSection.labelKey)}
-            </div>
-          </div>
-        </motion.header>
-
-        <nav
-          aria-label={t("settings.sections", {
-            defaultValue: "Settings sections",
-          })}
-          className="mb-6 grid gap-3 lg:grid-cols-3"
-        >
-          {SETTINGS_TABS.map(({ id, icon: Icon, labelKey, descriptionKey }) => {
-            const active = activeTab === id;
-
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-label={t(labelKey)}
-                aria-current={active ? "page" : undefined}
-                onClick={() => setActiveTab(id)}
-                className={`focus-ring flex min-h-[88px] cursor-pointer items-start gap-3 rounded-[14px] border px-4 py-4 text-left transition-all ${
-                  active
-                    ? "border-primary/20 bg-surface shadow-card"
-                    : "border-border-subtle bg-surface/70 hover:border-border hover:bg-surface"
-                }`}
-              >
-                <div
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border ${
-                    active
-                      ? "border-primary/15 bg-primary/7 text-primary"
-                      : "border-border-subtle bg-subtle/35 text-muted"
-                  }`}
-                >
-                  <Icon size={16} strokeWidth={2} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[12px] font-semibold text-foreground">
-                    {t(labelKey)}
-                  </div>
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-muted/65">
-                    {t(descriptionKey)}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
+    <MotionConfig reducedMotion="user">
+    <div className="h-full min-w-0 overflow-y-auto bg-background">
+      <div className="mx-auto w-full max-w-[1200px] px-5 py-6">
+        <header className="mb-6 border-b border-border-subtle pb-5">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">{t("settings.title")}</h2>
+          <p className="mt-1 text-sm text-muted">{t(activeSection.descriptionKey)}</p>
+        </header>
+        <div className="grid min-w-0 gap-6 md:grid-cols-[176px_minmax(0,1fr)]">
+        <nav aria-label={t("settings.sections", { defaultValue: "Settings sections" })} className="flex flex-wrap content-start gap-1 md:flex-col">
+          {SETTINGS_TABS.map(({ id, icon: Icon, labelKey }) => (
+            <button key={id} type="button" aria-label={t(labelKey)} aria-current={activeTab === id ? "page" : undefined} onClick={() => setActiveTab(id)} className={`focus-ring flex min-h-9 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${activeTab === id ? "bg-primary/10 text-primary" : "text-muted hover:bg-subtle hover:text-foreground"}`}>
+              <Icon size={16} strokeWidth={1.8} /><span>{t(labelKey)}</span>
+            </button>
+          ))}
         </nav>
-
-        <AnimatePresence mode="wait">
+        <div className="min-w-0">
+          {savingSettings ? <p role="status" className="mb-4 rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-muted">{t("studio.settings.saving", { defaultValue: "Saving changes…" })}</p> : null}
+          {saveError ? <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-error/25 bg-error/5 px-3 py-2 text-sm text-error">
+            <span>{t("studio.settings.saveFailed", { defaultValue: "Could not save changes. Please try again." })}</span>
+            <button type="button" onClick={() => { if (retrySettingsRef.current) void runSettingsAction(retrySettingsRef.current); }} className="focus-ring h-9 shrink-0 rounded-lg px-3 font-medium hover:bg-error/10">{t("studio.settings.retry", { defaultValue: "Retry" })}</button>
+          </div> : null}
+          <fieldset disabled={savingSettings} aria-busy={savingSettings} className="min-w-0 border-0 p-0">
           {activeTab === "general" ? (
             <GeneralSettingsPanel
               t={t}
@@ -594,10 +563,10 @@ export default function SettingsPage() {
               fontSizeLabelKeys={FONT_SIZE_LABEL_KEYS}
               onLanguageChange={handleLanguageChange}
               onTrashSettingsChange={setTrashSettings}
-              onSaveTrashRetention={() => void handleSaveTrashRetention()}
+              onSaveTrashRetention={() => void runSettingsAction(() => handleSaveTrashRetention())}
               onOpenTrash={() => navigate(ROUTES.trash)}
               onFontSizeChange={(nextSize) =>
-                void handleFontSizeChange(nextSize)
+                void runSettingsAction(() => handleFontSizeChange(nextSize))
               }
               onThemeChange={(nextTheme, event) =>
                 setThemeWithEvent(nextTheme, event)
@@ -615,7 +584,7 @@ export default function SettingsPage() {
               selectedProviderId={selectedProviderId}
               providerSaved={providerSaved}
               onSelectImageModel={handleSelectImageModel}
-              onSaveModel={() => void handleSaveModel()}
+              onSaveModel={() => void runSettingsAction(() => handleSaveModel())}
               onSelectProvider={(providerId) => {
                 setSelectedProviderId(providerId);
                 setShowKey(false);
@@ -667,14 +636,14 @@ export default function SettingsPage() {
                   },
                 }))
               }
-              onCreateProvider={() => void handleCreateProvider()}
+              onCreateProvider={() => void runSettingsAction(() => handleCreateProvider())}
               onDeleteProvider={(providerId) =>
-                void handleDeleteProvider(providerId)
+                void runSettingsAction(() => handleDeleteProvider(providerId))
               }
               onSetActiveProvider={(providerId) =>
-                void handleSetActiveProvider(providerId)
+                void runSettingsAction(() => handleSetActiveProvider(providerId))
               }
-              onSaveProvider={() => void handleSaveProvider()}
+              onSaveProvider={() => void runSettingsAction(() => handleSaveProvider())}
               onCancelProviderEdit={() => void handleCancelProviderEdit()}
             />
           ) : (
@@ -704,14 +673,16 @@ export default function SettingsPage() {
                 setLogLevel(nextLevel);
                 setLogPage(1);
               }}
-              onSaveRetention={(days) => void handleSaveRetention(days)}
+              onSaveRetention={(days) => void runSettingsAction(() => handleSaveRetention(days))}
               onOpenClearLogs={() => setClearLogsOpen(true)}
               onSelectLog={(log) => void handleSelectLog(log)}
               onLogPageChange={setLogPage}
               onCloseSelectedLog={() => setSelectedLog(null)}
             />
           )}
-        </AnimatePresence>
+        </fieldset>
+        </div>
+        </div>
       </div>
       <ConfirmDialog
         open={clearLogsOpen}
@@ -723,5 +694,6 @@ export default function SettingsPage() {
         loading={clearingLogs}
       />
     </div>
+    </MotionConfig>
   );
 }

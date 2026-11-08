@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import FavoritesPage from "./FavoritesPage";
@@ -268,6 +269,38 @@ describe("FavoritesPage", () => {
       page_size: 20,
     });
     getPromptFavorites.mockResolvedValue([]);
+  });
+
+  it("clears a submitted search rather than reusing the previous query", async () => {
+    render(<FavoritesPage />);
+    await waitFor(() => expect(getFavoriteImages).toHaveBeenCalled());
+    const input = screen.getByPlaceholderText("favorites.search");
+    fireEvent.change(input, { target: { value: "moon" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(getFavoriteImages).toHaveBeenLastCalledWith(undefined, "moon", 1));
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(getFavoriteImages).toHaveBeenLastCalledWith(undefined, undefined, 1));
+  });
+
+  it("shows a retry action when favorites cannot load", async () => {
+    getFavoriteImages.mockRejectedValueOnce(new Error("offline"));
+    render(<FavoritesPage />);
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.retry" }));
+    await waitFor(() => expect(getFavoriteImages).toHaveBeenCalledTimes(2));
+  });
+
+  it("confirms permanent prompt removal before deleting", async () => {
+    getPromptFavorites.mockResolvedValue([{ id: "prompt-1", prompt: "A blue moon", updated_at: "2026-01-01T00:00:00Z" }]);
+    render(<FavoritesPage />);
+    fireEvent.click(screen.getByRole("button", { name: "favorites.promptsTab" }));
+    await screen.findByText("A blue moon");
+    fireEvent.click(screen.getByRole("button", { name: "favorites.deletePrompt" }));
+    expect(deletePromptFavorite).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "favorites.deletePrompt" }));
+    await waitFor(() => expect(deletePromptFavorite).toHaveBeenCalledWith("prompt-1"));
   });
 
   it("opens the shared lightbox from a favorite image with all result images", async () => {

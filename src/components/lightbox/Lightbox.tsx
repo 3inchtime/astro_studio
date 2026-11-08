@@ -1,3 +1,4 @@
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -41,7 +42,11 @@ export default function Lightbox({
   onDelete,
 }: LightboxProps) {
   const { t } = useTranslation();
-  const [index, setIndex] = useState(initialIndex);
+  const [selectedIndex, setIndex] = useState(initialIndex);
+  const index = Math.max(0, Math.min(selectedIndex, images.length - 1));
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const dialogRef = useDialogFocus({ open: images.length > 0, onClose });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -51,16 +56,16 @@ export default function Lightbox({
 
   const currentImage = images[index];
   const currentPath = currentImage?.path;
-  const [displayPath, setDisplayPath] = useState(currentPath ?? "");
+  const imageEpoch = useRef(0);
   const transitionEase: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
   useEffect(() => {
-    setDisplayPath(currentPath ?? "");
-  }, [currentPath]);
-
-  if (!currentImage || !currentPath) {
-    return null;
-  }
+    setCopied(false);
+    setActionError(null);
+    return () => {
+      imageEpoch.current += 1;
+    };
+  }, [currentPath, t]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -101,14 +106,16 @@ export default function Lightbox({
   }, []);
 
   const goPrev = useCallback(() => {
-    setIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+    if (!images.length) return;
+    setIndex(index > 0 ? index - 1 : images.length - 1);
     resetView();
-  }, [images.length, resetView]);
+  }, [index, images.length, resetView]);
 
   const goNext = useCallback(() => {
-    setIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+    if (!images.length) return;
+    setIndex(index < images.length - 1 ? index + 1 : 0);
     resetView();
-  }, [images.length, resetView]);
+  }, [index, images.length, resetView]);
 
   const toggleZoom = useCallback(() => {
     if (zoom === 1) setZoom(2);
@@ -117,31 +124,52 @@ export default function Lightbox({
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft") goPrev();
+      if (
+        showFolderSelector ||
+        e.defaultPrevented ||
+        (e.target instanceof HTMLElement &&
+          e.target.closest("input,textarea,select"))
+      )
+        return;
+      if (e.key === "ArrowLeft") goPrev();
       else if (e.key === "ArrowRight") goNext();
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose, goPrev, goNext]);
+  }, [showFolderSelector, goPrev, goNext]);
 
   const handleCopy = useCallback(async () => {
     if (!currentPath) return;
+    const operationEpoch = imageEpoch.current;
     try {
+      setActionError(null);
       await copyImageToClipboard(currentPath);
+      if (operationEpoch !== imageEpoch.current) return;
+      setCopied(true);
     } catch {
-      // Toast notification handled by caller
+      if (operationEpoch !== imageEpoch.current) return;
+      setCopied(false);
+      setActionError(
+        t("studio.copyFailed", { defaultValue: "Could not copy. Try again." }),
+      );
     }
-  }, [currentPath]);
+  }, [currentPath, t]);
 
   const handleDownload = useCallback(async () => {
     if (!currentPath) return;
+    const operationEpoch = imageEpoch.current;
     try {
+      setActionError(null);
       await saveImageToFile(currentPath);
     } catch {
-      // Error handled by caller
+      if (operationEpoch !== imageEpoch.current) return;
+      setActionError(
+        t("studio.saveImageFailed", {
+          defaultValue: "Could not save image. Try again.",
+        }),
+      );
     }
-  }, [currentPath]);
+  }, [currentPath, t]);
 
   const handleDelete = useCallback(() => {
     if (currentImage?.generationId && onDelete) {
@@ -149,13 +177,21 @@ export default function Lightbox({
     }
   }, [currentImage, onDelete]);
 
+  if (!currentImage || !currentPath) return null;
+
   return (
     <motion.div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("lightbox.preview")}
+      tabIndex={-1}
       initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
       animate={{ opacity: 1, backdropFilter: "blur(10px)" }}
       exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
       transition={{ duration: 0.28, ease: transitionEase }}
-      className="fixed inset-0 z-50 flex flex-col bg-black/88"
+      className="fixed inset-0 z-50 flex max-h-none flex-col bg-[#111318] text-white outline-none"
+      style={{ maxHeight: "none" }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -170,11 +206,12 @@ export default function Lightbox({
       >
         <button
           onClick={onClose}
+          aria-label={t("update.close")}
           className="flex h-8 w-8 items-center justify-center rounded-[8px] text-white/70 hover:bg-white/10 hover:text-white transition-colors"
         >
           <X size={18} />
         </button>
-        <span className="text-[13px] text-white/50">
+        <span className="text-[13px] text-white/80">
           {index + 1} / {images.length}
         </span>
         <div className="w-8" />
@@ -205,7 +242,7 @@ export default function Lightbox({
             className="absolute inset-0 flex items-center justify-center"
           >
             <img
-              src={toAssetUrl(displayPath)}
+              src={toAssetUrl(currentPath)}
               alt={t("lightbox.preview")}
               className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
               style={{
@@ -228,6 +265,9 @@ export default function Lightbox({
             exit={{ opacity: 0, x: -12 }}
             transition={{ duration: 0.28, ease: transitionEase }}
             onClick={goPrev}
+            aria-label={t("studio.previousImage", {
+              defaultValue: "Previous image",
+            })}
             className="absolute left-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors"
           >
             <ChevronLeft size={20} />
@@ -238,6 +278,7 @@ export default function Lightbox({
             exit={{ opacity: 0, x: 12 }}
             transition={{ duration: 0.28, ease: transitionEase }}
             onClick={goNext}
+            aria-label={t("studio.nextImage", { defaultValue: "Next image" })}
             className="absolute right-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors"
           >
             <ChevronRight size={20} />
@@ -245,6 +286,16 @@ export default function Lightbox({
         </>
       )}
 
+      {actionError && (
+        <p role="alert" className="px-5 text-center text-sm text-red-200">
+          {actionError}
+        </p>
+      )}
+      {copied && !actionError && (
+        <p role="status" className="px-5 text-center text-sm text-white">
+          {t("studio.copied", { defaultValue: "Copied" })}
+        </p>
+      )}
       {/* Toolbar */}
       <motion.div
         initial={{ opacity: 0, y: 18 }}
@@ -294,23 +345,20 @@ export default function Lightbox({
             key={label}
             onClick={onClick}
             title={label}
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+            aria-label={label}
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/80 hover:bg-white/10 hover:text-white transition-colors"
           >
             <Icon size={16} strokeWidth={1.8} />
           </button>
         ))}
         {currentImage?.imageId && (
-          <button
-            onClick={() => setShowFolderSelector(true)}
-            title={t("favorites.addToFolder")}
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
-          >
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90">
             <FavoriteButton
               imageId={currentImage.imageId}
               size={16}
               onClick={() => setShowFolderSelector(true)}
             />
-          </button>
+          </div>
         )}
       </motion.div>
       {showFolderSelector && currentImage?.imageId && (

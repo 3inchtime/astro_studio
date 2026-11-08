@@ -59,6 +59,14 @@ function buildResult(): GenerationResult {
 }
 
 describe("GenerationDetailPanel", () => {
+  it("presents an accessible drawer with a named close action on smaller windows", () => {
+    const onClose = vi.fn();
+    render(<GenerationDetailPanel result={buildResult()} title="Detail" onClose={onClose} onDelete={vi.fn()} />);
+    expect(screen.getByRole("dialog", { name: "Detail" })).toHaveAttribute("aria-modal", "true");
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.closeDetail" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("opens the preview for the currently selected detail image", () => {
     const onPreview = vi.fn();
 
@@ -74,7 +82,7 @@ describe("GenerationDetailPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "lightbox.preview 2" }));
     fireEvent.click(screen.getByRole("button", {
-      name: "Preview Glass observatory",
+      name: "lightbox.preview Glass observatory",
     }));
 
     expect(onPreview).toHaveBeenCalledWith(1);

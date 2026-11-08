@@ -32,6 +32,7 @@ import {
 } from "../../lib/api";
 import { formatConversationTime } from "../../lib/utils";
 import type { Conversation, Project } from "../../types";
+import ProjectNameDialog from "../projects/ProjectNameDialog";
 import ConfirmDialog from "../common/ConfirmDialog";
 import { ROUTES } from "../../app/routes/contracts";
 
@@ -64,6 +65,9 @@ export default function ConversationList({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [query, setQuery] = useState("");
   const [openMenu, setOpenMenu] = useState<ActionMenu>(null);
+  const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -116,12 +120,9 @@ export default function ConversationList({
     async (conversation: Conversation, action: string) => {
       setOpenMenu(null);
       if (action === "rename") {
-        const title = window.prompt(
-          t("sidebar.renameConversation"),
-          conversation.title,
-        );
-        if (!title || title.trim() === conversation.title) return;
-        await renameConversation(conversation.id, title.trim());
+        setRenameTarget(conversation);
+        setRenameError(null);
+        return;
       } else if (action === "pin") {
         await pinConversation(conversation.id);
       } else if (action === "unpin") {
@@ -155,6 +156,21 @@ export default function ConversationList({
     ],
   );
 
+  async function handleRenameConversation(name: string) {
+    if (!renameTarget || renameLoading) return;
+    setRenameLoading(true);
+    setRenameError(null);
+    try {
+      await renameConversation(renameTarget.id, name);
+      setConversations((items) => items.map((item) => item.id === renameTarget.id ? { ...item, title: name } : item));
+      setRenameTarget(null);
+    } catch {
+      setRenameError(t("projects.renameConversationError"));
+    } finally {
+      setRenameLoading(false);
+    }
+  }
+
   const confirmDeleteConversation = useCallback(async () => {
     if (!deleteTarget) return;
     setDeleteLoading(true);
@@ -187,7 +203,7 @@ export default function ConversationList({
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <MessageSquare size={13} className="text-muted" strokeWidth={1.8} />
-            <span className="text-[13px] font-semibold text-foreground tracking-tight">
+            <span className="text-[14px] font-semibold text-foreground tracking-tight">
               {activeProjectId && selectedProject
                 ? selectedProject.name
                 : t("sidebar.conversations")}
@@ -197,7 +213,7 @@ export default function ConversationList({
             <button
               type="button"
               onClick={() => navigate(ROUTES.projects)}
-              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 shadow-card transition-colors hover:bg-subtle hover:text-foreground"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1.5 text-[12px] font-medium text-foreground shadow-card transition-colors hover:bg-subtle hover:text-foreground"
               aria-label={t("projects.backToList")}
             >
               <ArrowLeft size={12} strokeWidth={1.9} />
@@ -212,10 +228,11 @@ export default function ConversationList({
             strokeWidth={2}
           />
           <input
+            aria-label={t("sidebar.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("sidebar.search")}
-            className="h-8 w-full rounded-full border border-border-subtle bg-surface/72 pl-7 pr-2 text-[12px] text-foreground shadow-inset placeholder:text-muted/60 transition-colors focus:border-primary/24 focus:bg-surface focus:outline-none"
+            className="h-8 w-full rounded-full border border-border-subtle bg-surface/72 pl-7 pr-2 text-[12px] text-foreground shadow-inset placeholder:text-muted transition-colors focus:border-primary/24 focus:bg-surface focus:outline-none"
           />
         </div>
       </div>
@@ -223,17 +240,17 @@ export default function ConversationList({
       <div className="flex-1 overflow-y-auto px-2.5 pb-4 pt-3">
         <button
           onClick={onNewConversation}
-          className="focus-ring mb-3 flex w-full items-center gap-2.5 rounded-[14px] border border-dashed border-border-subtle bg-surface/42 px-2 py-2 text-left transition-all hover:border-primary/30 hover:bg-surface hover:shadow-card"
+          className="focus-ring mb-3 flex w-full items-center gap-2.5 rounded-[12px] border border-dashed border-border-subtle bg-surface/42 px-2 py-2 text-left transition-all hover:border-primary/30 hover:bg-surface hover:shadow-card"
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border-subtle bg-surface shadow-card">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-border-subtle bg-surface shadow-card">
             <Plus size={14} className="text-primary" strokeWidth={2} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] leading-snug text-foreground">
+            <p className="truncate text-[14px] leading-snug text-foreground">
               {t("sidebar.newConversation")}
             </p>
             <div className="mt-0.5 flex items-center gap-1.5">
-              <span className="truncate text-[10px] text-muted/60">
+              <span className="truncate text-[12px] text-muted">
                 {activeProjectId
                   ? t("sidebar.conversations")
                   : (selectedProject?.name ?? t("sidebar.conversations"))}
@@ -244,7 +261,7 @@ export default function ConversationList({
 
         {conversations.length === 0 ? (
           <div className="px-2 pt-6 text-center">
-            <p className="text-[12px] text-muted/50">
+            <p className="text-[12px] text-muted">
               {query ? t("sidebar.noResults") : t("sidebar.noConversations")}
             </p>
           </div>
@@ -275,6 +292,19 @@ export default function ConversationList({
         )}
       </div>
 
+      <ProjectNameDialog
+        open={renameTarget !== null}
+        title={t("sidebar.renameConversation")}
+        label={t("projectDialog.nameLabel")}
+        initialName={renameTarget?.title ?? ""}
+        submitLabel={t("projectDialog.renameSubmit")}
+        cancelLabel={t("projectDialog.cancel")}
+        requiredMessage={t("projectDialog.nameRequired")}
+        loading={renameLoading}
+        error={renameError}
+        onSubmit={(name) => void handleRenameConversation(name)}
+        onCancel={() => { if (!renameLoading) setRenameTarget(null); }}
+      />
       <ConfirmDialog
         open={deleteTarget !== null}
         title={t("sidebar.deleteConversationConfirm")}
@@ -321,17 +351,18 @@ function ConversationRow({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.25 }}
       data-active-conversation={active ? "true" : "false"}
-      className={`group relative rounded-[14px] border transition-all duration-200 ${
+      className={`group relative rounded-[12px] border transition-all duration-200 ${
         active
-          ? "border-white/72 bg-surface shadow-card ring-1 ring-primary/12"
+          ? "border-primary/20 bg-surface shadow-card ring-1 ring-primary/12"
           : "border-transparent hover:border-border-subtle hover:bg-surface/72 hover:shadow-card"
       }`}
     >
       <button
         onClick={onSelect}
-        className="flex w-full items-center gap-2.5 rounded-[14px] px-2 py-2 text-left"
+        aria-current={active ? "page" : undefined}
+        className="flex w-full items-center gap-2.5 rounded-[12px] px-2 py-2 text-left"
       >
-        <div className="h-[43px] w-[43px] shrink-0 overflow-hidden rounded-[10px] border border-border-subtle bg-subtle shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
+        <div className="h-[43px] w-[43px] shrink-0 overflow-hidden rounded-[8px] border border-border-subtle bg-subtle shadow-[inset_0_0_0_1px_rgba(255,255,255,0.42)]">
           {conversation.latest_thumbnail ? (
             <img
               src={toAssetUrl(conversation.latest_thumbnail)}
@@ -351,7 +382,7 @@ function ConversationRow({
               <Pin size={10} className="shrink-0 text-primary" />
             )}
             <p
-              className={`truncate text-[12px] leading-snug transition-colors ${
+              className={`truncate text-[14px] leading-snug transition-colors ${
                 active
                   ? "font-semibold text-foreground"
                   : "text-foreground/78 group-hover:text-foreground"
@@ -361,7 +392,7 @@ function ConversationRow({
             </p>
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="text-[10px] text-muted/60">
+            <span className="text-[12px] text-muted">
               {formatConversationTime(
                 conversation.latest_generation_at ?? conversation.updated_at,
               )}
@@ -384,7 +415,7 @@ function ConversationRow({
           event.stopPropagation();
           onToggleMenu();
         }}
-        className={`absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[9px] text-muted/60 transition-all hover:bg-subtle hover:text-foreground ${
+        className={`absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-muted transition-all hover:bg-subtle hover:text-foreground ${
           menuOpen
             ? "bg-subtle opacity-100"
             : "opacity-0 group-hover:opacity-100"
@@ -436,7 +467,7 @@ function ConversationRow({
             .length > 0 && (
             <>
               <div className="my-1 border-t border-border-subtle" />
-              <p className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted/50">
+              <p className="px-3 py-1 text-[12px] font-medium uppercase tracking-wider text-muted">
                 {t("sidebar.moveToProject")}
               </p>
               {projects
@@ -460,7 +491,7 @@ function ConversationRow({
 
 function ActionPopover({ children }: { children: ReactNode }) {
   return (
-    <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-[10px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
+    <div className="absolute right-0 top-7 z-20 w-36 overflow-hidden rounded-[8px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
       {children}
     </div>
   );

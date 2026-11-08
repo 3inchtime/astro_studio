@@ -1,76 +1,47 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
-const STORAGE_KEY = "astro-layout-widths";
-
-interface PanelConfig {
-  min: number;
-  default: number;
-  max: number | null;
-}
+const STORAGE_KEY = "astro-layout-widths-v2";
+interface PanelConfig { min: number; default: number; max: number | null }
 
 export function useResizable(panels: PanelConfig[]) {
-  const defaults = panels.map((p) => p.default);
+  const clamp = useCallback((index: number, value: number) => {
+    const panel = panels[index];
+    return Math.max(panel.min, Math.min(panel.max ?? Infinity, Number.isFinite(value) ? value : panel.default));
+  }, [panels]);
   const [widths, setWidths] = useState<number[]>(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as number[];
-        if (parsed.length === panels.length) return parsed;
+      const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem("astro-layout-widths") ?? "null");
+      if (Array.isArray(parsed) && parsed.length === panels.length) {
+        return parsed.map((value, index) => clamp(index, typeof value === "number" ? value : NaN));
       }
-    } catch {}
-    return defaults;
+    } catch { /* Unavailable storage should never prevent opening the workspace. */ }
+    return panels.map((panel) => panel.default);
   });
-
-  const draggingIndex = useRef<number | null>(null);
-  const startX = useRef(0);
-  const startWidths = useRef<number[]>([]);
-
-  const onMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (draggingIndex.current === null) return;
-      const idx = draggingIndex.current;
-      const dx = e.clientX - startX.current;
-      const panel = panels[idx];
-      const nextPanel = panels[idx + 1];
-
-      setWidths((prev) => {
-        const next = [...prev];
-        const newWidth = Math.max(panel.min, Math.min(panel.max ?? Infinity, startWidths.current[idx] + dx));
-        const remaining = prev[idx + 1] - (newWidth - startWidths.current[idx]);
-
-        if (nextPanel && remaining < nextPanel.min) return prev;
-
-        next[idx] = newWidth;
-        if (nextPanel) {
-          next[idx + 1] = Math.max(nextPanel.min, startWidths.current[idx + 1] - (newWidth - startWidths.current[idx]));
-        }
-        return next;
-      });
-    },
-    [panels],
-  );
-
-  const onMouseUp = useCallback(() => {
-    draggingIndex.current = null;
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
-    setWidths((prev) => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(prev));
-      return prev;
-    });
-  }, [onMouseMove]);
-
-  const onHandleDown = useCallback(
-    (index: number) => (e: React.MouseEvent) => {
-      e.preventDefault();
-      draggingIndex.current = index;
-      startX.current = e.clientX;
-      startWidths.current = [...widths];
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [widths, onMouseMove, onMouseUp],
-  );
-
-  return { widths, onHandleDown };
+  const stopDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopDrag.current?.(), []);
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(widths)); } catch { /* Session-only sizing. */ }
+  }, [widths]);
+  const setPanelWidth = useCallback((index: number, width: number) => {
+    setWidths((previous) => previous.map((value, i) => i === index ? clamp(index, width) : value));
+  }, [clamp]);
+  const onHandleDown = useCallback((index: number) => (event: React.MouseEvent) => {
+    event.preventDefault();
+    stopDrag.current?.();
+    const startX = event.clientX;
+    const startWidth = widths[index];
+    const oldSelection = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    const onMove = (next: MouseEvent) => setPanelWidth(index, startWidth + next.clientX - startX);
+    const onUp = () => {
+      document.body.style.userSelect = oldSelection;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      stopDrag.current = null;
+    };
+    stopDrag.current = onUp;
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [widths, setPanelWidth]);
+  return { widths, onHandleDown, setPanelWidth };
 }

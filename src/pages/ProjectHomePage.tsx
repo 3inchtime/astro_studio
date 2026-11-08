@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
-import { Archive, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { Archive, ArrowRight, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   archiveProject,
@@ -16,7 +16,13 @@ import {
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { useUIStore } from "../lib/store";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
-import type { GenerationResult, MessageImage, Project } from "../types";
+import type {
+  GenerationResult,
+  GenerationSearchFilters,
+  MessageImage,
+  Project,
+} from "../types";
+import CollectionStatus from "../components/gallery/CollectionStatus";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
@@ -61,27 +67,90 @@ export default function ProjectHomePage() {
     closeFolderSelector,
   } = useUIStore();
 
-  useEffect(() => {
-    Promise.all([
-      getProjects(false).then((items) => {
-        setProject(
-          items.find(
-            (item) => item.id === projectId && item.id !== "default",
-          ) ?? null,
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [imagesError, setImagesError] = useState(false);
+  const imageRequestId = useRef(0);
+  const projectEpoch = useRef(0);
+  const activeSearch = useRef<{
+    query: string;
+    filters: GenerationSearchFilters;
+  }>({ query: "", filters: {} });
+
+  const loadImages = useCallback(
+    async (
+      query: string,
+      filters: GenerationSearchFilters,
+      nextPage: number,
+    ) => {
+      const requestId = ++imageRequestId.current;
+      activeSearch.current = { query, filters };
+      setImagesLoading(true);
+      setImagesError(false);
+      try {
+        const result = await searchGenerations(
+          query.trim() || undefined,
+          nextPage,
+          false,
+          filters,
+          projectId,
         );
-      }),
-      searchGenerations(undefined, 1, false, {}, projectId).then((result) => {
+        if (requestId !== imageRequestId.current) return;
         setResults(result.generations);
         setTotal(result.total);
         setPage(result.page);
         setPageSize(result.page_size);
-      }),
-    ]).catch(() => {
-      setProject(null);
-      setResults([]);
-      setTotal(0);
-    });
-  }, [projectId]);
+        setSelectedImage(null);
+      } catch {
+        if (requestId === imageRequestId.current) setImagesError(true);
+      } finally {
+        if (requestId === imageRequestId.current) setImagesLoading(false);
+      }
+    },
+    [projectId],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    projectActionPendingRef.current = false;
+    setProjectActionPending(false);
+    setProjectActionError(null);
+    setRenameDialogOpen(false);
+    setRenameLoading(false);
+    setRenameError(null);
+    setDeleteDialogOpen(false);
+    setDeleteLoading(false);
+    setDeleteError(null);
+    setShowActions(false);
+    setLoading(true);
+    setLoadError(false);
+    setProject(null);
+    setResults([]);
+    setSelectedImage(null);
+    getProjects(false)
+      .then((items) => {
+        if (!cancelled)
+          setProject(
+            items.find(
+              (item) => item.id === projectId && item.id !== "default",
+            ) ?? null,
+          );
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    void loadImages("", {}, 1);
+    return () => {
+      cancelled = true;
+      imageRequestId.current++;
+      projectEpoch.current++;
+    };
+  }, [projectId, reloadVersion, loadImages]);
 
   async function handleRenameProject(name: string) {
     if (!project) return;
@@ -90,103 +159,124 @@ export default function ProjectHomePage() {
       setRenameError(null);
       return;
     }
+    const operationEpoch = projectEpoch.current;
     setRenameLoading(true);
     setRenameError(null);
     try {
       await renameProject(project.id, name);
+      if (operationEpoch !== projectEpoch.current) return;
       setRenameDialogOpen(false);
       setProject((current) => (current ? { ...current, name } : current));
     } catch {
+      if (operationEpoch !== projectEpoch.current) return;
       setRenameError(t("projectDialog.renameError"));
     } finally {
-      setRenameLoading(false);
+      if (operationEpoch === projectEpoch.current) {
+        setRenameLoading(false);
+      }
     }
   }
 
   async function handlePinProject() {
     if (!project || projectActionPendingRef.current) return;
     const currentProject = project;
+    const operationEpoch = projectEpoch.current;
     projectActionPendingRef.current = true;
     setProjectActionPending(true);
     setProjectActionError(null);
     try {
       await pinProject(currentProject.id);
+      if (operationEpoch !== projectEpoch.current) return;
       setProject({
         ...currentProject,
         pinned_at: currentProject.pinned_at ?? new Date().toISOString(),
       });
       setShowActions(false);
     } catch {
+      if (operationEpoch !== projectEpoch.current) return;
       setProjectActionError(t("projects.actionError"));
     } finally {
-      projectActionPendingRef.current = false;
-      setProjectActionPending(false);
+      if (operationEpoch === projectEpoch.current) {
+        projectActionPendingRef.current = false;
+        setProjectActionPending(false);
+      }
     }
   }
 
   async function handleUnpinProject() {
     if (!project || projectActionPendingRef.current) return;
     const currentProject = project;
+    const operationEpoch = projectEpoch.current;
     projectActionPendingRef.current = true;
     setProjectActionPending(true);
     setProjectActionError(null);
     try {
       await unpinProject(currentProject.id);
+      if (operationEpoch !== projectEpoch.current) return;
       setProject({ ...currentProject, pinned_at: null });
       setShowActions(false);
     } catch {
+      if (operationEpoch !== projectEpoch.current) return;
       setProjectActionError(t("projects.actionError"));
     } finally {
-      projectActionPendingRef.current = false;
-      setProjectActionPending(false);
+      if (operationEpoch === projectEpoch.current) {
+        projectActionPendingRef.current = false;
+        setProjectActionPending(false);
+      }
     }
   }
 
   async function handleArchiveProject() {
     if (!project || projectActionPendingRef.current) return;
+    const operationEpoch = projectEpoch.current;
     projectActionPendingRef.current = true;
     setProjectActionPending(true);
     setProjectActionError(null);
     try {
       await archiveProject(project.id);
+      if (operationEpoch !== projectEpoch.current) return;
       setShowActions(false);
       navigate(ROUTES.projects);
     } catch {
+      if (operationEpoch !== projectEpoch.current) return;
       setProjectActionError(t("projects.actionError"));
     } finally {
-      projectActionPendingRef.current = false;
-      setProjectActionPending(false);
+      if (operationEpoch === projectEpoch.current) {
+        projectActionPendingRef.current = false;
+        setProjectActionPending(false);
+      }
     }
   }
 
   async function handleDeleteProject() {
     if (!project || projectActionPendingRef.current) return;
+    const operationEpoch = projectEpoch.current;
     projectActionPendingRef.current = true;
     setDeleteLoading(true);
     setDeleteError(null);
     try {
       await deleteProject(project.id);
+      if (operationEpoch !== projectEpoch.current) return;
       setDeleteDialogOpen(false);
       navigate(ROUTES.projects);
     } catch {
+      if (operationEpoch !== projectEpoch.current) return;
       setDeleteError(t("projects.deleteError"));
     } finally {
-      projectActionPendingRef.current = false;
-      setDeleteLoading(false);
+      if (operationEpoch === projectEpoch.current) {
+        projectActionPendingRef.current = false;
+        setDeleteLoading(false);
+      }
     }
   }
 
   async function handleDeleteImage(id: string) {
     await deleteGeneration(id);
-    const result = await searchGenerations(
-      undefined,
-      page,
-      false,
-      {},
-      project!.id,
+    await loadImages(
+      activeSearch.current.query,
+      activeSearch.current.filters,
+      1,
     );
-    setResults(result.generations);
-    setTotal(result.total);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
       closeLightbox();
@@ -220,12 +310,23 @@ export default function ProjectHomePage() {
 
   function handleFolderSelectorClose() {
     closeFolderSelector();
-    searchGenerations(undefined, page, false, {}, project!.id)
-      .then((result) => {
-        setResults(result.generations);
-        setTotal(result.total);
-      })
-      .catch(() => {});
+    void loadImages(
+      activeSearch.current.query,
+      activeSearch.current.filters,
+      page,
+    );
+  }
+
+  if (loading || loadError) {
+    return (
+      <div className="p-6">
+        <CollectionStatus
+          loading={loading}
+          error={loadError}
+          onRetry={() => setReloadVersion((value) => value + 1)}
+        />
+      </div>
+    );
   }
 
   if (!project) {
@@ -237,132 +338,149 @@ export default function ProjectHomePage() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      {/* Project Header */}
-      <div className="shrink-0 border-b border-border-subtle bg-surface/40 px-6 py-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2">
-              {project.pinned_at && (
-                <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[10px] font-medium text-primary">
-                  <Pin size={9} />
-                  {t("projects.pinned")}
-                </span>
-              )}
-            </div>
-            <h1 className="text-[18px] font-semibold text-foreground tracking-tight truncate">
-              {project.name}
-            </h1>
-            <p className="mt-1 text-[11px] text-muted">
-              {t("projects.imageCountValue", { count: project.image_count })}
-            </p>
-          </div>
-
-          <div className="relative">
-            <button
-              onClick={() => setShowActions((c) => !c)}
-              className="flex h-8 w-8 items-center justify-center rounded-[9px] text-muted transition-all hover:bg-subtle hover:text-foreground"
-              aria-label={t("projects.manage")}
-            >
-              <svg width="15" height="3" viewBox="0 0 15 3" fill="currentColor">
-                <circle cx="1.5" cy="1.5" r="1.5" />
-                <circle cx="7.5" cy="1.5" r="1.5" />
-                <circle cx="13.5" cy="1.5" r="1.5" />
-              </svg>
-            </button>
-
-            {showActions && (
-              <div className="absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[10px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
-                <button
-                  onClick={() => {
-                    setShowActions(false);
-                    setRenameError(null);
-                    setRenameDialogOpen(true);
-                  }}
-                  disabled={projectActionPending}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  <Pencil size={13} />
-                  <span>{t("sidebar.rename")}</span>
-                </button>
-                {project.pinned_at ? (
-                  <button
-                    onClick={() => void handleUnpinProject()}
-                    disabled={projectActionPending}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    <PinOff size={13} />
-                    <span>{t("projects.unpin")}</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => void handlePinProject()}
-                    disabled={projectActionPending}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    <Pin size={13} />
-                    <span>{t("projects.pin")}</span>
-                  </button>
+    <div className="flex h-full min-w-0 overflow-hidden bg-background">
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Project Header */}
+        <div className="shrink-0 border-b border-border-subtle bg-surface/40 px-6 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="mb-1 flex items-center gap-2">
+                {project.pinned_at && (
+                  <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[12px] font-medium text-primary">
+                    <Pin size={9} />
+                    {t("projects.pinned")}
+                  </span>
                 )}
-                <button
-                  onClick={() => void handleArchiveProject()}
-                  disabled={projectActionPending}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  <Archive size={13} />
-                  <span>{t("sidebar.archive")}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setShowActions(false);
-                    setDeleteError(null);
-                    setDeleteDialogOpen(true);
-                  }}
-                  disabled={projectActionPending}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error hover:bg-error/8 transition-colors disabled:opacity-50"
-                >
-                  <Trash2 size={13} />
-                  <span>{t("sidebar.delete")}</span>
-                </button>
               </div>
-            )}
+              <h1 className="text-[20px] font-semibold text-foreground tracking-tight truncate">
+                {project.name}
+              </h1>
+              <p className="mt-1 text-[12px] text-muted">
+                <span>
+                  {t("projects.imageCountValue", {
+                    count: project.image_count,
+                  })}
+                </span>
+                <span className="mx-2">·</span>
+                {t("studio.project.sessions", {
+                  defaultValue: "{{count}} conversations",
+                  count: project.conversation_count,
+                })}
+              </p>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => navigate(ROUTES.projectChat(project.id))}
+                className="studio-control-primary focus-ring flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-medium"
+              >
+                {t("studio.project.continue", {
+                  defaultValue: "Continue creating",
+                })}
+                <ArrowRight size={15} />
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowActions((c) => !c)}
+                  className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-all hover:bg-subtle hover:text-foreground"
+                  aria-label={t("projects.manage")}
+                >
+                  <svg
+                    width="15"
+                    height="3"
+                    viewBox="0 0 15 3"
+                    fill="currentColor"
+                  >
+                    <circle cx="1.5" cy="1.5" r="1.5" />
+                    <circle cx="7.5" cy="1.5" r="1.5" />
+                    <circle cx="13.5" cy="1.5" r="1.5" />
+                  </svg>
+                </button>
+
+                {showActions && (
+                  <div className="absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[8px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
+                    <button
+                      onClick={() => {
+                        setShowActions(false);
+                        setRenameError(null);
+                        setRenameDialogOpen(true);
+                      }}
+                      disabled={projectActionPending}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      <Pencil size={13} />
+                      <span>{t("sidebar.rename")}</span>
+                    </button>
+                    {project.pinned_at ? (
+                      <button
+                        onClick={() => void handleUnpinProject()}
+                        disabled={projectActionPending}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                      >
+                        <PinOff size={13} />
+                        <span>{t("projects.unpin")}</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void handlePinProject()}
+                        disabled={projectActionPending}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                      >
+                        <Pin size={13} />
+                        <span>{t("projects.pin")}</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void handleArchiveProject()}
+                      disabled={projectActionPending}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      <Archive size={13} />
+                      <span>{t("sidebar.archive")}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowActions(false);
+                        setDeleteError(null);
+                        setDeleteDialogOpen(true);
+                      }}
+                      disabled={projectActionPending}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error hover:bg-error/8 transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                      <span>{t("sidebar.delete")}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
+
+          {projectActionError ? (
+            <div
+              role="alert"
+              className="mt-3 rounded-[8px] border border-error/15 bg-error/8 px-3 py-2 text-[12px] text-error"
+            >
+              {projectActionError}
+            </div>
+          ) : null}
         </div>
 
-        {projectActionError ? (
-          <div
-            role="alert"
-            className="mt-3 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-[11px] text-error"
-          >
-            {projectActionError}
-          </div>
-        ) : null}
-      </div>
-
-      {/* Image Gallery */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <ProjectImagePanel
-          results={results}
-          total={total}
-          page={page}
-          pageSize={pageSize}
-          onSearch={async (query, filters, nextPage) => {
-            const result = await searchGenerations(
-              query || undefined,
-              nextPage,
-              false,
-              filters,
-              project.id,
-            );
-            setResults(result.generations);
-            setTotal(result.total);
-            setPage(result.page);
-            setPageSize(result.page_size);
-          }}
-          onSelect={setSelectedImage}
-          onPreview={openResultLightbox}
-          onManageFolders={openFolderSelector}
-        />
+        {/* Image Gallery */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <ProjectImagePanel
+            results={results}
+            total={total}
+            page={page}
+            pageSize={pageSize}
+            loading={imagesLoading}
+            error={imagesError}
+            onSearch={loadImages}
+            onSelect={setSelectedImage}
+            onPreview={openResultLightbox}
+            onManageFolders={openFolderSelector}
+          />
+        </div>
       </div>
 
       {/* Slide-in Detail Panel */}

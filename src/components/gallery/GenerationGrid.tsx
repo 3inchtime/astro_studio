@@ -51,22 +51,22 @@ export default function GenerationGrid({
                 duration: 0.3,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              className="studio-card group grid grid-cols-[104px_minmax(0,1fr)_auto] gap-3 rounded-[10px] p-2.5 hover:studio-card-hover"
+              className="studio-card group grid grid-cols-[104px_minmax(0,1fr)_auto] gap-3 rounded-[8px] p-2.5 hover:studio-card-hover"
             >
               <button
                 type="button"
                 onClick={() => (onPreview ? onPreview(result, 0) : onSelect(result))}
-                aria-label={`Preview ${result.generation.prompt}`}
+                aria-label={`${t("lightbox.preview")} ${result.generation.prompt}`}
                 className="focus-ring relative h-[104px] overflow-hidden rounded-[8px] bg-subtle text-left"
               >
                 <img
-                  src={toAssetUrl(img.thumbnail_path)}
+                  src={toAssetUrl(img.thumbnail_path || img.file_path)}
                   alt={result.generation.prompt}
                   className="h-full w-full object-cover"
                   loading="lazy"
                 />
                 {result.images.length > 1 && (
-                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-[12px] font-medium text-white backdrop-blur-sm">
                     {result.images.length}
                   </div>
                 )}
@@ -77,10 +77,10 @@ export default function GenerationGrid({
                 onClick={() => onSelect(result)}
                 className="focus-ring min-w-0 rounded-[8px] py-1 text-left"
               >
-                <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground/88 transition-colors group-hover:text-foreground">
+                <p className="line-clamp-2 text-[14px] font-medium leading-snug text-foreground/88 transition-colors group-hover:text-foreground">
                   {result.generation.prompt}
                 </p>
-                <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted">
+                <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] text-muted">
                   <span className="rounded-[6px] bg-subtle px-2 py-0.5">
                     {result.generation.engine}
                   </span>
@@ -128,7 +128,7 @@ export default function GenerationGrid({
   }
 
   return (
-    <div className="columns-2 gap-3 sm:columns-3 lg:columns-4">
+    <div className="columns-[220px] gap-4">
       {results.map((result) => {
         const img = result.images[0];
         if (!img) return null;
@@ -148,24 +148,24 @@ export default function GenerationGrid({
             initial={isNew ? { opacity: 0, y: 6, scale: 0.98 } : false}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ delay, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="studio-card group mb-3 break-inside-avoid overflow-hidden rounded-[12px] hover:studio-card-hover"
+            className="studio-card group mb-4 break-inside-avoid overflow-hidden rounded-[12px] hover:studio-card-hover"
           >
             <div className="relative overflow-hidden">
               <button
                 type="button"
                 onClick={() => (onPreview ? onPreview(result, 0) : onSelect(result))}
-                aria-label={`Preview ${result.generation.prompt}`}
+                aria-label={`${t("lightbox.preview")} ${result.generation.prompt}`}
                 className="focus-ring block h-full w-full cursor-pointer overflow-hidden text-left"
                 style={{ aspectRatio }}
               >
                 <img
-                  src={toAssetUrl(img.thumbnail_path)}
+                  src={toAssetUrl(img.thumbnail_path || img.file_path)}
                   alt={result.generation.prompt}
                   className="h-full w-full object-cover"
                   loading="lazy"
                 />
                 {result.images.length > 1 && (
-                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-[12px] font-medium text-white backdrop-blur-sm">
                     {result.images.length}
                   </div>
                 )}
@@ -177,7 +177,7 @@ export default function GenerationGrid({
                     className={cn(
                       "focus-ring flex h-7 w-7 items-center justify-center rounded-[8px] bg-black/45 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white",
                       favoriteMode === "manage"
-                        ? "opacity-0 group-hover:opacity-100"
+                        ? "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
                         : "",
                     )}
                   >
@@ -203,7 +203,7 @@ export default function GenerationGrid({
               </div>
             </div>
             <div className="px-3 py-2.5">
-              <p className="line-clamp-2 text-[11px] leading-snug text-muted transition-colors group-hover:text-foreground/70">
+              <p className="line-clamp-2 text-[14px] leading-snug text-foreground transition-colors group-hover:text-foreground/70">
                 {result.generation.prompt}
               </p>
             </div>

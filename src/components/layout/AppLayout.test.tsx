@@ -14,7 +14,8 @@ vi.mock("react-i18next", async (importOriginal) => {
   return {
     ...actual,
     useTranslation: () => ({
-      t: (key: string) =>
+      t: (key: string, options?: { name?: string }) =>
+        key === "theme.select" ? `Select ${options?.name} theme` :
         ({
           "nav.generate": "Generate",
           "nav.extract": "Image Prompt Extract",
@@ -132,7 +133,7 @@ describe("AppLayout", () => {
     });
   });
 
-  it("renders active rail destinations as elevated tool buttons", () => {
+  it("marks the current labeled navigation destination", () => {
     render(
       <MemoryRouter initialEntries={[ROUTES.generate]}>
         <Routes>
@@ -143,11 +144,8 @@ describe("AppLayout", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByTitle("Generate")).toHaveClass(
-      "bg-surface",
-      "shadow-float",
-      "ring-1",
-    );
+    expect(screen.getByTitle("Generate")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTitle("Generate")).toHaveTextContent("Generate");
   });
 
   it("uses the white preset as the default theme when nothing is stored", async () => {

@@ -74,9 +74,9 @@ describe("GenerationGrid", () => {
     const grid = container.firstElementChild;
     const firstCard = grid?.firstElementChild;
 
-    expect(grid).toHaveClass("columns-2", "sm:columns-3", "lg:columns-4");
+    expect(grid).toHaveClass("columns-[220px]");
     expect(grid).not.toHaveClass("grid");
-    expect(firstCard).toHaveClass("mb-3", "break-inside-avoid");
+    expect(firstCard).toHaveClass("mb-4", "break-inside-avoid");
   });
 
   it("sizes gallery previews from each image aspect ratio instead of forcing squares", () => {
@@ -129,7 +129,7 @@ describe("GenerationGrid", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview Prompt wide" }));
+    fireEvent.click(screen.getByRole("button", { name: "lightbox.preview Prompt wide" }));
 
     expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({
       generation: expect.objectContaining({ id: "generation-wide" }),

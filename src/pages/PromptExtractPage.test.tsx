@@ -32,7 +32,7 @@ vi.mock("react-i18next", () => ({
       language: "zh-CN",
       resolvedLanguage: "zh-CN",
     },
-    t: (key: string) =>
+    t: (key: string, options?: { defaultValue?: string }) =>
       ({
         "extract.title": "Image Prompt Extract",
         "extract.subtitle": "Upload one image and extract a prompt.",
@@ -54,7 +54,9 @@ vi.mock("react-i18next", () => ({
           "Enable a multimodal LLM in settings first",
         "extract.copied": "Copied",
         "extract.extracting": "Extracting...",
-      })[key] ?? key,
+      })[key] ??
+      options?.defaultValue ??
+      key,
   }),
 }));
 
@@ -169,6 +171,90 @@ describe("PromptExtractPage", () => {
       latest_thumbnail: null,
     });
     writeText.mockResolvedValue(undefined);
+  });
+
+  it("allows selecting an enabled multimodal model and submits that selection", async () => {
+    getLlmConfigs.mockResolvedValue([
+      {
+        id: "vision-1",
+        name: "Vision One",
+        capability: "multimodal",
+        enabled: true,
+      },
+      {
+        id: "vision-2",
+        name: "Vision Two",
+        capability: "multimodal",
+        enabled: true,
+      },
+      { id: "text", name: "Text only", capability: "text", enabled: true },
+      {
+        id: "disabled",
+        name: "Disabled",
+        capability: "multimodal",
+        enabled: false,
+      },
+    ]);
+    render(<PromptExtractPage />, { wrapper: TestWrapper });
+    const model = await screen.findByRole("combobox", { name: "Vision model" });
+    await screen.findByRole("option", { name: "Vision Two" });
+    expect(
+      screen.queryByRole("option", { name: "Text only" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Disabled" }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(model, { target: { value: "vision-2" } });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "soft daylight portrait" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Extract prompt" }));
+    await waitFor(() =>
+      expect(extractPromptFromImage).toHaveBeenCalledWith(
+        "/tmp/history-1.png",
+        "vision-2",
+        "zh-CN",
+      ),
+    );
+  });
+
+  it("shows clipboard failure without claiming success and allows retry", async () => {
+    writeText
+      .mockRejectedValueOnce(new Error("Clipboard blocked"))
+      .mockResolvedValueOnce(undefined);
+    render(<PromptExtractPage />, { wrapper: TestWrapper });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "soft daylight portrait" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not copy. Try again.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Copied" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(
+      await screen.findByRole("button", { name: "Copied" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows an extraction failure and permits retry", async () => {
+    extractPromptFromImage.mockRejectedValueOnce(
+      new Error("Provider unavailable"),
+    );
+    render(<PromptExtractPage />, { wrapper: TestWrapper });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "soft daylight portrait" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Extract prompt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Provider unavailable",
+    );
+    expect(
+      screen.getByRole("button", { name: "Extract prompt" }),
+    ).toBeEnabled();
   });
 
   it("picks the first image and extracts a prompt into the textarea", async () => {

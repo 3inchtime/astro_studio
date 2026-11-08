@@ -81,6 +81,7 @@ function applyThemeSelection(
 
   if (
     origin &&
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches &&
     "startViewTransition" in document
   ) {
     const transitionDocument = document as Document & {
@@ -107,7 +108,7 @@ function applyThemeSelection(
           ],
         },
         {
-          duration: 500,
+          duration: 180,
           easing: "ease-out",
         },
       );
@@ -118,7 +119,7 @@ function applyThemeSelection(
 
   window.setTimeout(() => {
     root.classList.remove("theme-transition");
-  }, 500);
+  }, 180);
 
   if (emit) {
     notifyThemeListeners();

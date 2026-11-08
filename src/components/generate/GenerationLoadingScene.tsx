@@ -1,35 +1,32 @@
+import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export default function GenerationLoadingScene() {
   const { t } = useTranslation();
 
   return (
-    <div className="generation-loading-shell" role="status" aria-live="polite">
-      <div className="generation-loading-scene" aria-hidden="true">
-        <div className="generation-loading-orb">
-          <div className="generation-loading-orb-halo" />
-          <div className="generation-loading-orb-ring" />
-          <div className="generation-loading-orb-core" />
-          <span className="generation-loading-spark generation-loading-spark-a" />
-          <span className="generation-loading-spark generation-loading-spark-b" />
-          <span className="generation-loading-spark generation-loading-spark-c" />
-        </div>
-      </div>
-
-      <div className="generation-loading-copy">
-        <p className="generation-loading-title">{t("generate.loading.title")}</p>
-        <p className="generation-loading-subtitle">{t("generate.loading.subtitle")}</p>
-
-        <div className="generation-loading-meta" aria-hidden="true">
-          <div className="generation-loading-dots">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="generation-loading-progress">
-            <span />
-          </div>
-        </div>
+    <div
+      className="flex min-h-36 w-full max-w-md items-start gap-3 rounded-xl border border-border-subtle bg-surface p-5"
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2
+        size={18}
+        className="mt-0.5 shrink-0 animate-spin text-primary motion-reduce:animate-none"
+        aria-hidden="true"
+      />
+      <div>
+        <p className="text-[14px] font-medium text-foreground">
+          {t("studio.generationWaiting", {
+            defaultValue: "Waiting for image provider",
+          })}
+        </p>
+        <p className="mt-1 text-[12px] leading-relaxed text-muted">
+          {t("studio.generationWaitingHint", {
+            defaultValue:
+              "Your request is processing. Images will appear when ready.",
+          })}
+        </p>
       </div>
     </div>
   );

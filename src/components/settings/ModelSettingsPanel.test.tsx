@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import type { LlmConfig, ModelProviderProfilesState } from "../../types";
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
 const apiMocks = vi.hoisted(() => ({
   getLlmConfigs: vi.fn(),
   saveLlmConfigs: vi.fn(),

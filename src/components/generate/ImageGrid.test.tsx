@@ -23,6 +23,22 @@ vi.mock("../favorites/FavoriteButton", () => ({
 }));
 
 describe("ImageGrid", () => {
+  it("offers a native keyboard-accessible image preview button", () => {
+    const onImageClick = vi.fn();
+    const images = [
+      {
+        path: "/tmp/image.png",
+        imageId: "image-1",
+        generationId: "generation-1",
+      },
+    ];
+    render(<ImageGrid images={images} onImageClick={onImageClick} />);
+    const preview = screen.getByRole("button", { name: "studio.openImage" });
+    expect(preview.tagName).toBe("BUTTON");
+    fireEvent.click(preview);
+    expect(onImageClick).toHaveBeenCalledWith(images, 0);
+  });
+
   it("uses the original image for single-image previews so large renders stay sharp", () => {
     render(
       <ImageGrid
@@ -123,9 +139,9 @@ describe("ImageGrid", () => {
 
     const root = container.firstElementChild;
     const item = container.querySelector('div[class*="w-fit"]');
-    const controls = screen
-      .getByRole("button", { name: "Delete" })
-      .parentElement;
+    const controls = screen.getByRole("button", {
+      name: "Delete",
+    }).parentElement;
     const imageFrame = screen.getByAltText("Generated").parentElement;
 
     expect(root).toHaveClass("inline-flex", "flex-col", "items-start");
@@ -134,7 +150,7 @@ describe("ImageGrid", () => {
     expect(imageFrame).toHaveClass("h-72");
   });
 
-  it("renders image actions as an overlay tool cluster", () => {
+  it("keeps image actions visible below the preview", () => {
     render(
       <ImageGrid
         images={[
@@ -149,11 +165,12 @@ describe("ImageGrid", () => {
       />,
     );
 
-    const controls = screen
-      .getByRole("button", { name: "Delete" })
-      .parentElement;
+    const controls = screen.getByRole("button", {
+      name: "Delete",
+    }).parentElement;
 
-    expect(controls).toHaveClass("absolute", "bottom-3", "opacity-0");
+    expect(controls).not.toHaveClass("absolute", "opacity-0");
+    expect(controls).toHaveClass("border-t");
   });
 
   it("passes the generation id to delete without relying on native confirm", () => {

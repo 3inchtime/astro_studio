@@ -133,16 +133,16 @@ export default function ProjectConversationPanel({
       <div className="shrink-0 px-5 pt-6 pb-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
+            <h2 className="text-[14px] font-semibold text-foreground tracking-tight">
               {t("projects.conversations")}
             </h2>
-            <p className="mt-0.5 text-[11px] text-muted">
+            <p className="mt-0.5 text-[12px] text-muted">
               {t("projects.conversationCount")} · {conversations.length}
             </p>
           </div>
           <button
             onClick={handleCreate}
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-primary/8 text-primary transition-all hover:bg-primary/14 hover:scale-105 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-primary/8 text-primary transition-all hover:bg-primary/14 hover:scale-105 active:scale-95"
             aria-label={t("projects.newConversation")}
             title={t("projects.newConversation")}
           >
@@ -157,11 +157,11 @@ export default function ProjectConversationPanel({
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[12px] bg-subtle">
               <MessageSquarePlus
                 size={20}
-                className="text-muted/40"
+                className="text-muted"
                 strokeWidth={1.6}
               />
             </div>
-            <p className="text-[12px] text-muted/50 leading-relaxed">
+            <p className="text-[12px] text-muted leading-relaxed">
               {t("projects.emptyConversations")}
             </p>
           </div>
@@ -179,7 +179,7 @@ export default function ProjectConversationPanel({
                   onClick={() =>
                     navigate(ROUTES.projectChat(projectId, conv.id))
                   }
-                  className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left transition-colors hover:bg-subtle"
+                  className="flex w-full items-center gap-3 rounded-[8px] px-2 py-2.5 text-left transition-colors hover:bg-subtle"
                 >
                   <div className="flex h-[43px] w-[43px] shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-border-subtle bg-subtle">
                     {conv.latest_thumbnail ? (
@@ -198,18 +198,18 @@ export default function ProjectConversationPanel({
                       {conv.pinned_at && (
                         <Pin size={9} className="shrink-0 text-primary" />
                       )}
-                      <p className="truncate text-[12.5px] font-medium text-foreground/85 group-hover:text-foreground transition-colors">
+                      <p className="truncate text-[14px] font-medium text-foreground/85 group-hover:text-foreground transition-colors">
                         {conv.title}
                       </p>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
-                      <span className="text-[10.5px] text-muted/55">
+                      <span className="text-[12px] text-muted">
                         {formatConversationTime(
                           conv.latest_generation_at ?? conv.updated_at,
                         )}
                       </span>
                       {conv.generation_count > 0 && (
-                        <span className="rounded-[4px] bg-primary/6 px-1.5 py-px text-[9.5px] font-medium text-primary/70">
+                        <span className="rounded-[4px] bg-primary/6 px-1.5 py-px text-[12px] font-medium text-primary/70">
                           {conv.generation_count}
                         </span>
                       )}
@@ -222,14 +222,14 @@ export default function ProjectConversationPanel({
                     e.stopPropagation();
                     setOpenMenuId(openMenuId === conv.id ? null : conv.id);
                   }}
-                  className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-muted/50 opacity-0 transition-all hover:bg-surface hover:text-foreground group-hover:opacity-100"
+                  className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-muted opacity-0 transition-all hover:bg-surface hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
                   aria-label={t("sidebar.conversationActions")}
                 >
                   <MoreHorizontal size={14} />
                 </button>
 
                 {openMenuId === conv.id && (
-                  <div className="absolute right-1 top-9 z-20 w-36 overflow-hidden rounded-[10px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
+                  <div className="absolute right-1 top-9 z-20 w-36 overflow-hidden rounded-[8px] border border-border-subtle bg-surface py-1 shadow-[0_14px_35px_rgba(0,0,0,0.15)]">
                     <button
                       onClick={() => {
                         setOpenMenuId(null);

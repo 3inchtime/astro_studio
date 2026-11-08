@@ -1,4 +1,6 @@
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 
@@ -29,20 +31,11 @@ export default function ProjectNameDialog({
   onSubmit,
   onCancel,
 }: ProjectNameDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(initialName);
   const [validationError, setValidationError] = useState<string | null>(null);
   const wasOpenRef = useRef(open);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  if (
-    open &&
-    previousFocusRef.current === null &&
-    typeof document !== "undefined" &&
-    document.activeElement instanceof HTMLElement
-  ) {
-    previousFocusRef.current = document.activeElement;
-  }
+  const dialogRef = useDialogFocus({ open, onClose: onCancel, busy: loading });
 
   useEffect(() => {
     if (!wasOpenRef.current && open) {
@@ -52,54 +45,9 @@ export default function ProjectNameDialog({
     wasOpenRef.current = open;
   }, [initialName, open]);
 
-  useEffect(() => {
-    if (!open) {
-      previousFocusRef.current?.focus();
-      previousFocusRef.current = null;
-    }
-  }, [open]);
-
-  function getFocusableElements() {
-    return Array.from(
-      dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ) ?? [],
-    ).filter((element) => !element.hasAttribute("disabled"));
-  }
-
-  function handleDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      if (!loading) {
-        onCancel();
-      }
-      return;
-    }
-
-    if (event.key !== "Tab") {
-      return;
-    }
-
-    const focusableElements = getFocusableElements();
-    if (focusableElements.length === 0) {
-      event.preventDefault();
-      return;
-    }
-
-    const firstElement = focusableElements[0];
-    const lastElement = focusableElements[focusableElements.length - 1];
-
-    if (!event.shiftKey && document.activeElement === lastElement) {
-      event.preventDefault();
-      firstElement.focus();
-    } else if (event.shiftKey && document.activeElement === firstElement) {
-      event.preventDefault();
-      lastElement.focus();
-    }
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (loading) return;
     const trimmedName = name.trim();
     if (!trimmedName) {
       setValidationError(requiredMessage);
@@ -118,7 +66,7 @@ export default function ProjectNameDialog({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm"
-          onClick={onCancel}
+          onClick={() => { if (!loading) onCancel(); }}
         >
           <motion.div
             ref={dialogRef}
@@ -126,9 +74,9 @@ export default function ProjectNameDialog({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="w-full max-w-sm rounded-[20px] border border-border-subtle bg-surface p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+            className="w-full max-w-sm rounded-[12px] border border-border-subtle bg-surface p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
             onClick={(event) => event.stopPropagation()}
-            onKeyDown={handleDialogKeyDown}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="project-name-dialog-title"
@@ -145,7 +93,7 @@ export default function ProjectNameDialog({
                 onClick={onCancel}
                 disabled={loading}
                 className="flex h-7 w-7 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="Close dialog"
+                aria-label={t("studio.closeDialog", { defaultValue: "Close dialog" })}
               >
                 <X size={16} />
               </button>
@@ -163,14 +111,14 @@ export default function ProjectNameDialog({
                   setValidationError(null);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
                     event.preventDefault();
                     event.currentTarget.form?.requestSubmit();
                   }
                 }}
                 disabled={loading}
                 className="mt-2 h-10 w-full rounded-[10px] border border-border-subtle bg-background px-3 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted focus:border-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
-                autoFocus
+                data-autofocus
               />
 
               {visibleError ? (
@@ -194,7 +142,7 @@ export default function ProjectNameDialog({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="rounded-[10px] bg-primary px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-[10px] bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitLabel}
                 </button>

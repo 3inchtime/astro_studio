@@ -18,12 +18,16 @@ import {
   Palette,
   Settings,
   Sparkles,
+  Trash2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../../hooks/useTheme";
 import { useResizable } from "../../hooks/useResizable";
 import appLogo from "../../assets/logo.png";
-import { ResizeHandle } from "./ResizeHandle";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import ConversationList from "../sidebar/ConversationList";
 import ProjectsSidebar from "../projects/ProjectsSidebar";
 import {
@@ -83,7 +87,7 @@ const navItems = MAIN_NAV_ROUTES.map(({ key, to, labelKey }) => {
   return { to, labelKey, icon: iconByKey[key] };
 });
 
-const NAV_RAIL_WIDTH = 64;
+const NAV_RAIL_WIDTH = 80;
 const PANEL_CONFIGS = [
   { min: 180, default: 260, max: 400 },
   { min: 400, default: 600, max: null },
@@ -94,7 +98,26 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const { theme, themeMeta, setThemeWithEvent } = useTheme();
   const { t } = useTranslation();
-  const { widths, onHandleDown } = useResizable(PANEL_CONFIGS);
+  const { widths, onHandleDown, setPanelWidth } = useResizable(PANEL_CONFIGS);
+  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 1099px)").matches);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem("astro-sidebar-collapsed-v1") === "true"; } catch { return false; }
+  });
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1099px)");
+    const update = () => { setCompact(media.matches); setSidebarOpen(false); };
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+  const toggleSidebar = () => {
+    if (compact) setSidebarOpen((open) => !open);
+    else setSidebarCollapsed((collapsed) => {
+      try { localStorage.setItem("astro-sidebar-collapsed-v1", String(!collapsed)); } catch { /* Session-only preference. */ }
+      return !collapsed;
+    });
+  };
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
@@ -121,6 +144,8 @@ export default function AppLayout() {
     [routeContext],
   );
   const routeProjectId = routeContext.projectId;
+  const contextPanelRef = useDialogFocus({ open: compact && sidebarOpen && !shouldHideSidebar, onClose: () => setSidebarOpen(false) });
+  const themeFocusRef = useDialogFocus({ open: themePickerOpen, onClose: () => setThemePickerOpen(false) });
 
   const isProjectChatRoute = routeContext.kind === "chat";
   const pendingGenerateConversationId = useMemo(() => {
@@ -368,13 +393,14 @@ export default function AppLayout() {
       }}
     >
       <div className="studio-app-shell relative flex h-screen overflow-hidden bg-background">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:left-24 focus:top-2 focus:z-[100] focus:rounded-lg focus:bg-surface focus:p-3">{t("studio.skipContent", { defaultValue: "Skip to content" })}</a>
         <aside
-          className="studio-nav-rail flex shrink-0 flex-col items-center border-r py-5"
+          className="studio-nav-rail flex shrink-0 flex-col items-center border-r py-3"
           style={{ width: NAV_RAIL_WIDTH }}
         >
           <NavLink
             to={ROUTES.generate}
-            className="focus-ring mb-10 rounded-[12px] border border-transparent p-1 transition-colors hover:border-border-subtle hover:bg-surface/70"
+            className="focus-ring mb-4 rounded-[12px] border border-transparent p-1 transition-colors hover:border-border-subtle hover:bg-surface/70"
           >
             <div className="relative h-9 w-9 overflow-hidden rounded-[10px] shadow-button transition-shadow duration-200">
               <img
@@ -385,41 +411,21 @@ export default function AppLayout() {
             </div>
           </NavLink>
 
-          <nav className="flex flex-1 flex-col items-center gap-3">
-            {navItems.map(({ to, icon: Icon, labelKey }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={t(labelKey)}
-                className={({ isActive }) =>
-                  `focus-ring relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-[12px] border transition-all duration-200 ${
-                    isActive
-                      ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
-                      : "border-transparent text-muted dark:text-foreground/80 hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
-                  }`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <Icon size={20} strokeWidth={isActive ? 2 : 1.6} />
-                    {isActive && (
-                      <motion.div
-                        layoutId="nav-indicator"
-                        className="absolute -left-[8px] top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full gradient-primary"
-                        transition={{
-                          type: "spring",
-                          stiffness: 500,
-                          damping: 35,
-                        }}
-                      />
-                    )}
-                  </>
-                )}
-              </NavLink>
+          <nav aria-label={t("studio.navigation", { defaultValue: "Main navigation" })} className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1">
+            {navItems.map(({ to, icon: Icon, labelKey }, index) => (
+              <div key={to} className={index === 3 || index === 4 ? "mt-3 border-t border-border pt-3" : ""}>
+                <NavLink to={to} title={t(labelKey)} aria-label={t(labelKey)} className="studio-nav-item focus-ring">
+                  <Icon size={20} strokeWidth={1.8} aria-hidden="true" />
+                  <span>{t(labelKey)}</span>
+                </NavLink>
+              </div>
             ))}
+            <NavLink to={ROUTES.trash} title={t("trash.title")} aria-label={t("trash.title")} className="studio-nav-item focus-ring">
+              <Trash2 size={20} strokeWidth={1.8} aria-hidden="true" /><span>{t("trash.title")}</span>
+            </NavLink>
           </nav>
 
-          <div className="mt-auto flex flex-col items-center gap-3">
+          <div className="mt-3 flex shrink-0 flex-col items-center gap-2">
             <button
               ref={themeButtonRef}
               type="button"
@@ -431,7 +437,7 @@ export default function AppLayout() {
               className={`focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
                 themePickerOpen
                   ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
-                  : "border-transparent text-muted dark:text-foreground/80 hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
+                  : "border-transparent text-muted dark:text-foreground hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
               }`}
             >
               <motion.div
@@ -451,7 +457,7 @@ export default function AppLayout() {
                 `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                   isActive
                     ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
-                    : "border-transparent text-muted dark:text-foreground/80 hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
+                    : "border-transparent text-muted dark:text-foreground hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
                 }`
               }
             >
@@ -462,39 +468,39 @@ export default function AppLayout() {
 
         {!shouldHideSidebar && (
           <>
-            <aside
-              className="flex shrink-0 flex-col border-r border-border-subtle bg-surface/78 backdrop-blur-xl"
-              style={{ width: widths[0] }}
-            >
-              {isProjectListRoute ? (
-                <ProjectsSidebar
-                  activeProjectId={activeProjectId}
-                  onSelectProject={selectProject}
-                  onProjectCreated={selectCreatedProject}
-                />
-              ) : (
-                <ConversationList
-                  activeProjectId={sidebarConversationProjectId}
-                  activeConversationId={activeConversationId}
-                  refreshKey={conversationRefreshKey}
-                  onSelectProject={selectProject}
-                  onProjectCreated={selectCreatedProject}
-                  onSelectConversation={selectConversation}
-                  onInitialConversation={selectInitialConversation}
-                  onClearActiveConversation={clearActiveConversation}
-                  onNewConversation={createNewConversation}
-                />
-              )}
+            {compact && sidebarOpen && <button type="button" aria-label={t("studio.closeSidebar", { defaultValue: "Close sidebar" })} className="absolute inset-0 left-20 z-30 bg-black/20" onClick={() => setSidebarOpen(false)} />}
+            <aside ref={contextPanelRef} id="workspace-sidebar" role={compact && sidebarOpen ? "dialog" : undefined} aria-modal={compact && sidebarOpen || undefined}
+              aria-label={t("studio.sidebar", { defaultValue: "Workspace sidebar" })} tabIndex={-1}
+              data-open={sidebarOpen} data-collapsed={!compact && sidebarCollapsed}
+              className="studio-context-panel flex shrink-0 flex-col border-r border-border-subtle"
+              style={{ "--sidebar-width": `${widths[0]}px` } as React.CSSProperties}>
+              <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
+                <span className="text-xs font-semibold text-muted">{t(isProjectListRoute ? "nav.projects" : "studio.conversations", { defaultValue: "Conversations" })}</span>
+                <button type="button" onClick={compact ? () => setSidebarOpen(false) : toggleSidebar} aria-label={t("studio.closeSidebar", { defaultValue: "Close sidebar" })} className="studio-control-subtle focus-ring rounded-lg p-2"><PanelLeftClose size={16} /></button>
+              </div>
+              {isProjectListRoute ? <ProjectsSidebar activeProjectId={activeProjectId} onSelectProject={selectProject} onProjectCreated={selectCreatedProject} /> :
+                <ConversationList activeProjectId={sidebarConversationProjectId} activeConversationId={activeConversationId} refreshKey={conversationRefreshKey}
+                  onSelectProject={selectProject} onProjectCreated={selectCreatedProject}
+                  onSelectConversation={(id) => { selectConversation(id); setSidebarOpen(false); }}
+                  onInitialConversation={selectInitialConversation} onClearActiveConversation={clearActiveConversation} onNewConversation={createNewConversation} />}
             </aside>
-
-            <ResizeHandle onMouseDown={onHandleDown(0)} />
+            {!sidebarCollapsed && <div className="studio-context-resizer z-10 w-1 shrink-0 cursor-col-resize hover:bg-primary/20 focus-visible:bg-primary/20" role="separator" aria-orientation="vertical"
+              aria-label={t("studio.resizeSidebar", { defaultValue: "Resize sidebar" })} tabIndex={0} aria-valuemin={180} aria-valuemax={400} aria-valuenow={widths[0]}
+              onMouseDown={onHandleDown(0)} onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setPanelWidth(0, widths[0] + (event.key === "ArrowRight" ? 20 : -20)); }
+                if (event.key === "Home" || event.key === "End") { event.preventDefault(); setPanelWidth(0, event.key === "Home" ? 180 : 400); }
+              }} />}
           </>
         )}
 
         <main
-          className="studio-main-canvas relative flex-1 overflow-hidden"
-          style={{ minWidth: widths[1] }}
+          id="main-content" tabIndex={-1}
+          className="studio-main-canvas relative flex min-w-0 flex-1 flex-col overflow-hidden"
         >
+          {!shouldHideSidebar && <div data-collapsed={sidebarCollapsed} className="studio-context-toggle h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4">
+            <button type="button" onClick={toggleSidebar} className="studio-control-subtle focus-ring rounded-lg p-2" aria-controls="workspace-sidebar" aria-expanded={compact ? sidebarOpen : !sidebarCollapsed} aria-label={t("studio.openSidebar", { defaultValue: "Open sidebar" })}><PanelLeftOpen size={18} /></button>
+            <span className="text-sm font-medium">{t(isProjectListRoute || isProjectHomeRoute ? "nav.projects" : "nav.generate")}</span>
+          </div>}
           <AnimatePresence mode="wait">
             <motion.div
               key={routeContext.pathname}
@@ -502,7 +508,7 @@ export default function AppLayout() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="h-full"
+              className="min-h-0 flex-1"
             >
               <Outlet />
             </motion.div>
@@ -512,25 +518,28 @@ export default function AppLayout() {
         <AnimatePresence>
           {themePickerOpen && (
             <motion.div
-              ref={themePanelRef}
+              ref={(node) => { themePanelRef.current = node; themeFocusRef.current = node; }}
+              tabIndex={-1}
               role="dialog"
-              aria-modal="false"
+              aria-modal="true"
+              aria-label={t("theme.title")}
               initial={{ opacity: 0, x: -8, y: 8 }}
               animate={{ opacity: 1, x: 0, y: 0 }}
               exit={{ opacity: 0, x: -8, y: 8 }}
               transition={{ duration: 0.16 }}
-              className="studio-floating-panel absolute bottom-6 left-[78px] z-30 w-[360px] rounded-[16px] p-4"
+              className="studio-floating-panel absolute bottom-6 left-[88px] z-50 w-[360px] rounded-[16px] p-4"
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-[14px] font-semibold text-foreground">
                     {t("theme.title")}
                   </h2>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted/65">
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
                     {getThemeName(themeMeta, t)} · {t("settings.themeDesc")}
                   </p>
                 </div>
               </div>
+              <button type="button" onClick={() => setThemePickerOpen(false)} aria-label={t("update.close")} className="absolute right-3 top-3 rounded-lg p-2 hover:bg-subtle"><X size={16} /></button>
               <div className="max-h-[420px] overflow-y-auto pr-1">
                 <ThemeCardPicker
                   selectedThemeId={theme}

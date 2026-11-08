@@ -152,6 +152,25 @@ function flattenKeys(
 }
 
 describe("i18n resources", () => {
+  it("defines every studio key used by the interface as a flat localized string", () => {
+    const sources = import.meta.glob(["./**/*.tsx", "./**/*.ts", "!./**/*.test.*"], { query: "?raw", import: "default", eager: true });
+    const keys = new Set(Object.values(sources).flatMap((source) =>
+      [...String(source).matchAll(/["'](studio\.[A-Za-z][A-Za-z0-9_.]*)["']/g)].map((match) => match[1]),
+    ));
+    expect(keys.size).toBeGreaterThan(50);
+    for (const [locale, resources] of Object.entries(localeResources)) {
+      for (const key of keys) {
+        const value = (resources as Record<string, unknown>)[key];
+        expect(typeof value, `${locale} should define flat key ${key}`).toBe("string");
+        expect(String(value).trim(), `${locale} ${key} must not be empty`).not.toBe("");
+        const english = (en as Record<string, unknown>)[key];
+        const placeholders = (text: unknown) => [...String(text).matchAll(/{{\s*([^{}]+?)\s*}}/g)].map((match) => match[1]).sort();
+        expect(placeholders(value), `${locale} ${key} must preserve interpolation`).toEqual(placeholders(english));
+      }
+      expect(String(getNestedValue(resources, "generate.emptySubtitle"))).toContain("Ctrl");
+    }
+  });
+
   it("keeps every locale in parity with the English and Simplified Chinese resource keys", () => {
     const requiredKeys = new Set([
       ...flattenKeys(en),

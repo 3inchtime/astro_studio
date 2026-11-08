@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import GenerationLoadingScene from "./GenerationLoadingScene";
 
 const translations: Record<string, string> = {
-  "generate.loading.title": "画面正在穿过雾光",
-  "generate.loading.subtitle": "星云正在校准层次，最终镜头正在靠近。",
+  "studio.generationWaiting": "Waiting for image provider",
+  "studio.generationWaitingHint":
+    "Your request is processing. Images will appear when ready.",
 };
 
 vi.mock("react-i18next", () => ({
@@ -18,7 +19,12 @@ describe("GenerationLoadingScene", () => {
     render(<GenerationLoadingScene />);
 
     expect(screen.getByRole("status")).toBeTruthy();
-    expect(screen.getByText("画面正在穿过雾光", { selector: ".generation-loading-title" })).toBeTruthy();
-    expect(screen.getByText("星云正在校准层次，最终镜头正在靠近。")).toBeTruthy();
+    expect(screen.getByText("Waiting for image provider")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your request is processing. Images will appear when ready.",
+      ),
+    ).toBeTruthy();
+    expect(document.querySelector(".generation-loading-progress")).toBeNull();
   });
 });

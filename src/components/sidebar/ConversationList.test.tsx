@@ -193,6 +193,18 @@ describe("ConversationList", () => {
     expect(activeRow).toHaveClass("bg-surface", "shadow-card", "ring-1");
   });
 
+  it("renames a conversation using the shared in-app dialog", async () => {
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue(null);
+    render(<MemoryRouter><ConversationList activeProjectId="project-1" activeConversationId={null} refreshKey={0} onSelectProject={vi.fn()} onProjectCreated={vi.fn()} onSelectConversation={vi.fn()} onInitialConversation={vi.fn()} onClearActiveConversation={vi.fn()} onNewConversation={vi.fn()} /></MemoryRouter>);
+    await screen.findByText("Homepage hero direction");
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.conversationActions" }));
+    fireEvent.click(screen.getByRole("button", { name: "sidebar.rename" }));
+    expect(prompt).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent("sidebar.renameConversation");
+    expect(screen.getByLabelText("projectDialog.nameLabel")).toHaveValue("Homepage hero direction");
+    prompt.mockRestore();
+  });
+
   it("opens an in-app confirmation dialog before deleting a conversation", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 

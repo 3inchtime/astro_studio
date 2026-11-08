@@ -168,7 +168,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           )}
         </div>
       )}
-      <div className="flex max-w-full items-center gap-1 rounded-2xl border border-border-subtle bg-surface/95 p-1.5 shadow-float backdrop-blur-xl">
+      <div role="group" aria-label={t("studio.canvas.drawingTools", { defaultValue: "Drawing tools" })} className="flex max-w-full items-center gap-1 rounded-xl border border-border-subtle bg-surface/95 p-1.5 shadow-float backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
           {tools.map(([tool, Icon, shortcut]) => (
             <button
@@ -212,7 +212,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           title={t("canvas.properties")}
           aria-expanded={properties}
           onClick={() => setProperties(!properties)}
-          className={`${TOOL_BUTTON_CLASS} text-[11px] tabular-nums`}
+          className={`${TOOL_BUTTON_CLASS} text-[12px] tabular-nums`}
         >
           {props.strokeSize}px
         </button>
@@ -229,7 +229,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           )}
         </div>
       </div>
-      <div className="flex items-center gap-0.5 rounded-xl border border-border-subtle bg-surface/90 px-1 py-0.5 shadow-card backdrop-blur-xl">
+      <div role="group" aria-label={t("studio.canvas.viewControls", { defaultValue: "History and view" })} className="flex items-center gap-0.5 rounded-xl border border-border-subtle bg-surface/90 px-1 py-0.5 shadow-card backdrop-blur-xl">
         {button("canvas.tool.undo", props.onUndo, Undo2, !props.canUndo)}
         {button("canvas.tool.redo", props.onRedo, Redo2, !props.canRedo)}
         <span className="mx-1 h-4 w-px bg-border-subtle" />
@@ -279,7 +279,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
         </div>
         {button("canvas.tool.zoomIn", props.onZoomIn, Plus)}
         {button("canvas.fitFrame", props.onFitFrame, Maximize2)}
-        <span className="mx-2 hidden text-[10px] text-muted sm:inline">
+        <span className="mx-2 hidden text-[12px] text-muted sm:inline">
           {t("canvas.selectionCount", { count: props.selectedObjectCount })}
         </span>
       </div>

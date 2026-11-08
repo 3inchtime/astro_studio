@@ -26,6 +26,7 @@ import {
   unpinProject,
 } from "../lib/api";
 import type { Project } from "../types";
+import CollectionStatus from "../components/gallery/CollectionStatus";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import { ROUTES } from "../app/routes/contracts";
@@ -58,7 +59,11 @@ export default function ProjectsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
 
+  const [reloadVersion, setReloadVersion] = useState(0);
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(false);
     getProjects(false)
       .then(async (items) => {
         const filtered = items.filter((p) => p.id !== "default");
@@ -83,15 +88,18 @@ export default function ProjectsPage() {
             }
           }),
         );
+        if (cancelled) return;
         setProjects(withImages);
         setLoadError(false);
       })
       .catch(() => {
+        if (cancelled) return;
         setProjects([]);
         setLoadError(true);
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [reloadVersion]);
 
   const filteredProjects = useMemo(() => {
     let list = [...projects];
@@ -250,14 +258,19 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-transparent">
+    <div className="flex h-full flex-col overflow-hidden bg-background">
+      <div className="flex items-center justify-between px-6 pt-6 pb-4">
+        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">{t("studio.project.title", { defaultValue: "Projects" })}</h1>
+        <p className="mt-1 text-sm text-muted">{t("studio.project.subtitle", { defaultValue: "Keep your conversations and images together." })}</p></div>
+      </div>
       {/* Filter bar */}
-      <div className="studio-toolbar flex shrink-0 items-center gap-2 px-6 py-2.5">
+      <div className="studio-toolbar flex shrink-0 flex-wrap items-center gap-2 px-6 py-2.5">
         {(["all", "pinned", "mostImages", "recent"] as Filter[]).map((f) => (
           <button
             key={f}
+            aria-pressed={filter === f}
             onClick={() => setFilter(f)}
-            className={`focus-ring cursor-pointer rounded-[20px] border px-3 py-1 text-[12px] font-medium transition-colors ${
+            className={`focus-ring cursor-pointer rounded-[8px] border px-3 py-1 text-[12px] font-medium transition-colors ${
               filter === f
                 ? "border-primary/14 bg-primary/10 text-primary"
                 : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/70 hover:text-foreground"
@@ -273,6 +286,7 @@ export default function ProjectsPage() {
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
           />
           <input
+            aria-label={t("projects.searchPlaceholder")}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -294,20 +308,14 @@ export default function ProjectsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-[13px] text-muted">
-            {t("projects.loading")}
-          </div>
-        ) : loadError ? (
-          <div className="flex items-center justify-center py-16 text-[13px] text-error">
-            {t("projects.loadError")}
-          </div>
+        {loading || loadError ? (
+          <CollectionStatus errorTitle={t("projects.loadError")} loading={loading} error={loadError} onRetry={() => setReloadVersion((value) => value + 1)} />
         ) : filteredProjects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-[14px] bg-primary/8">
+            <div className="flex h-14 w-14 items-center justify-center rounded-[12px] bg-primary/8">
               <ImageIcon size={24} className="text-primary" />
             </div>
-            <div className="text-[15px] font-semibold text-foreground">
+            <div className="text-[20px] font-semibold text-foreground">
               {searchQuery ? t("projects.noResults") : t("projects.emptyTitle")}
             </div>
             <div className="text-[12px] text-muted max-w-[260px] text-center leading-relaxed">
@@ -321,7 +329,7 @@ export default function ProjectsPage() {
                   setCreateError(null);
                   setCreateDialogOpen(true);
                 }}
-                className="studio-control-primary focus-ring mt-1 flex items-center gap-1.5 rounded-[10px] px-4 py-2 text-[12px] font-medium"
+                className="studio-control-primary focus-ring mt-1 flex items-center gap-1.5 rounded-[8px] px-4 py-2 text-[12px] font-medium"
               >
                 <Plus size={13} />
                 {t("sidebar.newProject")}
@@ -363,7 +371,7 @@ export default function ProjectsPage() {
 
       {/* Stats footer */}
       {!loading && !loadError && projects.length > 0 && (
-        <div className="studio-status-bar flex shrink-0 items-center gap-5 px-6 py-2 text-[11px]">
+        <div className="studio-status-bar flex shrink-0 items-center gap-5 px-6 py-2 text-[12px]">
           <span>
             <span className="font-semibold text-foreground/70 tabular-nums font-[family-name:var(--font-mono)]">
               {stats.totalProjects}
@@ -472,13 +480,13 @@ function ProjectCard({
         duration: 0.3,
         ease: [0.22, 1, 0.36, 1],
       }}
-      className="studio-card group relative cursor-pointer overflow-hidden rounded-[14px] hover:studio-card-hover"
+      className="studio-card group relative cursor-pointer overflow-hidden rounded-[12px] hover:studio-card-hover"
       onClick={onOpen}
     >
       {/* Mosaic Preview */}
       <div className={`mosaic-preview mosaic-${mosaicLayout}`}>
         {images.length === 0 ? (
-          <div className="col-span-full flex items-center justify-center gap-1.5 text-[11px] text-muted">
+          <div className="col-span-full flex items-center justify-center gap-1.5 text-[12px] text-muted">
             <ImageIcon size={14} className="opacity-40" />
             {t("projects.noImages")}
           </div>
@@ -503,13 +511,13 @@ function ProjectCard({
             {project.name}
           </div>
           {project.pinned_at && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[10px] font-medium text-primary">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[12px] font-medium text-primary">
               <Pin size={9} />
               {t("projects.pinned")}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3.5 text-[11px] text-muted">
+        <div className="flex items-center gap-3.5 text-[12px] text-muted">
           <span className="flex items-center gap-1">
             <ImageIcon size={12} />
             <span className="font-semibold text-foreground/60 tabular-nums font-[family-name:var(--font-mono)]">
@@ -544,13 +552,15 @@ function ProjectCard({
               e.stopPropagation();
               setShowActions((c) => !c);
             }}
-            className="studio-floating-panel focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] text-foreground/80 transition-colors hover:text-foreground"
+            aria-label={t("projects.manage")}
+            aria-expanded={showActions}
+            className="studio-floating-panel focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] text-foreground transition-colors hover:text-foreground"
           >
             <MoreHorizontal size={15} />
           </button>
           {showActions && (
             <div
-              className="studio-floating-panel absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[10px] py-1"
+              className="studio-floating-panel absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[8px] py-1"
               onClick={(e) => e.stopPropagation()}
             >
               <button

@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Sparkles, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useTranslation } from "react-i18next";
 
 interface OptimizePromptModalProps {
@@ -23,14 +24,7 @@ export default function OptimizePromptModal({
   const { t } = useTranslation();
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onKeepOriginal();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [open, onKeepOriginal]);
+  const dialogRef = useDialogFocus({ open, onClose: onKeepOriginal });
 
   if (!open) return null;
 
@@ -47,12 +41,14 @@ export default function OptimizePromptModal({
       }}
     >
       <motion.div
+        ref={dialogRef}
+        tabIndex={-1}
         initial={{ opacity: 0, scale: 0.95, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 12 }}
         transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         onClick={(e) => e.stopPropagation()}
-        className="glass-strong w-full max-w-[640px] overflow-hidden rounded-[16px] border border-border-subtle shadow-float"
+        className="studio-floating-panel w-full max-w-[640px] overflow-hidden rounded-[12px] border border-border-subtle shadow-float"
         role="dialog"
         aria-modal="true"
         aria-label={t("generate.llm.modalTitle")}
@@ -69,7 +65,8 @@ export default function OptimizePromptModal({
           </div>
           <button
             onClick={onKeepOriginal}
-            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-muted/60 transition-colors hover:bg-subtle hover:text-foreground"
+            aria-label={t("favorites.cancel")}
+            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
           >
             <X size={15} />
           </button>
@@ -79,14 +76,15 @@ export default function OptimizePromptModal({
         <div className="grid grid-cols-2 gap-4 p-5">
           {/* Original */}
           <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted/60">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
               {t("generate.llm.original")}
             </span>
             <textarea
+              aria-label={t("generate.llm.original")}
               readOnly
               value={originalPrompt}
               rows={6}
-              className="w-full resize-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3.5 py-3 text-[13px] leading-[1.6] text-foreground/70 placeholder:text-muted/40 focus:outline-none"
+              className="w-full resize-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3.5 py-3 text-[13px] leading-[1.6] text-foreground placeholder:text-muted focus:outline-none"
             />
           </div>
 
@@ -96,10 +94,11 @@ export default function OptimizePromptModal({
               {t("generate.llm.optimized")}
             </span>
             <textarea
+              aria-label={t("generate.llm.optimized")}
               value={optimizedPrompt}
               onChange={(e) => onOptimizedChange(e.target.value)}
               rows={6}
-              className="w-full resize-none rounded-[10px] border border-primary/25 bg-surface px-3.5 py-3 text-[13px] leading-[1.6] text-foreground placeholder:text-muted/40 transition-all duration-200 focus:border-primary/40 focus:shadow-[0_0_0_3px_rgba(79,106,255,0.08)] focus:outline-none"
+              className="w-full resize-none rounded-[10px] border border-primary/25 bg-surface px-3.5 py-3 text-[13px] leading-[1.6] text-foreground placeholder:text-muted transition-all duration-200 focus:border-primary/40 focus:shadow-[0_0_0_3px_rgba(79,106,255,0.08)] focus:outline-none"
             />
           </div>
         </div>
