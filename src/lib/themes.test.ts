@@ -28,4 +28,10 @@ describe("theme localization", () => {
     expect(DEFAULT_THEME_ID).toBe("pure-light");
     expect(resolveThemeId(null)).toBe("pure-light");
   });
+  it("keeps editing and image inspection neutral across colorful presets", () => {
+    for (const theme of THEME_CATALOG) {
+      expect(theme.variables["--color-canvas"]).toBe(theme.appearance === "dark" ? "#18191C" : "#F2F3F5");
+    }
+  });
+
 });

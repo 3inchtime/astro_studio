@@ -13,11 +13,11 @@ export default function CanvasPropertiesPanel({
   const first = objects[0];
   const all = (key: string) => objects.every((o) => key in o);
   return (
-    <section className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
-      <h3 className="mb-3 text-[14px] font-semibold">
+    <section className="bg-surface p-4">
+      <h3 className="mb-3 text-sm font-semibold">
         {t("canvas.propertiesTitle")}
       </h3>
-      <div className="flex flex-col gap-3 text-[12px]">
+      <div className="flex flex-col gap-3 text-xs">
         {all("color") && "color" in first ? (
           <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
             {t("canvas.strokeColor")}

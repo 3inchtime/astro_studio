@@ -152,7 +152,7 @@ export default function CanvasResizeOverlay({
       {kind === "frame" && (
         <button
           type="button"
-          className="pointer-events-auto absolute -top-7 left-0 cursor-move rounded bg-primary px-2 py-1 text-[10px] text-white"
+          className="pointer-events-auto absolute -top-7 left-0 cursor-move rounded bg-primary px-2 py-1 text-xs text-primary-foreground"
           onMouseDown={(e) => start(e, "move")}
           onTouchStart={(e) => start(e, "move")}
         >

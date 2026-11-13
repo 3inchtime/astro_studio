@@ -1,6 +1,12 @@
 import { useDialogFocus } from "../../hooks/useDialogFocus";
-import { useState, useCallback, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   X,
   ChevronLeft,
@@ -21,10 +27,12 @@ import {
 import { useTranslation } from "react-i18next";
 import FavoriteButton from "../favorites/FavoriteButton";
 import FolderSelector from "../favorites/FolderSelector";
+import type { PreviewSource } from "../../lib/store";
 import type { MessageImage } from "../../types";
 
 interface LightboxProps {
   images: MessageImage[];
+  source?: PreviewSource;
   initialIndex: number;
   onClose: () => void;
   onEditImage?: (image: MessageImage) => void;
@@ -36,6 +44,7 @@ const MAX_ZOOM = 3.0;
 
 export default function Lightbox({
   images,
+  source,
   initialIndex,
   onClose,
   onEditImage,
@@ -44,6 +53,9 @@ export default function Lightbox({
   const { t } = useTranslation();
   const [selectedIndex, setIndex] = useState(initialIndex);
   const index = Math.max(0, Math.min(selectedIndex, images.length - 1));
+  const reducedMotion = useReducedMotion();
+  const [readyPath, setReadyPath] = useState<string | null>(null);
+  const [viewport, setViewport] = useState<DOMRect | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const dialogRef = useDialogFocus({ open: images.length > 0, onClose });
@@ -56,8 +68,47 @@ export default function Lightbox({
 
   const currentImage = images[index];
   const currentPath = currentImage?.path;
+  const currentPathRef = useRef(currentPath);
+  currentPathRef.current = currentPath;
   const imageEpoch = useRef(0);
   const transitionEase: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+  useLayoutEffect(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0) setViewport(rect);
+  }, [currentPath]);
+
+  const sourceRect =
+    source?.imageId === currentImage?.imageId ? source?.rect : undefined;
+  const fittedScale =
+    sourceRect && viewport
+      ? Math.min(
+          viewport.width / sourceRect.width,
+          viewport.height / sourceRect.height,
+        )
+      : 1;
+  const sourceTransform =
+    sourceRect && viewport && !reducedMotion
+      ? {
+          opacity: 1,
+          x:
+            sourceRect.left +
+            sourceRect.width / 2 -
+            viewport.left -
+            viewport.width / 2,
+          y:
+            sourceRect.top +
+            sourceRect.height / 2 -
+            viewport.top -
+            viewport.height / 2,
+          scale: 1 / fittedScale,
+        }
+      : { opacity: 0, x: 0, y: 0, scale: 1 };
+  const sourceStillPresent =
+    source &&
+    [...document.querySelectorAll("[data-preview-image-id]")].some(
+      (node) => node.getAttribute("data-preview-image-id") === source.imageId,
+    );
 
   useEffect(() => {
     setCopied(false);
@@ -126,6 +177,8 @@ export default function Lightbox({
     function handleKey(e: KeyboardEvent) {
       if (
         showFolderSelector ||
+        (e.target instanceof HTMLElement &&
+          e.target.closest('[role="dialog"]') !== dialogRef.current) ||
         e.defaultPrevented ||
         (e.target instanceof HTMLElement &&
           e.target.closest("input,textarea,select"))
@@ -136,7 +189,7 @@ export default function Lightbox({
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [showFolderSelector, goPrev, goNext]);
+  }, [showFolderSelector, goPrev, goNext, dialogRef]);
 
   const handleCopy = useCallback(async () => {
     if (!currentPath) return;
@@ -186,10 +239,10 @@ export default function Lightbox({
       aria-modal="true"
       aria-label={t("lightbox.preview")}
       tabIndex={-1}
-      initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
-      animate={{ opacity: 1, backdropFilter: "blur(10px)" }}
-      exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
-      transition={{ duration: 0.28, ease: transitionEase }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: transitionEase }}
       className="fixed inset-0 z-50 flex max-h-none flex-col bg-[#111318] text-white outline-none"
       style={{ maxHeight: "none" }}
       onClick={(e) => {
@@ -201,7 +254,7 @@ export default function Lightbox({
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -12 }}
-        transition={{ duration: 0.3, ease: transitionEase }}
+        transition={{ duration: 0.2, ease: transitionEase }}
         className="relative flex items-center justify-between px-4 py-3"
       >
         <button
@@ -211,7 +264,7 @@ export default function Lightbox({
         >
           <X size={18} />
         </button>
-        <span className="text-[13px] text-white/80">
+        <span className="text-body-sm text-white/80">
           {index + 1} / {images.length}
         </span>
         <div className="w-8" />
@@ -233,26 +286,59 @@ export default function Lightbox({
         }}
       >
         <AnimatePresence>
-          <motion.div
-            key={currentPath}
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.02 }}
-            transition={{ duration: 0.3, ease: transitionEase }}
-            className="absolute inset-0 flex items-center justify-center"
-          >
-            <img
-              src={toAssetUrl(currentPath)}
-              alt={t("lightbox.preview")}
-              className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
-              style={{
-                transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-              }}
-              onDoubleClick={toggleZoom}
-              onClick={(e) => e.stopPropagation()}
-              draggable={false}
-            />
-          </motion.div>
+          {(!sourceRect || viewport) && (
+            <motion.div
+              key={currentPath}
+              initial={sourceTransform}
+              animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+              exit={sourceStillPresent ? sourceTransform : { opacity: 0 }}
+              transition={{ duration: 0.2, ease: transitionEase }}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              {readyPath !== currentPath && currentImage.thumbnailPath && (
+                <img
+                  data-testid="preview-thumbnail"
+                  aria-hidden="true"
+                  src={toAssetUrl(currentImage.thumbnailPath)}
+                  alt=""
+                  className="absolute max-h-full max-w-full object-contain"
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={toggleZoom}
+                  style={{
+                    transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                  }}
+                />
+              )}
+              <img
+                src={toAssetUrl(currentPath)}
+                alt={t("lightbox.preview")}
+                className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
+                style={{
+                  opacity:
+                    readyPath === currentPath || !currentImage.thumbnailPath
+                      ? 1
+                      : 0,
+                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                }}
+                onLoad={() => {
+                  if (currentPathRef.current === currentPath)
+                    setReadyPath(currentPath);
+                }}
+                onError={() => {
+                  if (currentPathRef.current === currentPath)
+                    setActionError(
+                      t("studio.collection.previewLoadFailed", {
+                        defaultValue:
+                          "Could not load the full image. The thumbnail is still available.",
+                      }),
+                    );
+                }}
+                onDoubleClick={toggleZoom}
+                onClick={(e) => e.stopPropagation()}
+                draggable={false}
+              />
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -263,7 +349,7 @@ export default function Lightbox({
             initial={{ opacity: 0, x: -12 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -12 }}
-            transition={{ duration: 0.28, ease: transitionEase }}
+            transition={{ duration: 0.2, ease: transitionEase }}
             onClick={goPrev}
             aria-label={t("studio.previousImage", {
               defaultValue: "Previous image",
@@ -276,7 +362,7 @@ export default function Lightbox({
             initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 12 }}
-            transition={{ duration: 0.28, ease: transitionEase }}
+            transition={{ duration: 0.2, ease: transitionEase }}
             onClick={goNext}
             aria-label={t("studio.nextImage", { defaultValue: "Next image" })}
             className="absolute right-4 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white transition-colors"
@@ -301,7 +387,7 @@ export default function Lightbox({
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 14 }}
-        transition={{ duration: 0.32, ease: transitionEase }}
+        transition={{ duration: 0.22, ease: transitionEase }}
         className="relative flex items-center justify-center gap-1 px-4 py-3"
       >
         {[
@@ -352,9 +438,10 @@ export default function Lightbox({
           </button>
         ))}
         {currentImage?.imageId && (
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90">
+          <div className="flex h-9 w-9 items-center justify-center">
             <FavoriteButton
               imageId={currentImage.imageId}
+              className="h-9 w-9 text-white/80 hover:bg-white/10 hover:text-white"
               size={16}
               onClick={() => setShowFolderSelector(true)}
             />

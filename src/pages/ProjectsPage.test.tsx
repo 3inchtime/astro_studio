@@ -15,12 +15,17 @@ const createProject = vi.fn();
 const searchGenerations = vi.fn();
 const pinProject = vi.fn();
 const navigate = vi.fn();
+const toggleContextSidebar = vi.fn();
 
 vi.mock("react-i18next", () => {
   return {
     useTranslation: () => ({ t: (key: string) => key }),
   };
 });
+
+vi.mock("../components/layout/AppLayout", () => ({
+  useLayoutContext: () => ({ toggleContextSidebar, contextSidebarCollapsed: true, activeWorkspaceDrawer: null }),
+}));
 
 vi.mock("../lib/api", () => {
   return {
@@ -107,6 +112,46 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
+  });
+
+  it("opens project navigation directly from the page title", async () => {
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByText("Brand Storyboards");
+    const toggle = screen.getByRole("button", { name: "studio.openSidebar" });
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-sidebar");
+    fireEvent.click(toggle);
+    expect(toggleContextSidebar).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a keyboard reachable project cover button", async () => {
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Brand Storyboards" }));
+    expect(navigate).toHaveBeenCalledWith(ROUTES.projectHome("project-1"));
+  });
+
+  it("dismisses project actions with Escape and returns focus to the trigger", async () => {
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByText("Brand Storyboards");
+    const trigger = screen.getByRole("button", { name: "projects.manage" });
+    fireEvent.click(trigger);
+    const rename = screen.getByRole("button", { name: "sidebar.rename" });
+    rename.focus();
+    fireEvent.keyDown(rename, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "sidebar.rename" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("shows a project action failure without hiding the project", async () => {
+    pinProject.mockRejectedValueOnce(new Error("Offline"));
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByText("Brand Storyboards");
+    fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
+    fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("studio.project.actionFailed");
+    expect(screen.getByText("Brand Storyboards")).toBeInTheDocument();
   });
 
   it("opens the project dialog from the new project button", async () => {
@@ -294,8 +339,7 @@ describe("ProjectsPage", () => {
     );
     expect(firstCard).not.toBeNull();
     const firstMenuButton = within(firstCard as HTMLElement)
-      .getAllByRole("button")
-      .find((button) => button.textContent === "");
+      .getByRole("button", { name: "projects.manage" });
     expect(firstMenuButton).toBeDefined();
     fireEvent.click(firstMenuButton!);
     fireEvent.click(screen.getByRole("button", { name: "sidebar.rename" }));
@@ -305,8 +349,7 @@ describe("ProjectsPage", () => {
       .closest(".studio-card");
     expect(secondCard).not.toBeNull();
     const secondMenuButton = within(secondCard as HTMLElement)
-      .getAllByRole("button")
-      .find((button) => button.textContent === "");
+      .getByRole("button", { name: "projects.manage" });
     expect(secondMenuButton).toBeDefined();
     fireEvent.click(secondMenuButton!);
     fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));

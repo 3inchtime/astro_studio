@@ -59,24 +59,12 @@ function buildResult(
 }
 
 describe("GenerationGrid", () => {
-  it("uses a masonry column layout so mixed aspect ratios do not leave stretched row gaps", () => {
-    const { container } = render(
-      <GenerationGrid
-        results={[
-          buildResult("wide", 1536, 1024),
-          buildResult("square", 1024, 1024),
-          buildResult("portrait", 1024, 1536),
-        ]}
-        onSelect={vi.fn()}
-      />,
-    );
-
+  it("fills the available width with explicit masonry columns", () => {
+    const { container } = render(<GenerationGrid results={Array.from({ length: 6 }, (_, i) => buildResult(String(i), 1024, 1024))} onSelect={vi.fn()} />);
     const grid = container.firstElementChild;
-    const firstCard = grid?.firstElementChild;
-
-    expect(grid).toHaveClass("columns-[220px]");
-    expect(grid).not.toHaveClass("grid");
-    expect(firstCard).toHaveClass("mb-4", "break-inside-avoid");
+    expect(grid).toHaveClass("grid");
+    expect(grid).not.toHaveClass("columns-[220px]");
+    expect(grid?.querySelectorAll("[data-gallery-column]").length).toBeGreaterThan(0);
   });
 
   it("sizes gallery previews from each image aspect ratio instead of forcing squares", () => {
@@ -133,7 +121,7 @@ describe("GenerationGrid", () => {
 
     expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({
       generation: expect.objectContaining({ id: "generation-wide" }),
-    }), 0);
+    }), 0, expect.objectContaining({ imageId: "image-wide" }));
     expect(onSelect).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "gallery.detail" }));
@@ -141,6 +129,38 @@ describe("GenerationGrid", () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({
       generation: expect.objectContaining({ id: "generation-wide" }),
     }));
+  });
+
+  it("keeps record selection separate from preview and detail actions", () => {
+    const onToggleSelection = vi.fn();
+    const onSelect = vi.fn();
+    const onPreview = vi.fn();
+    render(<GenerationGrid results={[buildResult("wide", 1536, 1024)]} selectedIds={new Set(["generation-wide"])} onToggleSelection={onToggleSelection} onSelect={onSelect} onPreview={onPreview} />);
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    expect(onToggleSelection).toHaveBeenCalledWith("generation-wide");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onPreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps image controls quiet until interaction while preserving a full keyboard checkbox target", () => {
+    render(<GenerationGrid results={[buildResult("wide", 1536, 1024)]} selectedIds={new Set()} onToggleSelection={vi.fn()} onSelect={vi.fn()} />);
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toHaveClass("h-8", "w-8");
+    expect(checkbox.parentElement).toHaveClass("opacity-0", "focus-within:opacity-100");
+    expect(checkbox.parentElement?.className).not.toContain("bg-black");
+    const detail = screen.getByRole("button", { name: "gallery.detail" });
+    expect(detail).toHaveClass("h-8", "w-8");
+    expect(detail.parentElement).toHaveClass("group-focus-within:opacity-100", "[@media(hover:none)]:opacity-100");
+    expect(checkbox.parentElement).toHaveClass("[@media(hover:none)]:opacity-100");
+  });
+
+  it("keeps folder management visible for pointer users without hover", () => {
+    render(<GenerationGrid results={[buildResult("wide", 1536, 1024)]} favoriteMode="manage" onManageFolders={vi.fn()} onSelect={vi.fn()} />);
+    const favoriteWrapper = screen.getByTestId("favorite-image-wide").parentElement;
+    expect(favoriteWrapper).toHaveClass("h-8", "w-8", "[@media(hover:none)]:opacity-100");
+    expect(favoriteWrapper?.tagName).toBe("DIV");
   });
 
   it("renders results as a compact list when list view is selected", () => {

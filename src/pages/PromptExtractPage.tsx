@@ -158,7 +158,7 @@ export default function PromptExtractPage() {
           <h1 className="text-[20px] font-semibold tracking-tight text-foreground">
             {t("extract.title")}
           </h1>
-          <p className="mt-2 max-w-xl text-[14px] leading-relaxed text-muted">
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
             {t("extract.subtitle")}
           </p>
         </header>
@@ -166,10 +166,10 @@ export default function PromptExtractPage() {
         <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <section className="studio-panel flex flex-col gap-4 rounded-xl p-5">
             <div>
-              <h2 className="text-[14px] font-semibold text-foreground">
+              <h2 className="text-sm font-semibold text-foreground">
                 {t("extract.uploadTitle")}
               </h2>
-              <p className="mt-1 text-[12px] text-muted">
+              <p className="mt-1 text-xs text-muted">
                 {t("extract.uploadHint")}
               </p>
             </div>
@@ -177,13 +177,13 @@ export default function PromptExtractPage() {
             <button
               type="button"
               onClick={handlePickImage}
-              className="focus-ring flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-background px-6 py-8 text-center transition-colors hover:border-primary"
+              className="focus-ring flex min-h-[240px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-background px-6 py-8 text-center transition-colors hover:border-primary"
             >
               {imagePath ? (
                 <img
                   src={toAssetUrl(imagePath)}
                   alt=""
-                  className="max-h-[280px] w-full rounded-lg object-contain"
+                  className="max-h-[240px] w-full rounded-lg object-contain"
                 />
               ) : (
                 <>
@@ -191,10 +191,10 @@ export default function PromptExtractPage() {
                     <ImagePlus size={24} />
                   </div>
                   <div className="space-y-1">
-                    <strong className="block text-[14px] font-semibold text-foreground">
+                    <strong className="block text-sm font-semibold text-foreground">
                       {t("extract.selectImage")}
                     </strong>
-                    <p className="text-[12px] leading-relaxed text-muted">
+                    <p className="text-xs leading-relaxed text-muted">
                       {t("extract.uploadHint")}
                     </p>
                   </div>
@@ -202,7 +202,7 @@ export default function PromptExtractPage() {
               )}
             </button>
 
-            <label className="flex flex-col gap-1.5 text-[12px] font-medium text-muted">
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted">
               {t("studio.visionModel", { defaultValue: "Vision model" })}
               <select
                 value={selectedConfigId}
@@ -210,7 +210,7 @@ export default function PromptExtractPage() {
                 disabled={
                   multimodalConfigs.length === 0 || extractMutation.isPending
                 }
-                className="studio-input focus-ring select-control h-9 w-full rounded-lg px-3 pr-8 text-[14px] text-foreground"
+                className="studio-input focus-ring select-control h-9 w-full rounded-lg px-3 pr-8 text-sm text-foreground"
               >
                 {multimodalConfigs.length === 0 && (
                   <option value="">
@@ -229,7 +229,7 @@ export default function PromptExtractPage() {
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-[14px] font-medium text-foreground">
+                <p className="truncate text-sm font-medium text-foreground">
                   {imagePath || t("extract.noImageSelected")}
                 </p>
               </div>
@@ -237,7 +237,7 @@ export default function PromptExtractPage() {
                 <button
                   type="button"
                   onClick={handlePickImage}
-                  className="studio-control focus-ring rounded-lg px-4 py-2 text-[12px] font-medium hover:studio-control-hover"
+                  className="studio-control focus-ring rounded-lg min-h-9 px-4 py-2 text-sm font-medium hover:studio-control-hover"
                 >
                   {imagePath
                     ? t("extract.changeImage")
@@ -247,7 +247,7 @@ export default function PromptExtractPage() {
                   type="button"
                   onClick={handleExtract}
                   disabled={!canExtract}
-                  className="studio-control-primary focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[14px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                  className="studio-control-primary focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Sparkles size={13} />
                   {extractMutation.isPending
@@ -260,13 +260,13 @@ export default function PromptExtractPage() {
             {actionError && (
               <p
                 role="alert"
-                className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error"
+                className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-xs text-error"
               >
                 {actionError}
               </p>
             )}
             {!selectedConfigId && (
-              <div className="rounded-xl border border-warning/20 bg-warning/8 px-4 py-3 text-[12px] text-warning">
+              <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-sm text-foreground">
                 {t("extract.noMultimodalConfig")}
               </div>
             )}
@@ -275,10 +275,10 @@ export default function PromptExtractPage() {
           <section className="studio-panel flex min-h-0 flex-col gap-4 rounded-xl p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-[14px] font-semibold text-foreground">
+                <h2 className="text-sm font-semibold text-foreground">
                   {t("extract.resultTitle")}
                 </h2>
-                <p className="mt-1 text-[12px] text-muted">
+                <p className="mt-1 text-xs text-muted">
                   {t("extract.resultHint")}
                 </p>
               </div>
@@ -294,18 +294,18 @@ export default function PromptExtractPage() {
               }}
               placeholder={t("extract.resultPlaceholder")}
               spellCheck={false}
-              className="studio-input focus-ring min-h-[300px] flex-1 w-full resize-y rounded-lg px-4 py-3 text-[14px] leading-relaxed placeholder:text-muted focus:border-primary"
+              className="studio-input focus-ring min-h-[260px] flex-1 w-full resize-y rounded-lg px-4 py-3 text-sm leading-relaxed placeholder:text-muted focus:border-primary"
             />
 
             {copyError && (
-              <p role="alert" className="text-[12px] text-error">
+              <p role="alert" className="text-xs text-error">
                 {copyError}
               </p>
             )}
             {favoriteError && (
               <div
                 role="alert"
-                className="rounded-xl border border-error/20 bg-error/8 px-4 py-3 text-[12px] text-error"
+                className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-sm text-error"
               >
                 {favoriteError}
               </div>
@@ -316,7 +316,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleCopy}
                 disabled={!prompt}
-                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg min-h-9 px-4 py-2 text-sm font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Copy size={13} />
                 {copied ? t("extract.copied") : t("extract.copy")}
@@ -325,7 +325,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleFavorite}
                 disabled={!prompt}
-                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg min-h-9 px-4 py-2 text-sm font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Heart
                   size={13}
@@ -339,7 +339,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleUsePrompt}
                 disabled={!prompt}
-                className="studio-control-primary focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[14px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control-primary focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Sparkles size={13} />
                 {t("extract.usePrompt")}
@@ -351,17 +351,17 @@ export default function PromptExtractPage() {
         <section className="studio-panel rounded-xl p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-[14px] font-semibold text-foreground">
+              <h2 className="text-sm font-semibold text-foreground">
                 {t("extract.historyTitle")}
               </h2>
-              <p className="mt-1 text-[12px] text-muted">
+              <p className="mt-1 text-xs text-muted">
                 {t("extract.historyHint")}
               </p>
             </div>
           </div>
 
           {promptExtractions.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-dashed border-border-subtle px-4 py-6 text-center text-[12px] text-muted">
+            <div className="mt-4 rounded-xl border border-dashed border-border-subtle px-4 py-6 text-center text-xs text-muted">
               {t("extract.historyEmpty")}
             </div>
           ) : (
@@ -389,13 +389,13 @@ export default function PromptExtractPage() {
                       className="h-14 w-14 shrink-0 rounded-lg object-cover"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[12px] text-muted">
+                      <p className="text-xs text-muted">
                         {formatLocalDateTime(historyItem.updated_at)}
                       </p>
-                      <p className="mt-1 line-clamp-2 text-[14px] font-medium leading-relaxed text-foreground">
+                      <p className="mt-1 line-clamp-2 text-sm font-medium leading-relaxed text-foreground">
                         {historyItem.prompt}
                       </p>
-                      <p className="mt-1 truncate text-[12px] text-muted">
+                      <p className="mt-1 truncate text-xs text-muted">
                         {historyItem.image_path}
                       </p>
                     </div>

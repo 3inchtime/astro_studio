@@ -120,4 +120,21 @@ describe("GenerationComposer workbench", () => {
       screen.getByRole("button", { name: "generate.submit" }).parentElement,
     ).not.toHaveClass("absolute");
   });
+  it("keeps parameter disclosures mounted outside the prompt surface", () => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const config = props({ parametersTarget: target });
+    const { rerender, unmount } = render(<GenerationComposer {...config} />);
+    const model = screen.getByLabelText("generate.modelLabel");
+    expect(target).toContainElement(model);
+    const details = screen.getByText("Advanced settings").closest("details")!;
+    details.open = true;
+    rerender(<GenerationComposer {...config} prompt="Changed draft" />);
+    expect(screen.getByRole("textbox")).toHaveValue("Changed draft");
+    expect(screen.getByText("Advanced settings").closest("details")).toBe(details);
+    expect(details.open).toBe(true);
+    expect(screen.getByTestId("generation-command-surface")).not.toContainElement(model);
+    unmount(); target.remove();
+  });
+
 });

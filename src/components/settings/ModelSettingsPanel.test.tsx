@@ -137,7 +137,7 @@ describe("ModelSettingsPanel provider profiles", () => {
     expect(screen.getByText("settings.optimizationService")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "settings.addOptimizationService" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "settings.cancelEdit" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "settings.saveProvider" })).toHaveClass("bg-primary/10");
+    expect(screen.getByRole("button", { name: "settings.saveProvider" })).toBeEnabled();
     expect(screen.getByDisplayValue("OpenAI Official")).toBeInTheDocument();
     expect(screen.getAllByText("settings.apiKey").length).toBeGreaterThan(0);
     expect(screen.getAllByText("settings.endpoint").length).toBeGreaterThan(0);
@@ -147,11 +147,10 @@ describe("ModelSettingsPanel provider profiles", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Prompt Helper").length).toBeGreaterThan(0);
     });
-    expect(screen.getByText("settings.promptOptimizationUsageTitle")).toBeInTheDocument();
-    expect(screen.getByText("settings.promptOptimizationUsageHint")).toBeInTheDocument();
+    expect(screen.getByLabelText("settings.llm.formModel")).toHaveValue("gpt-4o");
     expect(screen.getByText("settings.llm.disabled")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "settings.llm.activate" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "settings.llm.saveConfig" })).toHaveClass("bg-accent/10");
+    expect(screen.getByRole("button", { name: "settings.llm.saveConfig" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "settings.llm.save" })).not.toBeInTheDocument();
   });
 

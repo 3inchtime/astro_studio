@@ -65,15 +65,16 @@ export default function ProjectNameDialog({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          transition={{ duration: 0.14 }}
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm"
           onClick={() => { if (!loading) onCancel(); }}
         >
           <motion.div
             ref={dialogRef}
-            initial={{ opacity: 0, y: 12, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             className="w-full max-w-sm rounded-[12px] border border-border-subtle bg-surface p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
             onClick={(event) => event.stopPropagation()}
             tabIndex={-1}
@@ -84,7 +85,7 @@ export default function ProjectNameDialog({
             <div className="flex items-start justify-between gap-3">
               <h2
                 id="project-name-dialog-title"
-                className="text-[15px] font-semibold tracking-tight text-foreground"
+                className="text-body-lg font-semibold tracking-tight text-foreground"
               >
                 {title}
               </h2>
@@ -100,7 +101,7 @@ export default function ProjectNameDialog({
             </div>
 
             <form onSubmit={handleSubmit} className="mt-5">
-              <label htmlFor="project-name-input" className="text-[12px] font-medium text-foreground/75">
+              <label htmlFor="project-name-input" className="text-xs font-medium text-foreground">
                 {label}
               </label>
               <input
@@ -117,14 +118,14 @@ export default function ProjectNameDialog({
                   }
                 }}
                 disabled={loading}
-                className="mt-2 h-10 w-full rounded-[10px] border border-border-subtle bg-background px-3 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted focus:border-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-2 h-10 w-full rounded-[10px] border border-border-subtle bg-background px-3 text-body-sm text-foreground outline-none transition-colors placeholder:text-muted focus:border-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
                 data-autofocus
               />
 
               {visibleError ? (
                 <div
                   role="alert"
-                  className="mt-3 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-[12px] text-error"
+                  className="mt-3 rounded-[10px] border border-error/15 bg-surface px-3 py-2 text-xs text-error"
                 >
                   {visibleError}
                 </div>
@@ -135,14 +136,14 @@ export default function ProjectNameDialog({
                   type="button"
                   onClick={onCancel}
                   disabled={loading}
-                  className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground/75 transition-colors hover:border-border hover:bg-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-[10px] border border-border-subtle px-4 py-2 text-body-sm font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {cancelLabel}
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="rounded-[10px] bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-[10px] bg-primary px-4 py-2 text-body-sm font-medium text-primary-foreground transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitLabel}
                 </button>

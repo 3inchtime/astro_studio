@@ -96,4 +96,13 @@ describe("useDialogFocus", () => {
     fireEvent.keyDown(document, { key: "Tab" });
     expect(screen.getByRole("dialog")).toHaveFocus();
   });
+  it("wraps focus to a closed disclosure summary and skips its hidden contents", () => {
+    render(<Dialog><button>Close</button><details><summary>Advanced</summary><button>Hidden advanced action</button></details></Dialog>);
+    const close = screen.getByRole("button", { name: "Close" });
+    close.focus(); fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByText("Advanced")).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(close).toHaveFocus();
+  });
+
 });

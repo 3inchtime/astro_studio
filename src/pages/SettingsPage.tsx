@@ -49,7 +49,6 @@ import {
   NEW_PROVIDER_NAME,
   defaultProviderProfilesStateForModel,
   providerForState,
-  removeProviderFromState,
   updateProviderInState,
 } from "../lib/modelProviderProfiles";
 
@@ -86,6 +85,17 @@ export default function SettingsPage() {
   const { checkForUpdates, updateSupported } = useLayoutContext();
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [saveSucceeded, setSaveSucceeded] = useState(false);
+  const [savedProviderState, setSavedProviderState] = useState(() =>
+    defaultProviderProfilesStateForModel(DEFAULT_MODEL),
+  );
+  const [savedImageModel, setSavedImageModel] = useState<ImageModel>(DEFAULT_MODEL);
+  const [savedTrashDays, setSavedTrashDays] = useState(30);
+  function clearSaveFeedback() {
+    setSaveError(false);
+    setSaveSucceeded(false);
+    retrySettingsRef.current = null;
+  }
   const retrySettingsRef = useRef<(() => Promise<void>) | null>(null);
   const settingsPendingRef = useRef(false);
   async function runSettingsAction(action: () => Promise<void>) {
@@ -93,8 +103,9 @@ export default function SettingsPage() {
     settingsPendingRef.current = true;
     setSavingSettings(true);
     setSaveError(false);
+    setSaveSucceeded(false);
     retrySettingsRef.current = action;
-    try { await action(); retrySettingsRef.current = null; }
+    try { await action(); retrySettingsRef.current = null; setSaveSucceeded(true); }
     catch { setSaveError(true); }
     finally { settingsPendingRef.current = false; setSavingSettings(false); }
   }
@@ -173,6 +184,7 @@ export default function SettingsPage() {
         }
 
         setImageModel(model);
+        setSavedImageModel(model);
       })
       .catch(() => {
         // Ignore persisted model load failures and keep catalog default.
@@ -202,6 +214,7 @@ export default function SettingsPage() {
     setShowKey(false);
     setProviderSaved(false);
     setProviderState(defaultState);
+    setSavedProviderState(defaultState);
     setSelectedProviderId(defaultState.active_provider_id);
 
     getModelProviderProfiles(modelAtLoadStart)
@@ -211,6 +224,7 @@ export default function SettingsPage() {
         }
 
         setProviderState(state);
+        setSavedProviderState(state);
         setSelectedProviderId(state.active_provider_id);
       })
       .catch(() => {
@@ -219,6 +233,7 @@ export default function SettingsPage() {
         }
 
         setProviderState(defaultState);
+        setSavedProviderState(defaultState);
         setSelectedProviderId(defaultState.active_provider_id);
       });
 
@@ -229,7 +244,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     getLogSettings().then(setLogSettings).catch(() => {});
-    getTrashSettings().then(setTrashSettings).catch(() => {});
+    getTrashSettings().then((settings) => { setTrashSettings(settings); setSavedTrashDays(settings.retention_days); }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -314,6 +329,7 @@ export default function SettingsPage() {
   function updateSelectedProvider(
     update: (profile: ModelProviderProfile) => ModelProviderProfile,
   ) {
+    clearSaveFeedback();
     setProviderState((currentState) => {
       if (!providerForState(currentState, selectedProviderId)) {
         return currentState;
@@ -336,6 +352,7 @@ export default function SettingsPage() {
     }
 
     setProviderState(nextState);
+    setSavedProviderState(nextState);
     setSelectedProviderId(
       providerForState(nextState, selectedProviderId)
         ? selectedProviderId
@@ -358,6 +375,7 @@ export default function SettingsPage() {
     }
 
     setProviderState(nextState);
+    setSavedProviderState(nextState);
     const existingProviderIds = new Set(
       stateAtCreateStart.profiles.map((profile) => profile.id),
     );
@@ -376,16 +394,6 @@ export default function SettingsPage() {
 
   async function handleDeleteProvider(providerId: string) {
     const modelAtDeleteStart = imageModel;
-    setProviderState((currentState) => {
-      const nextState = removeProviderFromState(currentState, providerId);
-      if (!providerForState(nextState, selectedProviderId)) {
-        setSelectedProviderId(nextState.active_provider_id);
-      }
-
-      return nextState;
-    });
-    setProviderSaved(false);
-
     const nextState = await deleteModelProviderProfile(
       modelAtDeleteStart,
       providerId,
@@ -395,6 +403,7 @@ export default function SettingsPage() {
     }
 
     setProviderState(nextState);
+    setSavedProviderState(nextState);
     setSelectedProviderId(
       providerForState(nextState, selectedProviderId)
         ? selectedProviderId
@@ -413,12 +422,14 @@ export default function SettingsPage() {
     }
 
     setProviderState(nextState);
+    setSavedProviderState(nextState);
     setSelectedProviderId(providerId);
     setProviderSaved(false);
   }
 
   async function handleSaveModel() {
     await saveImageModel(imageModel);
+    setSavedImageModel(imageModel);
     setModelSaved(true);
     setTimeout(() => setModelSaved(false), 2000);
   }
@@ -429,6 +440,8 @@ export default function SettingsPage() {
       const state = await getModelProviderProfiles(modelAtCancelStart);
       if (imageModelRef.current !== modelAtCancelStart) return;
       setProviderState(state);
+      setSavedProviderState(state);
+      clearSaveFeedback();
       setSelectedProviderId(state.active_provider_id);
     } catch {
       // keep current state on failure
@@ -437,6 +450,7 @@ export default function SettingsPage() {
   }
 
   function handleSelectImageModel(model: ImageModel) {
+    clearSaveFeedback();
     didUserSelectModelRef.current = true;
     setImageModel(model);
     setModelSaved(false);
@@ -468,6 +482,7 @@ export default function SettingsPage() {
 
   async function handleSaveTrashRetention() {
     await saveTrashSettings(trashSettings.retention_days);
+    setSavedTrashDays(trashSettings.retention_days);
     setTrashSaved(true);
     setTimeout(() => setTrashSaved(false), 2000);
   }
@@ -522,31 +537,32 @@ export default function SettingsPage() {
   }
 
   const totalPages = Math.ceil(totalLogs / pageSize);
-  const activeSection =
-    SETTINGS_TABS.find((section) => section.id === activeTab) ??
-    SETTINGS_TABS[0];
+  const hasUnsavedChanges = activeTab === "model"
+    ? imageModel !== savedImageModel || JSON.stringify(providerState) !== JSON.stringify(savedProviderState)
+    : activeTab === "general" && trashSettings.retention_days !== savedTrashDays;
 
   return (
     <MotionConfig reducedMotion="user">
     <div className="h-full min-w-0 overflow-y-auto bg-background">
-      <div className="mx-auto w-full max-w-[1200px] px-5 py-6">
-        <header className="mb-6 border-b border-border-subtle pb-5">
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">{t("settings.title")}</h2>
-          <p className="mt-1 text-sm text-muted">{t(activeSection.descriptionKey)}</p>
+      <div className="mx-auto w-full max-w-[1120px] px-6 py-6">
+        <header className="mb-6">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">{t("settings.title")}</h1>
         </header>
-        <div className="grid min-w-0 gap-6 md:grid-cols-[176px_minmax(0,1fr)]">
+        <div className="grid min-w-0 gap-8 md:grid-cols-[160px_minmax(0,1fr)]">
         <nav aria-label={t("settings.sections", { defaultValue: "Settings sections" })} className="flex flex-wrap content-start gap-1 md:flex-col">
           {SETTINGS_TABS.map(({ id, icon: Icon, labelKey }) => (
-            <button key={id} type="button" aria-label={t(labelKey)} aria-current={activeTab === id ? "page" : undefined} onClick={() => setActiveTab(id)} className={`focus-ring flex min-h-9 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${activeTab === id ? "bg-primary/10 text-primary" : "text-muted hover:bg-subtle hover:text-foreground"}`}>
+            <button key={id} type="button" aria-label={t(labelKey)} aria-current={activeTab === id ? "page" : undefined} onClick={() => setActiveTab(id)} className={`focus-ring flex min-h-9 items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors ${activeTab === id ? "border-border bg-surface text-foreground" : "border-transparent text-muted hover:bg-subtle hover:text-foreground"}`}>
               <Icon size={16} strokeWidth={1.8} /><span>{t(labelKey)}</span>
             </button>
           ))}
         </nav>
         <div className="min-w-0">
+          {!savingSettings && !saveError && hasUnsavedChanges ? <p className="mb-4 text-sm text-muted">{t("studio.settings.unsaved", { defaultValue: "Unsaved changes" })}</p> : null}
+          {!savingSettings && !saveError && !hasUnsavedChanges && saveSucceeded ? <p role="status" className="mb-4 text-sm text-success">{t("studio.settings.savedLocally", { defaultValue: "Changes saved." })}</p> : null}
           {savingSettings ? <p role="status" className="mb-4 rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-muted">{t("studio.settings.saving", { defaultValue: "Saving changes…" })}</p> : null}
-          {saveError ? <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-error/25 bg-error/5 px-3 py-2 text-sm text-error">
+          {saveError ? <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-error/25 bg-surface px-3 py-2 text-sm text-error">
             <span>{t("studio.settings.saveFailed", { defaultValue: "Could not save changes. Please try again." })}</span>
-            <button type="button" onClick={() => { if (retrySettingsRef.current) void runSettingsAction(retrySettingsRef.current); }} className="focus-ring h-9 shrink-0 rounded-lg px-3 font-medium hover:bg-error/10">{t("studio.settings.retry", { defaultValue: "Retry" })}</button>
+            <button type="button" onClick={() => { if (retrySettingsRef.current) void runSettingsAction(retrySettingsRef.current); }} className="focus-ring h-9 shrink-0 rounded-lg px-3 font-medium hover:bg-subtle">{t("studio.settings.retry", { defaultValue: "Retry" })}</button>
           </div> : null}
           <fieldset disabled={savingSettings} aria-busy={savingSettings} className="min-w-0 border-0 p-0">
           {activeTab === "general" ? (
@@ -562,7 +578,7 @@ export default function SettingsPage() {
               updateSupported={updateSupported === true}
               fontSizeLabelKeys={FONT_SIZE_LABEL_KEYS}
               onLanguageChange={handleLanguageChange}
-              onTrashSettingsChange={setTrashSettings}
+              onTrashSettingsChange={(settings) => { clearSaveFeedback(); setTrashSaved(false); setTrashSettings(settings); }}
               onSaveTrashRetention={() => void runSettingsAction(() => handleSaveTrashRetention())}
               onOpenTrash={() => navigate(ROUTES.trash)}
               onFontSizeChange={(nextSize) =>

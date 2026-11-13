@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  deleteGeneration,
   deletePromptFavorite,
   getFavoriteImages,
   getPromptFavorites,
@@ -19,7 +18,7 @@ import {
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { getPromptFolderDisplayName } from "../lib/promptFolders";
 import { cn, formatLocalDateTime } from "../lib/utils";
-import { useUIStore } from "../lib/store";
+import { useUIStore, type PreviewSource } from "../lib/store";
 import { useFolders } from "../hooks/useFolders";
 import { usePromptFolders } from "../hooks/usePromptFolders";
 import { useLayoutContext } from "../components/layout/AppLayout";
@@ -30,6 +29,10 @@ import ConfirmDialog from "../components/common/ConfirmDialog";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
+import CollectionSelectionButton from "../components/gallery/CollectionSelectionButton";
+import CollectionBatchActions from "../components/gallery/CollectionBatchActions";
+import GenerationDeleteDialog from "../components/gallery/GenerationDeleteDialog";
+import { useCollectionSelection } from "../components/gallery/useCollectionSelection";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import ViewModeToggle from "../components/gallery/ViewModeToggle";
 import Lightbox from "../components/lightbox/Lightbox";
@@ -50,6 +53,15 @@ export default function FavoritesPage() {
   const [activeKind, setActiveKind] = useState<FavoriteKind>("images");
 
   const [imageResults, setImageResults] = useState<GenerationResult[]>([]);
+  const displayedResults = useMemo(() => imageResults.filter((row) => row.images.length > 0), [imageResults]);
+  const selection = useCollectionSelection(displayedResults.map((row) => row.generation.id));
+  const [selectionMode, setSelectionMode] = useState(false);
+  const selecting = selectionMode || selection.selectedIds.size > 0;
+  function clearSelection() {
+    selection.clear();
+    setSelectionMode(false);
+  }
+  const [deleteImageTarget, setDeleteImageTarget] = useState<string | null>(null);
   const [imageQuery, setImageQuery] = useState("");
   const [selectedImageFolderId, setSelectedImageFolderId] = useState("");
   const [imageTotal, setImageTotal] = useState(0);
@@ -82,6 +94,7 @@ export default function FavoritesPage() {
   const [selectedPromptFolderId, setSelectedPromptFolderId] = useState("");
   const [promptFolderSelectorFavoriteId, setPromptFolderSelectorFavoriteId] =
     useState<string | null>(null);
+  const [promptCopyError, setPromptCopyError] = useState<string | null>(null);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const [deletePromptTarget, setDeletePromptTarget] = useState<string | null>(null);
   const [deletePromptBusy, setDeletePromptBusy] = useState(false);
@@ -108,7 +121,7 @@ export default function FavoritesPage() {
         if (requestId !== imageFavoritesRequestIdRef.current) return;
         setImageResults((current) =>
           mode === "append"
-            ? [...current, ...result.generations]
+            ? [...current, ...result.generations.filter((row) => !current.some((entry) => entry.generation.id === row.generation.id))]
             : result.generations,
         );
         setImageTotal(result.total);
@@ -156,6 +169,7 @@ export default function FavoritesPage() {
   }, []);
 
   function handleSearch() {
+    clearSelection();
     if (activeKind === "images") {
       loadImageFavorites(1, imageQuery, selectedImageFolderId).catch(() => {});
       return;
@@ -164,6 +178,7 @@ export default function FavoritesPage() {
   }
 
   function handleFolderFilterChange(folderId: string) {
+    clearSelection();
     if (activeKind === "images") {
       setSelectedImageFolderId(folderId);
       setSelectedImage(null);
@@ -175,9 +190,10 @@ export default function FavoritesPage() {
     loadPromptFavorites(promptQuery, folderId).catch(() => {});
   }
 
-  async function handleDeleteImage(id: string) {
-    await deleteGeneration(id);
-    await loadImageFavorites(imagePage, imageQuery, selectedImageFolderId);
+  function handleDeletedImage(id: string) {
+    setImageResults((current) => current.filter((row) => row.generation.id !== id));
+    setImageTotal((current) => Math.max(0, current - 1));
+    selection.remove([id]);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
       closeLightbox();
@@ -221,7 +237,10 @@ export default function FavoritesPage() {
   }
 
   async function handleCopyPrompt(favorite: PromptFavorite) {
-    await navigator.clipboard.writeText(favorite.prompt).catch(() => {});
+    setPromptCopyError(null);
+    setCopiedPromptId(null);
+    try { await navigator.clipboard.writeText(favorite.prompt); }
+    catch { setPromptCopyError(t("studio.copyFailed", { defaultValue: "Could not copy. Try again." })); return; }
     setCopiedPromptId(favorite.id);
     window.setTimeout(() => {
       setCopiedPromptId((current) =>
@@ -245,8 +264,8 @@ export default function FavoritesPage() {
   }
 
   const openResultLightbox = useCallback(
-    (result: GenerationResult, index: number) => {
-      openLightbox(generationResultToLightboxImages(result), index);
+    (result: GenerationResult, index: number, source?: PreviewSource) => {
+      openLightbox(generationResultToLightboxImages(result), index, source);
     },
     [openLightbox],
   );
@@ -257,14 +276,14 @@ export default function FavoritesPage() {
     activeKind === "images" ? selectedImageFolderId : selectedPromptFolderId;
   const activeFolders = activeKind === "images" ? folders : promptFolders;
   const activeQuery = activeKind === "images" ? imageQuery : promptQuery;
-  const hasMoreImages = imagePage * imagePageSize < imageTotal;
+  const hasMoreImages = imageResults.length < imageTotal;
   const loadMoreImagesRef = useInfiniteScroll({
-    enabled: activeKind === "images" && imageResults.length > 0 && !imageLoadError,
+    enabled: activeKind === "images" && imageResults.length > 0 && !imageLoadError && !lightbox,
     hasMore: hasMoreImages,
     isLoading: isLoadingImages,
     onLoadMore: () => {
       void loadImageFavorites(
-        imagePage + 1,
+        Math.min(imagePage + 1, Math.floor(imageResults.length / imagePageSize) + 1),
         appliedImageSearch.current.query,
         appliedImageSearch.current.folderId,
         "append",
@@ -281,7 +300,7 @@ export default function FavoritesPage() {
               {t("favorites.title")}
             </h2>
             {activeTotal > 0 && (
-              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium text-muted tabular-nums">
+              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-xs font-medium text-muted tabular-nums">
                 {activeTotal}
               </span>
             )}
@@ -289,7 +308,7 @@ export default function FavoritesPage() {
               <button
                 aria-pressed={activeKind === "images"}
                 onClick={() => { setSelectedImage(null); setActiveKind("images"); }}
-                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
+                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium transition-colors ${
                   activeKind === "images"
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -301,7 +320,7 @@ export default function FavoritesPage() {
               <button
                 aria-pressed={activeKind === "prompts"}
                 onClick={() => { setSelectedImage(null); setActiveKind("prompts"); }}
-                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
+                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium transition-colors ${
                   activeKind === "prompts"
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -314,6 +333,11 @@ export default function FavoritesPage() {
           </div>
 
           <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto">
+            {activeKind === "images" && <CollectionSelectionButton
+              active={selecting}
+              disabled={!displayedResults.length}
+              onClick={() => selecting ? clearSelection() : setSelectionMode(true)}
+            />}
             {activeKind === "images" && (
               <ViewModeToggle
                 value={imageViewMode}
@@ -326,7 +350,7 @@ export default function FavoritesPage() {
                 size={13}
                 className={cn(
                   "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 transition-colors",
-                  activeFolderId ? "text-primary/80" : "text-muted",
+                  activeFolderId ? "text-primary" : "text-muted",
                 )}
                 strokeWidth={2}
               />
@@ -336,7 +360,7 @@ export default function FavoritesPage() {
                   handleFolderFilterChange(event.target.value)
                 }
                 className={cn(
-                  "select-control studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-8 text-[12px] font-medium xl:w-44",
+                  "select-control studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-8 text-xs font-medium xl:w-44",
                   activeFolderId
                     ? "border-primary/20 bg-surface text-foreground shadow-[0_10px_24px_rgba(79,106,255,0.08)]"
                     : "border-border-subtle bg-subtle/55 text-muted hover:border-border hover:bg-surface/92 hover:text-foreground",
@@ -381,13 +405,19 @@ export default function FavoritesPage() {
                     ? t("favorites.search")
                     : t("favorites.searchPrompts")
                 }
-                className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted xl:w-52"
+                className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted xl:w-52"
               />
             </div>
           </div>
         </div>
 
+        {activeKind === "images" && <CollectionBatchActions selectionMode={selectionMode} rows={displayedResults} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={clearSelection} onSucceeded={(ids, kind) => {
+          selection.remove(ids);
+          if (kind === "delete") ids.forEach(handleDeletedImage);
+          else void reloadFolders();
+        }} />}
         <div className="flex-1 overflow-y-auto p-5">
+          {activeKind === "prompts" && promptCopyError && <p role="alert" className="mb-4 text-sm text-error">{promptCopyError}</p>}
           <CollectionStatus
             loading={activeKind === "images" ? isLoadingImages : isLoadingPrompts}
             error={activeKind === "images" ? imageLoadError : promptLoadError}
@@ -395,14 +425,17 @@ export default function FavoritesPage() {
           />
           {activeKind === "images" ? (
             <>
-              {imageResults.length === 0 ? (!isLoadingImages && !imageLoadError && (
+              {displayedResults.length === 0 ? (!isLoadingImages && !imageLoadError && (
                 <EmptyCollectionState
                   title={t("favorites.noImages")}
                   subtitle={t("favorites.emptyHint")}
                 />
               )) : (
                 <GenerationGrid
-                  results={imageResults}
+                  results={displayedResults}
+                  selectedIds={selection.selectedIds}
+                  selectionMode={selecting}
+                  onToggleSelection={selection.toggle}
                   viewMode={imageViewMode}
                   onSelect={setSelectedImage}
                   onPreview={openResultLightbox}
@@ -428,10 +461,10 @@ export default function FavoritesPage() {
             result={selectedImage}
             title={t("favorites.detail")}
             onClose={() => setSelectedImage(null)}
-            onDelete={(id) => void handleDeleteImage(id)}
+            onDelete={setDeleteImageTarget}
             onEditImage={handleEditImage}
-            onPreview={(imageIndex) =>
-              openResultLightbox(selectedImage, imageIndex)
+            onPreview={(imageIndex, source) =>
+              openResultLightbox(selectedImage, imageIndex, source)
             }
             onManageFolders={openFolderSelector}
           />
@@ -441,15 +474,17 @@ export default function FavoritesPage() {
       <AnimatePresence>
         {lightbox && (
           <Lightbox
+            source={lightbox.source}
             images={lightbox.images}
             initialIndex={lightbox.index}
             onClose={closeLightbox}
             onEditImage={handleEditLightboxImage}
-            onDelete={(id) => void handleDeleteImage(id)}
+            onDelete={setDeleteImageTarget}
           />
         )}
       </AnimatePresence>
 
+      {deleteImageTarget && <GenerationDeleteDialog generationId={deleteImageTarget} onClose={() => setDeleteImageTarget(null)} onDeleted={handleDeletedImage} />}
       {folderSelectorImageId && (
         <FolderSelector
           imageId={folderSelectorImageId}
@@ -507,19 +542,19 @@ function PromptFavoritesList({
     <div className="grid gap-3 xl:grid-cols-2">
       {favorites.map((favorite) => (
         <article key={favorite.id} className="studio-card rounded-[12px] p-5">
-          <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground/85">
+          <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
             {favorite.prompt}
           </p>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-[12px] text-muted">
+            <span className="min-w-0 truncate text-xs text-muted">
               {formatLocalDateTime(favorite.updated_at)}
             </span>
 
             <div className="flex shrink-0 items-center gap-1">
               <button
                 onClick={() => onCopy(favorite)}
-                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
+                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium hover:bg-subtle hover:text-foreground"
               >
                 <Copy size={13} />
                 {copiedPromptId === favorite.id
@@ -528,7 +563,7 @@ function PromptFavoritesList({
               </button>
               <button
                 onClick={() => onManageFolders(favorite.id)}
-                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
+                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium hover:bg-subtle hover:text-foreground"
               >
                 <Folder size={13} />
                 {t("favorites.manageFolders")}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Brush,
   Circle,
@@ -58,7 +58,7 @@ interface CanvasToolbarProps extends CanvasActionProps {
 }
 
 const TOOL_BUTTON_CLASS =
-  "studio-control focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground/75 transition-colors hover:bg-subtle disabled:opacity-30";
+  "focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-muted transition-colors duration-[var(--motion-feedback)] hover:bg-subtle hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 export default function CanvasToolbar(props: CanvasToolbarProps) {
   const { t } = useTranslation();
   const [actions, setActions] = useState(false);
@@ -94,9 +94,9 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
     </button>
   );
   return (
-    <div className="pointer-events-auto relative flex max-w-full flex-col items-center gap-2">
+    <div className="pointer-events-none absolute inset-0">
       {properties && (
-        <div className="flex max-w-full flex-wrap items-center justify-center gap-3 rounded-xl border border-border-subtle bg-surface/95 px-3 py-2 shadow-float">
+        <div className="pointer-events-auto absolute left-[76px] top-3 z-30 flex w-56 max-w-[calc(100%-88px)] flex-col items-stretch gap-3 rounded-xl bg-surface px-3 py-3 shadow-float">
           <label className="flex items-center gap-2 text-xs text-muted">
             {t("canvas.strokeWidth")}
             <input
@@ -168,9 +168,11 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           )}
         </div>
       )}
-      <div role="group" aria-label={t("studio.canvas.drawingTools", { defaultValue: "Drawing tools" })} className="flex max-w-full items-center gap-1 rounded-xl border border-border-subtle bg-surface/95 p-1.5 shadow-float backdrop-blur-xl">
-        <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+      <div role="toolbar" aria-orientation="vertical" aria-label={t("studio.canvas.drawingTools", { defaultValue: "Drawing tools" })} className="pointer-events-auto absolute left-3 top-3 flex max-h-[calc(100%-92px)] w-[52px] flex-col items-center gap-1 overflow-y-auto rounded-xl bg-surface p-1.5 shadow-[0_6px_20px_rgba(0,0,0,0.08)]">
+        <div className="flex flex-col items-center gap-0.5">
           {tools.map(([tool, Icon, shortcut]) => (
+            <Fragment key={tool}>
+            {tool === "rectangle" ? <span role="separator" className="my-1 h-px w-6 bg-border-subtle" /> : null}
             <button
               type="button"
               key={tool}
@@ -178,11 +180,13 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
               title={`${t(`canvas.tool.${tool}`)} · ${shortcut}`}
               aria-pressed={!props.frameEditing && props.activeTool === tool}
               onClick={() => props.onToolChange(tool)}
-              className={`${TOOL_BUTTON_CLASS} ${!props.frameEditing && props.activeTool === tool ? "bg-primary/12 text-primary" : ""}`}
+              className={`${TOOL_BUTTON_CLASS} aria-pressed:bg-primary/10 aria-pressed:text-primary`}
             >
               <Icon size={17} strokeWidth={1.7} />
             </button>
+            </Fragment>
           ))}
+          <span role="separator" className="my-1 h-px w-6 bg-border-subtle" />
           {props.onEditFrame && (
             <button
               type="button"
@@ -190,21 +194,21 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
               title={t("canvas.editFrame")}
               aria-pressed={props.frameEditing}
               onClick={props.onEditFrame}
-              className={`${TOOL_BUTTON_CLASS} ${props.frameEditing ? "bg-primary/12 text-primary" : ""}`}
+              className={`${TOOL_BUTTON_CLASS} aria-pressed:bg-primary/10 aria-pressed:text-primary`}
             >
               <Frame size={17} />
             </button>
           )}
           {button("canvas.importImage", props.onImportImage, ImagePlus)}
         </div>
-        <span className="mx-1 h-5 w-px shrink-0 bg-border-subtle" />
+        <span className="my-1 h-px w-6 shrink-0 bg-border-subtle" />
         <input
           aria-label={t("canvas.strokeColor")}
           title={t("canvas.strokeColor")}
           type="color"
           value={props.strokeColor}
           onChange={(e) => props.onColorChange(e.target.value)}
-          className="h-7 w-7 shrink-0 cursor-pointer border-0 bg-transparent p-0.5"
+          className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border-0 bg-transparent p-2"
         />
         <button
           type="button"
@@ -212,24 +216,22 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           title={t("canvas.properties")}
           aria-expanded={properties}
           onClick={() => setProperties(!properties)}
-          className={`${TOOL_BUTTON_CLASS} text-[12px] tabular-nums`}
+          className={`${TOOL_BUTTON_CLASS} text-xs tabular-nums`}
         >
           {props.strokeSize}px
         </button>
-        <div className="relative">
-          {button("canvas.actions", () => setActions(!actions), MoreHorizontal)}
-          {actions && (
-            <CanvasActionMenu
-              {...props}
-              hasSelection={props.selectedObjectCount > 0}
-              selectionCount={props.selectedObjectCount}
-              onClose={() => setActions(false)}
-              style={{ bottom: 48, right: 0 }}
-            />
-          )}
-        </div>
+        {button("canvas.actions", () => setActions(!actions), MoreHorizontal)}
       </div>
-      <div role="group" aria-label={t("studio.canvas.viewControls", { defaultValue: "History and view" })} className="flex items-center gap-0.5 rounded-xl border border-border-subtle bg-surface/90 px-1 py-0.5 shadow-card backdrop-blur-xl">
+      {actions && (
+        <CanvasActionMenu
+          {...props}
+          hasSelection={props.selectedObjectCount > 0}
+          selectionCount={props.selectedObjectCount}
+          onClose={() => setActions(false)}
+          style={{ bottom: 80, left: 76, pointerEvents: "auto" }}
+        />
+      )}
+      <div role="toolbar" aria-label={t("studio.canvas.viewControls", { defaultValue: "History and view" })} className="pointer-events-auto absolute bottom-3 left-1/2 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 rounded-xl bg-surface px-1.5 py-1 shadow-[0_4px_16px_rgba(0,0,0,0.08)]">
         {button("canvas.tool.undo", props.onUndo, Undo2, !props.canUndo)}
         {button("canvas.tool.redo", props.onRedo, Redo2, !props.canRedo)}
         <span className="mx-1 h-4 w-px bg-border-subtle" />
@@ -240,7 +242,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
             aria-label={t("canvas.zoomOptions")}
             aria-expanded={zoomMenu}
             onClick={() => setZoomMenu(!zoomMenu)}
-            className="focus-ring min-w-14 rounded-lg px-1 py-2 text-xs tabular-nums text-muted"
+            className="focus-ring inline-flex h-9 min-w-14 items-center justify-center rounded-lg px-1 text-xs tabular-nums text-muted"
           >
             {props.zoomPercent}%
           </button>
@@ -278,8 +280,18 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           )}
         </div>
         {button("canvas.tool.zoomIn", props.onZoomIn, Plus)}
-        {button("canvas.fitFrame", props.onFitFrame, Maximize2)}
-        <span className="mx-2 hidden text-[12px] text-muted sm:inline">
+        <span className="mx-1 h-4 w-px bg-border-subtle" />
+        <button
+          type="button"
+          aria-label={t("canvas.fitFrame")}
+          title={t("canvas.fitFrame")}
+          onClick={props.onFitFrame}
+          className="focus-ring inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg px-2 text-xs font-medium text-foreground transition-colors duration-[var(--motion-feedback)] hover:bg-subtle"
+        >
+          <Maximize2 size={15} strokeWidth={1.7} />
+          <span className="hidden min-[600px]:inline">{t("canvas.fitFrame")}</span>
+        </button>
+        <span className="mx-2 hidden shrink-0 whitespace-nowrap text-xs text-muted min-[1440px]:inline">
           {t("canvas.selectionCount", { count: props.selectedObjectCount })}
         </span>
       </div>

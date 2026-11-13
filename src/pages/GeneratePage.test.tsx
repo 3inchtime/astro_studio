@@ -1147,8 +1147,10 @@ describe("GeneratePage", () => {
       "[data-testid='generation-command-surface']",
     );
 
-    expect(toolbar).toHaveClass("studio-toolbar");
-    expect(commandSurface).toHaveClass("studio-panel-strong");
+    expect(document.getElementById("generation-parameters")).toContainElement(
+      toolbar,
+    );
+    expect(commandSurface).not.toContainElement(screen.getByLabelText("Model"));
     expect(promptInput).toHaveClass("studio-input");
   });
 
@@ -1167,7 +1169,9 @@ describe("GeneratePage", () => {
       .closest("[data-testid='generation-command-surface']");
 
     expect(toolbar).toHaveAttribute("data-variant", "parameter-rail");
-    expect(commandSurface).toHaveClass("rounded-xl");
+    expect(document.getElementById("generation-parameters")).toContainElement(
+      toolbar,
+    );
   });
 
   it("lets the generate surface stretch across the available main panel", async () => {
@@ -1182,7 +1186,7 @@ describe("GeneratePage", () => {
     });
     const feedSurface = screen
       .getByRole("button", { name: "Edit prompt" })
-      .closest(".space-y-7");
+      .closest("[data-testid='generation-feed']");
     const composerSurface = screen.getByPlaceholderText(
       "Describe the image you want to generate...",
     ).parentElement?.parentElement;
@@ -1204,7 +1208,7 @@ describe("GeneratePage", () => {
 
     const feedSurface = screen
       .getByRole("button", { name: "Edit prompt" })
-      .closest(".space-y-7");
+      .closest("[data-testid='generation-feed']");
     const scrollContainer = feedSurface?.parentElement;
 
     expect(scrollContainer).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
@@ -1382,5 +1386,54 @@ describe("GeneratePage", () => {
     expect(generateImage.mock.calls[0][0].advancedOptions).not.toHaveProperty(
       "svg",
     );
+  });
+  it("follows growing result content only while the user stays at the latest messages", async () => {
+    let resize!: () => void;
+    const observe = vi.fn();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = () => callback([], this as unknown as ResizeObserver);
+        }
+        observe = observe;
+        disconnect = vi.fn();
+      },
+    );
+    try {
+      render(<GeneratePage />, { wrapper: TestWrapper });
+      await screen.findByRole("button", { name: "Edit prompt" });
+      const content = screen.getByTestId("generation-feed");
+      const scroll = content.parentElement!;
+      let height = 900;
+      Object.defineProperties(scroll, {
+        clientHeight: { configurable: true, value: 300 },
+        scrollHeight: { configurable: true, get: () => height },
+      });
+      scroll.scrollTop = 600;
+      fireEvent.scroll(scroll);
+      await act(async () => {
+        height = 1200;
+        resize();
+      });
+      expect(scroll.scrollTop).toBe(1200);
+      scroll.scrollTop = 900;
+      fireEvent.scroll(scroll);
+      await act(async () => {
+        height = 1500;
+        resize();
+      });
+      expect(scroll.scrollTop).toBe(1500);
+      expect(observe).toHaveBeenCalledWith(content);
+      scroll.scrollTop = 100;
+      fireEvent.scroll(scroll);
+      await act(async () => {
+        height = 1800;
+        resize();
+      });
+      expect(scroll.scrollTop).toBe(100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -108,12 +108,12 @@ describe("MessageBubble", () => {
       screen
         .getByText("A cinematic portrait of a fox astronaut")
         .closest("[data-message-role='user']"),
-    ).toHaveClass("justify-end");
+    ).toHaveClass("justify-start");
     expect(
       screen
         .getByText("A cinematic portrait of a fox astronaut")
         .closest("div"),
-    ).toHaveClass("rounded-xl", "bg-surface");
+    ).toHaveClass("bg-transparent");
   });
 
   it("shows a retry button for failed messages with retry data", () => {
@@ -158,7 +158,7 @@ describe("MessageBubble", () => {
     );
   });
 
-  it("uses a less-rounded container for assistant image bubbles", () => {
+  it("leaves individual image rounding to the image grid", () => {
     const message: Message = {
       id: "assistant-2",
       role: "assistant",
@@ -184,9 +184,9 @@ describe("MessageBubble", () => {
         .closest("[data-message-role='assistant']"),
     ).toHaveClass("justify-start");
     expect(screen.getByTestId("image-grid").parentElement).toHaveClass(
-      "rounded-xl",
-      "border-border-subtle",
+      "bg-canvas",
     );
+    expect(screen.getByTestId("image-grid").parentElement).not.toHaveClass("overflow-hidden");
   });
 
   it("renders accept controls for ready prompt agent drafts", () => {

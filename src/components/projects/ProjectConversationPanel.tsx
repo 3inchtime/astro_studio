@@ -133,16 +133,16 @@ export default function ProjectConversationPanel({
       <div className="shrink-0 px-5 pt-6 pb-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-[14px] font-semibold text-foreground tracking-tight">
+            <h2 className="text-sm font-semibold text-foreground tracking-tight">
               {t("projects.conversations")}
             </h2>
-            <p className="mt-0.5 text-[12px] text-muted">
+            <p className="mt-0.5 text-xs text-muted">
               {t("projects.conversationCount")} · {conversations.length}
             </p>
           </div>
           <button
             onClick={handleCreate}
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-primary/8 text-primary transition-all hover:bg-primary/14 hover:scale-105 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-surface text-primary transition-colors duration-[140ms] hover:bg-subtle"
             aria-label={t("projects.newConversation")}
             title={t("projects.newConversation")}
           >
@@ -161,18 +161,18 @@ export default function ProjectConversationPanel({
                 strokeWidth={1.6}
               />
             </div>
-            <p className="text-[12px] text-muted leading-relaxed">
+            <p className="text-xs text-muted leading-relaxed">
               {t("projects.emptyConversations")}
             </p>
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {sortedConversations.map((conv, i) => (
+            {sortedConversations.map((conv) => (
               <motion.div
                 key={conv.id}
-                initial={{ opacity: 0, y: 4 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.02, duration: 0.2 }}
+                transition={{ duration: 0.14 }}
                 className="group relative"
               >
                 <button
@@ -190,7 +190,7 @@ export default function ProjectConversationPanel({
                         loading="lazy"
                       />
                     ) : (
-                      <ImageIcon size={15} className="text-muted/25" />
+                      <ImageIcon size={15} className="text-muted" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -198,18 +198,18 @@ export default function ProjectConversationPanel({
                       {conv.pinned_at && (
                         <Pin size={9} className="shrink-0 text-primary" />
                       )}
-                      <p className="truncate text-[14px] font-medium text-foreground/85 group-hover:text-foreground transition-colors">
+                      <p className="truncate text-sm font-medium text-foreground group-hover:text-foreground transition-colors">
                         {conv.title}
                       </p>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
-                      <span className="text-[12px] text-muted">
+                      <span className="text-xs text-muted">
                         {formatConversationTime(
                           conv.latest_generation_at ?? conv.updated_at,
                         )}
                       </span>
                       {conv.generation_count > 0 && (
-                        <span className="rounded-[4px] bg-primary/6 px-1.5 py-px text-[12px] font-medium text-primary/70">
+                        <span className="rounded-[4px] bg-surface px-1.5 py-px text-xs font-medium text-primary">
                           {conv.generation_count}
                         </span>
                       )}
@@ -235,14 +235,14 @@ export default function ProjectConversationPanel({
                         setOpenMenuId(null);
                         setRenameTarget(conv);
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground hover:bg-subtle hover:text-foreground transition-colors"
                     >
                       <Pencil size={13} />
                       <span>{t("sidebar.rename")}</span>
                     </button>
                     <button
                       onClick={() => handlePin(conv)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground hover:bg-subtle hover:text-foreground transition-colors"
                     >
                       {conv.pinned_at ? (
                         <PinOff size={13} />
@@ -258,7 +258,7 @@ export default function ProjectConversationPanel({
                         setOpenMenuId(null);
                         setDeleteTarget(conv);
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error hover:bg-error/8 transition-colors"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error hover:bg-surface transition-colors"
                     >
                       <Trash2 size={13} />
                       <span>{t("sidebar.delete")}</span>

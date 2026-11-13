@@ -1,53 +1,84 @@
-# Astro Studio 前端重构验收记录
+# Astro Studio 工作台深化重构验收记录
 
-日期：2026-11-08。实现源于 `codex/studio-ui-refresh`，纳入 `v0.0.32` 发布。
+日期：2026-11-13。基线：`68d6e0f` / `v0.0.32`；实现分支：`feat/studio-workbench-v2`。实现阶段未升级版本；后续按用户授权合并main并发布v0.0.33。
 
-## 已落地
+## 实现内容
 
-- 统一工作台导航、可折叠/键盘调宽侧栏、排版、表单、按钮、提示和主题语义色；保留 12 个主题 ID 与 8 种语言。
-- 重排生成编辑器：参考图、输入区和操作区分开；常用参数直接可见；高级参数折叠；Enter 换行，Cmd/Ctrl+Enter 发送，并处理输入法组合态。
-- 优化生成记录、图片操作、提示词提取、项目及项目详情、画廊、收藏、回收站、画布和设置。
-- 统一加载、失败重试、空结果、保存中反馈；失败保留输入；拦截重复操作；防止过期请求覆盖当前页面状态。
-- 抽屉、图片预览、文件夹选择、确认框、主题和日期选择器改善焦点进入、Tab、Escape 和关闭后的焦点恢复。嵌套弹窗仅关闭顶层。
-- 画布在窄窗口使用文档/属性抽屉，打开抽屉时暂停画布快捷键；集合详情在窄窗口使用抽屉。
+- 生成页采用中央会话结果、底部提示词与参考图、右侧参数面板；参数保持挂载，跨断点保留草稿及高级设置状态。提交区内部滚动，操作行始终可达。
+- 会话／文档面板在1440px起停靠，生成参数／画布检查器在1200px起停靠；抽屉互斥、管理焦点，Escape恢复触发点。
+- 图库／图片收藏按已加载生成记录批量选择，收藏逐图片记录成功检查点，删除确认整条生成记录的影响范围；部分失败仅重试失败项。预览保留列表、筛选、滚动与选择。
+- 预览支持图片ID与来源位置过渡，原图加载前保留缩略图；复制、保存、嵌套文件夹及图片切换保持各自反馈。
+- 画布右侧改为持续挂载的属性／图层／生成标签页，绘图工具与视图操作分离，保持文档、历史、视口、快捷键、保存和恢复逻辑。
+- 项目突出封面、最近活动及会话入口；设置采用扁平分组与待保存／保存中／成功／失败状态，本地字段校验不声称测试连接。
+- 八种语言补齐新文案并同步文档语言；改用语义字号变量，最小辅助文字12px。画布与预览背景在所有主题保持中性。
+- 自主深化：图库瀑布流填满可用列，批量选择按需出现；生成页压缩记录层级，结果高度随可用区域调整，保持底部跟随并尊重历史浏览位置；画布收敛边框，设置和项目页统一标题与分组。
+- 收藏改为可命名、可聚焦的真实按钮；排除不可见无图记录的全选；窄参数面板按容器宽度排版，折叠高级设置的隐藏字段不进入焦点循环。
 
-设计依据见 [DESIGN.md](DESIGN.md)，产品边界见 [PRODUCT.md](PRODUCT.md)。生产 IPC、路由地址、数据库结构和生成业务协议保持兼容。
+生产Rust代码、IPC、路由、数据库及持久化数据格式、运行时依赖均未改动。设计约束见 [DESIGN.md](DESIGN.md)。
 
-## Skills
-
-项目内安装并应用了 [Impeccable](.agents/skills/impeccable/SKILL.md)、[UI UX Pro Max](.agents/skills/ui-ux-pro-max/SKILL.md)、[Web Design Guidelines](.agents/skills/web-design-guidelines/SKILL.md)，结合现有 frontend-design。固定来源版本记录在 DESIGN.md。
-
-## 验证结果
+## 自动化与浏览器检查
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm test` | 73 个文件、529 项测试通过 |
-| `npm run build` | TypeScript 和 Vite 生产构建通过 |
-| `git diff --check` | 通过 |
-| 10 个路由 × 900×600 / 1200×800 / 1440×900 | 30 组均无页面/主内容横向溢出，无可见未命名表单控件，无浏览器运行异常 |
-| 12 套主题 | 切换及主题存储状态检查通过；基础文字和控件边框对比度有自动测试 |
-| 8 种语言 + 大字号 | 设置页均无横向溢出；语言键与插值完整性测试通过 |
-| 10 个路由暗色模式 | 已截图检查 |
-| 展开状态 | 设置分区、主题弹层、集合详情、嵌套文件夹、图片预览、侧栏、画布属性和日期选择已实测 |
-| Impeccable 静态扫描 | 无主要问题；提示的废弃 loading 动画已连同未使用样式移除 |
+| 完整Vitest | 585项通过，82个文件 |
+| TypeScript / Vite | 生产构建通过；入口仍有500kB阈值提示，未提高阈值掩盖 |
+| Impeccable静态检测 | `[]`，无发现 |
+| 10路由 × 900×600 / 1200×800 / 1440×900 | 30组无页面或主区域横向溢出，无运行异常 |
+| 设置／项目页：12主题 × 8语言 × 3状态 | 288组检查通过；大字号下无低于12px文字、未命名控件或遮挡 |
+| 生成／图库／画布：12主题 × 8语言 | 288组、576个状态检查通过；192次提交可达性检查通过 |
+| 参数抽屉与会话抽屉 | 草稿保留、Escape返回焦点、同时仅一个模态抽屉 |
+| 图库批量操作与预览 | 关闭预览后选择保留；局部失败检查点及翻页边界由交互测试覆盖 |
+| 最新核心页大字号矩阵 | 8语言 × 浅／深色 × 生成／图库／画布，共48组；德语导航截断修复后6组复查通过 |
+| 最新高级参数抽屉 | 16组实际展开检查，176个字段可滚动到达、192次Tab均在面板内，反向Tab正确停在折叠summary |
+| 最新设置对比度 | 12主题 × 4状态，共48组；最小普通文字对比度4.502:1，禁用项除外 |
 
-回归测试覆盖 IME 发送、弹窗忙碌状态、焦点循环、嵌套 Escape、失败保留草稿、局部保存重试、过期请求隔离、已应用筛选的分页、复制失败与图片切换后的异步反馈隔离等行为。
+浏览器使用独立IPC模拟数据和本仓库已有文档截图的裁剪图作为测试作品（仅验收使用，不进入产品资产），不调用收费接口、不访问用户项目。普通文字语义色自动验证4.5:1，控件边框3:1；深色主题活动导航实测示例为5.04:1。
 
-## 本地截图和日志
+## 性能比较
 
-[浏览截图索引](output/playwright/index.html)。该目录是本地验收产物，已由仓库原有规则忽略，不进入生产包。
+相同设备、相同Chromium、相同数据集，实际滚动或拖拽期间采集`requestAnimationFrame`帧间隔；每场景运行三次，取p95中位数，无CPU／网络节流。
 
-- [生成工作台](output/playwright/generate-1440.png) · [900px 生成页](output/playwright/generate-900.png)
-- [画布](output/playwright/canvas-1440.png) · [窄窗口属性抽屉](output/playwright/canvas-inspector-900.png)
-- [项目概览](output/playwright/projects-qa-project-1200.png) · [画廊详情](output/playwright/gallery-detail-900.png)
-- [嵌套文件夹弹窗](output/playwright/gallery-folder-nested-900.png) · [模型设置](output/playwright/settings-model-900.png)
-- [测试输出](output/playwright/vitest.log) · [构建输出](output/playwright/build.log)
-- [页面检查数据](output/playwright/browser-metrics.txt) · [主题/语言检查数据](output/playwright/theme-locale-metrics.txt)
+| 场景 | 改造前 | 改造后 | 变化 |
+| --- | --- | --- | --- |
+| 1000条生成记录图库滚动 | 17.30ms | 17.40ms | +0.58% |
+| 200对象画布拖拽 | 17.40ms | 18.20ms | +4.60% |
 
-浏览器使用独立的 [IPC 演示数据脚本](output/playwright/browser-fixture.js)，未调用收费生成接口、未更改真实项目数据。图片占位来自仓库现有文档截图。可在 Vite 本地服务器运行时通过 Playwright CLI 的 `run-code` 注入该脚本，再运行 [页面检查脚本](output/playwright/review-pages.js)。
+最新生产构建的三次测量结果如上，覆盖本轮瀑布流与画布修改；两项均通过不劣化超过15%的约定门槛。图库首轮出现2个超过33.4ms的长帧（最大100ms），另两轮及画布三轮无此类长帧，原始采样已保留。数据仅说明该浏览器场景下的回归情况，不代替真实作品和原生WebView性能验收。
 
-## 验证边界
+## 原生平台验证边界
 
-本轮完成前端构建、组件/交互回归和 Chromium 浏览器实测。未完成 Windows/macOS 原生安装包内的 WKWebView/WebView2、系统文件对话框、剪贴板、窗口材质和真实供应商生成联调；这些仍需在对应平台发布前验收。
+macOS已使用独立QA身份与数据库启动真实WKWebView，未读取或复制用户数据库／密钥。忽略目录中的QA源副本仅改动数据库／配置目录、应用身份、标题与窗口尺寸；生产后端未改动。
 
-Vite 仍提示入口压缩后约 537 kB 超过默认 500 kB 阈值。构建成功；本轮未通过提高阈值掩盖提示，也未引入运行时依赖。
+已验证900×600原生窗口渲染、Enter换行、参数抽屉Tab／Escape与焦点恢复、草稿保留，以及Cmd+Enter触发无供应商配置的真实本地失败状态。隔离数据库确认任务为`provider_configuration_invalid`终态，配置表无密钥；画布创建通过真实IPC完成，文档JSON已写入QA目录。
+
+用户解锁后已继续完成真实原生功能检查：矩形绘制、描边6→9、自动保存和文档重开；非法设置拦截与空密钥本地配置保存；失败任务恢复与重试入口；原生图片加载、缩放、平移和方向键切图；收藏与嵌套弹窗；剪贴板成功反馈；系统保存面板导出的PNG与源图SHA256一致。所有数据均在隔离QA目录，未调用收费生成接口。
+
+最新视觉深化后的定向原生复查在首次取应用时再次遇到系统锁屏，未取得新版原生观察结果；未绕过锁屏，按用户“不提问”要求未再次询问。已正常关闭QA程序，生产调试产物已恢复。此前原生功能通过不等同于最新视觉修改的原生验收；Windows WebView2环境不可用，真实供应商生成未测试。两平台原生整轮验收仍未完成。
+
+## 独立复核
+
+视觉深化前采用独立视觉评审与证据检查，初评26/40，重点指出图库留白、常驻选择装饰、画布边框、生成层级和设置主次。修正后独立最终复核为`ship`：代表性三尺寸页面与实际源码协调、安静，未发现需要继续修改的实质问题。最后四文件的容器排版、导航与焦点修正也单独复核为`ship`。该结论限于浏览器呈现与所审代码，不代替全部原生验收。
+
+测试包含新旧图加载隔离、保存错误重试、批量部分失败、输入法发送、跨断点草稿、生成结果跟随滚动、收藏键盘操作和折叠内容焦点循环；后两项焦点／滚动回归均先复现失败再验证修正。
+
+## 本地证据
+
+最新验收产物位于忽略目录 [output/playwright/v3](output/playwright/v3/)，不进入生产包。早期全矩阵与真实原生数据保留在v2，最新视觉截图以v3为准。
+
+- [生成1440px](output/playwright/v3/final/generate-1440.png) · [高级参数900px](output/playwright/v3/final/parameters-readable-900.png)
+- [图库](output/playwright/v3/final/gallery-1440.png) · [批量选择](output/playwright/v3/final/gallery-selected-900.png) · [收藏键盘焦点](output/playwright/v3/final/preview-favorite-focus-900.png)
+- [画布适配视图](output/playwright/v3/final/canvas-fitted-1200.png) · [画布保存视口](output/playwright/v3/final/canvas-1200.png)
+- [设置](output/playwright/v3/final/settings-1440.png) · [项目](output/playwright/v3/final/projects-1440.png)
+- [测试](output/playwright/v3/vitest.log) · [构建](output/playwright/v3/build.log) · [最新矩阵](output/playwright/v3/final/matrix-report.md) · [设置检查](output/playwright/v3/secondary/summary.json)
+- [性能数据](output/playwright/v3/performance-comparison.json) · [视觉评审](output/playwright/v3/critique.md)
+- [原生功能检查](output/playwright/v2/native-verification.json) · [最新原生复查边界](output/playwright/v3/native-targeted-recheck.json) · [QA隔离说明](output/playwright/v2/native-harness.json)
+
+上一轮2026-11-08的v0.0.32验收记录可从基线提交查看。
+
+## 纯图标导航调整
+
+按用户最新偏好去掉侧栏可见文字，保留本地化title与aria-label。主导航按钮统一44×44px，组内间距4px，创作与资源仅保留一处分隔；底部工具同步44px。900×600与1440×900实际浏览器检查无侧栏文字、无横向溢出，导航可访问名称完整。AppLayout的14项测试及生产构建通过。最新截图：[生成页](output/playwright/v3/icon-nav/generate-1440.png)、[窄窗口](output/playwright/v3/icon-nav/generate-900.png)。本次覆盖此前截图中的带文字导航。
+
+## 生成图片圆角修正
+
+圆角原先作用于图片与操作栏的共同外框，导致图片上角圆、下角直。现改由图片及预览按钮各自使用8px圆角，操作栏和会话布局不参与裁切。直角SVG测试图的浏览器前后对比确认四角均8px，图片矩形尺寸不变；旧验收裁图自带的左上圆弧属于素材内容。证据见[修正后](output/playwright/v3/image-radius/after.png)与[尺寸记录](output/playwright/v3/image-radius/after.log)。

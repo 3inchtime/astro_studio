@@ -21,6 +21,7 @@ const deleteProject = vi.fn();
 const setActiveConversationId = vi.fn();
 const setActiveProjectId = vi.fn();
 const navigate = vi.fn();
+const toggleContextSidebar = vi.fn();
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -58,6 +59,9 @@ vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({
     setActiveConversationId,
     setActiveProjectId,
+    toggleContextSidebar,
+    contextSidebarCollapsed: true,
+    activeWorkspaceDrawer: null,
   }),
 }));
 
@@ -137,6 +141,18 @@ describe("ProjectHomePage", () => {
 
   afterEach(() => {
     promptSpy.mockRestore();
+  });
+
+  it("opens project navigation from beside the project title", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    const toggle = await screen.findByRole("button", { name: "studio.openSidebar" });
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-sidebar");
+    fireEvent.click(toggle);
+    expect(toggleContextSidebar).toHaveBeenCalledTimes(1);
   });
 
   it("offers a direct way to continue creating inside the project", async () => {
@@ -262,6 +278,30 @@ describe("ProjectHomePage", () => {
     expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
   });
 
+  it("opens a recent conversation from the overview", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Homepage hero direction/ }));
+    expect(getConversations).toHaveBeenCalledWith(undefined, "project-1", false);
+    expect(navigate).toHaveBeenLastCalledWith(ROUTES.projectChat("project-1", "conversation-1"));
+  });
+
+  it("retries recent conversations independently after a load failure", async () => {
+    getConversations.mockRejectedValueOnce(new Error("Offline"));
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("studio.project.conversationsFailed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "studio.project.retryConversations" }));
+    expect(await screen.findByRole("button", { name: /Homepage hero direction/ })).toBeInTheDocument();
+    expect(searchGenerations).toHaveBeenCalledTimes(1);
+  });
+
   it("does not render a duplicate back button inside the project content header", async () => {
     render(
       <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
@@ -275,6 +315,22 @@ describe("ProjectHomePage", () => {
     expect(
       screen.queryByRole("button", { name: "projects.backToList" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("dismisses project management with Escape and restores trigger focus", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Brand Storyboards");
+    const trigger = screen.getByRole("button", { name: "projects.manage" });
+    fireEvent.click(trigger);
+    const rename = screen.getByRole("button", { name: "sidebar.rename" });
+    rename.focus();
+    fireEvent.keyDown(rename, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "sidebar.rename" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it("opens the rename dialog with the current project name", async () => {

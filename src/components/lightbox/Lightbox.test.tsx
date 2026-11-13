@@ -211,6 +211,25 @@ describe("Lightbox", () => {
     });
   });
 
+  it("retains a thumbnail until the full image has loaded", () => {
+    const onClose = vi.fn();
+    render(
+      <Lightbox
+        images={[{ ...images[0], thumbnailPath: "/tmp/thumb.png" }]}
+        initialIndex={0}
+        onClose={onClose}
+      />,
+    );
+    const full = screen.getByAltText("Preview");
+    expect(screen.getByTestId("preview-thumbnail")).toBeInTheDocument();
+    expect(full).toHaveStyle({ opacity: "0" });
+    fireEvent.click(screen.getByTestId("preview-thumbnail"));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.load(full);
+    expect(full).toHaveStyle({ opacity: "1" });
+    expect(screen.queryByTestId("preview-thumbnail")).not.toBeInTheDocument();
+  });
+
   it("keeps the full-resolution source for the lightbox image", () => {
     render(
       <Lightbox
@@ -256,5 +275,28 @@ describe("Lightbox", () => {
 
     fireEvent.click(screen.getByTestId("image-preview-viewport"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it("ignores outgoing image load and error callbacks after the next image is ready", () => {
+    render(
+      <Lightbox
+        images={images.map((image) => ({
+          ...image,
+          thumbnailPath: image.path + ".thumb",
+        }))}
+        initialIndex={0}
+        onClose={vi.fn()}
+      />,
+    );
+    const outgoing = screen.getByAltText("Preview");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+    const current = screen
+      .getAllByAltText("Preview")
+      .find((image) => image.getAttribute("src") === images[1].path)!;
+    fireEvent.load(current);
+    expect(current).toHaveStyle({ opacity: "1" });
+    fireEvent.load(outgoing);
+    expect(current).toHaveStyle({ opacity: "1" });
+    fireEvent.error(outgoing);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

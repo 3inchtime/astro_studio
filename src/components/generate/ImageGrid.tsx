@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   toAssetUrl,
   copyImageToClipboard,
@@ -17,6 +17,7 @@ interface ImageItem {
 }
 
 interface ImageGridProps {
+  maxImageHeight?: number;
   images: ImageItem[];
   onImageClick: (images: ImageItem[], index: number) => void;
   onDelete?: (generationId: string) => void;
@@ -43,7 +44,7 @@ function ImagePreview({
     <img
       src={toAssetUrl(src)}
       alt="Generated"
-      className={`block h-full ${
+      className={`block h-full rounded-lg ${
         isMultiImage
           ? "w-full object-contain"
           : "w-auto max-w-full object-contain object-center"
@@ -58,7 +59,120 @@ function ImagePreview({
   );
 }
 
+function ImageActions({
+  img,
+  onDelete,
+  onEditImage,
+  onFavoriteClick,
+}: { img: ImageItem } & Pick<
+  ImageGridProps,
+  "onDelete" | "onEditImage" | "onFavoriteClick"
+>) {
+  const { t } = useTranslation();
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  async function perform(kind: "copy" | "save") {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      await (kind === "copy"
+        ? copyImageToClipboard(img.path)
+        : saveImageToFile(img.path));
+      setCopied(kind === "copy");
+    } catch {
+      setError(
+        t(kind === "copy" ? "studio.copyFailed" : "studio.saveImageFailed"),
+      );
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <div className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-1 border-t border-border-subtle px-2 py-1.5">
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            void perform("copy");
+          }}
+          disabled={busy}
+          aria-busy={busy}
+          aria-label={t("lightbox.copy")}
+          title={t("lightbox.copy")}
+          className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+        >
+          <Copy size={16} />
+        </button>
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            void perform("save");
+          }}
+          disabled={busy}
+          aria-busy={busy}
+          aria-label={t("lightbox.download")}
+          title={t("lightbox.download")}
+          className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+        >
+          <Download size={16} />
+        </button>
+        {onEditImage && (
+          <button
+            onClick={(event) => {
+              event.stopPropagation();
+              onEditImage(img);
+            }}
+            aria-label={t("lightbox.edit")}
+            title={t("lightbox.edit")}
+            className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+          >
+            <Wand2 size={16} />
+          </button>
+        )}
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete?.(img.generationId);
+          }}
+          aria-label={t("lightbox.delete")}
+          title={t("lightbox.delete")}
+          className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
+        >
+          <Trash2 size={16} />
+        </button>
+        <div className="w-px h-5 bg-border mx-1" />
+        <div onClick={(event) => event.stopPropagation()}>
+          <FavoriteButton
+            imageId={img.imageId}
+            size={16}
+            openSelector={
+              onFavoriteClick ? () => onFavoriteClick(img.imageId) : undefined
+            }
+          />
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="px-3 pb-2 text-xs text-error">
+          {error}
+        </p>
+      )}
+      {copied && (
+        <p role="status" className="px-3 pb-2 text-xs text-muted">
+          {t("studio.copied")}
+        </p>
+      )}
+    </>
+  );
+}
+
 export default function ImageGrid({
+  maxImageHeight,
   images,
   onImageClick,
   onDelete,
@@ -72,9 +186,9 @@ export default function ImageGrid({
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
+      initial={{ opacity: 0 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       className={
         isMultiImage
           ? "grid grid-cols-2 gap-3"
@@ -83,82 +197,34 @@ export default function ImageGrid({
     >
       {images.map((img, i) => (
         <div key={img.path} className={isMultiImage ? "min-w-0" : "w-fit"}>
-          <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
+          <div className="bg-canvas">
             <button
               type="button"
               aria-label={t("studio.openImage", {
                 defaultValue: "Open image {{number}}",
                 number: i + 1,
               })}
+              style={
+                !isMultiImage && maxImageHeight
+                  ? { height: `${maxImageHeight}px` }
+                  : undefined
+              }
+              data-preview-image-id={img.imageId}
               onClick={() => onImageClick(images, i)}
-              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden bg-background ${
+              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden rounded-lg bg-canvas ${
                 isMultiImage
                   ? "h-60 w-full"
-                  : "inline-block h-72 w-fit max-w-[min(76vw,36rem)]"
+                  : "inline-block h-[min(52cqh,520px)] w-fit max-w-full"
               }`}
             >
               <ImagePreview image={img} isMultiImage={isMultiImage} />
             </button>
-            <div className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-1 border-t border-border-subtle px-2 py-1.5">
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void copyImageToClipboard(img.path);
-                }}
-                aria-label={t("lightbox.copy")}
-                title={t("lightbox.copy")}
-                className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
-              >
-                <Copy size={16} />
-              </button>
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void saveImageToFile(img.path);
-                }}
-                aria-label={t("lightbox.download")}
-                title={t("lightbox.download")}
-                className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
-              >
-                <Download size={16} />
-              </button>
-              {onEditImage && (
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onEditImage(img);
-                  }}
-                  aria-label={t("lightbox.edit")}
-                  title={t("lightbox.edit")}
-                  className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
-                >
-                  <Wand2 size={16} />
-                </button>
-              )}
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete?.(img.generationId);
-                }}
-                aria-label={t("lightbox.delete")}
-                title={t("lightbox.delete")}
-                className="focus-ring p-2 rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground"
-              >
-                <Trash2 size={16} />
-              </button>
-              <div className="w-px h-5 bg-border mx-1" />
-              <div onClick={(event) => event.stopPropagation()}>
-                <FavoriteButton
-                  imageId={img.imageId}
-                  size={16}
-                  openSelector={
-                    onFavoriteClick
-                      ? () => onFavoriteClick(img.imageId)
-                      : undefined
-                  }
-                />
-              </div>
-            </div>
+            <ImageActions
+              img={img}
+              onDelete={onDelete}
+              onEditImage={onEditImage}
+              onFavoriteClick={onFavoriteClick}
+            />
           </div>
         </div>
       ))}

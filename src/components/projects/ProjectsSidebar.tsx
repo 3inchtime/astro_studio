@@ -52,7 +52,7 @@ export default function ProjectsSidebar({
     <div className="flex h-full flex-col">
       <div className="border-b border-border-subtle px-4 py-4">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <FolderKanban size={13} strokeWidth={1.8} />
             <span>{t("projects.directory")}</span>
           </div>
@@ -77,7 +77,7 @@ export default function ProjectsSidebar({
           onClick={() => onSelectProject(null)}
           className={`mb-1 flex w-full items-center gap-2 rounded-[8px] px-3 py-2 text-left text-sm transition-colors ${
             activeProjectId === null
-              ? "bg-primary/10 text-primary"
+              ? "bg-surface font-medium text-foreground"
               : "text-muted hover:bg-subtle hover:text-foreground"
           }`}
         >
@@ -93,7 +93,7 @@ export default function ProjectsSidebar({
               onClick={() => onSelectProject(project.id)}
               className={`flex w-full items-center gap-2 rounded-[8px] px-3 py-2 text-left text-sm transition-colors ${
                 activeProjectId === project.id
-                  ? "bg-primary/10 text-primary"
+                  ? "bg-surface font-medium text-foreground"
                   : "text-muted hover:bg-subtle hover:text-foreground"
               }`}
             >

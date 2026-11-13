@@ -31,7 +31,7 @@ export default function DateFilterField({
     <div className="flex min-w-[150px] flex-[1_1_160px] flex-col gap-1.5 xl:max-w-[185px]">
       <label
         htmlFor={inputId}
-        className="text-[12px] font-medium uppercase tracking-[0.08em] text-muted"
+        className="text-xs font-medium uppercase tracking-[0.08em] text-muted"
       >
         {label}
       </label>
@@ -62,13 +62,13 @@ export default function DateFilterField({
             strokeWidth={1.8}
             className={cn(
               "shrink-0 transition-colors",
-              value ? "text-primary/60" : "text-muted group-hover:text-muted",
+              value ? "text-primary" : "text-muted group-hover:text-muted",
             )}
           />
 
           <span
             className={cn(
-              "min-w-0 flex-1 truncate text-[14px] transition-colors",
+              "min-w-0 flex-1 truncate text-sm transition-colors",
               value
                 ? "font-medium text-foreground"
                 : "text-muted",

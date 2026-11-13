@@ -180,6 +180,8 @@ vi.mock("react-konva", async () => {
           "data-points": domValue(props.points),
           "data-visible": domValue(props.visible),
           "data-listening": domValue(props.listening),
+          "data-stroke": domValue(props.stroke),
+          "data-dash": domValue(props.dash),
         },
         props.children as React.ReactNode,
       );
@@ -869,6 +871,30 @@ describe("CanvasStage", () => {
     expect(callbacks.onAddStroke).not.toHaveBeenCalled();
   });
 
+  it("keeps onboarding guidance clear of a populated composition", () => {
+    renderStage();
+    expect(screen.queryByText("Use the toolbar to draw and select.")).not.toBeInTheDocument();
+  });
+
+  it("leaves Space available to an open inspector drawer", () => {
+    renderStage({ shortcutsDisabled: true });
+    expect(dispatchSpace(window).defaultPrevented).toBe(false);
+  });
+
+  it("clears a held Space gesture when a drawer opens", () => {
+    const props = baseProps();
+    const view = render(<CanvasStage {...props} />);
+    act(() => dispatchSpace(window));
+    view.rerender(<CanvasStage {...props} shortcutsDisabled />);
+    view.rerender(<CanvasStage {...props} />);
+    act(() => {
+      pointerDown(450, 450);
+      pointerMove(470, 470);
+      pointerUp();
+    });
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
+  });
+
   it("gates temporary Space pan for typing targets and resets it on keyup and blur", () => {
     renderStage({
       content: createContent({ viewport: { x: 10, y: 20, scale: 1 } }),
@@ -1035,6 +1061,24 @@ describe("CanvasStage", () => {
     expect(konvaNodeByName("canvas-selection-outline")).toBeNull();
     act(() => pointerUp());
     expect(callbacks.onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("keeps the artboard aligned to the saved viewport without fitting it", () => {
+    const content = createContent({ viewport: { x: 93, y: -41, scale: 0.5 } });
+    renderStage({ content });
+    expect(screen.getByTestId("canvas-artboard")).toHaveStyle({ left: "93px", top: "-41px", width: "256px", height: "256px" });
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it("reserves frame accent for frame editing", () => {
+    const props = baseProps();
+    const view = render(<CanvasStage {...props} />);
+    const idle = konvaNodeByName("canvas-generation-frame")!;
+    expect(idle).toHaveAttribute("data-stroke", "rgba(128,128,128,0.5)");
+    expect(idle).not.toHaveAttribute("data-dash");
+    view.rerender(<CanvasStage {...props} frameEditing />);
+    expect(konvaNodeByName("canvas-generation-frame")).toHaveAttribute("data-stroke", "#4f6aff");
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
   });
 
   it("adds stable ids and names for objects and non-listening canvas chrome", () => {

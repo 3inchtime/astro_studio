@@ -1,6 +1,7 @@
 import { Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import type { ReactNode } from "react";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
+import { cn } from "../../lib/utils";
 import DateRangeFilterField from "./DateRangeFilterField";
 
 interface GallerySearchBarProps {
@@ -12,6 +13,7 @@ interface GallerySearchBarProps {
   onSearch: () => void;
   onReset: () => void;
   actions?: ReactNode;
+  headingLevel?: "page" | "section";
 }
 
 export default function GallerySearchBar({
@@ -23,19 +25,24 @@ export default function GallerySearchBar({
   onSearch,
   onReset,
   actions,
+  headingLevel = "page",
 }: GallerySearchBarProps) {
   return (
-    <div className="studio-toolbar px-6 py-4">
+    <div className="studio-toolbar px-5 py-4">
       <div className="flex flex-col gap-4">
         <div className="flex shrink-0 items-center gap-3 pb-0.5">
-          <h2 className="text-[20px] font-semibold tracking-tight text-foreground">
+          <h2 className={cn(
+            "tracking-tight text-foreground",
+            headingLevel === "section" ? "text-base font-medium" : "text-[20px] font-semibold",
+          )}>
             {config.title}
           </h2>
           {total > 0 && (
-            <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium tabular-nums text-muted">
+            <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-xs font-medium tabular-nums text-muted">
               {total}
             </span>
           )}
+          {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
         </div>
 
         <div
@@ -59,7 +66,7 @@ export default function GallerySearchBar({
                 }
               }}
               placeholder={config.searchPlaceholder}
-              className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted"
             />
           </label>
 
@@ -100,7 +107,7 @@ export default function GallerySearchBar({
                     value={field.value}
                     aria-label={field.label}
                     onChange={(event) => field.onChange(event.target.value)}
-                    className="select-control studio-input focus-ring h-9 w-full min-w-0 rounded-[8px] pl-7 pr-8 text-[12px]"
+                    className="select-control studio-input focus-ring h-9 w-full min-w-0 rounded-[8px] pl-7 pr-8 text-xs"
                   >
                     {field.options.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -120,7 +127,7 @@ export default function GallerySearchBar({
             <button
               type="button"
               onClick={onSearch}
-              className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-[12px] font-medium"
+              className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-xs font-medium"
             >
               <Filter size={13} />
               {config.applyFilters}
@@ -129,12 +136,11 @@ export default function GallerySearchBar({
               type="button"
               onClick={onReset}
               disabled={!hasActiveFilters}
-              className="studio-control focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
+              className="studio-control focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-xs font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RotateCcw size={13} />
               {config.resetFilters}
             </button>
-            {actions}
           </div>
         </div>
       </div>

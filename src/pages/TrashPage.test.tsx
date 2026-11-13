@@ -165,11 +165,7 @@ describe("TrashPage", () => {
   it("refreshes the conversation history immediately after restoring", async () => {
     render(<TrashPage />);
 
-    await waitFor(() => {
-      expect(searchGenerations).toHaveBeenCalledWith(undefined, 1, true);
-    });
-
-    fireEvent.click(screen.getByText("Select generation"));
+    fireEvent.click(await screen.findByText("Select generation"));
     fireEvent.click(screen.getByText("Restore image"));
 
     await waitFor(() => {

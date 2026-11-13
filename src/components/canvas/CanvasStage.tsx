@@ -52,6 +52,7 @@ import type {
 } from "../../types";
 
 interface CanvasStageProps extends CanvasActionProps {
+  shortcutsDisabled?: boolean;
   onAddObject?: (object: CanvasObject) => void;
   onUpdateText?: (
     id: string,
@@ -99,6 +100,7 @@ const ZERO_SELECTION_DELTA = { dx: 0, dy: 0 };
 
 export default function CanvasStage({
   content,
+  shortcutsDisabled = false,
   activeLayerId,
   activeTool,
   selectedObjectIds,
@@ -696,6 +698,10 @@ export default function CanvasStage({
   }, [activeTool, cancelActiveGestures]);
 
   useEffect(() => {
+    if (shortcutsDisabled) {
+      spacePanActiveRef.current = false;
+      cancelActiveGestures();
+    }
     function isTypingTarget(target: EventTarget | null) {
       if (!(target instanceof HTMLElement)) return false;
       const tagName = target.tagName.toLowerCase();
@@ -708,6 +714,7 @@ export default function CanvasStage({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (shortcutsDisabled) return;
       if (event.key === "Escape") {
         cancelActiveGestures();
         return;
@@ -739,7 +746,7 @@ export default function CanvasStage({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [cancelActiveGestures]);
+  }, [cancelActiveGestures, shortcutsDisabled]);
 
   function commitText() {
     const editor = textEditorRef.current;
@@ -800,9 +807,17 @@ export default function CanvasStage({
       }}
     >
       <div className="absolute inset-0 bg-canvas" />
-      <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-[calc(100%-180px)] line-clamp-2 text-[12px] text-muted">
-        {t("canvas.emptyStateHint")}
-      </div>
+      <div
+        data-testid="canvas-artboard"
+        aria-hidden="true"
+        className="pointer-events-none absolute bg-white shadow-[0_3px_16px_rgba(0,0,0,0.08)] dark:bg-[#232427]"
+        style={{ left: frameRect.x, top: frameRect.y, width: frameRect.width, height: frameRect.height }}
+      />
+      {content.layers.every((layer) => layer.objects.length === 0) && (
+        <div className="pointer-events-none absolute left-20 top-4 z-10 max-w-[calc(100%-240px)] line-clamp-2 text-xs text-muted">
+          {t("canvas.emptyStateHint")}
+        </div>
+      )}
 
       <Stage
         ref={stageRef}
@@ -950,12 +965,10 @@ export default function CanvasStage({
             y={frameRect.y}
             width={frameRect.width}
             height={frameRect.height}
-            cornerRadius={18}
-            stroke="rgba(79,106,255,0.92)"
-            strokeWidth={2}
-            dash={[10, 6]}
-            shadowColor="rgba(79,106,255,0.2)"
-            shadowBlur={18}
+            cornerRadius={0}
+            stroke={frameEditing ? "#4f6aff" : "rgba(128,128,128,0.5)"}
+            strokeWidth={frameEditing ? 1.5 : 1}
+            dash={frameEditing ? [6, 4] : undefined}
             listening={false}
           />
 
@@ -1138,7 +1151,7 @@ export default function CanvasStage({
         <button
           type="button"
           onClick={() => onResetImageAspect(selectedImageObject.id)}
-          className="focus-ring absolute z-20 rounded-[10px] border border-border-subtle bg-surface/95 px-3 py-2 text-[12px] font-medium text-foreground shadow-card transition-colors hover:bg-subtle"
+          className="focus-ring absolute z-20 rounded-[10px] border border-border-subtle bg-surface/95 px-3 py-2 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-subtle"
           style={{
             left: Math.min(
               stageSize.width - 132,

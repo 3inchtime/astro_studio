@@ -46,6 +46,16 @@ const config: GallerySearchConfig = {
 };
 
 describe("GallerySearchBar", () => {
+  it("uses a quieter section heading beneath an existing page title", () => {
+    const props = { config, total: 42, query: "", hasActiveFilters: false, onQueryChange: vi.fn(), onSearch: vi.fn(), onReset: vi.fn() };
+    const { rerender } = render(<GallerySearchBar {...props} />);
+    expect(screen.getByRole("heading", { name: "Gallery" })).toHaveClass("text-[20px]", "font-semibold");
+    rerender(<GallerySearchBar {...props} headingLevel="section" />);
+    expect(screen.getByRole("heading", { name: "Gallery" })).toHaveClass("text-base", "font-medium");
+    expect(screen.getByRole("search", { name: "Gallery" })).toBeInTheDocument();
+    expect(screen.getByText("42")).toBeInTheDocument();
+  });
+
   it("keeps prompt, model, range filters, and actions in one compact filter row", () => {
     const { container } = render(
       <GallerySearchBar

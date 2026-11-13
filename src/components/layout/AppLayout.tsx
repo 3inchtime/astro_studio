@@ -20,7 +20,6 @@ import {
   Sparkles,
   Trash2,
   PanelLeftClose,
-  PanelLeftOpen,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -48,6 +47,10 @@ import {
 } from "../../app/routes/contracts";
 
 interface LayoutContextType {
+  toggleContextSidebar?: () => void;
+  contextSidebarCollapsed?: boolean;
+  activeWorkspaceDrawer?: "context" | "parameters" | null;
+  setWorkspaceDrawer?: (drawer: "context" | "parameters" | null) => void;
   activeProjectId: string | null;
   setActiveProjectId: (id: string | null) => void;
   activeConversationId: string | null;
@@ -84,7 +87,7 @@ const iconByKey: Record<MainNavKey, typeof Sparkles> = {
 };
 
 const navItems = MAIN_NAV_ROUTES.map(({ key, to, labelKey }) => {
-  return { to, labelKey, icon: iconByKey[key] };
+  return { key, to, labelKey, icon: iconByKey[key] };
 });
 
 const NAV_RAIL_WIDTH = 80;
@@ -99,13 +102,17 @@ export default function AppLayout() {
   const { theme, themeMeta, setThemeWithEvent } = useTheme();
   const { t } = useTranslation();
   const { widths, onHandleDown, setPanelWidth } = useResizable(PANEL_CONFIGS);
-  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 1099px)").matches);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 1439px)").matches);
+  const [activeWorkspaceDrawer, setWorkspaceDrawer] = useState<"context" | "parameters" | null>(null);
+  const sidebarOpen = activeWorkspaceDrawer === "context";
+  const setSidebarOpen = (value: boolean | ((open: boolean) => boolean)) => {
+    setWorkspaceDrawer(current => (typeof value === "function" ? value(current === "context") : value) ? "context" : null);
+  };
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem("astro-sidebar-collapsed-v1") === "true"; } catch { return false; }
   });
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 1099px)");
+    const media = window.matchMedia("(max-width: 1439px)");
     const update = () => { setCompact(media.matches); setSidebarOpen(false); };
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
@@ -383,6 +390,10 @@ export default function AppLayout() {
   return (
     <LayoutContext.Provider
       value={{
+        toggleContextSidebar: toggleSidebar,
+        contextSidebarCollapsed: sidebarCollapsed,
+        activeWorkspaceDrawer,
+        setWorkspaceDrawer,
         activeProjectId,
         setActiveProjectId,
         activeConversationId,
@@ -413,15 +424,14 @@ export default function AppLayout() {
 
           <nav aria-label={t("studio.navigation", { defaultValue: "Main navigation" })} className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1">
             {navItems.map(({ to, icon: Icon, labelKey }, index) => (
-              <div key={to} className={index === 3 || index === 4 ? "mt-3 border-t border-border pt-3" : ""}>
+              <div key={to} className={index === 3 ? "mt-3 border-t border-border pt-3" : ""}>
                 <NavLink to={to} title={t(labelKey)} aria-label={t(labelKey)} className="studio-nav-item focus-ring">
                   <Icon size={20} strokeWidth={1.8} aria-hidden="true" />
-                  <span>{t(labelKey)}</span>
                 </NavLink>
               </div>
             ))}
             <NavLink to={ROUTES.trash} title={t("trash.title")} aria-label={t("trash.title")} className="studio-nav-item focus-ring">
-              <Trash2 size={20} strokeWidth={1.8} aria-hidden="true" /><span>{t("trash.title")}</span>
+              <Trash2 size={20} strokeWidth={1.8} aria-hidden="true" />
             </NavLink>
           </nav>
 
@@ -434,7 +444,7 @@ export default function AppLayout() {
               aria-haspopup="dialog"
               aria-expanded={themePickerOpen}
               onClick={() => setThemePickerOpen((open) => !open)}
-              className={`focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
+              className={`focus-ring flex h-11 w-11 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
                 themePickerOpen
                   ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
                   : "border-transparent text-muted dark:text-foreground hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
@@ -453,8 +463,9 @@ export default function AppLayout() {
             <NavLink
               to={ROUTES.settings}
               title={t("nav.settings")}
+              aria-label={t("nav.settings")}
               className={({ isActive }) =>
-                `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
+                `focus-ring flex h-11 w-11 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                   isActive
                     ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
                     : "border-transparent text-muted dark:text-foreground hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
@@ -497,22 +508,16 @@ export default function AppLayout() {
           id="main-content" tabIndex={-1}
           className="studio-main-canvas relative flex min-w-0 flex-1 flex-col overflow-hidden"
         >
-          {!shouldHideSidebar && <div data-collapsed={sidebarCollapsed} className="studio-context-toggle h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4">
-            <button type="button" onClick={toggleSidebar} className="studio-control-subtle focus-ring rounded-lg p-2" aria-controls="workspace-sidebar" aria-expanded={compact ? sidebarOpen : !sidebarCollapsed} aria-label={t("studio.openSidebar", { defaultValue: "Open sidebar" })}><PanelLeftOpen size={18} /></button>
-            <span className="text-sm font-medium">{t(isProjectListRoute || isProjectHomeRoute ? "nav.projects" : "nav.generate")}</span>
-          </div>}
-          <AnimatePresence mode="wait">
-            <motion.div
+
+          <motion.div
               key={routeContext.pathname}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={{ duration: 0.18 }}
               className="min-h-0 flex-1"
             >
               <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          </motion.div>
         </main>
 
         <AnimatePresence>
@@ -531,10 +536,10 @@ export default function AppLayout() {
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-[14px] font-semibold text-foreground">
+                  <h2 className="text-sm font-semibold text-foreground">
                     {t("theme.title")}
                   </h2>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                  <p className="mt-1 text-xs leading-relaxed text-muted">
                     {getThemeName(themeMeta, t)} · {t("settings.themeDesc")}
                   </p>
                 </div>

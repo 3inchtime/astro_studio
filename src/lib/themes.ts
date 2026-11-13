@@ -383,10 +383,18 @@ for (const theme of THEME_CATALOG) {
     v["--color-border"] = "#DCE0E6";
     v["--color-border-subtle"] = "#E7E9EE";
   }
-  v["--color-canvas"] = v["--color-background"];
+  if (theme.id === "pure-black") {
+    Object.assign(v, {
+      "--color-background": "#18191C", "--color-surface": "#202125",
+      "--color-surface-elevated": "#28292E", "--color-subtle": "#2C2D32",
+      "--color-border": "#3B3D44", "--color-border-subtle": "#303238",
+      "--color-primary": "#A8B9FF", "--color-accent": "#A8B9FF",
+    });
+  }
+  v["--color-canvas"] = theme.appearance === "dark" ? "#18191C" : "#F2F3F5";
   v["--color-rail"] = v["--color-subtle"];
   v["--color-surface-muted"] = v["--color-background"];
-  const surfaces = [v["--color-background"], v["--color-surface"], v["--color-subtle"], v["--color-surface-elevated"]];
+  const surfaces = [v["--color-background"], v["--color-surface"], v["--color-subtle"], v["--color-surface-elevated"], v["--color-canvas"]];
   for (const key of ["--color-muted", "--color-primary", "--color-error", "--color-success", "--color-warning"]) {
     v[key] = readableColor(v[key], surfaces, ink, 4.5);
   }

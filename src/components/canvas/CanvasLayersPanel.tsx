@@ -22,9 +22,9 @@ export default function CanvasLayersPanel({
   const { t } = useTranslation();
 
   return (
-    <section className="rounded-xl border border-border-subtle bg-surface shadow-card">
+    <section className="bg-surface">
       <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
-        <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
           <Layers3 size={14} strokeWidth={1.8} />
           <span>{t("canvas.layersTitle")}</span>
         </div>
@@ -33,7 +33,7 @@ export default function CanvasLayersPanel({
           aria-label={t("canvas.newLayer")}
           title={t("canvas.newLayer")}
           onClick={onAddLayer}
-          className="studio-control focus-ring inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-foreground/80 hover:studio-control-hover"
+          className="studio-control focus-ring inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-foreground hover:studio-control-hover"
         >
           <Plus size={15} strokeWidth={1.8} />
         </button>
@@ -45,7 +45,7 @@ export default function CanvasLayersPanel({
           return (
             <div
               key={layer.id}
-              className={`rounded-lg border px-3 py-2 transition-colors ${
+              className={`rounded-lg border px-3 py-2 transition-colors duration-[var(--motion-feedback)] ${
                 selected
                   ? "border-primary/25 bg-primary/8"
                   : "border-transparent bg-surface-muted"
@@ -57,10 +57,10 @@ export default function CanvasLayersPanel({
                 className="flex w-full cursor-pointer items-center justify-between gap-2 text-left"
               >
                 <div>
-                  <div className="text-[14px] font-medium text-foreground">
+                  <div className="text-sm font-medium text-foreground">
                     {layer.name}
                   </div>
-                  <div className="mt-1 text-[12px] text-muted">
+                  <div className="mt-1 text-xs text-muted">
                     {t("canvas.objectCount", { count: layer.objects.length })}
                   </div>
                 </div>
@@ -72,7 +72,7 @@ export default function CanvasLayersPanel({
                   aria-label={layer.visible ? t("canvas.hideLayer") : t("canvas.showLayer")}
                   title={layer.visible ? t("canvas.hideLayer") : t("canvas.showLayer")}
                   onClick={() => onToggleLayerVisibility(layer.id)}
-                  className="studio-control focus-ring inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-foreground/80 hover:studio-control-hover"
+                  className="studio-control focus-ring inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-foreground hover:studio-control-hover"
                 >
                   {layer.visible ? (
                     <Eye size={14} strokeWidth={1.8} />
@@ -85,7 +85,7 @@ export default function CanvasLayersPanel({
                   aria-label={layer.locked ? t("canvas.unlockLayer") : t("canvas.lockLayer")}
                   title={layer.locked ? t("canvas.unlockLayer") : t("canvas.lockLayer")}
                   onClick={() => onToggleLayerLock(layer.id)}
-                  className="studio-control focus-ring inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-foreground/80 hover:studio-control-hover"
+                  className="studio-control focus-ring inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-foreground hover:studio-control-hover"
                 >
                   {layer.locked ? (
                     <Lock size={14} strokeWidth={1.8} />

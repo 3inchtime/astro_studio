@@ -1,0 +1,446 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-13T06:59:03.590945Z",
+  "title": "Design System: Astro Studio",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Primary",
+        "tonalRamp": [
+          "oklch(15% 0.0760 265.65)",
+          "oklch(26% 0.1303 265.65)",
+          "oklch(38% 0.1737 265.65)",
+          "oklch(49% 0.2171 265.65)",
+          "oklch(61% 0.2171 265.65)",
+          "oklch(72% 0.1737 265.65)",
+          "oklch(84% 0.1085 265.65)",
+          "oklch(95% 0.0434 265.65)"
+        ]
+      },
+      "primary-foreground": {
+        "role": "neutral",
+        "displayName": "Primary Foreground",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Background",
+        "tonalRamp": [
+          "oklch(15% 0.0010 264.54)",
+          "oklch(26% 0.0017 264.54)",
+          "oklch(38% 0.0023 264.54)",
+          "oklch(49% 0.0029 264.54)",
+          "oklch(61% 0.0029 264.54)",
+          "oklch(72% 0.0023 264.54)",
+          "oklch(84% 0.0014 264.54)",
+          "oklch(95% 0.0006 264.54)"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "tonalRamp": [
+          "oklch(15% 0.0010 264.54)",
+          "oklch(26% 0.0017 264.54)",
+          "oklch(38% 0.0023 264.54)",
+          "oklch(49% 0.0029 264.54)",
+          "oklch(61% 0.0029 264.54)",
+          "oklch(72% 0.0023 264.54)",
+          "oklch(84% 0.0014 264.54)",
+          "oklch(95% 0.0006 264.54)"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Rail",
+        "tonalRamp": [
+          "oklch(15% 0.0016 258.32)",
+          "oklch(26% 0.0027 258.32)",
+          "oklch(38% 0.0036 258.32)",
+          "oklch(49% 0.0046 258.32)",
+          "oklch(61% 0.0046 258.32)",
+          "oklch(72% 0.0036 258.32)",
+          "oklch(84% 0.0023 258.32)",
+          "oklch(95% 0.0009 258.32)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ]
+      },
+      "surface-elevated": {
+        "role": "neutral",
+        "displayName": "Surface Elevated",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "tonalRamp": [
+          "oklch(15% 0.0032 258.34)",
+          "oklch(26% 0.0055 258.34)",
+          "oklch(38% 0.0074 258.34)",
+          "oklch(49% 0.0092 258.34)",
+          "oklch(61% 0.0092 258.34)",
+          "oklch(72% 0.0074 258.34)",
+          "oklch(84% 0.0046 258.34)",
+          "oklch(95% 0.0018 258.34)"
+        ]
+      },
+      "border-subtle": {
+        "role": "neutral",
+        "displayName": "Border Subtle",
+        "tonalRamp": [
+          "oklch(15% 0.0025 268.55)",
+          "oklch(26% 0.0042 268.55)",
+          "oklch(38% 0.0057 268.55)",
+          "oklch(49% 0.0071 268.55)",
+          "oklch(61% 0.0071 268.55)",
+          "oklch(72% 0.0057 268.55)",
+          "oklch(84% 0.0035 268.55)",
+          "oklch(95% 0.0014 268.55)"
+        ]
+      },
+      "control-border": {
+        "role": "neutral",
+        "displayName": "Control Border",
+        "tonalRamp": [
+          "oklch(15% 0.0024 255.50)",
+          "oklch(26% 0.0042 255.50)",
+          "oklch(38% 0.0055 255.50)",
+          "oklch(49% 0.0069 255.50)",
+          "oklch(61% 0.0069 255.50)",
+          "oklch(72% 0.0055 255.50)",
+          "oklch(84% 0.0035 255.50)",
+          "oklch(95% 0.0014 255.50)"
+        ]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Foreground",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(15% 0.0081 267.11)",
+          "oklch(26% 0.0139 267.11)",
+          "oklch(38% 0.0185 267.11)",
+          "oklch(49% 0.0231 267.11)",
+          "oklch(61% 0.0231 267.11)",
+          "oklch(72% 0.0185 267.11)",
+          "oklch(84% 0.0116 267.11)",
+          "oklch(95% 0.0046 267.11)"
+        ]
+      },
+      "subtle": {
+        "role": "neutral",
+        "displayName": "Subtle",
+        "tonalRamp": [
+          "oklch(15% 0.0016 258.32)",
+          "oklch(26% 0.0027 258.32)",
+          "oklch(38% 0.0036 258.32)",
+          "oklch(49% 0.0046 258.32)",
+          "oklch(61% 0.0046 258.32)",
+          "oklch(72% 0.0036 258.32)",
+          "oklch(84% 0.0023 258.32)",
+          "oklch(95% 0.0009 258.32)"
+        ]
+      },
+      "success": {
+        "role": "neutral",
+        "displayName": "Success",
+        "tonalRamp": [
+          "oklch(15% 0.0354 160.98)",
+          "oklch(26% 0.0606 160.98)",
+          "oklch(38% 0.0808 160.98)",
+          "oklch(49% 0.1010 160.98)",
+          "oklch(61% 0.1010 160.98)",
+          "oklch(72% 0.0808 160.98)",
+          "oklch(84% 0.0505 160.98)",
+          "oklch(95% 0.0202 160.98)"
+        ]
+      },
+      "warning": {
+        "role": "neutral",
+        "displayName": "Warning",
+        "tonalRamp": [
+          "oklch(15% 0.0358 73.28)",
+          "oklch(26% 0.0614 73.28)",
+          "oklch(38% 0.0819 73.28)",
+          "oklch(49% 0.1024 73.28)",
+          "oklch(61% 0.1024 73.28)",
+          "oklch(72% 0.0819 73.28)",
+          "oklch(84% 0.0512 73.28)",
+          "oklch(95% 0.0205 73.28)"
+        ]
+      },
+      "error": {
+        "role": "neutral",
+        "displayName": "Error",
+        "tonalRamp": [
+          "oklch(15% 0.0582 24.29)",
+          "oklch(26% 0.0998 24.29)",
+          "oklch(38% 0.1331 24.29)",
+          "oklch(49% 0.1663 24.29)",
+          "oklch(61% 0.1663 24.29)",
+          "oklch(72% 0.1331 24.29)",
+          "oklch(84% 0.0832 24.29)",
+          "oklch(95% 0.0333 24.29)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Page title",
+        "purpose": "Shared page-heading role; compact workbench bars use body size."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Main application reading text."
+      },
+      "body-sm": {
+        "displayName": "Supporting body",
+        "purpose": "Supporting descriptions and dense form content."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Secondary metadata and navigation labels."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Code-like values in incumbent components."
+      }
+    },
+    "shadows": [
+      {
+        "name": "card-light",
+        "value": "0 1px 3px rgba(20,30,50,.04)",
+        "purpose": "Minor separation and selected navigation; content cards remain flat."
+      },
+      {
+        "name": "card-dark",
+        "value": "0 1px 3px rgba(0,0,0,.18)",
+        "purpose": "Dark-theme counterpart for minor separation."
+      },
+      {
+        "name": "float-light",
+        "value": "0 8px 28px rgba(20,30,50,.12)",
+        "purpose": "Floating panels and compact drawers."
+      },
+      {
+        "name": "float-dark",
+        "value": "0 8px 28px rgba(0,0,0,.32)",
+        "purpose": "Dark-theme floating panels and drawers."
+      },
+      {
+        "name": "focus",
+        "value": "0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent)",
+        "purpose": "Theme-bound halo for focus-ring controls."
+      }
+    ],
+    "motion": [
+      {
+        "name": "feedback",
+        "value": "140ms",
+        "purpose": "Control state feedback."
+      },
+      {
+        "name": "panel",
+        "value": "180ms",
+        "purpose": "Panel and drawer entry."
+      },
+      {
+        "name": "preview",
+        "value": "200ms",
+        "purpose": "Image inspection transition."
+      },
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.0, 0, 0.2, 1)",
+        "purpose": "Shared feedback and panel easing."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "CSS animation/transition override with one iteration; MotionConfig also respects reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "inspector-dock",
+        "value": "1200px"
+      },
+      {
+        "name": "context-and-documents-dock",
+        "value": "1440px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary submit",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Generation submit action with theme-selected foreground and focus.",
+      "html": "<button class=\"ds-primary\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M12 19V5m-7 7 7-7 7 7\"/></svg>Generate</button>",
+      "css": ".ds-primary{font-family:var(--font-sans);font-size:var(--text-sm);font-weight:500;cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out),border-color var(--motion-feedback) var(--ease-out);display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:1px solid var(--color-primary);border-radius:var(--radius-button);background:var(--color-primary);color:var(--color-primary-foreground);transition:filter var(--motion-feedback) ease-out,opacity var(--motion-feedback) ease-out;}.ds-primary:hover:not(:disabled){filter:brightness(.94)}.ds-primary:active:not(:disabled){transform:scale(.98)}.ds-primary:disabled{opacity:.5;cursor:not-allowed}.ds-primary:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus);}@media(prefers-reduced-motion:reduce){.ds-primary{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Secondary control",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Compact opaque workbench action.",
+      "html": "<button class=\"ds-secondary\">Choose folder</button>",
+      "css": ".ds-secondary{font-family:var(--font-sans);font-size:var(--text-sm);font-weight:500;cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out),border-color var(--motion-feedback) var(--ease-out);min-height:36px;padding:6px 12px;border-radius:var(--radius-button);border:1px solid var(--color-control-border);background:var(--color-surface);color:var(--color-foreground)}.ds-secondary:hover{border-color:var(--color-border);background:var(--color-surface);color:var(--color-foreground)}.ds-secondary:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus);}@media(prefers-reduced-motion:reduce){.ds-secondary{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Subtle control",
+      "kind": "button",
+      "refersTo": "button-subtle",
+      "description": "Low-emphasis utility action.",
+      "html": "<button class=\"ds-subtle\">Parameters</button>",
+      "css": ".ds-subtle{font-family:var(--font-sans);font-size:var(--text-sm);font-weight:500;cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out),border-color var(--motion-feedback) var(--ease-out);min-height:36px;padding:6px 12px;border:1px solid transparent;border-radius:var(--radius-button);background:transparent;color:var(--color-muted)}.ds-subtle:hover{background:var(--color-subtle);color:var(--color-foreground)}.ds-subtle:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus);}@media(prefers-reduced-motion:reduce){.ds-subtle{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Readable surface field with dedicated contrast edge.",
+      "html": "<input class=\"ds-input\" aria-label=\"Project name\" placeholder=\"Project name\" />",
+      "css": ".ds-input{font-family:var(--font-sans);font-size:var(--text-sm);min-height:36px;padding:6px 10px;border:1px solid var(--color-control-border);border-radius:var(--radius-input);background:var(--color-surface);color:var(--color-foreground);transition:border-color var(--motion-feedback),box-shadow var(--motion-feedback)}.ds-input::placeholder{color:var(--color-muted);opacity:1}.ds-input:focus-visible{border-color:var(--color-primary)}.ds-input:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus);}@media(prefers-reduced-motion:reduce){.ds-input{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Rail destination",
+      "kind": "nav",
+      "refersTo": "navigation-item",
+      "description": "Icon-only navigation with localized accessible name and hover title.",
+      "html": "<a class=\"ds-nav\" href=\"#generate\" aria-label=\"Generate\" title=\"Generate\" aria-current=\"page\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M12 19V5m-7 7 7-7 7 7\"/></svg></a>",
+      "css": ".ds-nav{font-family:var(--font-sans);font-size:var(--text-sm);font-weight:500;cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out),border-color var(--motion-feedback) var(--ease-out);display:flex;height:44px;min-height:44px;width:44px;flex-shrink:0;align-items:center;justify-content:center;padding:0;border-radius:var(--radius-button);color:var(--color-muted);text-decoration:none}.ds-nav:hover{background:var(--color-surface);color:var(--color-foreground)}.ds-nav[aria-current=page]{background:var(--color-surface);color:var(--color-primary);box-shadow:var(--shadow-card)}.ds-nav:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus);}@media(prefers-reduced-motion:reduce){.ds-nav{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Metadata chip",
+      "kind": "chip",
+      "refersTo": "metadata-chip",
+      "description": "Static compact generation metadata.",
+      "html": "<span class=\"ds-chip\">1024 × 1024</span>",
+      "css": ".ds-chip{display:inline-block;font-family:var(--font-sans);font-size:var(--text-xs);padding:2px 8px;border-radius:var(--radius-badge);background:var(--color-subtle);color:var(--color-foreground)}@media(prefers-reduced-motion:reduce){.ds-chip{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Image card",
+      "kind": "card",
+      "refersTo": "image-card",
+      "description": "Flat clipped image card with progressive native checkbox selection; no shipped imagery in sample.",
+      "html": "<article class=\"ds-card\"><div class=\"ds-card-stage\" role=\"img\" aria-label=\"Neutral image placeholder\"></div><label class=\"ds-select\"><input type=\"checkbox\" aria-label=\"Select generation: Image metadata\"/><span aria-hidden=\"true\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"><path d=\"m20 6-11 11-5-5\"/></svg></span></label><p class=\"ds-card-meta\">Image metadata</p></article>",
+      "css": ".ds-card{position:relative;max-width:280px;overflow:hidden;border:1px solid var(--color-border-subtle);border-radius:var(--radius-card);background:var(--color-surface);box-shadow:none;transition:border-color var(--motion-feedback)}.ds-card:hover{border-color:var(--color-border)}.ds-card-stage{height:140px;background:var(--color-canvas)}.ds-card-meta{margin:0;padding:12px;font-family:var(--font-sans);font-size:var(--text-xs);color:var(--color-muted)}@media(prefers-reduced-motion:reduce){.ds-card{position:relative;transition-duration:.01ms;animation-duration:.01ms}}.ds-select{position:absolute;top:100px;left:8px;display:flex;width:32px;height:32px;align-items:center;justify-content:center;opacity:0;cursor:pointer}.ds-select input{position:absolute;inset:0;width:32px;height:32px;margin:0;opacity:0;cursor:pointer}.ds-select span{display:flex;align-items:center;justify-content:center;pointer-events:none;width:20px;height:20px;border:1px solid var(--color-control-border);border-radius:6px;background:var(--color-surface)}.ds-card:hover .ds-select,.ds-select:focus-within,.ds-select:has(input:checked){opacity:1}.ds-select input:checked+span{border-color:var(--color-primary);background:var(--color-primary)}.ds-select svg{display:none;color:var(--color-primary-foreground)}.ds-select input:checked+span svg{display:block}.ds-select input:focus-visible+span{outline:2px solid var(--color-primary);outline-offset:2px}@media(hover:none){.ds-select{opacity:1}}"
+    },
+    {
+      "name": "Canvas tool",
+      "kind": "custom",
+      "description": "Borderless 36px drawing action within grouped floating canvas tools.",
+      "html": "<button type=\"button\" class=\"ds-tool\" aria-label=\"Select tool\" aria-pressed=\"false\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m4 3 7.07 17 2.51-6.42L20 11.07 4 3z\"/></svg></button>",
+      "css": ".ds-tool{font-family:var(--font-sans);font-size:var(--text-sm);cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out);display:inline-flex;align-items:center;justify-content:center;height:36px;width:36px;border:0;border-radius:var(--radius-button);background:transparent;color:var(--color-muted)}.ds-tool:hover{background:var(--color-subtle);color:var(--color-foreground)}.ds-tool[aria-pressed=true]{background:color-mix(in srgb,var(--color-primary) 10%,transparent);color:var(--color-primary)}.ds-tool:disabled{pointer-events:none;opacity:.3}.ds-tool:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus)}@media(prefers-reduced-motion:reduce){.ds-tool{transition-duration:.01ms;animation-duration:.01ms}}",
+      "refersTo": "canvas-tool"
+    },
+    {
+      "name": "Favorite action",
+      "kind": "button",
+      "refersTo": "favorite-action",
+      "description": "Named native favorite control; aria-pressed reports membership and loading disables the action.",
+      "html": "<button type=\"button\" class=\"ds-favorite\" aria-label=\"Manage favorite folders\" aria-pressed=\"true\" aria-busy=\"false\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m12 3 2.78 5.63L21 9.54l-4.5 4.39 1.06 6.2L12 17.2l-5.56 2.93 1.06-6.2L3 9.54l6.22-.91L12 3z\"/></svg></button>",
+      "css": ".ds-favorite{font-family:var(--font-sans);font-size:var(--text-sm);cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out);display:inline-flex;width:32px;height:32px;align-items:center;justify-content:center;flex-shrink:0;border:0;border-radius:var(--radius-button);background:transparent;color:var(--color-muted)}.ds-favorite:hover{background:var(--color-subtle);color:var(--color-foreground)}.ds-favorite[aria-pressed=true] svg{fill:var(--color-primary);color:var(--color-primary)}.ds-favorite:disabled{cursor:wait}.ds-favorite[aria-busy=true] svg{opacity:.4}.ds-favorite:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus)}@media(prefers-reduced-motion:reduce){.ds-favorite{transition-duration:.01ms;animation-duration:.01ms}}"
+    },
+    {
+      "name": "Danger control",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action uses a neutral surface and gray control edge with semantic error ink.",
+      "html": "<button type=\"button\" class=\"ds-danger\">Move to trash</button>",
+      "css": ".ds-danger{font-family:var(--font-sans);font-size:var(--text-sm);cursor:pointer;transition:background-color var(--motion-feedback) var(--ease-out),color var(--motion-feedback) var(--ease-out);display:inline-flex;min-height:36px;align-items:center;justify-content:center;padding:6px 12px;border:1px solid var(--color-control-border);border-radius:var(--radius-button);background:var(--color-surface);color:var(--color-error)}.ds-danger:hover{background:var(--color-subtle)}.ds-danger:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px;box-shadow:var(--shadow-focus)}@media(prefers-reduced-motion:reduce){.ds-danger{transition-duration:.01ms;animation-duration:.01ms}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Precise image-first desktop workbench",
+    "overview": "Operate mode for creation, editing, settings and organization; image-led viewing for previews. Product function and familiar desktop behavior take priority over decorative styling. The 2026-11-08 redesign, deepened on 2026-11-13, replaces layered glass, tiny low-contrast copy and crowded composer overlays with a coherent workbench.\n\nThe existing visual world is a precise image-first desktop workbench. Images occupy the flexible center; tools and metadata live in stable surrounding surfaces. Local platform typography, flat panels and short feedback keep repeated work legible across twelve themes and eight locales. Existing routes, IPC contracts, editor state and local data remain authoritative.",
+    "keyCharacteristics": [
+      "Neutral image inspection, theme-aware controls.",
+      "Readable semantic typography with a 12px floor.",
+      "Stable desktop docks with exclusive compact drawers.",
+      "Flat content surfaces; lifted overlays and explicit focus."
+    ],
+    "rules": [
+      {
+        "name": "The Neutral Stage Rule",
+        "body": "Image inspection and canvas surfaces use the neutral canvas token regardless of the selected accent theme.",
+        "section": "colors"
+      },
+      {
+        "name": "The Readable Control Rule",
+        "body": "Functional labels use solid semantic colors; theme generation corrects muted, primary and status colors against supported surfaces to at least 4.5:1, and dedicated control borders to at least 3:1.",
+        "section": "colors"
+      },
+      {
+        "name": "The Semantic Type Rule",
+        "body": "Use the semantic size tokens and the shared font preference scale; secondary text never falls below the 12px floor.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Content Rule",
+        "body": "Content cards remain flat at rest and on hover; floating panels, drawers and focused controls provide the depth vocabulary.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use semantic theme variables for functional text, controls and surfaces.",
+      "Do keep the canvas neutral across all twelve themes and use solid text colors for functional labels.",
+      "Do preserve stable drafts and disclosures when a dock becomes a drawer.",
+      "Do keep image loading, empty collection, no matches and failure states distinct, with visible retry where applicable.",
+      "Do respect reduced motion and use real backend generation status."
+    ],
+    "donts": [
+      "Don't add decorative gradients, constant breathing actions or large glass workspaces to the established workbench.",
+      "Don't shrink secondary copy below the semantic 12px floor or patch individual font sizes to bypass preferences.",
+      "Don't let compact context and parameter drawers overlap, or automatically switch canvas inspector tabs on selection.",
+      "Don't report native platform acceptance from browser mocks, or promote verification screenshots and placeholder imagery into shipped assets."
+    ]
+  }
+}

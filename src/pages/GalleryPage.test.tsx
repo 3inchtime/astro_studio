@@ -1,3 +1,4 @@
+import { useUIStore } from "../lib/store";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GalleryPage from "./GalleryPage";
@@ -50,15 +51,17 @@ vi.mock("../components/gallery/GenerationGrid", () => ({
   default: ({
     results,
     viewMode,
+    selectedIds,
     onPreview,
     onSelect,
   }: {
     results: GenerationResult[];
     viewMode?: "masonry" | "list";
+    selectedIds?: Set<string>;
     onPreview?: (result: GenerationResult, imageIndex: number) => void;
     onSelect: (result: GenerationResult) => void;
   }) => (
-    <div data-testid="grid" data-view-mode={viewMode}>
+    <div data-testid="grid" data-view-mode={viewMode} data-selected={[...(selectedIds ?? [])].join(",")}>
       {results.map((result) => (
         <div key={result.generation.id}>
           <button onClick={() => onPreview?.(result, 1)}>
@@ -77,11 +80,14 @@ vi.mock("../components/gallery/GenerationDetailPanel", () => ({
   default: ({
     result,
     onPreview,
+    onDelete,
   }: {
     result: GenerationResult;
     onPreview?: (imageIndex: number) => void;
+    onDelete: (id: string) => void;
   }) => (
     <div data-testid="detail-panel">
+      <button onClick={() => onDelete(result.generation.id)}>Delete record</button>
       <button onClick={() => onPreview?.(0)}>
         Preview detail {result.generation.id}
       </button>
@@ -223,6 +229,7 @@ function buildResult(id = "1"): GenerationResult {
 
 describe("GalleryPage", () => {
   beforeEach(() => {
+    useUIStore.setState({ lightbox: null, folderSelectorImageId: null });
     searchGenerations.mockReset();
     deleteGeneration.mockReset();
     setActiveConversationId.mockReset();
@@ -506,6 +513,48 @@ describe("GalleryPage", () => {
 
     expect(screen.getByTestId("lightbox-index")).toHaveTextContent("0");
     expect(screen.getAllByTestId("lightbox-image")).toHaveLength(2);
+  });
+
+  it("keeps batch record selection separate from details and preview", async () => {
+    searchGenerations.mockResolvedValueOnce({ generations: [buildResult("1"), buildResult("2")], total: 20, page: 1, page_size: 20 });
+    render(<GalleryPage />);
+    await screen.findByTestId("grid");
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.select" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.selectVisible" }));
+    expect(screen.getByTestId("grid")).toHaveAttribute("data-selected", "generation-1,generation-2");
+    fireEvent.click(screen.getByRole("button", { name: "Open detail generation-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open preview generation-2" }));
+    expect(screen.getByTestId("grid")).toHaveAttribute("data-selected", "generation-1,generation-2");
+    expect(searchGenerations).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects only displayed records when the backend includes failed generations without images", async () => {
+    const failed = { ...buildResult("failed"), images: [], generation: { ...buildResult("failed").generation, status: "failed" as const } };
+    searchGenerations.mockResolvedValueOnce({ generations: [failed, buildResult("visible")], total: 2, page: 1, page_size: 20 });
+    render(<GalleryPage />);
+    await screen.findByTestId("grid");
+    expect(screen.queryByRole("button", { name: "studio.collection.selectVisible" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.select" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.selectVisible" }));
+    expect(screen.getByTestId("grid")).toHaveAttribute("data-selected", "generation-visible");
+    expect(screen.queryByRole("button", { name: "Open preview generation-failed" })).not.toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("refills the loaded boundary after deleting a record without duplicating rows", async () => {
+    searchGenerations.mockResolvedValueOnce({ generations: [buildResult("1"), buildResult("2"), buildResult("3")], total: 6, page: 1, page_size: 3 }).mockResolvedValueOnce({ generations: [buildResult("2"), buildResult("3"), buildResult("4")], total: 5, page: 1, page_size: 3 });
+    deleteGeneration.mockResolvedValueOnce(undefined);
+    render(<GalleryPage />);
+    await screen.findByTestId("grid");
+    fireEvent.click(screen.getByRole("button", { name: "Open detail generation-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    expect(deleteGeneration).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.bulkDelete" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open preview generation-1" })).not.toBeInTheDocument());
+    await act(async () => triggerIntersection());
+    expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
+    expect(screen.getAllByRole("button", { name: /Open preview generation-/ })).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Open preview generation-4" })).toBeInTheDocument();
   });
 
   it("paginates the submitted search even while a new draft is being typed", async () => {
