@@ -804,5 +804,12 @@
   "studio.collection.deleteRecord": "この生成記録をゴミ箱に移動しますか？",
   "studio.collection.deleteRecordImages": "この生成記録のすべての画像をゴミ箱に移動します。",
   "studio.collection.selectRecord": "生成記録を選択：{{prompt}}",
-  "studio.collection.previewLoadFailed": "元画像を読み込めませんでした。サムネイルは表示できます。"
+  "studio.collection.previewLoadFailed": "元画像を読み込めませんでした。サムネイルは表示できます。",
+  "studio.nav.extractShort": "画像解析",
+  "studio.favorite.saved": "お気に入りに保存済み",
+  "studio.favorite.unsaved": "お気に入り未登録",
+  "studio.parameters.output": "出力",
+  "studio.collection.select": "選択",
+  "studio.collection.selectVisible": "表示中をすべて選択",
+  "studio.collection.doneSelecting": "完了"
 }

@@ -804,5 +804,12 @@
   "studio.collection.deleteRecord": "Mettre cette génération à la corbeille ?",
   "studio.collection.deleteRecordImages": "Toutes les images de cette génération seront mises à la corbeille.",
   "studio.collection.selectRecord": "Sélectionner la génération : {{prompt}}",
-  "studio.collection.previewLoadFailed": "Impossible de charger l’image complète. La miniature reste disponible."
+  "studio.collection.previewLoadFailed": "Impossible de charger l’image complète. La miniature reste disponible.",
+  "studio.nav.extractShort": "Extraire",
+  "studio.favorite.saved": "Enregistré dans les favoris",
+  "studio.favorite.unsaved": "Non ajouté aux favoris",
+  "studio.parameters.output": "Sortie",
+  "studio.collection.select": "Sélectionner",
+  "studio.collection.selectVisible": "Tout sélectionner à l’écran",
+  "studio.collection.doneSelecting": "Terminer"
 }

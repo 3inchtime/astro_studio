@@ -740,5 +740,12 @@
   "studio.collection.deleteRecord": "Move this generation to trash?",
   "studio.collection.deleteRecordImages": "All images in this generation record will move to trash.",
   "studio.collection.selectRecord": "Select generation: {{prompt}}",
-  "studio.collection.previewLoadFailed": "Could not load the full image. The thumbnail is still available."
+  "studio.collection.previewLoadFailed": "Could not load the full image. The thumbnail is still available.",
+  "studio.nav.extractShort": "Extract",
+  "studio.favorite.saved": "Saved to favorites",
+  "studio.favorite.unsaved": "Not favorited",
+  "studio.parameters.output": "Output",
+  "studio.collection.select": "Select",
+  "studio.collection.selectVisible": "Select all visible",
+  "studio.collection.doneSelecting": "Done"
 }

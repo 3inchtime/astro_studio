@@ -804,5 +804,12 @@
   "studio.collection.deleteRecord": "Diese Generierung in den Papierkorb verschieben?",
   "studio.collection.deleteRecordImages": "Alle Bilder dieser Generierung werden in den Papierkorb verschoben.",
   "studio.collection.selectRecord": "Generierung auswählen: {{prompt}}",
-  "studio.collection.previewLoadFailed": "Vollbild konnte nicht geladen werden. Das Vorschaubild bleibt verfügbar."
+  "studio.collection.previewLoadFailed": "Vollbild konnte nicht geladen werden. Das Vorschaubild bleibt verfügbar.",
+  "studio.nav.extractShort": "Analyse",
+  "studio.favorite.saved": "In Favoriten gespeichert",
+  "studio.favorite.unsaved": "Nicht favorisiert",
+  "studio.parameters.output": "Ausgabe",
+  "studio.collection.select": "Auswählen",
+  "studio.collection.selectVisible": "Alle sichtbaren auswählen",
+  "studio.collection.doneSelecting": "Fertig"
 }

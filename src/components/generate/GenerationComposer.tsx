@@ -357,7 +357,7 @@ export default function GenerationComposer({
         ? createPortal(parameters, parametersTarget)
         : parameters}
 
-      <div className="generation-composer shrink-0 border-t border-border-subtle bg-surface p-3">
+      <div className="generation-composer shrink-0 border-t border-border-subtle bg-surface px-5 py-4">
         <div className="mx-auto w-full max-w-[980px]">
           <div
             data-testid="generation-command-surface"
@@ -380,13 +380,13 @@ export default function GenerationComposer({
 
               <div className="flex shrink-0 items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <div className="flex rounded-md border border-border/60 bg-surface/80 p-0.5">
+                  <div className="flex rounded-lg bg-subtle p-0.5">
                     <button
                       type="button"
                       aria-pressed={composerMode === "direct"}
-                      className={`focus-ring rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                      className={`focus-ring inline-flex min-h-8 items-center rounded-md px-3 text-xs font-medium transition-colors ${
                         composerMode === "direct"
-                          ? "bg-foreground text-background"
+                          ? "bg-surface text-primary shadow-button"
                           : "text-muted hover:text-foreground"
                       }`}
                       onClick={() => onComposerModeChange("direct")}
@@ -396,9 +396,9 @@ export default function GenerationComposer({
                     <button
                       type="button"
                       aria-pressed={composerMode === "deep-thinking"}
-                      className={`focus-ring rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                      className={`focus-ring inline-flex min-h-8 items-center rounded-md px-3 text-xs font-medium transition-colors ${
                         composerMode === "deep-thinking"
-                          ? "bg-foreground text-background"
+                          ? "bg-surface text-primary shadow-button"
                           : "text-muted hover:text-foreground"
                       }`}
                       onClick={() => onComposerModeChange("deep-thinking")}
@@ -631,7 +631,7 @@ export default function GenerationComposer({
             )}
             {/* Inline optimize error */}
             {optimizeError && (
-              <div className="mt-2 rounded-[8px] border border-error/15 bg-error/5 px-3 py-1.5 text-xs text-error">
+              <div className="mt-2 rounded-[8px] border border-border-subtle bg-surface px-3 py-1.5 text-xs text-error">
                 {optimizeError}
               </div>
             )}

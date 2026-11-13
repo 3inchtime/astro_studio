@@ -71,7 +71,7 @@ export default function GenerationWorkbench({
   return (
     <div className="generation-workbench relative flex h-full min-h-0 min-w-0">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex h-11 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-4">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-5">
           <div className="flex min-w-0 items-center gap-2">
             {toggleContextSidebar && (
               <button
@@ -87,7 +87,9 @@ export default function GenerationWorkbench({
                 <PanelLeftOpen size={16} />
               </button>
             )}
-            <h1 className="text-sm font-medium">{t("nav.generate")}</h1>
+            <h1 className="text-base font-semibold tracking-tight">
+              {t("nav.generate")}
+            </h1>
           </div>
           <button
             type="button"
@@ -99,9 +101,6 @@ export default function GenerationWorkbench({
             <SlidersHorizontal size={16} />
             {t("generate.parametersLabel")}
           </button>
-          <span className="hidden text-xs text-muted min-[1200px]:inline">
-            {t("studio.imageFirst", { defaultValue: "Image workspace" })}
-          </span>
         </div>
         {children(target, open || activeWorkspaceDrawer === "context")}
       </section>
@@ -121,7 +120,7 @@ export default function GenerationWorkbench({
         tabIndex={-1}
         className={`${docked || open ? "flex" : "hidden"} ${docked ? "relative" : "absolute inset-y-0 right-0 z-40 shadow-float"} w-[300px] max-w-full shrink-0 flex-col border-l border-border-subtle bg-surface`}
       >
-        <div className="flex h-11 shrink-0 items-center justify-between border-b border-border-subtle px-4">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
           <h2 className="text-sm font-medium">
             {t("generate.parametersLabel")}
           </h2>

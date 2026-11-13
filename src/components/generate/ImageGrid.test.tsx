@@ -259,4 +259,16 @@ describe("ImageGrid", () => {
       expect(action).toHaveBeenCalledTimes(2);
     },
   );
+  it("fits a result to the available feed height budget", () => {
+    render(
+      <ImageGrid
+        images={[{ path: "/tmp/fit.png", imageId: "fit", generationId: "fit" }]}
+        maxImageHeight={220}
+        onImageClick={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "studio.openImage" }),
+    ).toHaveStyle({ height: "220px" });
+  });
 });

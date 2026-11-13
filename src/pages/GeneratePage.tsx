@@ -349,7 +349,7 @@ export default function GeneratePage() {
     if (autoScrollRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, promptAgentMessages]);
+  }, [messages, promptAgentMessages, chatViewportHeight]);
 
   useEffect(() => {
     const scrollElement = scrollRef.current;
@@ -367,13 +367,17 @@ export default function GeneratePage() {
 
     const resizeObserver = new ResizeObserver(() => {
       updateChatViewportHeight();
+      if (autoScrollRef.current)
+        scrollElement.scrollTop = scrollElement.scrollHeight;
     });
     resizeObserver.observe(scrollElement);
+    if (scrollElement.firstElementChild)
+      resizeObserver.observe(scrollElement.firstElementChild);
 
     return () => {
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [messages.length, promptAgentMessages.length]);
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
@@ -790,8 +794,16 @@ export default function GeneratePage() {
   const handleImageClick = useCallback(
     (images: MessageImage[], index: number) => {
       const image = images[index];
-      const origin = image && [...document.querySelectorAll<HTMLElement>("[data-preview-image-id]")].find(node => node.dataset.previewImageId === image.imageId);
-      openLightbox(images, index, origin ? capturePreviewSource(origin, image.imageId) : undefined);
+      const origin =
+        image &&
+        [
+          ...document.querySelectorAll<HTMLElement>("[data-preview-image-id]"),
+        ].find((node) => node.dataset.previewImageId === image.imageId);
+      openLightbox(
+        images,
+        index,
+        origin ? capturePreviewSource(origin, image.imageId) : undefined,
+      );
     },
     [openLightbox],
   );
@@ -901,150 +913,160 @@ export default function GeneratePage() {
   );
 
   return (
-    <GenerationWorkbench>{(parametersTarget, drawerOpen) => <>
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="flex-1 min-h-0 overflow-y-auto"
-      >
-        <GenerationFeed
-          messages={messages}
-          chatViewportHeight={chatViewportHeight}
-          isPromptFavorited={(message) =>
-            message.role === "user" &&
-            promptFavoriteByPrompt.has(normalizePromptFavorite(message.content))
-          }
-          onImageClick={handleImageClick}
-          onDelete={handleRequestDeleteGeneration}
-          onEditImage={handleUseImageAsSource}
-          onEditPrompt={handleEditPrompt}
-          onFavoritePrompt={(value) => void handleTogglePromptFavorite(value)}
-          onFavoriteClick={openFolderSelector}
-          onRetry={(message) => void handleRetryMessage(message)}
-          agentMessages={promptAgentMessages}
-          isPromptAgentRunning={
-            startPromptAgentSessionMutation.isPending ||
-            sendPromptAgentMessageMutation.isPending
-          }
-          onAcceptAgentDraft={(message) => void handleAcceptAgentDraft(message)}
-          onContinueAgentDraft={handleContinueAgentDraft}
-          onEditAgentDraft={handleEditAgentDraft}
-        />
-      </div>
+    <GenerationWorkbench>
+      {(parametersTarget, drawerOpen) => (
+        <>
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="flex-1 min-h-0 overflow-y-auto"
+          >
+            <GenerationFeed
+              messages={messages}
+              chatViewportHeight={chatViewportHeight}
+              isPromptFavorited={(message) =>
+                message.role === "user" &&
+                promptFavoriteByPrompt.has(
+                  normalizePromptFavorite(message.content),
+                )
+              }
+              onImageClick={handleImageClick}
+              onDelete={handleRequestDeleteGeneration}
+              onEditImage={handleUseImageAsSource}
+              onEditPrompt={handleEditPrompt}
+              onFavoritePrompt={(value) =>
+                void handleTogglePromptFavorite(value)
+              }
+              onFavoriteClick={openFolderSelector}
+              onRetry={(message) => void handleRetryMessage(message)}
+              agentMessages={promptAgentMessages}
+              isPromptAgentRunning={
+                startPromptAgentSessionMutation.isPending ||
+                sendPromptAgentMessageMutation.isPending
+              }
+              onAcceptAgentDraft={(message) =>
+                void handleAcceptAgentDraft(message)
+              }
+              onContinueAgentDraft={handleContinueAgentDraft}
+              onEditAgentDraft={handleEditAgentDraft}
+            />
+          </div>
 
-      <GenerationComposer
-        parametersTarget={parametersTarget}
-        interactionDisabled={drawerOpen}
-        advancedOptions={advancedOptions}
-        onAdvancedOptionsChange={(value) => {
-          markComposerDraftStarted();
-          setAdvancedOptions(value);
-        }}
-        outputCompression={outputCompression}
-        onOutputCompressionChange={(value) => {
-          markComposerDraftStarted();
-          setOutputCompression(value);
-        }}
-        textareaRef={textareaRef}
-        prompt={prompt}
-        imageModel={imageModel}
-        size={size}
-        aspectRatio={aspectRatio}
-        resolution={resolution}
-        onSizeChange={(value) => {
-          markComposerDraftStarted();
-          setSize(value);
-        }}
-        onAspectRatioChange={(value) => {
-          markComposerDraftStarted();
-          setAspectRatio(value);
-        }}
-        onResolutionChange={(value) => {
-          markComposerDraftStarted();
-          setResolution(value);
-        }}
-        quality={quality}
-        background={background}
-        outputFormat={outputFormat}
-        moderation={moderation}
-        inputFidelity={inputFidelity}
-        imageCount={imageCount}
-        editSources={editSources}
-        editingPromptMessageId={editingPromptMessageId}
-        onPromptChange={(value) => {
-          markComposerDraftStarted();
-          setPrompt(value);
-        }}
-        onModelChange={handleModelChange}
-        onQualityChange={(value) => {
-          markComposerDraftStarted();
-          setQuality(value);
-        }}
-        onBackgroundChange={handleBackgroundChange}
-        onOutputFormatChange={handleOutputFormatChange}
-        onModerationChange={(value) => {
-          markComposerDraftStarted();
-          setModeration(value);
-        }}
-        onInputFidelityChange={(value) => {
-          markComposerDraftStarted();
-          setInputFidelity(value);
-        }}
-        onImageCountChange={(value) => {
-          markComposerDraftStarted();
-          setImageCount(value);
-        }}
-        onAddUploadedSources={() => void handleAddUploadedSources()}
-        onClearEditSources={() => {
-          markComposerDraftStarted();
-          setEditSources([]);
-        }}
-        onRemoveEditSource={handleRemoveEditSource}
-        onCancelPromptEdit={handleCancelPromptEdit}
-        onGenerate={() => void handleGenerate()}
-        composerMode={composerMode}
-        onComposerModeChange={setComposerMode}
-        onDeepThinkingSend={() => void handleDeepThinkingSend()}
-        onPromptAgentConfigChange={setSelectedPromptAgentConfigId}
-        isPromptAgentRunning={
-          startPromptAgentSessionMutation.isPending ||
-          sendPromptAgentMessageMutation.isPending
-        }
-        isGenerating={isGenerating}
-      />
-
-      <AnimatePresence>
-        {lightbox && (
-          <Lightbox
-            images={lightbox.images}
-            source={lightbox.source}
-            initialIndex={lightbox.index}
-            onClose={closeLightbox}
-            onEditImage={(image) => {
-              handleUseImageAsSource(image);
-              closeLightbox();
+          <GenerationComposer
+            parametersTarget={parametersTarget}
+            interactionDisabled={drawerOpen}
+            advancedOptions={advancedOptions}
+            onAdvancedOptionsChange={(value) => {
+              markComposerDraftStarted();
+              setAdvancedOptions(value);
             }}
-            onDelete={handleRequestDeleteGeneration}
+            outputCompression={outputCompression}
+            onOutputCompressionChange={(value) => {
+              markComposerDraftStarted();
+              setOutputCompression(value);
+            }}
+            textareaRef={textareaRef}
+            prompt={prompt}
+            imageModel={imageModel}
+            size={size}
+            aspectRatio={aspectRatio}
+            resolution={resolution}
+            onSizeChange={(value) => {
+              markComposerDraftStarted();
+              setSize(value);
+            }}
+            onAspectRatioChange={(value) => {
+              markComposerDraftStarted();
+              setAspectRatio(value);
+            }}
+            onResolutionChange={(value) => {
+              markComposerDraftStarted();
+              setResolution(value);
+            }}
+            quality={quality}
+            background={background}
+            outputFormat={outputFormat}
+            moderation={moderation}
+            inputFidelity={inputFidelity}
+            imageCount={imageCount}
+            editSources={editSources}
+            editingPromptMessageId={editingPromptMessageId}
+            onPromptChange={(value) => {
+              markComposerDraftStarted();
+              setPrompt(value);
+            }}
+            onModelChange={handleModelChange}
+            onQualityChange={(value) => {
+              markComposerDraftStarted();
+              setQuality(value);
+            }}
+            onBackgroundChange={handleBackgroundChange}
+            onOutputFormatChange={handleOutputFormatChange}
+            onModerationChange={(value) => {
+              markComposerDraftStarted();
+              setModeration(value);
+            }}
+            onInputFidelityChange={(value) => {
+              markComposerDraftStarted();
+              setInputFidelity(value);
+            }}
+            onImageCountChange={(value) => {
+              markComposerDraftStarted();
+              setImageCount(value);
+            }}
+            onAddUploadedSources={() => void handleAddUploadedSources()}
+            onClearEditSources={() => {
+              markComposerDraftStarted();
+              setEditSources([]);
+            }}
+            onRemoveEditSource={handleRemoveEditSource}
+            onCancelPromptEdit={handleCancelPromptEdit}
+            onGenerate={() => void handleGenerate()}
+            composerMode={composerMode}
+            onComposerModeChange={setComposerMode}
+            onDeepThinkingSend={() => void handleDeepThinkingSend()}
+            onPromptAgentConfigChange={setSelectedPromptAgentConfigId}
+            isPromptAgentRunning={
+              startPromptAgentSessionMutation.isPending ||
+              sendPromptAgentMessageMutation.isPending
+            }
+            isGenerating={isGenerating}
           />
-        )}
-      </AnimatePresence>
 
-      {folderSelectorImageId && (
-        <FolderSelector
-          imageId={folderSelectorImageId}
-          onClose={closeFolderSelector}
-        />
+          <AnimatePresence>
+            {lightbox && (
+              <Lightbox
+                images={lightbox.images}
+                source={lightbox.source}
+                initialIndex={lightbox.index}
+                onClose={closeLightbox}
+                onEditImage={(image) => {
+                  handleUseImageAsSource(image);
+                  closeLightbox();
+                }}
+                onDelete={handleRequestDeleteGeneration}
+              />
+            )}
+          </AnimatePresence>
+
+          {folderSelectorImageId && (
+            <FolderSelector
+              imageId={folderSelectorImageId}
+              onClose={closeFolderSelector}
+            />
+          )}
+
+          <ConfirmDialog
+            open={pendingDeleteGenerationId !== null}
+            title={t("lightbox.deleteConfirm")}
+            confirmLabel={t("favorites.confirm")}
+            cancelLabel={t("favorites.cancel")}
+            onConfirm={() => void handleConfirmDeleteGeneration()}
+            onCancel={handleCancelDeleteGeneration}
+            loading={isDeletingGeneration}
+          />
+        </>
       )}
-
-      <ConfirmDialog
-        open={pendingDeleteGenerationId !== null}
-        title={t("lightbox.deleteConfirm")}
-        confirmLabel={t("favorites.confirm")}
-        cancelLabel={t("favorites.cancel")}
-        onConfirm={() => void handleConfirmDeleteGeneration()}
-        onCancel={handleCancelDeleteGeneration}
-        loading={isDeletingGeneration}
-      />
-    </>}</GenerationWorkbench>
+    </GenerationWorkbench>
   );
 }

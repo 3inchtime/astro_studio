@@ -20,7 +20,6 @@ import {
   Sparkles,
   Trash2,
   PanelLeftClose,
-  PanelLeftOpen,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -88,7 +87,7 @@ const iconByKey: Record<MainNavKey, typeof Sparkles> = {
 };
 
 const navItems = MAIN_NAV_ROUTES.map(({ key, to, labelKey }) => {
-  return { to, labelKey, icon: iconByKey[key] };
+  return { key, to, labelKey, icon: iconByKey[key] };
 });
 
 const NAV_RAIL_WIDTH = 80;
@@ -424,11 +423,11 @@ export default function AppLayout() {
           </NavLink>
 
           <nav aria-label={t("studio.navigation", { defaultValue: "Main navigation" })} className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1">
-            {navItems.map(({ to, icon: Icon, labelKey }, index) => (
+            {navItems.map(({ key, to, icon: Icon, labelKey }, index) => (
               <div key={to} className={index === 3 || index === 4 ? "mt-3 border-t border-border pt-3" : ""}>
                 <NavLink to={to} title={t(labelKey)} aria-label={t(labelKey)} className="studio-nav-item focus-ring">
                   <Icon size={20} strokeWidth={1.8} aria-hidden="true" />
-                  <span>{t(labelKey)}</span>
+                  <span>{t(key === "extract" ? "studio.nav.extractShort" : labelKey)}</span>
                 </NavLink>
               </div>
             ))}
@@ -509,10 +508,7 @@ export default function AppLayout() {
           id="main-content" tabIndex={-1}
           className="studio-main-canvas relative flex min-w-0 flex-1 flex-col overflow-hidden"
         >
-          {!shouldHideSidebar && !["generate", "chat"].includes(routeContext.kind) && <div data-collapsed={sidebarCollapsed} className="studio-context-toggle h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4">
-            <button type="button" onClick={toggleSidebar} className="studio-control-subtle focus-ring rounded-lg p-2" aria-controls="workspace-sidebar" aria-expanded={compact ? sidebarOpen : !sidebarCollapsed} aria-label={t("studio.openSidebar", { defaultValue: "Open sidebar" })}><PanelLeftOpen size={18} /></button>
-            <span className="text-sm font-medium">{t(isProjectListRoute || isProjectHomeRoute ? "nav.projects" : "nav.generate")}</span>
-          </div>}
+
           <motion.div
               key={routeContext.pathname}
               initial={{ opacity: 0 }}

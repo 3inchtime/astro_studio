@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   IMAGE_MODEL_CATALOG,
@@ -132,32 +133,32 @@ export default function GenerationParameters({
         role="toolbar"
         data-variant="parameter-rail"
         aria-label={t("generate.parametersLabel")}
-        className="studio-toolbar mx-auto w-full max-w-[980px] rounded-xl"
+        className="mx-auto w-full"
       >
-        <div className="mb-4 flex flex-col gap-1.5 text-xs text-muted">
+        <div className="mb-5 flex items-center justify-between gap-3 border-b border-border-subtle pb-4 text-xs text-muted">
           <span>
             {t("studio.imageProvider", { defaultValue: "Image provider" })}:{" "}
             <span className="font-medium text-foreground">{providerLabel}</span>
           </span>
-          <span>
-            {t("studio.supportedParameters", {
-              defaultValue: "Available settings for this model",
-            })}
-          </span>
         </div>
         <div
           data-testid="generation-parameter-row"
-          className="grid w-full min-w-0 grid-cols-1 items-end gap-3"
+          className="grid w-full min-w-0 grid-cols-2 items-end gap-4"
         >
-          <SelectField
-            label={t("generate.modelLabel")}
-            value={imageModel}
-            onChange={(value) => onModelChange(value as ImageModel)}
-            options={IMAGE_MODEL_CATALOG.map((entry) => ({
-              value: entry.id,
-              label: t(entry.i18nKey),
-            }))}
-          />
+          <div className="col-span-2">
+            <SelectField
+              label={t("generate.modelLabel")}
+              value={imageModel}
+              onChange={(value) => onModelChange(value as ImageModel)}
+              options={IMAGE_MODEL_CATALOG.map((entry) => ({
+                value: entry.id,
+                label: t(entry.i18nKey),
+              }))}
+            />
+          </div>
+          <h3 className="col-span-2 mt-2 border-t border-border-subtle pt-4 text-xs font-semibold text-foreground">
+            {t("studio.parameters.output", { defaultValue: "Output" })}
+          </h3>
           {parameterCapabilities.sizes.length > 1 &&
             !parameterCapabilities.aspectRatios && (
               <SelectField
@@ -219,11 +220,17 @@ export default function GenerationParameters({
           )}
         </div>
         {hasAdvancedSettings && (
-          <details className="mt-3 border-t border-border-subtle pt-3">
-            <summary className="focus-ring cursor-pointer rounded-lg text-xs font-medium text-muted">
-              {t("studio.advancedSettings", {
-                defaultValue: "Advanced settings",
-              })}
+          <details className="group mt-5 border-t border-border-subtle pt-2">
+            <summary className="focus-ring flex min-h-9 cursor-pointer list-none items-center justify-between rounded-lg text-xs font-medium text-foreground [&::-webkit-details-marker]:hidden">
+              <span>
+                {t("studio.advancedSettings", {
+                  defaultValue: "Advanced settings",
+                })}
+              </span>
+              <ChevronDown
+                size={14}
+                className="text-muted transition-transform group-open:rotate-180"
+              />
             </summary>
             <div className="mt-3 grid grid-cols-1 gap-3">
               {showQuality && (

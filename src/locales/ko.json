@@ -804,5 +804,12 @@
   "studio.collection.deleteRecord": "이 생성 기록을 휴지통으로 이동할까요?",
   "studio.collection.deleteRecordImages": "이 생성 기록의 모든 이미지가 휴지통으로 이동합니다.",
   "studio.collection.selectRecord": "생성 기록 선택: {{prompt}}",
-  "studio.collection.previewLoadFailed": "원본 이미지를 불러오지 못했습니다. 미리보기는 계속 볼 수 있습니다."
+  "studio.collection.previewLoadFailed": "원본 이미지를 불러오지 못했습니다. 미리보기는 계속 볼 수 있습니다.",
+  "studio.nav.extractShort": "추출",
+  "studio.favorite.saved": "즐겨찾기에 저장됨",
+  "studio.favorite.unsaved": "즐겨찾기에 없음",
+  "studio.parameters.output": "출력",
+  "studio.collection.select": "선택",
+  "studio.collection.selectVisible": "표시된 항목 모두 선택",
+  "studio.collection.doneSelecting": "완료"
 }

@@ -17,6 +17,7 @@ interface ImageItem {
 }
 
 interface ImageGridProps {
+  maxImageHeight?: number;
   images: ImageItem[];
   onImageClick: (images: ImageItem[], index: number) => void;
   onDelete?: (generationId: string) => void;
@@ -171,6 +172,7 @@ function ImageActions({
 }
 
 export default function ImageGrid({
+  maxImageHeight,
   images,
   onImageClick,
   onDelete,
@@ -202,6 +204,11 @@ export default function ImageGrid({
                 defaultValue: "Open image {{number}}",
                 number: i + 1,
               })}
+              style={
+                !isMultiImage && maxImageHeight
+                  ? { height: `${maxImageHeight}px` }
+                  : undefined
+              }
               data-preview-image-id={img.imageId}
               onClick={() => onImageClick(images, i)}
               className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden bg-canvas ${

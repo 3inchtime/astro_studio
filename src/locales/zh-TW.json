@@ -804,5 +804,12 @@
   "studio.collection.deleteRecord": "將這筆生成記錄移至垃圾桶？",
   "studio.collection.deleteRecordImages": "這筆生成記錄中的所有圖片都將移至垃圾桶。",
   "studio.collection.selectRecord": "選取生成記錄：{{prompt}}",
-  "studio.collection.previewLoadFailed": "無法載入原圖，仍可檢視縮圖。"
+  "studio.collection.previewLoadFailed": "無法載入原圖，仍可檢視縮圖。",
+  "studio.nav.extractShort": "影像解析",
+  "studio.favorite.saved": "已收藏",
+  "studio.favorite.unsaved": "未收藏",
+  "studio.parameters.output": "輸出",
+  "studio.collection.select": "選取",
+  "studio.collection.selectVisible": "全選可見記錄",
+  "studio.collection.doneSelecting": "完成選取"
 }

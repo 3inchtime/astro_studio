@@ -438,9 +438,10 @@ export default function Lightbox({
           </button>
         ))}
         {currentImage?.imageId && (
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90">
+          <div className="flex h-9 w-9 items-center justify-center">
             <FavoriteButton
               imageId={currentImage.imageId}
+              className="h-9 w-9 text-white/80 hover:bg-white/10 hover:text-white"
               size={16}
               onClick={() => setShowFolderSelector(true)}
             />

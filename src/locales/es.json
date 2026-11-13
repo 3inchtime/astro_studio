@@ -804,5 +804,12 @@
   "studio.collection.deleteRecord": "¿Mover esta generación a la papelera?",
   "studio.collection.deleteRecordImages": "Todas las imágenes de esta generación irán a la papelera.",
   "studio.collection.selectRecord": "Seleccionar generación: {{prompt}}",
-  "studio.collection.previewLoadFailed": "No se pudo cargar la imagen completa. La miniatura sigue disponible."
+  "studio.collection.previewLoadFailed": "No se pudo cargar la imagen completa. La miniatura sigue disponible.",
+  "studio.nav.extractShort": "Extraer",
+  "studio.favorite.saved": "Guardado en favoritos",
+  "studio.favorite.unsaved": "Sin marcar como favorito",
+  "studio.parameters.output": "Salida",
+  "studio.collection.select": "Seleccionar",
+  "studio.collection.selectVisible": "Seleccionar todos los visibles",
+  "studio.collection.doneSelecting": "Listo"
 }

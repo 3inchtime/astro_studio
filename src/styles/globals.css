@@ -506,8 +506,8 @@
 
 @utility studio-control-danger {
   cursor: pointer;
-  border: 1px solid rgba(209, 69, 69, 0.16);
-  background-color: rgba(209, 69, 69, 0.06);
+  border: 1px solid var(--color-control-border);
+  background-color: var(--color-surface);
   color: var(--color-error);
   transition:
     background-color var(--motion-feedback) var(--ease-out),
@@ -742,7 +742,8 @@ button:disabled,
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
     outline: 2px solid var(--color-primary); outline-offset: 3px;
   }
-  [role="dialog"] { overscroll-behavior: contain; max-height: calc(100dvh - 32px); }
+  [role="dialog"] { overscroll-behavior: contain; }
+  .studio-floating-panel[role="dialog"] { max-height: calc(100dvh - 32px); }
   [role="dialog"]:focus { outline: none; }
 }
 @utility studio-button {
@@ -763,14 +764,14 @@ button:disabled,
   &[aria-current="page"] { background: var(--color-surface); color: var(--color-primary); box-shadow: var(--shadow-card); }
 }
 @layer components {
-  .studio-nav-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+  .studio-nav-item span { max-width: 100%; overflow: hidden; white-space: normal; overflow-wrap: anywhere; hyphens: auto; text-align: center; line-height: 1.15; font-size: var(--text-xs); }
   .studio-context-panel { width: var(--sidebar-width); background: var(--color-surface); }
   .studio-context-toggle { display: none; }
   .studio-context-panel[data-collapsed="true"] { display: none; }
   .studio-context-toggle[data-collapsed="true"] { display: flex; }
   @media (max-width: 1439px) {
     .studio-context-toggle { display: flex; }
-    .studio-context-panel { position: absolute; left: 80px; top: 48px; bottom: 0; z-index: 40; width: min(320px, calc(100vw - 96px)); box-shadow: var(--shadow-float); }
+    .studio-context-panel { position: absolute; left: 80px; top: 0; bottom: 0; z-index: 40; width: min(320px, calc(100vw - 96px)); box-shadow: var(--shadow-float); }
     .studio-context-panel[data-open="false"] { display: none; }
     .studio-context-resizer { display: none; }
   }
@@ -786,9 +787,14 @@ button:disabled,
 /* The command dock scrolls its content independently of the submit row. */
 .generation-workbench { container-type: size; }
 .generation-composer { max-height: 35cqh; min-height: 152px; }
-.generation-composer > div, .generation-composer [data-testid="generation-command-surface"] { min-height: 0; max-height: calc(35cqh - 24px); }
-.generation-prompt { field-sizing: content; overflow-y: auto; max-height: 120px; margin-top: 8px; }
+.generation-composer > div, .generation-composer [data-testid="generation-command-surface"] { min-height: 0; max-height: calc(35cqh - 32px); }
+.generation-prompt { min-height: 64px; field-sizing: content; overflow-y: auto; max-height: 120px; margin-top: 8px; }
 .generation-composer-scroll { flex: 1 1 auto; }
 
 @keyframes studio-panel-enter { from { opacity: .85; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
 #generation-parameters[role="dialog"] { animation: studio-panel-enter var(--motion-panel) var(--ease-out); }
+
+[data-message-role="user"]:not(:first-child) { margin-top: 20px; }
+[data-context-actions] { opacity: 0; transition: opacity var(--motion-feedback) var(--ease-out); }
+[data-message-role]:is(:hover, :focus-within) [data-context-actions] { opacity: 1; }
+@media (hover: none) { [data-context-actions] { opacity: 1; } }

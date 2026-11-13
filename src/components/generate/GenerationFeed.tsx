@@ -62,8 +62,11 @@ export default function GenerationFeed({
   }
 
   return (
-    <div data-testid="generation-feed" className="relative min-h-full w-full bg-canvas px-4 py-4">
-      <div className="relative mx-auto flex min-h-full w-full max-w-[1200px] flex-col gap-4">
+    <div
+      data-testid="generation-feed"
+      className="relative min-h-full w-full bg-canvas px-5 py-5"
+    >
+      <div className="relative mx-auto flex min-h-full w-full max-w-[1200px] flex-col gap-3">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
             <MessageBubble

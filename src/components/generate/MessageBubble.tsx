@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Pencil, RotateCcw, Sparkles, Star } from "lucide-react";
+import { formatLocalDateTime } from "../../lib/utils";
 import { toAssetUrl } from "../../lib/api";
 import type { Message, MessageImage, PromptAgentMessage } from "../../types";
 import ImageGrid from "./ImageGrid";
@@ -129,100 +130,108 @@ export default function MessageBubble({
   if (message.role === "user") {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.18 }}
         data-message-role="user"
         className="flex justify-start"
       >
-        <div className="group flex w-full max-w-full items-start gap-2">
-          <div className="min-w-0 flex-1 bg-transparent px-1 py-1 text-foreground selection:bg-primary/15">
-            <p className="mb-1.5 text-xs font-medium text-muted">
+        <div className="group w-full min-w-0 bg-transparent text-foreground selection:bg-primary/15">
+          <div className="mb-1 flex min-h-8 items-center gap-3">
+            <span className="text-xs font-medium text-foreground">
               {t("studio.prompt", { defaultValue: "Prompt" })}
-            </p>
-            <p
-              className={`${promptIsLong && !promptExpanded ? "line-clamp-3" : ""} break-words text-sm leading-relaxed text-foreground whitespace-pre-wrap`}
+            </span>
+            <time
+              dateTime={message.createdAt}
+              className="min-w-0 truncate text-xs tabular-nums text-muted"
             >
-              {message.content}
-            </p>
-            {promptIsLong && (
-              <button
-                type="button"
-                aria-expanded={promptExpanded}
-                onClick={() => setPromptExpanded(!promptExpanded)}
-                className="focus-ring mt-2 rounded-lg text-xs font-medium text-primary"
+              {formatLocalDateTime(message.createdAt)}
+            </time>
+            {(onFavoritePrompt || onEditPrompt) && (
+              <div
+                data-context-actions
+                className="ml-auto flex shrink-0 items-center gap-1"
               >
-                {promptExpanded
-                  ? t("studio.collapsePrompt", { defaultValue: "Show less" })
-                  : t("studio.expandPrompt", {
-                      defaultValue: "Show full prompt",
-                    })}
-              </button>
-            )}
-            {hasSourceImages && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {message.sourceImages?.map((image, index) => (
-                  <div
-                    key={`${image.path}-${index}`}
-                    className="max-w-full overflow-hidden rounded-[12px] border border-primary/18 bg-primary/5"
+                {onFavoritePrompt && (
+                  <button
+                    type="button"
+                    onClick={() => onFavoritePrompt(message)}
+                    aria-pressed={isPromptFavorited}
+                    aria-label={t(
+                      isPromptFavorited
+                        ? "generate.removePromptFavorite"
+                        : "generate.favoritePrompt",
+                    )}
+                    title={t(
+                      isPromptFavorited
+                        ? "generate.removePromptFavorite"
+                        : "generate.favoritePrompt",
+                    )}
+                    className={`focus-ring flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-surface ${isPromptFavorited ? "text-primary" : "text-muted hover:text-foreground"}`}
                   >
-                    <img
-                      src={toAssetUrl(image.thumbnailPath || image.path)}
-                      alt=""
-                      className={
-                        sourceImageMaxHeight
-                          ? "block h-auto w-auto max-w-full object-contain"
-                          : "h-16 w-16 object-cover"
-                      }
-                      style={
-                        sourceImageMaxHeight
-                          ? { maxHeight: sourceImageMaxHeight }
-                          : undefined
-                      }
+                    <Star
+                      size={15}
+                      fill={isPromptFavorited ? "currentColor" : "none"}
                     />
-                  </div>
-                ))}
+                  </button>
+                )}
+                {onEditPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => onEditPrompt(message)}
+                    aria-label={t("generate.editPrompt")}
+                    title={t("generate.editPrompt")}
+                    className="focus-ring flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface hover:text-foreground"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                )}
               </div>
             )}
           </div>
-          {(onFavoritePrompt || onEditPrompt) && (
-            <div className="mt-1 flex shrink-0 flex-col gap-1">
-              {onFavoritePrompt && (
-                <button
-                  onClick={() => onFavoritePrompt(message)}
-                  className={`focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border bg-surface shadow-sm transition-all ${
-                    isPromptFavorited
-                      ? "border-primary/18 text-primary hover:bg-primary/6"
-                      : "border-primary/14 text-primary hover:bg-primary/6 hover:text-primary"
-                  }`}
-                  aria-label={
-                    isPromptFavorited
-                      ? t("generate.removePromptFavorite")
-                      : t("generate.favoritePrompt")
-                  }
-                  title={
-                    isPromptFavorited
-                      ? t("generate.removePromptFavorite")
-                      : t("generate.favoritePrompt")
-                  }
-                >
-                  {isPromptFavorited ? (
-                    <Star size={13} fill="currentColor" />
-                  ) : (
-                    <Star size={13} />
-                  )}
-                </button>
+          <p
+            className={`${promptIsLong && !promptExpanded ? "line-clamp-3" : ""} whitespace-pre-wrap break-words text-sm leading-6 text-foreground`}
+          >
+            {message.content}
+          </p>
+          {promptIsLong && (
+            <button
+              type="button"
+              aria-expanded={promptExpanded}
+              onClick={() => setPromptExpanded(!promptExpanded)}
+              className="focus-ring mt-2 min-h-8 rounded-lg text-xs font-medium text-primary"
+            >
+              {t(
+                promptExpanded
+                  ? "studio.collapsePrompt"
+                  : "studio.expandPrompt",
+                {
+                  defaultValue: promptExpanded
+                    ? "Show less"
+                    : "Show full prompt",
+                },
               )}
-              {onEditPrompt && (
-                <button
-                  onClick={() => onEditPrompt(message)}
-                  className="focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-primary/14 bg-surface text-primary shadow-sm transition-all hover:bg-primary/6 hover:text-primary"
-                  aria-label={t("generate.editPrompt")}
-                  title={t("generate.editPrompt")}
+            </button>
+          )}
+          {hasSourceImages && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {message.sourceImages?.map((image, index) => (
+                <div
+                  key={`${image.path}-${index}`}
+                  className="overflow-hidden rounded-lg border border-border-subtle bg-surface"
                 >
-                  <Pencil size={13} />
-                </button>
-              )}
+                  <img
+                    src={toAssetUrl(image.thumbnailPath || image.path)}
+                    alt=""
+                    className="block h-16 w-auto max-w-32 object-contain"
+                    style={
+                      sourceImageMaxHeight
+                        ? { maxHeight: sourceImageMaxHeight }
+                        : undefined
+                    }
+                  />
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -239,9 +248,6 @@ export default function MessageBubble({
       data-message-role="assistant"
       className="flex items-start justify-start gap-3"
     >
-      <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-primary">
-        <Sparkles size={14} className="text-primary" strokeWidth={2.5} />
-      </div>
       <div className="min-w-0 w-full">
         <AnimatePresence initial={false}>
           {message.status === "processing" && (
@@ -273,9 +279,14 @@ export default function MessageBubble({
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                className="inline-block max-w-full overflow-hidden rounded-lg bg-canvas"
+                className="flex w-full max-w-full justify-center overflow-hidden rounded-lg bg-canvas"
               >
                 <ImageGrid
+                  maxImageHeight={
+                    chatViewportHeight
+                      ? Math.max(160, Math.min(520, chatViewportHeight - 96))
+                      : undefined
+                  }
                   images={message.images.map((image) => ({
                     path: image.path,
                     thumbnail: image.thumbnailPath,

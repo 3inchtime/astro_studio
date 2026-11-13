@@ -740,5 +740,12 @@
   "studio.collection.deleteRecord": "将这条生成记录移至回收站？",
   "studio.collection.deleteRecordImages": "这条生成记录中的所有图片都将移至回收站。",
   "studio.collection.selectRecord": "选择生成记录：{{prompt}}",
-  "studio.collection.previewLoadFailed": "无法加载原图，仍可查看缩略图。"
+  "studio.collection.previewLoadFailed": "无法加载原图，仍可查看缩略图。",
+  "studio.nav.extractShort": "图像解析",
+  "studio.favorite.saved": "已收藏",
+  "studio.favorite.unsaved": "未收藏",
+  "studio.parameters.output": "输出",
+  "studio.collection.select": "选择",
+  "studio.collection.selectVisible": "全选可见记录",
+  "studio.collection.doneSelecting": "完成选择"
 }
