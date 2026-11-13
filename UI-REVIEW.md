@@ -11,6 +11,8 @@
 - 画布右侧改为持续挂载的属性／图层／生成标签页，绘图工具与视图操作分离，保持文档、历史、视口、快捷键、保存和恢复逻辑。
 - 项目突出封面、最近活动及会话入口；设置采用扁平分组与待保存／保存中／成功／失败状态，本地字段校验不声称测试连接。
 - 八种语言补齐新文案并同步文档语言；改用语义字号变量，最小辅助文字12px。画布与预览背景在所有主题保持中性。
+- 自主深化：图库瀑布流填满可用列，批量选择按需出现；生成页压缩记录层级，结果高度随可用区域调整，保持底部跟随并尊重历史浏览位置；画布收敛边框，设置和项目页统一标题与分组。
+- 收藏改为可命名、可聚焦的真实按钮；排除不可见无图记录的全选；窄参数面板按容器宽度排版，折叠高级设置的隐藏字段不进入焦点循环。
 
 生产Rust代码、IPC、路由、数据库及持久化数据格式、运行时依赖均未改动。设计约束见 [DESIGN.md](DESIGN.md)。
 
@@ -18,7 +20,7 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| 完整Vitest | 565项通过，79个文件 |
+| 完整Vitest | 585项通过，82个文件 |
 | TypeScript / Vite | 生产构建通过；入口仍有500kB阈值提示，未提高阈值掩盖 |
 | Impeccable静态检测 | `[]`，无发现 |
 | 10路由 × 900×600 / 1200×800 / 1440×900 | 30组无页面或主区域横向溢出，无运行异常 |
@@ -26,8 +28,11 @@
 | 生成／图库／画布：12主题 × 8语言 | 288组、576个状态检查通过；192次提交可达性检查通过 |
 | 参数抽屉与会话抽屉 | 草稿保留、Escape返回焦点、同时仅一个模态抽屉 |
 | 图库批量操作与预览 | 关闭预览后选择保留；局部失败检查点及翻页边界由交互测试覆盖 |
+| 最新核心页大字号矩阵 | 8语言 × 浅／深色 × 生成／图库／画布，共48组；德语导航截断修复后6组复查通过 |
+| 最新高级参数抽屉 | 16组实际展开检查，176个字段可滚动到达、192次Tab均在面板内，反向Tab正确停在折叠summary |
+| 最新设置对比度 | 12主题 × 4状态，共48组；最小普通文字对比度4.502:1，禁用项除外 |
 
-浏览器使用独立IPC模拟数据和本仓库已有文档截图作为图片占位，不调用收费接口、不访问用户项目。普通文字语义色自动验证4.5:1，控件边框3:1；深色主题活动导航实测示例为5.04:1。
+浏览器使用独立IPC模拟数据和本仓库已有文档截图的裁剪图作为测试作品（仅验收使用，不进入产品资产），不调用收费接口、不访问用户项目。普通文字语义色自动验证4.5:1，控件边框3:1；深色主题活动导航实测示例为5.04:1。
 
 ## 性能比较
 
@@ -35,10 +40,10 @@
 
 | 场景 | 改造前 | 改造后 | 变化 |
 | --- | --- | --- | --- |
-| 1000条生成记录图库滚动 | 17.30ms | 17.60ms | +1.73% |
-| 200对象画布拖拽 | 17.40ms | 17.70ms | +1.72% |
+| 1000条生成记录图库滚动 | 17.30ms | 17.40ms | +0.58% |
+| 200对象画布拖拽 | 17.40ms | 18.20ms | +4.60% |
 
-两项均通过不劣化超过15%的约定门槛。数据仅说明该浏览器场景下的回归情况，不代替真实作品和原生WebView性能验收。
+最新生产构建的三次测量结果如上，覆盖本轮瀑布流与画布修改；两项均通过不劣化超过15%的约定门槛。图库首轮出现2个超过33.4ms的长帧（最大100ms），另两轮及画布三轮无此类长帧，原始采样已保留。数据仅说明该浏览器场景下的回归情况，不代替真实作品和原生WebView性能验收。
 
 ## 原生平台验证边界
 
@@ -46,23 +51,26 @@ macOS已使用独立QA身份与数据库启动真实WKWebView，未读取或复�
 
 已验证900×600原生窗口渲染、Enter换行、参数抽屉Tab／Escape与焦点恢复、草稿保留，以及Cmd+Enter触发无供应商配置的真实本地失败状态。隔离数据库确认任务为`provider_configuration_invalid`终态，配置表无密钥；画布创建通过真实IPC完成，文档JSON已写入QA目录。
 
-后续系统锁屏，自动工具无法继续图形操作，已请求用户解锁。未收到解锁回复后，已正常关闭隔离QA程序并重新构建恢复生产调试产物。原生图形编辑及自动保存、设置表单、图片预览、系统保存对话框和剪贴板尚未完成；真实供应商生成未测试。Windows WebView2目标环境不可用，完整Windows原生验收仍待进行。本轮不能宣称两平台原生验收全部完成。
+用户解锁后已继续完成真实原生功能检查：矩形绘制、描边6→9、自动保存和文档重开；非法设置拦截与空密钥本地配置保存；失败任务恢复与重试入口；原生图片加载、缩放、平移和方向键切图；收藏与嵌套弹窗；剪贴板成功反馈；系统保存面板导出的PNG与源图SHA256一致。所有数据均在隔离QA目录，未调用收费生成接口。
+
+最新视觉深化后的定向原生复查在首次取应用时再次遇到系统锁屏，未取得新版原生观察结果；未绕过锁屏，按用户“不提问”要求未再次询问。已正常关闭QA程序，生产调试产物已恢复。此前原生功能通过不等同于最新视觉修改的原生验收；Windows WebView2环境不可用，真实供应商生成未测试。两平台原生整轮验收仍未完成。
 
 ## 独立复核
 
-最终代码／呈现复核为`ship`，范围限于三项修正：旧图加载回调不再覆盖当前图状态；图库移除累积入场延迟；生成结果与详情保存提供失败提示、重复提交拦截及原控件重试。新增测试先复现失败后通过，32项相关测试由复核者独立重跑通过。该结论不代表全部原生平台验收通过。
+视觉深化前采用独立视觉评审与证据检查，初评26/40，重点指出图库留白、常驻选择装饰、画布边框、生成层级和设置主次。修正后独立最终复核为`ship`：代表性三尺寸页面与实际源码协调、安静，未发现需要继续修改的实质问题。最后四文件的容器排版、导航与焦点修正也单独复核为`ship`。该结论限于浏览器呈现与所审代码，不代替全部原生验收。
 
-详情抽屉曾在入场过程中截图，已等待过渡完成后重新截图；30组路由截图及展开状态也已按最终实现更新。
+测试包含新旧图加载隔离、保存错误重试、批量部分失败、输入法发送、跨断点草稿、生成结果跟随滚动、收藏键盘操作和折叠内容焦点循环；后两项焦点／滚动回归均先复现失败再验证修正。
 
 ## 本地证据
 
-验收产物位于忽略目录 [output/playwright/v2](output/playwright/v2/)，不进入生产包。
+最新验收产物位于忽略目录 [output/playwright/v3](output/playwright/v3/)，不进入生产包。早期全矩阵与真实原生数据保留在v2，最新视觉截图以v3为准。
 
-- [生成1440px](output/playwright/v2/review/generate-1440.png) · [参数抽屉900px](output/playwright/v2/review/generate-parameters-900.png)
-- [图库](output/playwright/v2/review/gallery-1440.png) · [预览](output/playwright/v2/review/gallery-preview-900.png) · [批量收藏](output/playwright/v2/review/gallery-batch-900.png)
-- [画布](output/playwright/v2/review/canvas-1200.png) · [画布检查器](output/playwright/v2/review/canvas-inspector-900.png)
-- [测试](output/playwright/v2/vitest.log) · [构建](output/playwright/v2/build.log) · [浏览器检查](output/playwright/v2/final-browser-review.log)
-- [核心页面矩阵](output/playwright/v2/core-matrix/audit-summary.json) · [主题语言矩阵](output/playwright/v2/secondary/audit-summary.json) · [性能数据](output/playwright/v2/performance-comparison.json)
-- [原生检查](output/playwright/v2/native-verification.json) · [QA隔离说明](output/playwright/v2/native-harness.json)
+- [生成1440px](output/playwright/v3/final/generate-1440.png) · [高级参数900px](output/playwright/v3/final/parameters-readable-900.png)
+- [图库](output/playwright/v3/final/gallery-1440.png) · [批量选择](output/playwright/v3/final/gallery-selected-900.png) · [收藏键盘焦点](output/playwright/v3/final/preview-favorite-focus-900.png)
+- [画布适配视图](output/playwright/v3/final/canvas-fitted-1200.png) · [画布保存视口](output/playwright/v3/final/canvas-1200.png)
+- [设置](output/playwright/v3/final/settings-1440.png) · [项目](output/playwright/v3/final/projects-1440.png)
+- [测试](output/playwright/v3/vitest.log) · [构建](output/playwright/v3/build.log) · [最新矩阵](output/playwright/v3/final/matrix-report.md) · [设置检查](output/playwright/v3/secondary/summary.json)
+- [性能数据](output/playwright/v3/performance-comparison.json) · [视觉评审](output/playwright/v3/critique.md)
+- [原生功能检查](output/playwright/v2/native-verification.json) · [最新原生复查边界](output/playwright/v3/native-targeted-recheck.json) · [QA隔离说明](output/playwright/v2/native-harness.json)
 
 上一轮2026-11-08的v0.0.32验收记录可从基线提交查看。

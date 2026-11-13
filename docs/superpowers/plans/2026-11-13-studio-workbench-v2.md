@@ -13,7 +13,9 @@ Approved user plan: 2026-11-13. Base: `68d6e0f` / v0.0.32. Branch: `feat/studio-
 - [x] Compare 1000-record gallery / 200-object canvas median p95 over three runs.
 - [x] Finish rendered review and retain screenshots at 900/1200/1440px.
 - [x] Run isolated macOS WKWebView smoke QA and document partial coverage.
-- [ ] Complete native macOS shape editing/autosave, settings, preview, file and clipboard acceptance after system unlock.
+- [x] Complete native macOS shape editing/autosave, settings, preview, file and clipboard functional checks after system unlock, using isolated QA data.
+- [x] Complete autonomous visual refinement, current browser screenshots, large-text/locale checks and closed-disclosure keyboard regression.
+- [ ] Recheck latest polish in native macOS (desktop locked again before targeted verification).
 - [ ] Run Windows WebView2 and real supplier/native file/clipboard integration acceptance on target hardware.
 
 No version bump, push, merge, tag or release is part of this implementation.
