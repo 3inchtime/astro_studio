@@ -1,3 +1,4 @@
+import RecoveryNotice from "../components/generate/RecoveryNotice";
 import {
   getGenerationRecipe,
   recipeToRequest,
@@ -1068,6 +1069,7 @@ export default function GeneratePage() {
     <GenerationWorkbench>
       {(parametersTarget, drawerOpen) => (
         <>
+          <RecoveryNotice />
           <div
             ref={scrollRef}
             onScroll={handleScroll}

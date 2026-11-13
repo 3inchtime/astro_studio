@@ -1,3 +1,4 @@
+import RecoveryNotice from "../components/generate/RecoveryNotice";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useDialogFocus } from "../hooks/useDialogFocus";
@@ -1280,6 +1281,7 @@ export default function CanvasPage() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+      <RecoveryNotice />
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3 min-[1440px]:hidden">
         <button
           ref={documentsToggleRef}
