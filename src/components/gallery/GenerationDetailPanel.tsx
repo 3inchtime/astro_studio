@@ -4,6 +4,7 @@ import { Calendar, Download, RotateCcw, Trash2, Wand2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { saveImageToFile, toAssetUrl } from "../../lib/api";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
+import { capturePreviewSource, type PreviewSource } from "../../lib/store";
 import { formatLocalDateTime } from "../../lib/utils";
 import type { GenerationResult } from "../../types";
 
@@ -20,7 +21,7 @@ interface GenerationDetailPanelProps {
     imageId: string,
     generationId: string,
   ) => void;
-  onPreview?: (imageIndex: number) => void;
+  onPreview?: (imageIndex: number, source?: PreviewSource) => void;
   onManageFolders?: (imageId: string) => void;
   onRestore?: (generationId: string) => void;
   deleteLabel?: string;
@@ -46,10 +47,10 @@ export default function GenerationDetailPanel({
 }: GenerationDetailPanelProps) {
   const { t } = useTranslation();
   const titleId = useId();
-  const [docked, setDocked] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
+  const [docked, setDocked] = useState(() => window.matchMedia("(min-width: 1200px)").matches);
   const panelRef = useDialogFocus({ open: true, onClose, busy, modal: !docked });
   useEffect(() => {
-    const media = window.matchMedia("(min-width: 1280px)");
+    const media = window.matchMedia("(min-width: 1200px)");
     const update = () => setDocked(media.matches);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
@@ -80,7 +81,7 @@ export default function GenerationDetailPanel({
       initial={{ x: 340, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 340, opacity: 0 }}
-      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       className={`studio-panel-strong h-full w-[320px] max-w-[calc(100vw-24px)] shrink-0 overflow-y-auto border-y-0 border-r-0 ${docked ? "relative" : "fixed inset-y-0 right-0 z-50 shadow-2xl"}`}
     >
       <div className="p-5">
@@ -103,17 +104,18 @@ export default function GenerationDetailPanel({
             <motion.div
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               className="mb-3 overflow-hidden rounded-[12px] border border-border-subtle"
             >
               {onPreview ? (
                 <button
                   type="button"
-                  onClick={() => onPreview(selectedIndex)}
+                  onClick={(event) => onPreview(selectedIndex, capturePreviewSource(event.currentTarget, image.id))}
                   aria-label={`${t("lightbox.preview")} ${result.generation.prompt}`}
                   className="focus-ring block w-full cursor-zoom-in text-left"
                 >
                   <img
+                    data-preview-image-id={image.id}
                     src={toAssetUrl(image.file_path)}
                     alt={result.generation.prompt}
                     className="w-full"

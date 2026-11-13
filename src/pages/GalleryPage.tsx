@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { deleteGeneration, searchGenerations } from "../lib/api";
+import { searchGenerations } from "../lib/api";
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
-import { useUIStore } from "../lib/store";
+import { useUIStore, type PreviewSource } from "../lib/store";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import type { GenerationResult, GenerationSearchFilters } from "../types";
 import { useTranslation } from "react-i18next";
@@ -11,6 +11,9 @@ import FolderSelector from "../components/favorites/FolderSelector";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
+import CollectionBatchActions from "../components/gallery/CollectionBatchActions";
+import GenerationDeleteDialog from "../components/gallery/GenerationDeleteDialog";
+import { useCollectionSelection } from "../components/gallery/useCollectionSelection";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import GallerySearchBar from "../components/gallery/GallerySearchBar";
 import ViewModeToggle from "../components/gallery/ViewModeToggle";
@@ -39,6 +42,8 @@ export default function GalleryPage() {
     closeFolderSelector,
   } = useUIStore();
   const [results, setResults] = useState<GenerationResult[]>([]);
+  const selection = useCollectionSelection(results.map((row) => row.generation.id));
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<GenerationSearchFilters>({});
   const [total, setTotal] = useState(0);
@@ -101,7 +106,7 @@ export default function GalleryPage() {
         if (requestId !== searchRequestIdRef.current) return;
         setResults((current) =>
           mode === "append"
-            ? [...current, ...result.generations]
+            ? [...current, ...result.generations.filter((row) => !current.some((entry) => entry.generation.id === row.generation.id))]
             : result.generations,
         );
         setTotal(result.total);
@@ -127,12 +132,14 @@ export default function GalleryPage() {
   }, [performSearch]);
 
   async function handleSearch() {
+    selection.clear();
     await performSearch(1, query, filters);
   }
 
-  async function handleDelete(id: string) {
-    await deleteGeneration(id);
-    await performSearch(1, appliedSearch.current.query, appliedSearch.current.filters);
+  function handleDeleted(id: string) {
+    setResults((current) => current.filter((row) => row.generation.id !== id));
+    setTotal((current) => Math.max(0, current - 1));
+    selection.remove([id]);
     if (selected?.generation.id === id) setSelected(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
       closeLightbox();
@@ -151,14 +158,15 @@ export default function GalleryPage() {
   );
 
   function resetFilters() {
+    selection.clear();
     setQuery("");
     setFilters({});
     void performSearch(1, "", {});
   }
 
   const openResultLightbox = useCallback(
-    (result: GenerationResult, index: number) => {
-      openLightbox(generationResultToLightboxImages(result), index);
+    (result: GenerationResult, index: number, source?: PreviewSource) => {
+      openLightbox(generationResultToLightboxImages(result), index, source);
     },
     [openLightbox],
   );
@@ -171,13 +179,13 @@ export default function GalleryPage() {
     [handleEditImage, closeLightbox],
   );
 
-  const hasMore = page * pageSize < total;
+  const hasMore = results.length < total;
   const loadMoreRef = useInfiniteScroll({
-    enabled: results.length > 0 && !loadError,
+    enabled: results.length > 0 && !loadError && !lightbox,
     hasMore,
     isLoading,
     onLoadMore: () => {
-      void performSearch(page + 1, appliedSearch.current.query, appliedSearch.current.filters, "append");
+      void performSearch(Math.min(page + 1, Math.floor(results.length / pageSize) + 1), appliedSearch.current.query, appliedSearch.current.filters, "append");
     },
   });
 
@@ -195,6 +203,10 @@ export default function GalleryPage() {
           actions={<ViewModeToggle value={viewMode} onChange={setViewMode} />}
         />
 
+        <CollectionBatchActions rows={results} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={selection.clear} onSucceeded={(ids, kind) => {
+          selection.remove(ids);
+          if (kind === "delete") ids.forEach(handleDeleted);
+        }} />
         <div className="flex-1 overflow-y-auto p-5">
           <CollectionStatus loading={isLoading} error={loadError} onRetry={() => void handleSearch()} />
           {results.length === 0 ? (!isLoading && !loadError && (
@@ -205,6 +217,8 @@ export default function GalleryPage() {
           )) : (
             <GenerationGrid
               results={results}
+              selectedIds={selection.selectedIds}
+              onToggleSelection={selection.toggle}
               viewMode={viewMode}
               favoriteMode="manage"
               onSelect={setSelected}
@@ -223,9 +237,9 @@ export default function GalleryPage() {
             title={t("gallery.detail")}
             showSaveButton
             onClose={() => setSelected(null)}
-            onDelete={(id) => void handleDelete(id)}
+            onDelete={setDeleteTarget}
             onEditImage={handleEditImage}
-            onPreview={(imageIndex) => openResultLightbox(selected, imageIndex)}
+            onPreview={(imageIndex, source) => openResultLightbox(selected, imageIndex, source)}
             onManageFolders={openFolderSelector}
           />
         )}
@@ -234,15 +248,17 @@ export default function GalleryPage() {
       <AnimatePresence>
         {lightbox && (
           <Lightbox
+            source={lightbox.source}
             images={lightbox.images}
             initialIndex={lightbox.index}
             onClose={closeLightbox}
             onEditImage={handleEditLightboxImage}
-            onDelete={(id) => void handleDelete(id)}
+            onDelete={setDeleteTarget}
           />
         )}
       </AnimatePresence>
 
+      {deleteTarget && <GenerationDeleteDialog generationId={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleDeleted} />}
       {folderSelectorImageId && (
         <FolderSelector
           imageId={folderSelectorImageId}

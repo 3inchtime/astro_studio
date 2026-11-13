@@ -4,21 +4,26 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toAssetUrl } from "../../lib/api";
 import type { GalleryViewMode } from "../../lib/galleryViewMode";
+import { capturePreviewSource, type PreviewSource } from "../../lib/store";
 import { cn, formatLocalDateTime } from "../../lib/utils";
 import type { GenerationResult } from "../../types";
 import FavoriteButton from "../favorites/FavoriteButton";
 
 interface GenerationGridProps {
   results: GenerationResult[];
+  selectedIds?: Set<string>;
+  onToggleSelection?: (id: string) => void;
   viewMode?: GalleryViewMode;
   favoriteMode?: "manage" | "status" | "hidden";
   onSelect: (result: GenerationResult) => void;
-  onPreview?: (result: GenerationResult, index: number) => void;
+  onPreview?: (result: GenerationResult, index: number, source?: PreviewSource) => void;
   onManageFolders?: (imageId: string) => void;
 }
 
 export default function GenerationGrid({
   results,
+  selectedIds,
+  onToggleSelection,
   viewMode = "masonry",
   favoriteMode = "status",
   onSelect,
@@ -48,18 +53,19 @@ export default function GenerationGrid({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{
                 delay,
-                duration: 0.3,
+                duration: 0.18,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              className="studio-card group grid grid-cols-[104px_minmax(0,1fr)_auto] gap-3 rounded-[8px] p-2.5 hover:studio-card-hover"
+              className={cn(selectedIds?.has(result.generation.id) && "ring-2 ring-primary", "studio-card group grid grid-cols-[104px_minmax(0,1fr)_auto] gap-3 rounded-[8px] p-2.5 hover:studio-card-hover")}
             >
               <button
                 type="button"
-                onClick={() => (onPreview ? onPreview(result, 0) : onSelect(result))}
+                onClick={(event) => (onPreview ? onPreview(result, 0, capturePreviewSource(event.currentTarget, img.id)) : onSelect(result))}
                 aria-label={`${t("lightbox.preview")} ${result.generation.prompt}`}
                 className="focus-ring relative h-[104px] overflow-hidden rounded-[8px] bg-subtle text-left"
               >
                 <img
+                  data-preview-image-id={img.id}
                   src={toAssetUrl(img.thumbnail_path || img.file_path)}
                   alt={result.generation.prompt}
                   className="h-full w-full object-cover"
@@ -94,6 +100,7 @@ export default function GenerationGrid({
               </button>
 
               <div className="flex shrink-0 items-start gap-1">
+                {onToggleSelection && <input type="checkbox" checked={selectedIds?.has(result.generation.id) ?? false} onChange={() => onToggleSelection(result.generation.id)} aria-label={t("studio.collection.selectRecord", { defaultValue: "Select generation: {{prompt}}", prompt: result.generation.prompt })} className="focus-ring m-2 h-4 w-4 accent-primary" />}
                 {favoriteMode !== "hidden" && (
                   <div
                     onClick={(e) => e.stopPropagation()}
@@ -147,18 +154,19 @@ export default function GenerationGrid({
             key={img.id}
             initial={isNew ? { opacity: 0, y: 6, scale: 0.98 } : false}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ delay, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="studio-card group mb-4 break-inside-avoid overflow-hidden rounded-[12px] hover:studio-card-hover"
+            transition={{ delay, duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            className={cn(selectedIds?.has(result.generation.id) && "ring-2 ring-primary", "studio-card group mb-4 break-inside-avoid overflow-hidden rounded-[12px] hover:studio-card-hover")}
           >
             <div className="relative overflow-hidden">
               <button
                 type="button"
-                onClick={() => (onPreview ? onPreview(result, 0) : onSelect(result))}
+                onClick={(event) => (onPreview ? onPreview(result, 0, capturePreviewSource(event.currentTarget, img.id)) : onSelect(result))}
                 aria-label={`${t("lightbox.preview")} ${result.generation.prompt}`}
                 className="focus-ring block h-full w-full cursor-pointer overflow-hidden text-left"
                 style={{ aspectRatio }}
               >
                 <img
+                  data-preview-image-id={img.id}
                   src={toAssetUrl(img.thumbnail_path || img.file_path)}
                   alt={result.generation.prompt}
                   className="h-full w-full object-cover"
@@ -170,6 +178,7 @@ export default function GenerationGrid({
                   </div>
                 )}
               </button>
+              {onToggleSelection && <label className="absolute bottom-2 left-2 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg bg-black/65"><input type="checkbox" checked={selectedIds?.has(result.generation.id) ?? false} onChange={() => onToggleSelection(result.generation.id)} aria-label={t("studio.collection.selectRecord", { defaultValue: "Select generation: {{prompt}}", prompt: result.generation.prompt })} className="focus-ring h-4 w-4 accent-primary" /></label>}
               <div className="absolute right-2 top-2 flex items-center gap-1">
                 {favoriteMode !== "hidden" && (
                   <div
@@ -203,7 +212,7 @@ export default function GenerationGrid({
               </div>
             </div>
             <div className="px-3 py-2.5">
-              <p className="line-clamp-2 text-[14px] leading-snug text-foreground transition-colors group-hover:text-foreground/70">
+              <p className="line-clamp-1 text-[12px] leading-snug text-foreground transition-colors group-hover:text-foreground/70">
                 {result.generation.prompt}
               </p>
             </div>

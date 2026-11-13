@@ -85,6 +85,6 @@ describe("GenerationDetailPanel", () => {
       name: "lightbox.preview Glass observatory",
     }));
 
-    expect(onPreview).toHaveBeenCalledWith(1);
+    expect(onPreview).toHaveBeenCalledWith(1, expect.objectContaining({ imageId: "image-2" }));
   });
 });

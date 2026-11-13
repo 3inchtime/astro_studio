@@ -133,7 +133,7 @@ describe("GenerationGrid", () => {
 
     expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({
       generation: expect.objectContaining({ id: "generation-wide" }),
-    }), 0);
+    }), 0, expect.objectContaining({ imageId: "image-wide" }));
     expect(onSelect).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "gallery.detail" }));
@@ -141,6 +141,19 @@ describe("GenerationGrid", () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({
       generation: expect.objectContaining({ id: "generation-wide" }),
     }));
+  });
+
+  it("keeps record selection separate from preview and detail actions", () => {
+    const onToggleSelection = vi.fn();
+    const onSelect = vi.fn();
+    const onPreview = vi.fn();
+    render(<GenerationGrid results={[buildResult("wide", 1536, 1024)]} selectedIds={new Set(["generation-wide"])} onToggleSelection={onToggleSelection} onSelect={onSelect} onPreview={onPreview} />);
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    expect(onToggleSelection).toHaveBeenCalledWith("generation-wide");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onPreview).not.toHaveBeenCalled();
   });
 
   it("renders results as a compact list when list view is selected", () => {

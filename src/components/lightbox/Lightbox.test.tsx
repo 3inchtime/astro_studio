@@ -211,6 +211,16 @@ describe("Lightbox", () => {
     });
   });
 
+  it("retains a thumbnail until the full image has loaded", () => {
+    render(<Lightbox images={[{ ...images[0], thumbnailPath: "/tmp/thumb.png" }]} initialIndex={0} onClose={vi.fn()} />);
+    const full = screen.getByAltText("Preview");
+    expect(screen.getByTestId("preview-thumbnail")).toBeInTheDocument();
+    expect(full).toHaveStyle({ opacity: "0" });
+    fireEvent.load(full);
+    expect(full).toHaveStyle({ opacity: "1" });
+    expect(screen.queryByTestId("preview-thumbnail")).not.toBeInTheDocument();
+  });
+
   it("keeps the full-resolution source for the lightbox image", () => {
     render(
       <Lightbox

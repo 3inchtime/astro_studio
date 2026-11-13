@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  deleteGeneration,
   deletePromptFavorite,
   getFavoriteImages,
   getPromptFavorites,
@@ -19,7 +18,7 @@ import {
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { getPromptFolderDisplayName } from "../lib/promptFolders";
 import { cn, formatLocalDateTime } from "../lib/utils";
-import { useUIStore } from "../lib/store";
+import { useUIStore, type PreviewSource } from "../lib/store";
 import { useFolders } from "../hooks/useFolders";
 import { usePromptFolders } from "../hooks/usePromptFolders";
 import { useLayoutContext } from "../components/layout/AppLayout";
@@ -30,6 +29,9 @@ import ConfirmDialog from "../components/common/ConfirmDialog";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
+import CollectionBatchActions from "../components/gallery/CollectionBatchActions";
+import GenerationDeleteDialog from "../components/gallery/GenerationDeleteDialog";
+import { useCollectionSelection } from "../components/gallery/useCollectionSelection";
 import GenerationGrid from "../components/gallery/GenerationGrid";
 import ViewModeToggle from "../components/gallery/ViewModeToggle";
 import Lightbox from "../components/lightbox/Lightbox";
@@ -50,6 +52,8 @@ export default function FavoritesPage() {
   const [activeKind, setActiveKind] = useState<FavoriteKind>("images");
 
   const [imageResults, setImageResults] = useState<GenerationResult[]>([]);
+  const selection = useCollectionSelection(imageResults.map((row) => row.generation.id));
+  const [deleteImageTarget, setDeleteImageTarget] = useState<string | null>(null);
   const [imageQuery, setImageQuery] = useState("");
   const [selectedImageFolderId, setSelectedImageFolderId] = useState("");
   const [imageTotal, setImageTotal] = useState(0);
@@ -82,6 +86,7 @@ export default function FavoritesPage() {
   const [selectedPromptFolderId, setSelectedPromptFolderId] = useState("");
   const [promptFolderSelectorFavoriteId, setPromptFolderSelectorFavoriteId] =
     useState<string | null>(null);
+  const [promptCopyError, setPromptCopyError] = useState<string | null>(null);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const [deletePromptTarget, setDeletePromptTarget] = useState<string | null>(null);
   const [deletePromptBusy, setDeletePromptBusy] = useState(false);
@@ -108,7 +113,7 @@ export default function FavoritesPage() {
         if (requestId !== imageFavoritesRequestIdRef.current) return;
         setImageResults((current) =>
           mode === "append"
-            ? [...current, ...result.generations]
+            ? [...current, ...result.generations.filter((row) => !current.some((entry) => entry.generation.id === row.generation.id))]
             : result.generations,
         );
         setImageTotal(result.total);
@@ -156,6 +161,7 @@ export default function FavoritesPage() {
   }, []);
 
   function handleSearch() {
+    selection.clear();
     if (activeKind === "images") {
       loadImageFavorites(1, imageQuery, selectedImageFolderId).catch(() => {});
       return;
@@ -164,6 +170,7 @@ export default function FavoritesPage() {
   }
 
   function handleFolderFilterChange(folderId: string) {
+    selection.clear();
     if (activeKind === "images") {
       setSelectedImageFolderId(folderId);
       setSelectedImage(null);
@@ -175,9 +182,10 @@ export default function FavoritesPage() {
     loadPromptFavorites(promptQuery, folderId).catch(() => {});
   }
 
-  async function handleDeleteImage(id: string) {
-    await deleteGeneration(id);
-    await loadImageFavorites(imagePage, imageQuery, selectedImageFolderId);
+  function handleDeletedImage(id: string) {
+    setImageResults((current) => current.filter((row) => row.generation.id !== id));
+    setImageTotal((current) => Math.max(0, current - 1));
+    selection.remove([id]);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
       closeLightbox();
@@ -221,7 +229,10 @@ export default function FavoritesPage() {
   }
 
   async function handleCopyPrompt(favorite: PromptFavorite) {
-    await navigator.clipboard.writeText(favorite.prompt).catch(() => {});
+    setPromptCopyError(null);
+    setCopiedPromptId(null);
+    try { await navigator.clipboard.writeText(favorite.prompt); }
+    catch { setPromptCopyError(t("studio.copyFailed", { defaultValue: "Could not copy. Try again." })); return; }
     setCopiedPromptId(favorite.id);
     window.setTimeout(() => {
       setCopiedPromptId((current) =>
@@ -245,8 +256,8 @@ export default function FavoritesPage() {
   }
 
   const openResultLightbox = useCallback(
-    (result: GenerationResult, index: number) => {
-      openLightbox(generationResultToLightboxImages(result), index);
+    (result: GenerationResult, index: number, source?: PreviewSource) => {
+      openLightbox(generationResultToLightboxImages(result), index, source);
     },
     [openLightbox],
   );
@@ -257,14 +268,14 @@ export default function FavoritesPage() {
     activeKind === "images" ? selectedImageFolderId : selectedPromptFolderId;
   const activeFolders = activeKind === "images" ? folders : promptFolders;
   const activeQuery = activeKind === "images" ? imageQuery : promptQuery;
-  const hasMoreImages = imagePage * imagePageSize < imageTotal;
+  const hasMoreImages = imageResults.length < imageTotal;
   const loadMoreImagesRef = useInfiniteScroll({
-    enabled: activeKind === "images" && imageResults.length > 0 && !imageLoadError,
+    enabled: activeKind === "images" && imageResults.length > 0 && !imageLoadError && !lightbox,
     hasMore: hasMoreImages,
     isLoading: isLoadingImages,
     onLoadMore: () => {
       void loadImageFavorites(
-        imagePage + 1,
+        Math.min(imagePage + 1, Math.floor(imageResults.length / imagePageSize) + 1),
         appliedImageSearch.current.query,
         appliedImageSearch.current.folderId,
         "append",
@@ -387,7 +398,13 @@ export default function FavoritesPage() {
           </div>
         </div>
 
+        {activeKind === "images" && <CollectionBatchActions rows={imageResults} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={selection.clear} onSucceeded={(ids, kind) => {
+          selection.remove(ids);
+          if (kind === "delete") ids.forEach(handleDeletedImage);
+          else void reloadFolders();
+        }} />}
         <div className="flex-1 overflow-y-auto p-5">
+          {activeKind === "prompts" && promptCopyError && <p role="alert" className="mb-4 text-sm text-error">{promptCopyError}</p>}
           <CollectionStatus
             loading={activeKind === "images" ? isLoadingImages : isLoadingPrompts}
             error={activeKind === "images" ? imageLoadError : promptLoadError}
@@ -403,6 +420,8 @@ export default function FavoritesPage() {
               )) : (
                 <GenerationGrid
                   results={imageResults}
+                  selectedIds={selection.selectedIds}
+                  onToggleSelection={selection.toggle}
                   viewMode={imageViewMode}
                   onSelect={setSelectedImage}
                   onPreview={openResultLightbox}
@@ -428,10 +447,10 @@ export default function FavoritesPage() {
             result={selectedImage}
             title={t("favorites.detail")}
             onClose={() => setSelectedImage(null)}
-            onDelete={(id) => void handleDeleteImage(id)}
+            onDelete={setDeleteImageTarget}
             onEditImage={handleEditImage}
-            onPreview={(imageIndex) =>
-              openResultLightbox(selectedImage, imageIndex)
+            onPreview={(imageIndex, source) =>
+              openResultLightbox(selectedImage, imageIndex, source)
             }
             onManageFolders={openFolderSelector}
           />
@@ -441,15 +460,17 @@ export default function FavoritesPage() {
       <AnimatePresence>
         {lightbox && (
           <Lightbox
+            source={lightbox.source}
             images={lightbox.images}
             initialIndex={lightbox.index}
             onClose={closeLightbox}
             onEditImage={handleEditLightboxImage}
-            onDelete={(id) => void handleDeleteImage(id)}
+            onDelete={setDeleteImageTarget}
           />
         )}
       </AnimatePresence>
 
+      {deleteImageTarget && <GenerationDeleteDialog generationId={deleteImageTarget} onClose={() => setDeleteImageTarget(null)} onDeleted={handleDeletedImage} />}
       {folderSelectorImageId && (
         <FolderSelector
           imageId={folderSelectorImageId}

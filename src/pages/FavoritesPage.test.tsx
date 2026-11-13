@@ -1,3 +1,4 @@
+import { useUIStore } from "../lib/store";
 import {
   act,
   fireEvent,
@@ -234,6 +235,7 @@ function buildResult(id = "1"): GenerationResult {
 
 describe("FavoritesPage", () => {
   beforeEach(() => {
+    useUIStore.setState({ lightbox: null, folderSelectorImageId: null });
     deleteGeneration.mockReset();
     deletePromptFavorite.mockReset();
     getFavoriteImages.mockReset();
@@ -289,6 +291,17 @@ describe("FavoritesPage", () => {
     await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "studio.collection.retry" }));
     await waitFor(() => expect(getFavoriteImages).toHaveBeenCalledTimes(2));
+  });
+
+  it("reports a prompt clipboard failure without showing copied success", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error("Denied")) } });
+    getPromptFavorites.mockResolvedValue([{ id: "prompt-1", prompt: "A blue moon", updated_at: "2026-01-01T00:00:00Z" }]);
+    render(<FavoritesPage />);
+    fireEvent.click(screen.getByRole("button", { name: "favorites.promptsTab" }));
+    await screen.findByText("A blue moon");
+    fireEvent.click(screen.getByRole("button", { name: "favorites.copyPrompt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("studio.copyFailed");
+    expect(screen.queryByRole("button", { name: "favorites.copiedPrompt" })).not.toBeInTheDocument();
   });
 
   it("confirms permanent prompt removal before deleting", async () => {
