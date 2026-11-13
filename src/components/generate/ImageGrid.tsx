@@ -44,7 +44,7 @@ function ImagePreview({
     <img
       src={toAssetUrl(src)}
       alt="Generated"
-      className={`block h-full ${
+      className={`block h-full rounded-lg ${
         isMultiImage
           ? "w-full object-contain"
           : "w-auto max-w-full object-contain object-center"
@@ -197,7 +197,7 @@ export default function ImageGrid({
     >
       {images.map((img, i) => (
         <div key={img.path} className={isMultiImage ? "min-w-0" : "w-fit"}>
-          <div className="overflow-hidden rounded-lg bg-canvas">
+          <div className="bg-canvas">
             <button
               type="button"
               aria-label={t("studio.openImage", {
@@ -211,7 +211,7 @@ export default function ImageGrid({
               }
               data-preview-image-id={img.imageId}
               onClick={() => onImageClick(images, i)}
-              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden bg-canvas ${
+              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden rounded-lg bg-canvas ${
                 isMultiImage
                   ? "h-60 w-full"
                   : "inline-block h-[min(52cqh,520px)] w-fit max-w-full"

@@ -78,3 +78,7 @@ macOS已使用独立QA身份与数据库启动真实WKWebView，未读取或复�
 ## 纯图标导航调整
 
 按用户最新偏好去掉侧栏可见文字，保留本地化title与aria-label。主导航按钮统一44×44px，组内间距4px，创作与资源仅保留一处分隔；底部工具同步44px。900×600与1440×900实际浏览器检查无侧栏文字、无横向溢出，导航可访问名称完整。AppLayout的14项测试及生产构建通过。最新截图：[生成页](output/playwright/v3/icon-nav/generate-1440.png)、[窄窗口](output/playwright/v3/icon-nav/generate-900.png)。本次覆盖此前截图中的带文字导航。
+
+## 生成图片圆角修正
+
+圆角原先作用于图片与操作栏的共同外框，导致图片上角圆、下角直。现改由图片及预览按钮各自使用8px圆角，操作栏和会话布局不参与裁切。直角SVG测试图的浏览器前后对比确认四角均8px，图片矩形尺寸不变；旧验收裁图自带的左上圆弧属于素材内容。证据见[修正后](output/playwright/v3/image-radius/after.png)与[尺寸记录](output/playwright/v3/image-radius/after.log)。
