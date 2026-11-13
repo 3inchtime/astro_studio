@@ -301,6 +301,22 @@ describe("ProjectHomePage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("dismisses project management with Escape and restores trigger focus", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Brand Storyboards");
+    const trigger = screen.getByRole("button", { name: "projects.manage" });
+    fireEvent.click(trigger);
+    const rename = screen.getByRole("button", { name: "sidebar.rename" });
+    rename.focus();
+    fireEvent.keyDown(rename, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "sidebar.rename" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("opens the rename dialog with the current project name", async () => {
     render(
       <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>

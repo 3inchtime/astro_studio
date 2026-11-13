@@ -79,6 +79,28 @@ export default function ProjectHomePage() {
     null,
   );
   const [showActions, setShowActions] = useState(false);
+  const actionsContainerRef = useRef<HTMLDivElement>(null);
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!showActions) return;
+    const dismissOutside = (event: PointerEvent) => {
+      if (!actionsContainerRef.current?.contains(event.target as Node)) setShowActions(false);
+    };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setShowActions(false);
+      actionsTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("keydown", dismissEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("keydown", dismissEscape);
+    };
+  }, [showActions]);
+
 
   const {
     lightbox,
@@ -357,7 +379,7 @@ export default function ProjectHomePage() {
   if (!project) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-[14px] text-muted">{t("projects.notFound")}</p>
+        <p className="text-sm text-muted">{t("projects.notFound")}</p>
       </div>
     );
   }
@@ -371,7 +393,7 @@ export default function ProjectHomePage() {
             <div className="min-w-0">
               <div className="mb-1 flex items-center gap-2">
                 {project.pinned_at && (
-                  <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[12px] font-medium text-primary">
+                  <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-xs font-medium text-primary">
                     <Pin size={9} />
                     {t("projects.pinned")}
                   </span>
@@ -380,7 +402,7 @@ export default function ProjectHomePage() {
               <h1 className="text-[20px] font-semibold text-foreground tracking-tight truncate">
                 {project.name}
               </h1>
-              <p className="mt-1 text-[12px] text-muted">
+              <p className="mt-1 text-xs text-muted">
                 <span>
                   {t("projects.imageCountValue", {
                     count: project.image_count,
@@ -404,8 +426,10 @@ export default function ProjectHomePage() {
                 })}
                 <ArrowRight size={15} />
               </button>
-              <div className="relative">
+              <div ref={actionsContainerRef} className="relative">
                 <button
+                  ref={actionsTriggerRef}
+                  aria-expanded={showActions}
                   onClick={() => setShowActions((c) => !c)}
                   className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted transition-all hover:bg-subtle hover:text-foreground"
                   aria-label={t("projects.manage")}
@@ -431,7 +455,7 @@ export default function ProjectHomePage() {
                         setRenameDialogOpen(true);
                       }}
                       disabled={projectActionPending}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                     >
                       <Pencil size={13} />
                       <span>{t("sidebar.rename")}</span>
@@ -440,7 +464,7 @@ export default function ProjectHomePage() {
                       <button
                         onClick={() => void handleUnpinProject()}
                         disabled={projectActionPending}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                       >
                         <PinOff size={13} />
                         <span>{t("projects.unpin")}</span>
@@ -449,7 +473,7 @@ export default function ProjectHomePage() {
                       <button
                         onClick={() => void handlePinProject()}
                         disabled={projectActionPending}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                       >
                         <Pin size={13} />
                         <span>{t("projects.pin")}</span>
@@ -458,7 +482,7 @@ export default function ProjectHomePage() {
                     <button
                       onClick={() => void handleArchiveProject()}
                       disabled={projectActionPending}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                     >
                       <Archive size={13} />
                       <span>{t("sidebar.archive")}</span>
@@ -470,7 +494,7 @@ export default function ProjectHomePage() {
                         setDeleteDialogOpen(true);
                       }}
                       disabled={projectActionPending}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error hover:bg-error/8 transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error hover:bg-error/8 transition-colors disabled:opacity-50"
                     >
                       <Trash2 size={13} />
                       <span>{t("sidebar.delete")}</span>
@@ -484,7 +508,7 @@ export default function ProjectHomePage() {
           {projectActionError ? (
             <div
               role="alert"
-              className="mt-3 rounded-[8px] border border-error/15 bg-error/8 px-3 py-2 text-[12px] text-error"
+              className="mt-3 rounded-[8px] border border-error/15 bg-error/8 px-3 py-2 text-xs text-error"
             >
               {projectActionError}
             </div>

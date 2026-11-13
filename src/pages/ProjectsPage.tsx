@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -267,7 +267,7 @@ export default function ProjectsPage() {
             key={f}
             aria-pressed={filter === f}
             onClick={() => setFilter(f)}
-            className={`focus-ring cursor-pointer rounded-[8px] border px-3 py-2 text-[12px] font-medium transition-colors ${
+            className={`focus-ring cursor-pointer rounded-[8px] border px-3 py-2 text-xs font-medium transition-colors ${
               filter === f
                 ? "border-primary/14 bg-primary/10 text-primary"
                 : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/70 hover:text-foreground"
@@ -288,7 +288,7 @@ export default function ProjectsPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("projects.searchPlaceholder")}
-            className="studio-input focus-ring h-9 w-48 rounded-[8px] pl-7 pr-2.5 text-[12px] placeholder:text-muted"
+            className="studio-input focus-ring h-9 w-48 rounded-[8px] pl-7 pr-2.5 text-xs placeholder:text-muted"
           />
         </div>
         <button
@@ -296,7 +296,7 @@ export default function ProjectsPage() {
             setCreateError(null);
             setCreateDialogOpen(true);
           }}
-          className="studio-control-primary focus-ring flex h-9 items-center gap-1.5 rounded-[8px] px-3 text-[12px] font-medium"
+          className="studio-control-primary focus-ring flex h-9 items-center gap-1.5 rounded-[8px] px-3 text-xs font-medium"
         >
           <Plus size={13} />
           {t("sidebar.newProject")}
@@ -317,7 +317,7 @@ export default function ProjectsPage() {
             <div className="text-[20px] font-semibold text-foreground">
               {searchQuery ? t("projects.noResults") : t("projects.emptyTitle")}
             </div>
-            <div className="text-[12px] text-muted max-w-[260px] text-center leading-relaxed">
+            <div className="text-xs text-muted max-w-[260px] text-center leading-relaxed">
               {searchQuery
                 ? t("projects.noResultsHint")
                 : t("projects.emptyHint")}
@@ -328,7 +328,7 @@ export default function ProjectsPage() {
                   setCreateError(null);
                   setCreateDialogOpen(true);
                 }}
-                className="studio-control-primary focus-ring mt-1 flex items-center gap-1.5 rounded-[8px] px-4 py-2 text-[12px] font-medium"
+                className="studio-control-primary focus-ring mt-1 flex items-center gap-1.5 rounded-[8px] px-4 py-2 text-xs font-medium"
               >
                 <Plus size={13} />
                 {t("sidebar.newProject")}
@@ -366,7 +366,7 @@ export default function ProjectsPage() {
 
       {/* Stats footer */}
       {!loading && !loadError && projects.length > 0 && (
-        <div className="studio-status-bar flex shrink-0 items-center gap-5 px-6 py-2 text-[12px]">
+        <div className="studio-status-bar flex shrink-0 items-center gap-5 px-6 py-2 text-xs">
           <span>
             <span className="font-semibold text-foreground/70 tabular-nums font-[family-name:var(--font-mono)]">
               {stats.totalProjects}
@@ -462,6 +462,28 @@ function ProjectCard({
   t,
 }: ProjectCardProps) {
   const [showActions, setShowActions] = useState(false);
+  const actionsContainerRef = useRef<HTMLDivElement>(null);
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!showActions) return;
+    const dismissOutside = (event: PointerEvent) => {
+      if (!actionsContainerRef.current?.contains(event.target as Node)) setShowActions(false);
+    };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setShowActions(false);
+      actionsTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("keydown", dismissEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("keydown", dismissEscape);
+    };
+  }, [showActions]);
+
   const images = project.previewImages;
 
   return (
@@ -487,8 +509,8 @@ function ProjectCard({
       </button>
       <div className="flex min-w-0 items-center justify-between gap-2 px-4 pb-3 pt-2">
         <time dateTime={project.updated_at} className="min-w-0 truncate text-xs text-muted">{t("studio.project.updated", { defaultValue: "Updated {{date}}", date: formatConversationTime(project.updated_at) })}</time>
-        <div className="relative shrink-0">
-          <button type="button" onClick={() => setShowActions((current) => !current)} disabled={busy} aria-label={t("projects.manage")} aria-expanded={showActions} className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-[140ms] hover:bg-subtle hover:text-foreground disabled:opacity-50"><MoreHorizontal size={17} /></button>
+        <div ref={actionsContainerRef} className="relative shrink-0">
+          <button ref={actionsTriggerRef} type="button" onClick={() => setShowActions((current) => !current)} disabled={busy} aria-label={t("projects.manage")} aria-expanded={showActions} className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-[140ms] hover:bg-subtle hover:text-foreground disabled:opacity-50"><MoreHorizontal size={17} /></button>
           {showActions && (
             <div
               className="studio-floating-panel absolute right-0 bottom-10 z-20 w-40 overflow-hidden rounded-[8px] py-1"
@@ -500,7 +522,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("rename");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 <Pencil size={13} />
                 <span>{t("sidebar.rename")}</span>
@@ -511,7 +533,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("pin");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 {project.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
                 <span>
@@ -524,7 +546,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("archive");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
               >
                 <Archive size={13} />
                 <span>{t("sidebar.archive")}</span>
@@ -535,7 +557,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("delete");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-error transition-colors hover:bg-error/8"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error transition-colors hover:bg-error/8"
               >
                 <Trash2 size={13} />
                 <span>{t("sidebar.delete")}</span>

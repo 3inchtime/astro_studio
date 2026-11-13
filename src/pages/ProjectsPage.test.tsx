@@ -115,6 +115,21 @@ describe("ProjectsPage", () => {
     expect(navigate).toHaveBeenCalledWith(ROUTES.projectHome("project-1"));
   });
 
+  it("dismisses project actions with Escape and returns focus to the trigger", async () => {
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByText("Brand Storyboards");
+    const trigger = screen.getByRole("button", { name: "projects.manage" });
+    fireEvent.click(trigger);
+    const rename = screen.getByRole("button", { name: "sidebar.rename" });
+    rename.focus();
+    fireEvent.keyDown(rename, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "sidebar.rename" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("shows a project action failure without hiding the project", async () => {
     pinProject.mockRejectedValueOnce(new Error("Offline"));
     render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
