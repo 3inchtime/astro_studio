@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -36,31 +36,63 @@ function signingMaterial(pubkey, encodedSignature) {
   return { publicKey, signature };
 }
 
-export async function verifyRelease({ directory, tag, repository, pubkey }) {
-  if (!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) throw new Error("Invalid release version tag");
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("Invalid repository");
-  const manifest = JSON.parse(await readFile(join(directory, "latest.json"), "utf8"));
-  if (manifest.version !== tag.slice(1)) throw new Error("Manifest version does not match tag");
-  const platform = manifest.platforms?.["windows-x86_64"];
-  if (!platform) throw new Error("Missing windows-x86_64 manifest entry");
+function installerName(platform, tag, repository, installerType) {
   const url = new URL(platform.url);
   const prefix = `/${repository}/releases/download/${tag}/`;
   if (url.protocol !== "https:" || url.host !== "github.com" || url.username || url.password ||
       url.search || url.hash || !url.pathname.startsWith(prefix)) throw new Error("Unexpected updater URL");
   const name = decodeURIComponent(url.pathname.slice(prefix.length));
-  if (basename(name) !== name || /[\\/\x00-\x1f]/.test(name) || !name.endsWith("-setup.exe")) {
-    throw new Error("Updater URL must identify a Windows NSIS installer");
+  const suffix = installerType === "msi" ? ".msi" : "-setup.exe";
+  if (basename(name) !== name || /[\\/\x00-\x1f]/.test(name) || !name.endsWith(suffix)) {
+    throw new Error(`Updater URL must identify a Windows ${installerType === "msi" ? "MSI" : "NSIS"} installer`);
   }
-  const path = join(directory, name);
-  const info = await lstat(path);
-  if (!info.isFile() || info.size === 0) throw new Error("Missing or invalid installer");
-  const attached = (await readFile(`${path}.sig`, "utf8")).trim();
-  if (attached !== platform.signature.trim()) throw new Error("Signature attachment differs from manifest");
-  const material = signingMaterial(pubkey, attached);
-  const sha256 = createHash("sha256"), payload = createHash("blake2b512");
-  for await (const chunk of createReadStream(path)) { sha256.update(chunk); payload.update(chunk); }
-  if (!verify(null, payload.digest(), material.publicKey, material.signature)) throw new Error("Invalid installer signature");
-  return { version: manifest.version, installer: name, installer_sha256: sha256.digest("hex"), size: info.size };
+  return name;
+}
+
+export async function verifyRelease({ directory, tag, repository, pubkey }) {
+  if (!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) throw new Error("Invalid release version tag");
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("Invalid repository");
+  const manifest = JSON.parse(await readFile(join(directory, "latest.json"), "utf8"));
+  if (manifest.version !== tag.slice(1)) throw new Error("Manifest version does not match tag");
+  const generic = manifest.platforms?.["windows-x86_64"];
+  if (!generic) throw new Error("Missing windows-x86_64 manifest entry");
+  // Tauri selects the installer-specific key before the generic fallback. Both
+  // must identify the exact NSIS file whose hash binds Windows native acceptance.
+  const nsis = manifest.platforms["windows-x86_64-nsis"];
+  if (nsis && (nsis.url !== generic.url || nsis.signature !== generic.signature)) {
+    throw new Error("NSIS updater alias differs from the native-tested generic installer");
+  }
+  const primary = installerName(generic, tag, repository, "nsis");
+  const verified = new Map();
+  async function verifyInstaller(name, expectedSignature) {
+    const path = join(directory, name);
+    const attached = (await readFile(`${path}.sig`, "utf8")).trim();
+    if (expectedSignature !== undefined && attached !== expectedSignature.trim()) {
+      throw new Error("Signature attachment differs from manifest");
+    }
+    if (verified.has(name)) return;
+    const info = await lstat(path);
+    if (!info.isFile() || info.size === 0) throw new Error("Missing or invalid installer");
+    const material = signingMaterial(pubkey, attached);
+    const sha256 = createHash("sha256"), payload = createHash("blake2b512");
+    for await (const chunk of createReadStream(path)) { sha256.update(chunk); payload.update(chunk); }
+    if (!verify(null, payload.digest(), material.publicKey, material.signature)) throw new Error("Invalid installer signature");
+    verified.set(name, { installer: name, installer_sha256: sha256.digest("hex"), size: info.size });
+  }
+  for (const [alias, platform] of Object.entries(manifest.platforms)) {
+    if (!alias.startsWith("windows-")) continue;
+    const match = /^windows-(?:x86_64|i686|aarch64|armv7)(?:-(nsis|msi))?$/.exec(alias);
+    if (!match) throw new Error(`Unsupported Windows updater alias: ${alias}`);
+    const name = installerName(platform, tag, repository, match[1] ?? "nsis");
+    if (typeof platform.signature !== "string") throw new Error("Missing updater signature");
+    await verifyInstaller(name, platform.signature);
+  }
+  // A downloadable installer is still public release content if its alias was
+  // removed from the manifest. Verify these bytes too, including retained MSI.
+  for (const name of await readdir(directory)) {
+    if (name.endsWith("-setup.exe") || name.endsWith(".msi")) await verifyInstaller(name);
+  }
+  return { version: manifest.version, ...verified.get(primary), verified_windows_installers: [...verified.values()] };
 }
 
 export function verifyNativeEvidence(evidenceUrl, testedHash, actualHash) {

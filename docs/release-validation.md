@@ -2,7 +2,7 @@
 
 `Build Desktop` 在 PR、main 和 tag 上运行 Windows/macOS 的前端测试、生产构建、Rust 测试、格式与 Clippy。tag 构建必须提供 updater 私钥，显式生成签名附件与 `latest.json`；正常本地构建不要求签名。
 
-发布先创建草稿，再下载 GitHub 上的实际附件验证：版本等于 tag、清单指向本仓库该 tag 的 NSIS 安装包、清单签名等于 `.sig` 附件，以及安装包内容和可信注释的 Ed25519/minisign 签名均通过应用内公钥校验。校验失败保持草稿，不修改已公开版本。
+发布先创建草稿，再下载 GitHub 上的实际附件验证：版本等于 tag、清单指向本仓库该 tag 的 NSIS 安装包、NSIS 专用清单条目与通用条目指向同一验收安装包；逐一检查全部 Windows 清单条目及下载目录中的 NSIS/MSI，清单签名等于 `.sig` 附件，以及安装包内容和可信注释的 Ed25519/minisign 签名均通过应用内公钥校验。校验失败保持草稿，不修改已公开版本。
 
 ## 原生 Windows 验收（发布必需）
 
