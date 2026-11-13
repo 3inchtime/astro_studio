@@ -44,6 +44,16 @@ describe("LlmConfigSection", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows no saved secret and sends a distinct clear action", async () => {
+    renderSection([{ id: "vault-llm", name: "Vault helper", protocol: "openai", model: "gpt-4o", api_key: "", api_key_configured: true, api_key_masked: "••••••••", base_url: "https://example.test", capability: "text", enabled: false }]);
+    const input = await screen.findByPlaceholderText("credentials.keepPlaceholder");
+    expect(input).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "credentials.clear" }));
+    expect(screen.getByRole("button", { name: "credentials.clearPending" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "settings.llm.saveConfig" }));
+    await waitFor(() => expect(apiMocks.saveLlmConfigs).toHaveBeenCalledWith([expect.objectContaining({ api_key: "", credential_update: { action: "clear" } })]));
+  });
+
   it("creates disabled configs by default", async () => {
     renderSection();
 

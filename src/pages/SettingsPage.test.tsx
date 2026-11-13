@@ -37,6 +37,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../lib/api", () => ({
+  getCredentialStatus: vi.fn(async () => ({ ready: true, message: null })),
   clearLogs: (...args: unknown[]) => clearLogs(...args),
   getFontSize: (...args: unknown[]) => getFontSize(...args),
   getImageModel: (...args: unknown[]) => getImageModel(...args),

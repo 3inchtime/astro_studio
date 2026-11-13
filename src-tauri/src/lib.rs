@@ -1,6 +1,7 @@
 mod api_gateway;
 mod commands;
 mod config;
+mod credentials;
 mod db;
 mod error;
 mod file_manager;
@@ -14,9 +15,9 @@ mod generation_lifecycle;
 // Lease primitives belong to the deferred worker runtime and have no caller
 // while compatibility execution remains the supported production path.
 mod atomic_files;
+mod batch_export;
 mod canvas_assets;
 mod canvas_close;
-mod batch_export;
 mod generation_recipe;
 mod generation_recovery;
 #[allow(dead_code)]
@@ -578,6 +579,7 @@ pub fn run() {
             provider_diagnostics::diagnose_image_provider,
             provider_diagnostics::get_provider_smoke_plan,
             provider_diagnostics::run_provider_smoke_test,
+            credentials::get_credential_status,
             commands::settings::save_api_key,
             commands::settings::get_api_key,
             commands::settings::get_model_api_key,
@@ -735,6 +737,9 @@ pub fn run() {
             app.manage(library_lock);
             app.manage(paths.clone());
             app.manage(storage::global_gate().clone());
+            if database.migrate_credentials().is_err() {
+                log::warn!("Credential migration is pending; credential-backed operations are unavailable until the system vault is accessible.");
+            }
             app.manage(database);
             runtime_logs::attach_app_handle(app.handle().clone());
             app.state::<api_gateway::GptImageEngine>()

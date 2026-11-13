@@ -3,8 +3,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "detail")]
 pub enum AppError {
+    #[error("System credential vault is unavailable. Unlock the vault and retry; original credentials have been retained.")]
+    CredentialUnavailable,
     #[error("Canvas changed in another window (expected revision {expected_revision}, current {actual_revision})")]
-    CanvasRevisionConflict { expected_revision: i64, actual_revision: i64 },
+    CanvasRevisionConflict {
+        expected_revision: i64,
+        actual_revision: i64,
+    },
     #[error("API key not configured for model '{model}'")]
     ApiKeyNotSet { model: String },
 
@@ -58,6 +63,7 @@ pub enum AppError {
 impl AppError {
     pub fn stable_code(&self) -> &'static str {
         match self {
+            AppError::CredentialUnavailable => "credential_unavailable",
             AppError::CanvasRevisionConflict { .. } => "canvas_revision_conflict",
             AppError::ApiKeyNotSet { .. } => "api_key_not_set",
             AppError::ProviderProfileNotFound { .. } => "provider_profile_not_found",

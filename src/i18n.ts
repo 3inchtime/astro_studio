@@ -1,3 +1,11 @@
+import credentialsko from "./locales/credentials.ko.json";
+import credentialsja from "./locales/credentials.ja.json";
+import credentialsfr from "./locales/credentials.fr.json";
+import credentialses from "./locales/credentials.es.json";
+import credentialsde from "./locales/credentials.de.json";
+import credentialszhTW from "./locales/credentials.zh-TW.json";
+import credentialszhCN from "./locales/credentials.zh-CN.json";
+import credentialsen from "./locales/credentials.en.json";
 import exportzhTW from "./locales/export.zh-TW.json";
 import exportzhCN from "./locales/export.zh-CN.json";
 import exportko from "./locales/export.ko.json";
@@ -40,14 +48,14 @@ i18n
   .use(initReactI18next)
   .init({
     resources: {
-      de: { translation: { ...de, diagnostics: diagnosticsde, backup: backupde, export: exportde } },
-      en: { translation: { ...en, diagnostics: diagnosticsen, backup: backupen, export: exporten } },
-      es: { translation: { ...es, diagnostics: diagnosticses, backup: backupes, export: exportes } },
-      fr: { translation: { ...fr, diagnostics: diagnosticsfr, backup: backupfr, export: exportfr } },
-      ja: { translation: { ...ja, diagnostics: diagnosticsja, backup: backupja, export: exportja } },
-      ko: { translation: { ...ko, diagnostics: diagnosticsko, backup: backupko, export: exportko } },
-      "zh-CN": { translation: { ...zhCN, diagnostics: diagnosticszhCN, backup: backupzhCN, export: exportzhCN } },
-      "zh-TW": { translation: { ...zhTW, diagnostics: diagnosticszhTW, backup: backupzhTW, export: exportzhTW } },
+      de: { translation: { ...de, diagnostics: diagnosticsde, backup: backupde, export: exportde, credentials: credentialsde } },
+      en: { translation: { ...en, diagnostics: diagnosticsen, backup: backupen, export: exporten, credentials: credentialsen } },
+      es: { translation: { ...es, diagnostics: diagnosticses, backup: backupes, export: exportes, credentials: credentialses } },
+      fr: { translation: { ...fr, diagnostics: diagnosticsfr, backup: backupfr, export: exportfr, credentials: credentialsfr } },
+      ja: { translation: { ...ja, diagnostics: diagnosticsja, backup: backupja, export: exportja, credentials: credentialsja } },
+      ko: { translation: { ...ko, diagnostics: diagnosticsko, backup: backupko, export: exportko, credentials: credentialsko } },
+      "zh-CN": { translation: { ...zhCN, diagnostics: diagnosticszhCN, backup: backupzhCN, export: exportzhCN, credentials: credentialszhCN } },
+      "zh-TW": { translation: { ...zhTW, diagnostics: diagnosticszhTW, backup: backupzhTW, export: exportzhTW, credentials: credentialszhTW } },
     },
     fallbackLng: "en",
     supportedLngs: [...LANGUAGE_CODES],

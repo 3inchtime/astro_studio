@@ -192,7 +192,8 @@ describe("api model provider profile commands", () => {
 
     tauriApi.invoke.mockResolvedValue(state);
 
-    await getModelProviderProfiles("gpt-image-2");
+    const readState = await getModelProviderProfiles("gpt-image-2");
+    expect(JSON.stringify(readState)).not.toContain("sk-provider-1");
     await saveModelProviderProfiles("gpt-image-2", state);
     await createModelProviderProfile("gpt-image-2", "Company Gateway");
     await deleteModelProviderProfile("gpt-image-2", "provider-1");
@@ -209,7 +210,7 @@ describe("api model provider profile commands", () => {
       {
         model: "gpt-image-2",
         activeProviderId: "provider-1",
-        profiles: state.profiles,
+        profiles: state.profiles.map(({ api_key, ...profile }) => ({ ...profile, credential_update: { action: "replace", value: api_key } })),
       },
     );
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(

@@ -459,10 +459,17 @@ export interface EndpointSettings {
   edit_url: string;
 }
 
+export type CredentialUpdate = { action: "keep" } | { action: "clear" } | { action: "replace"; value: string };
+export interface CredentialStatus { api_key_configured: boolean; api_key_masked: string | null; }
+
 export interface ModelProviderProfile {
   id: string;
   name: string;
+  /** Unsaved input only; never returned by the backend. */
   api_key: string;
+  api_key_configured?: boolean;
+  api_key_masked?: string | null;
+  credential_update?: CredentialUpdate;
   endpoint_settings: EndpointSettings;
 }
 
@@ -525,7 +532,11 @@ export interface LlmConfig {
   name: string;
   protocol: "openai" | "anthropic";
   model: string;
+  /** Unsaved input only; never returned by the backend. */
   api_key: string;
+  api_key_configured?: boolean;
+  api_key_masked?: string | null;
+  credential_update?: CredentialUpdate;
   base_url: string;
   capability: "text" | "multimodal";
   enabled: boolean;

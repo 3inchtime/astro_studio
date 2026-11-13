@@ -1,3 +1,6 @@
+use crate::credentials::{
+    CredentialStatus, CredentialUpdate, ProviderProfileWrite, ProviderProfilesDto,
+};
 use crate::db::Database;
 use crate::error::AppError;
 use crate::model_registry::{
@@ -113,10 +116,10 @@ fn set_model_setting(
 }
 
 fn read_legacy_model_api_key(db: &Database, model: &str) -> Result<Option<String>, AppError> {
-    Ok(
-        get_model_setting(db, model, SETTING_API_KEY, Some(SETTING_API_KEY))?
-            .map(|key| normalize_api_key_for_storage(&key)),
-    )
+    db.migrate_credentials()?;
+    get_model_setting(db, model, SETTING_API_KEY, Some(SETTING_API_KEY))?
+        .map(|key| db.resolve_legacy_credential(&key))
+        .transpose()
 }
 
 fn read_legacy_model_endpoint_settings(
@@ -225,7 +228,8 @@ pub(crate) fn read_model_provider_profiles_state(
     model: &str,
 ) -> Result<ModelProviderProfilesState, AppError> {
     let normalized_model = normalize_image_model(model);
-    let stored_profiles = db.get_setting(&model_provider_profiles_key(normalized_model))?;
+    let stored_profiles =
+        db.read_credential_json(&model_provider_profiles_key(normalized_model))?;
     let profiles = match stored_profiles.as_deref() {
         Some(value) => serde_json::from_str::<Vec<ModelProviderProfile>>(value).map_err(|e| {
             AppError::Database {
@@ -252,15 +256,25 @@ pub(crate) fn save_model_provider_profiles_state(
     model: &str,
     state: ModelProviderProfilesState,
 ) -> Result<ModelProviderProfilesState, AppError> {
+    save_model_provider_profiles_with_kept_ids(db, model, state, &std::collections::HashSet::new())
+}
+
+fn save_model_provider_profiles_with_kept_ids(
+    db: &Database,
+    model: &str,
+    state: ModelProviderProfilesState,
+    kept_ids: &std::collections::HashSet<String>,
+) -> Result<ModelProviderProfilesState, AppError> {
     let normalized_model = normalize_image_model(model);
     let state = normalize_provider_profiles_state(normalized_model, state)?;
     let profiles_json = serde_json::to_string(&state.profiles).map_err(|e| AppError::Database {
         message: format!("Serialize provider profiles failed: {}", e),
     })?;
 
-    db.set_setting(
+    db.write_credential_json_with_kept_ids(
         &model_provider_profiles_key(normalized_model),
         &profiles_json,
+        kept_ids,
     )?;
     db.set_setting(
         &model_active_provider_key(normalized_model),
@@ -354,10 +368,6 @@ pub(crate) fn save_model_api_key_value(
     }
     save_model_provider_profiles_state(db, normalized_model, state)?;
 
-    if normalized_model == ENGINE_GPT_IMAGE_2 {
-        db.set_setting(SETTING_API_KEY, &key)?;
-        set_model_setting(db, normalized_model, SETTING_API_KEY, &key)?;
-    }
     Ok(())
 }
 
@@ -430,10 +440,12 @@ pub(crate) fn save_api_key(db: State<'_, Database>, key: String) -> Result<(), A
 }
 
 #[tauri::command]
-pub(crate) fn get_api_key(db: State<'_, Database>) -> Result<Option<String>, AppError> {
+pub(crate) fn get_api_key(db: State<'_, Database>) -> Result<CredentialStatus, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
     let model = current_image_model(db.inner())?;
-    read_model_api_key(db.inner(), &model)
+    Ok(CredentialStatus::from_secret(
+        &read_model_api_key(db.inner(), &model)?.unwrap_or_default(),
+    ))
 }
 
 #[tauri::command]
@@ -498,9 +510,11 @@ pub(crate) fn save_endpoint_settings(
 pub(crate) fn get_model_api_key(
     db: State<'_, Database>,
     model: String,
-) -> Result<Option<String>, AppError> {
+) -> Result<CredentialStatus, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
-    read_model_api_key(db.inner(), &model)
+    Ok(CredentialStatus::from_secret(
+        &read_model_api_key(db.inner(), &model)?.unwrap_or_default(),
+    ))
 }
 
 #[tauri::command]
@@ -546,9 +560,9 @@ pub(crate) fn save_model_endpoint_settings(
 pub(crate) fn get_model_provider_profiles(
     db: State<'_, Database>,
     model: String,
-) -> Result<ModelProviderProfilesState, AppError> {
+) -> Result<ProviderProfilesDto, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
-    read_model_provider_profiles_state(db.inner(), &model)
+    read_model_provider_profiles_state(db.inner(), &model).map(Into::into)
 }
 
 #[tauri::command]
@@ -556,17 +570,38 @@ pub(crate) fn save_model_provider_profiles(
     db: State<'_, Database>,
     model: String,
     active_provider_id: String,
-    profiles: Vec<ModelProviderProfile>,
-) -> Result<ModelProviderProfilesState, AppError> {
+    profiles: Vec<ProviderProfileWrite>,
+) -> Result<ProviderProfilesDto, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
-    save_model_provider_profiles_state(
-        db.inner(),
-        &model,
+    save_provider_profile_updates(db.inner(), &model, active_provider_id, profiles)
+}
+
+pub(crate) fn save_provider_profile_updates(
+    db: &Database,
+    model: &str,
+    active_provider_id: String,
+    profiles: Vec<ProviderProfileWrite>,
+) -> Result<ProviderProfilesDto, AppError> {
+    let kept_ids = profiles
+        .iter()
+        .filter(|p| matches!(p.credential_update, CredentialUpdate::Keep))
+        .map(|p| p.id.clone())
+        .collect();
+    let previous = read_model_provider_profiles_state(db, model)?;
+    let profiles = profiles
+        .into_iter()
+        .map(|p| p.apply(&previous.profiles))
+        .collect::<Result<Vec<_>, _>>()?;
+    save_model_provider_profiles_with_kept_ids(
+        db,
+        model,
         ModelProviderProfilesState {
             active_provider_id,
             profiles,
         },
+        &kept_ids,
     )
+    .map(Into::into)
 }
 
 #[tauri::command]
@@ -574,7 +609,7 @@ pub(crate) fn create_model_provider_profile(
     db: State<'_, Database>,
     model: String,
     name: String,
-) -> Result<ModelProviderProfilesState, AppError> {
+) -> Result<ProviderProfilesDto, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
@@ -585,7 +620,7 @@ pub(crate) fn create_model_provider_profile(
         api_key: String::new(),
         endpoint_settings: default_endpoint_settings_for_model(normalized_model),
     });
-    save_model_provider_profiles_state(db.inner(), normalized_model, state)
+    save_model_provider_profiles_state(db.inner(), normalized_model, state).map(Into::into)
 }
 
 #[tauri::command]
@@ -593,7 +628,7 @@ pub(crate) fn delete_model_provider_profile(
     db: State<'_, Database>,
     model: String,
     provider_id: String,
-) -> Result<ModelProviderProfilesState, AppError> {
+) -> Result<ProviderProfilesDto, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
@@ -609,7 +644,7 @@ pub(crate) fn delete_model_provider_profile(
             .map(|profile| profile.id.clone())
             .unwrap_or_default();
     }
-    save_model_provider_profiles_state(db.inner(), normalized_model, state)
+    save_model_provider_profiles_state(db.inner(), normalized_model, state).map(Into::into)
 }
 
 #[tauri::command]
@@ -617,7 +652,7 @@ pub(crate) fn set_active_model_provider(
     db: State<'_, Database>,
     model: String,
     provider_id: String,
-) -> Result<ModelProviderProfilesState, AppError> {
+) -> Result<ProviderProfilesDto, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
@@ -631,7 +666,7 @@ pub(crate) fn set_active_model_provider(
         });
     }
     state.active_provider_id = provider_id;
-    save_model_provider_profiles_state(db.inner(), normalized_model, state)
+    save_model_provider_profiles_state(db.inner(), normalized_model, state).map(Into::into)
 }
 
 #[tauri::command]
@@ -686,6 +721,28 @@ mod tests {
     }
 
     #[test]
+    fn saving_provider_keeps_secret_out_of_database_bytes() {
+        let dir = std::env::temp_dir().join(format!("vault-regression-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("test.db");
+        let db = Database::open(&path).unwrap();
+        db.run_migrations().unwrap();
+        save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, "vault-test-distinct-secret-321")
+            .unwrap();
+        let conn = db.conn.lock().unwrap();
+        let values: Vec<String> = conn
+            .prepare("SELECT value FROM settings")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!values.join(" ").contains("vault-test-distinct-secret-321"));
+        drop(conn);
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn normalize_api_key_for_storage_removes_paste_artifacts() {
         assert_eq!(
             normalize_api_key_for_storage("  sk-proj-valid-token\n"),
@@ -713,13 +770,10 @@ mod tests {
         save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, " Bearer sk-proj-valid-token\n").unwrap();
 
         assert_eq!(
-            read_legacy_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
+            read_model_api_key(&db, ENGINE_GPT_IMAGE_2).unwrap(),
             Some("sk-proj-valid-token".to_string())
         );
-        assert_eq!(
-            db.get_setting(SETTING_API_KEY).unwrap(),
-            Some("sk-proj-valid-token".to_string())
-        );
+        assert_eq!(db.get_setting(SETTING_API_KEY).unwrap(), None);
 
         drop(db);
         let _ = std::fs::remove_file(&db_path);

@@ -1,3 +1,5 @@
+import { credentialWrite, credentialDraft } from "./credentialDraft";
+import { flushCanvasSaves } from "./canvas/persistence";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -137,7 +139,7 @@ export async function saveApiKey(key: string): Promise<void> {
   await invoke("save_api_key", { key });
 }
 
-export async function getApiKey(): Promise<string | null> {
+export async function getApiKey(): Promise<import("../types").CredentialStatus> {
   return invoke("get_api_key");
 }
 
@@ -155,7 +157,7 @@ export async function getEndpointSettings(): Promise<EndpointSettings> {
 
 export async function getModelApiKey(
   model: ImageModel,
-): Promise<string | null> {
+): Promise<import("../types").CredentialStatus> {
   return invoke("get_model_api_key", { model });
 }
 
@@ -199,7 +201,8 @@ export async function saveModelEndpointSettings(
 export async function getModelProviderProfiles(
   model: ImageModel,
 ): Promise<ModelProviderProfilesState> {
-  return invoke("get_model_provider_profiles", { model });
+  const state = await invoke<ModelProviderProfilesState>("get_model_provider_profiles", { model });
+  return { ...state, profiles: state.profiles.map(credentialDraft) };
 }
 
 export async function saveModelProviderProfiles(
@@ -209,7 +212,7 @@ export async function saveModelProviderProfiles(
   return invoke("save_model_provider_profiles", {
     model,
     activeProviderId: state.active_provider_id,
-    profiles: state.profiles,
+    profiles: state.profiles.map(credentialWrite),
   });
 }
 
@@ -904,11 +907,11 @@ export async function saveFontSize(fontSize: AppFontSize): Promise<void> {
 }
 
 export async function getLlmConfigs(): Promise<LlmConfig[]> {
-  return invoke("get_llm_configs");
+  return (await invoke<LlmConfig[]>("get_llm_configs")).map(credentialDraft);
 }
 
 export async function saveLlmConfigs(configs: LlmConfig[]): Promise<void> {
-  return invoke("save_llm_configs", { configs });
+  return invoke("save_llm_configs", { configs: configs.map(credentialWrite) });
 }
 
 export async function optimizePrompt(
@@ -1010,4 +1013,8 @@ export async function getCanvasGenerationStatus(
 ): Promise<CanvasGenerationStatus | null> {
   if (!hasTauriRuntime()) return null;
   return invoke("get_canvas_generation_status", { documentId, requestId });
+}
+
+export async function getCredentialStatus(): Promise<{ready: boolean; message: string | null}> {
+  return invoke("get_credential_status");
 }

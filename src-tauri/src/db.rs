@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct Database {
     pub conn: Arc<Mutex<Connection>>,
+    pub(crate) credentials: Arc<crate::credentials::Credentials>,
 }
 
 #[cfg(test)]
@@ -1908,7 +1909,18 @@ impl Database {
             })?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            credentials: Arc::new(crate::credentials::Credentials::default()),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_with_vault(
+        path: &Path,
+        vault: Arc<dyn crate::credentials::CredentialVault>,
+    ) -> Result<Self, AppError> {
+        let mut database = Self::open(path)?;
+        database.credentials = Arc::new(crate::credentials::Credentials::new(vault));
+        Ok(database)
     }
 
     pub fn run_migrations(&self) -> Result<(), AppError> {
@@ -2434,7 +2446,11 @@ impl Database {
              END;",
         )?;
 
-        apply_migration(&conn, 19, "canvas revisions and managed assets", "
+        apply_migration(
+            &conn,
+            19,
+            "canvas revisions and managed assets",
+            "
             ALTER TABLE canvas_documents ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
             CREATE TABLE canvas_assets (id TEXT PRIMARY KEY, file_path TEXT NOT NULL UNIQUE);
             CREATE TABLE canvas_asset_refs (
@@ -2443,7 +2459,9 @@ impl Database {
                 PRIMARY KEY(document_id,object_id)
             );
             CREATE INDEX idx_canvas_asset_refs_asset ON canvas_asset_refs(asset_id);
-        ")?;
+        ",
+        )?;
+
 
         ensure_migration_compatibility(&conn)?;
 
