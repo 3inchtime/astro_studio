@@ -30,7 +30,9 @@ export function useCanvasGenerationRecovery(options: {
         const requests =
           latest.current
             .getContent()
-            .generation_requests?.filter((r) => r.status === "pending") ?? [];
+            .generation_requests?.filter(
+              (r) => r.status === "pending" || r.status === "failed",
+            ) ?? [];
         for (const request of requests) {
           let result;
           try {
@@ -50,6 +52,7 @@ export function useCanvasGenerationRecovery(options: {
               request.request_id,
               result.generation_id ?? request.generation_id ?? "",
               result.images,
+              true,
             );
           else if (
             result &&
@@ -59,6 +62,8 @@ export function useCanvasGenerationRecovery(options: {
               current,
               request.request_id,
               result.error ?? "Generation failed",
+              result.status === "cancelled" ? "cancelled" : "failed",
+              result.generation_id ?? undefined,
             );
           else if (
             !result &&

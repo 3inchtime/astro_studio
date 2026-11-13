@@ -858,6 +858,7 @@ export default function CanvasPage() {
               requestId,
               status.generation_id ?? "",
               status.images,
+              true,
             ),
           );
         } else if (
@@ -870,6 +871,8 @@ export default function CanvasPage() {
               current,
               requestId,
               status.error ?? String(error),
+              status.status === "cancelled" ? "cancelled" : "failed",
+              status.generation_id ?? undefined,
             ),
           );
         } else if (

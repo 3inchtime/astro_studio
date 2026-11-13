@@ -1106,7 +1106,7 @@ fn composable_enqueue_outer_rollback_restores_updated_conversation() {
     {
         let conn = fixture.database.conn.lock().expect("lock database");
         conn.execute(
-            "INSERT INTO conversations (id, project_id, title) VALUES ('conversation-1', 'default', 'Original title')",
+            "INSERT INTO conversations (id, project_id, title) VALUES ('conversation-1', 'default', 'New Conversation')",
             [],
         )
         .expect("insert conversation");
@@ -1125,7 +1125,7 @@ fn composable_enqueue_outer_rollback_restores_updated_conversation() {
             |row| row.get(0),
         )
         .expect("read updated title");
-    assert_ne!(changed_title, "Original title");
+    assert_eq!(changed_title, "prompt for updated-conversation");
     tx.rollback().expect("rollback outer transaction");
 
     let conn = fixture.database.conn.lock().expect("lock database");
@@ -1136,7 +1136,7 @@ fn composable_enqueue_outer_rollback_restores_updated_conversation() {
             |row| row.get(0),
         )
         .expect("read restored title");
-    assert_eq!(restored_title, "Original title");
+    assert_eq!(restored_title, "New Conversation");
 }
 
 #[test]

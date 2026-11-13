@@ -395,7 +395,7 @@ fn archive_inspection_rejects_symlink_and_duplicate_names() {
 #[test]
 fn nested_profile_and_llm_credentials_are_removed_from_portable_database() {
     let f = Fixture::new();
-    f.db.set_setting("model_provider_profiles::gpt-image-2",&json!([{"id":"profile","name":"Preserve name","api_key":"UNIQUE_API_SECRET","endpoint_settings":{"base_url":" HTTPS://user:UNIQUE_PASSWORD@example.org/v1?client_secret=UNIQUE_QUERY_SECRET&api-version=2026#UNIQUE_FRAGMENT_SECRET"}}]).to_string()).unwrap();
+    f.db.set_setting("model_provider_profiles::gpt-image-2",&json!([{"id":"profile","name":"Preserve name","api_key":"UNIQUE_API_SECRET","endpoint_settings":{"base_url":" HTTPS://user:UNIQUE_PASSWORD@example.org/v1?client_secret=UNIQUE_QUERY_SECRET&subscription-key=UNIQUE_SUBSCRIPTION_SECRET&X-Amz-Signature=UNIQUE_SIGNATURE_SECRET&access_key=UNIQUE_ACCESS_SECRET&api-version=2026#UNIQUE_FRAGMENT_SECRET"}}]).to_string()).unwrap();
     f.db.set_setting(
         "llm_configs",
         &json!([{"id":"llm","api_key":"UNIQUE_LLM_SECRET"}]).to_string(),
@@ -411,6 +411,9 @@ fn nested_profile_and_llm_credentials_are_removed_from_portable_database() {
         "UNIQUE_API_SECRET",
         "UNIQUE_PASSWORD",
         "UNIQUE_QUERY_SECRET",
+        "UNIQUE_SUBSCRIPTION_SECRET",
+        "UNIQUE_SIGNATURE_SECRET",
+        "UNIQUE_ACCESS_SECRET",
         "UNIQUE_FRAGMENT_SECRET",
         "UNIQUE_LLM_SECRET",
     ] {
@@ -422,4 +425,51 @@ fn nested_profile_and_llm_credentials_are_removed_from_portable_database() {
     assert!(db
         .windows("Preserve name".len())
         .any(|w| w == b"Preserve name"));
+}
+
+#[test]
+fn restore_approval_is_bound_to_inspected_files_even_if_archive_is_replaced() {
+    let f = Fixture::new();
+    let archive = f.archive();
+    let approved = inspect_archive(&archive).unwrap();
+    f.add_generation("unapproved");
+    let replacement = f.archive();
+    fs::copy(replacement, &archive).unwrap();
+    // Simulate replacement after the command's coarse file hash check.
+    let outcome =
+        restore_approved_archive(&f.paths, &archive, &approved, &f.operation(), &|_, _, _| {});
+    assert!(
+        outcome.is_err(),
+        "a different valid archive must not replace the reviewed library"
+    );
+    assert!(!f.paths.bootstrap.join("active-library.json").exists());
+}
+#[test]
+fn credential_url_signed_query_material_is_removed() {
+    let mut value = json!({"url":"https://example.org/v1?access_key=LEAK_ACCESS&X-Amz-Credential=LEAK_ID&X-Amz-Signature=LEAK_SIGNATURE&api-version=2026"});
+    scrub(&mut value);
+    assert!(!value.to_string().contains("LEAK_"));
+    assert!(value.to_string().contains("api-version=2026"));
+}
+
+#[test]
+fn extraction_keeps_approved_hashes_after_archive_replacement_and_cleans_staging() {
+    let f = Fixture::new();
+    let archive = f.archive();
+    let approved = inspect_archive(&archive).unwrap();
+    f.add_generation("changed-after-final-check");
+    let replacement = f.archive();
+    fs::copy(replacement, &archive).unwrap();
+    // The extraction boundary retains the approved manifest even if replacement
+    // occurs after the final inspection but before opening the archive again.
+    let result =
+        restore_archive_manifest(&f.paths, &archive, &approved, &f.operation(), &|_, _, _| {});
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_dir(f.paths.bootstrap.join("libraries"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(!f.paths.bootstrap.join("active-library.json").exists());
 }

@@ -209,9 +209,32 @@ fn backup_rejects_extra_envelope_fields_and_wrong_response_job_identity() {
 
 #[test]
 fn normalized_backup_restores_to_verified_recoverable_job_without_provider_submission() {
-    for ready in [false, true] {
+    for (ready, failed) in [(false, false), (true, false), (false, true)] {
         let fixture = Fixture::new();
         tauri::async_runtime::block_on(fixture.save_response(ready));
+        if failed {
+            use crate::generation_jobs::{
+                begin_generation_job_write_transaction, finish_job_in_transaction,
+                GenerationJobTerminalUpdate,
+            };
+            let mut conn = fixture.db.conn.lock().unwrap();
+            let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+            tx.execute("UPDATE generation_jobs SET source_ref_json=json_set(source_ref_json,'$.execution_version',1)", []).unwrap();
+            finish_job_in_transaction(
+                &tx,
+                &GenerationJobTerminalUpdate {
+                    job_id: fixture.job_id.clone(),
+                    expected_status: GenerationJobStatus::Running,
+                    status: GenerationJobStatus::Failed,
+                    finished_at: crate::current_timestamp(),
+                    error_code: Some("local_processing_failed".into()),
+                    error_message: None,
+                    retryable: true,
+                },
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
         let paths = StoragePaths::new(
             fixture.root.join("bootstrap"),
             fixture.root.join("fixture.db"),
@@ -234,7 +257,7 @@ fn normalized_backup_restores_to_verified_recoverable_job_without_provider_submi
             None,
         ))
         .unwrap();
-        assert_eq!(summary.recovered, 1, "ready={ready}");
+        assert_eq!(summary.recovered, 1, "ready={ready}, failed={failed}");
         let count: i64 = db
             .conn
             .lock()

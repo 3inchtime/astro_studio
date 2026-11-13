@@ -112,12 +112,19 @@ fn pending_ids(db: &Database, generation_id: Option<&str>) -> Result<Vec<String>
         "SELECT j.id FROM generation_jobs j WHERE (?1 IS NULL OR j.generation_id=?1)
          AND ((?1 IS NULL AND j.status IN ('running','queued'))
               OR (j.status IN ('failed','interrupted') AND EXISTS (
-                  SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND r.request_state='response_ready')))
+                  SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND (r.request_state='response_ready' OR (r.request_state='requesting' AND r.expected_response_file IS NOT NULL)))))
          ORDER BY j.queued_at, j.rowid"
     )?;
     let ids = statement
         .query_map(params![generation_id], |r| r.get(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+        .filter_map(|row| match row {
+            Ok(id) => Some(id),
+            Err(_) => {
+                log::warn!("Skipping a malformed recovery job identity");
+                None
+            }
+        })
+        .collect();
     Ok(ids)
 }
 
@@ -324,6 +331,182 @@ async fn recover_candidate(
     }
 }
 
+async fn with_recovery_lease<T>(
+    db: &Database,
+    authority: &WorkerTransitionAuthority,
+    operation: impl std::future::Future<Output = Result<T, AppError>>,
+) -> Result<T, AppError> {
+    tokio::pin!(operation);
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        tokio::select! {
+            result = &mut operation => return result,
+            _ = heartbeat.tick() => {
+                let conn = db.conn.lock().map_err(|_| lock_error())?;
+                renew_worker_lease_with_transaction_time(&conn, authority, LEASE_TTL, now_ms)
+                    .map_err(|_| AppError::GenerationJobInvalidTransition)?;
+            }
+        }
+    }
+}
+
+/// Upgrade only the exact pre-milestone compatibility shape. File verification
+/// happens outside the transaction; lease fencing and an unchanged-row check
+/// protect publication. Modern records never pass through this migration.
+async fn normalize_compatibility_recovery(
+    db: &Database,
+    root: &Path,
+    id: &str,
+    authority: &WorkerTransitionAuthority,
+) -> Result<Option<GenerationJobStatus>, AppError> {
+    use crate::generation_jobs::{
+        begin_generation_job_write_transaction, finish_job_in_transaction, get_job,
+        get_job_in_transaction, GenerationJobRequest, GenerationJobTerminalUpdate,
+    };
+    use crate::generation_lifecycle::GenerationExecutionContext;
+    use crate::generation_worker_lease::assert_worker_transition_authority_in_transaction;
+    let (job, descriptor, bound_terminal) = {
+        let conn = db.conn.lock().map_err(|_| lock_error())?;
+        let job = get_job(&conn, id)?;
+        if !matches!(
+            (job.status.clone(), job.stage),
+            (GenerationJobStatus::Running, GenerationJobStage::Preparing)
+                | (
+                    GenerationJobStatus::Failed | GenerationJobStatus::Interrupted,
+                    GenerationJobStage::Terminal
+                )
+        ) {
+            return Ok(None);
+        }
+        let descriptor = conn.query_row("SELECT request_state,response_file,expected_response_file,response_size,response_sha256 FROM generation_recoveries WHERE generation_id=?1", [&job.generation_id], |row| Ok((row.get::<_,String>(0)?, row.get::<_,Option<String>>(1)?, row.get::<_,Option<String>>(2)?, row.get::<_,Option<i64>>(3)?, row.get::<_,Option<String>>(4)?)))?;
+        let bound_terminal = job.status != GenerationJobStatus::Running
+            && descriptor.0 == "requesting"
+            && descriptor.1.is_none()
+            && descriptor.2.is_some()
+            && descriptor.3.is_none()
+            && descriptor.4.is_none();
+        let historical = job.source_ref["execution_version"] != 1
+            && descriptor.2.is_none()
+            && descriptor.3.is_none()
+            && descriptor.4.is_none()
+            && (descriptor.0 == "response_ready"
+                || (descriptor.0 == "requesting"
+                    && descriptor.1.is_none()
+                    && job.status == GenerationJobStatus::Running));
+        if !historical && !bound_terminal {
+            return Ok(None);
+        }
+        (job, descriptor, bound_terminal)
+    };
+    let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    let context = GenerationExecutionContext {
+        job_id: job.id.clone(),
+        generation_id: job.generation_id.clone(),
+        conversation_id: request.conversation_id,
+        provider_kind: job.provider_kind.clone(),
+        model: request.model,
+        endpoint_url: job.endpoint_snapshot.clone(),
+        provider_profile_id: job.provider_profile_id.clone(),
+    };
+    let store = FileResponseArtifactStore::new(root.to_owned());
+    let path = store
+        .response_path(&context)
+        .map_err(|_| AppError::GenerationJobCorruptPersistedData)?;
+    let saved_path = descriptor
+        .1
+        .as_deref()
+        .or(descriptor.2.as_deref())
+        .map(Path::new)
+        .unwrap_or(&path);
+    let response = store
+        .load_verified_response(&context, saved_path)
+        .await
+        .ok()
+        .filter(|response| {
+            request.options.image_count.unwrap_or(1) == response.requested_image_count
+        });
+    let mut conn = db.conn.lock().map_err(|_| lock_error())?;
+    let tx = begin_generation_job_write_transaction(&mut conn)?;
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms())
+        .map_err(|_| AppError::GenerationJobInvalidTransition)?;
+    let current = get_job_in_transaction(&tx, id)?;
+    if current != job {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let current_descriptor = tx.query_row("SELECT request_state,response_file,expected_response_file,response_size,response_sha256 FROM generation_recoveries WHERE generation_id=?1", [&job.generation_id], |row| Ok((row.get::<_,String>(0)?, row.get::<_,Option<String>>(1)?, row.get::<_,Option<String>>(2)?, row.get::<_,Option<i64>>(3)?, row.get::<_,Option<String>>(4)?)))?;
+    if current_descriptor != descriptor {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    if job.cancel_requested_at.is_some()
+        || ((descriptor.0 == "response_ready" || bound_terminal) && response.is_none())
+    {
+        let cancelled = job.cancel_requested_at.is_some();
+        let status = if cancelled {
+            GenerationJobStatus::Cancelled
+        } else {
+            GenerationJobStatus::Failed
+        };
+        if job.status == GenerationJobStatus::Running {
+            if cancelled {
+                tx.execute(
+                    "DELETE FROM generation_recoveries WHERE generation_id=?1",
+                    [&job.generation_id],
+                )?;
+            }
+            finish_job_in_transaction(
+                &tx,
+                &GenerationJobTerminalUpdate {
+                    job_id: job.id,
+                    expected_status: GenerationJobStatus::Running,
+                    status: status.clone(),
+                    finished_at: crate::current_timestamp(),
+                    error_code: Some(
+                        if cancelled {
+                            "cancelled_by_user"
+                        } else {
+                            "recovery_failed"
+                        }
+                        .into(),
+                    ),
+                    error_message: None,
+                    retryable: !cancelled,
+                },
+            )?;
+            tx.commit()?;
+        }
+        return Ok(Some(status));
+    }
+    let stage = if let Some(response) = response {
+        tx.execute("UPDATE generation_recoveries SET request_state='response_ready',expected_response_file=?1,response_file=?1,response_size=?2,response_sha256=?3 WHERE generation_id=?4", params![response.response_file, response.response_size, response.response_sha256, job.generation_id])?;
+        GenerationJobStage::ResponseReady
+    } else {
+        // Historical compatibility jobs did not distinguish before-send from
+        // in-flight HTTP. Treat both conservatively as outcome unknown.
+        tx.execute(
+            "UPDATE generation_recoveries SET expected_response_file=?1 WHERE generation_id=?2",
+            params![path.to_string_lossy(), job.generation_id],
+        )?;
+        GenerationJobStage::ProviderRequest
+    };
+    if job.status == GenerationJobStatus::Running {
+        tx.execute(
+            "UPDATE generation_jobs SET stage=?1 WHERE id=?2",
+            params![
+                if stage == GenerationJobStage::ResponseReady {
+                    "response_ready"
+                } else {
+                    "provider_request"
+                },
+                id
+            ],
+        )?;
+    }
+    crate::generation_jobs::validate_worker_recovery_for_stage(&tx, &job.generation_id, stage)?;
+    tx.commit()?;
+    Ok(None)
+}
+
 pub(crate) async fn recover_pending(
     db: &Database,
     engine: &GptImageEngine,
@@ -359,6 +542,23 @@ pub(crate) async fn recover_pending(
     let lease = RecoveryLease { db, authority };
     let mut summary = RecoverySummary::default();
     for id in ids {
+        let normalized = with_recovery_lease(
+            db,
+            &lease.authority,
+            normalize_compatibility_recovery(db, root, &id, &lease.authority),
+        )
+        .await;
+        match normalized {
+            Ok(Some(GenerationJobStatus::Cancelled)) => {
+                summary.cancelled += 1;
+                continue;
+            }
+            Ok(Some(_)) | Err(_) => {
+                summary.failed += 1;
+                continue;
+            }
+            Ok(None) => {}
+        }
         let prepared = {
             let conn = db.conn.lock().map_err(|_| lock_error())?;
             renew_worker_lease_with_transaction_time(&conn, &lease.authority, LEASE_TTL, now_ms)
@@ -372,7 +572,28 @@ pub(crate) async fn recover_pending(
         };
         let result = match prepared {
             Ok(candidate) => {
-                recover_candidate(db, engine, root, candidate, &lease.authority, app).await
+                let result = with_recovery_lease(
+                    db,
+                    &lease.authority,
+                    recover_candidate(db, engine, root, candidate.clone(), &lease.authority, app),
+                )
+                .await;
+                if result.is_err() {
+                    // A cancellation can win any fenced stage/terminal CAS
+                    // after the candidate was read. Acknowledge it rather than
+                    // leaving the saved job running until another restart.
+                    let cancelled = {
+                        let conn = db.conn.lock().map_err(|_| lock_error())?;
+                        conn.query_row("SELECT status='running' AND cancel_requested_at IS NOT NULL FROM generation_jobs WHERE id=?1", [&id], |row| row.get::<_,bool>(0))?
+                    };
+                    if cancelled {
+                        acknowledge_cancel(db, &candidate, &lease.authority, app)
+                    } else {
+                        result
+                    }
+                } else {
+                    result
+                }
             }
             Err(error) => Err(transition_error(error)),
         };
@@ -471,11 +692,11 @@ fn recovery_summary(db: &Database) -> Result<RecoverySummary, AppError> {
     let mut statement = conn.prepare(
         "SELECT generation_id, conversation_id, prompt, status, can_recover, result_unknown FROM (
          SELECT j.generation_id, COALESCE(g.conversation_id,'') AS conversation_id, substr(g.prompt,1,180) AS prompt, j.status,
-            EXISTS(SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND r.request_state='response_ready') AS can_recover, j.error_code='provider_outcome_unknown' AS result_unknown,
+            EXISTS(SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND (r.request_state='response_ready' OR (r.request_state='requesting' AND r.expected_response_file IS NOT NULL))) AS can_recover, j.error_code='provider_outcome_unknown' AS result_unknown,
             j.finished_at AS sort_time
          FROM generation_jobs j JOIN generations g ON g.id=j.generation_id
          WHERE j.status IN ('failed','interrupted') AND g.deleted_at IS NULL
-         AND (j.error_code IN ('app_interrupted','provider_outcome_unknown') OR EXISTS(SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND r.request_state='response_ready'))
+         AND (j.error_code IN ('app_interrupted','provider_outcome_unknown') OR EXISTS(SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND (r.request_state='response_ready' OR (r.request_state='requesting' AND r.expected_response_file IS NOT NULL))))
          AND NOT EXISTS(SELECT 1 FROM generation_jobs child WHERE child.parent_job_id=j.id)
          UNION ALL
          SELECT g.id, COALESCE(g.conversation_id,''), substr(g.prompt,1,180), g.status,
@@ -724,6 +945,144 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn historical_compatibility_shapes_recover_verified_paid_responses() {
+        for state in ["requesting", "running_ready", "failed_ready"] {
+            let fixture = Fixture::new();
+            fixture.save_response(state != "requesting").await;
+            {
+                let conn = fixture.db.conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE generation_jobs SET stage='preparing' WHERE id=?1",
+                    [&fixture.job_id],
+                )
+                .unwrap();
+                conn.execute("UPDATE generation_recoveries SET expected_response_file=NULL,response_size=NULL,response_sha256=NULL WHERE generation_id=?1", [&fixture.generation_id]).unwrap();
+                if state == "failed_ready" {
+                    crate::generation_jobs::finish_job(
+                        &conn,
+                        &crate::generation_jobs::GenerationJobTerminalUpdate {
+                            job_id: fixture.job_id.clone(),
+                            expected_status: GenerationJobStatus::Running,
+                            status: GenerationJobStatus::Failed,
+                            finished_at: crate::current_timestamp(),
+                            error_code: Some("response_decode_failed".into()),
+                            error_message: None,
+                            retryable: true,
+                        },
+                    )
+                    .unwrap();
+                }
+            }
+            let engine = GptImageEngine::new(&crate::config::ApiConfig::default()).unwrap();
+            let result = startup_recover_inner(None, &fixture.db, &engine, &fixture.root)
+                .await
+                .unwrap();
+            assert_eq!(result.recovered, 1, "{state}");
+            assert_eq!(fixture.status(), "completed");
+            assert_eq!(
+                startup_recover_inner(None, &fixture.db, &engine, &fixture.root)
+                    .await
+                    .unwrap()
+                    .recovered,
+                0
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn historical_recovery_rejects_other_jobs_envelope_without_blocking_owner() {
+        let wrong = Fixture::new();
+        wrong.save_response(true).await;
+        let owner = Fixture::at(wrong.root.clone());
+        let owned_response = owner.save_response(true).await;
+        {
+            let conn = wrong.db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE generation_jobs SET stage='preparing' WHERE id=?1",
+                [&wrong.job_id],
+            )
+            .unwrap();
+            conn.execute("UPDATE generation_recoveries SET expected_response_file=NULL,response_size=NULL,response_sha256=NULL,response_file=?1 WHERE generation_id=?2", params![owned_response.to_string_lossy(), wrong.generation_id]).unwrap();
+        }
+        let engine = GptImageEngine::new(&crate::config::ApiConfig::default()).unwrap();
+        let summary = startup_recover_inner(None, &wrong.db, &engine, &wrong.root)
+            .await
+            .unwrap();
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.recovered, 1);
+        assert_eq!(wrong.status(), "failed");
+        assert_eq!(owner.status(), "completed");
+        assert!(owned_response.exists());
+    }
+
+    #[tokio::test]
+    async fn historical_request_without_artifact_is_unknown_not_unsent() {
+        let fixture = Fixture::new();
+        let response = fixture.save_response(false).await;
+        std::fs::remove_file(response).unwrap();
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE generation_jobs SET stage='preparing' WHERE id=?1",
+                [&fixture.job_id],
+            )
+            .unwrap();
+            conn.execute(
+            "UPDATE generation_recoveries SET expected_response_file=NULL WHERE generation_id=?1",
+            [&fixture.generation_id],
+        )
+        .unwrap();
+        }
+        let engine = GptImageEngine::new(&crate::config::ApiConfig::default()).unwrap();
+        let result = startup_recover_inner(None, &fixture.db, &engine, &fixture.root)
+            .await
+            .unwrap();
+        assert_eq!(result.interrupted, 1);
+        assert!(recovery_summary(&fixture.db).unwrap().entries[0].result_unknown);
+    }
+
+    #[tokio::test]
+    async fn historical_corrupt_response_stays_actionable_then_recovers_after_repair() {
+        let fixture = Fixture::new();
+        let path = fixture.save_response(true).await;
+        let saved = std::fs::read(&path).unwrap();
+        std::fs::write(&path, b"broken").unwrap();
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE generation_jobs SET stage='preparing' WHERE id=?1",
+                [&fixture.job_id],
+            )
+            .unwrap();
+            conn.execute("UPDATE generation_recoveries SET expected_response_file=NULL,response_size=NULL,response_sha256=NULL WHERE generation_id=?1", [&fixture.generation_id]).unwrap();
+        }
+        let engine = GptImageEngine::new(&crate::config::ApiConfig::default()).unwrap();
+        assert_eq!(
+            startup_recover_inner(None, &fixture.db, &engine, &fixture.root)
+                .await
+                .unwrap()
+                .failed,
+            1
+        );
+        assert_eq!(fixture.status(), "failed");
+        assert!(recovery_summary(&fixture.db).unwrap().entries[0].can_recover);
+        std::fs::write(path, saved).unwrap();
+        assert_eq!(
+            recover_pending(
+                &fixture.db,
+                &engine,
+                &fixture.root,
+                Some(&fixture.generation_id),
+                None
+            )
+            .await
+            .unwrap()
+            .recovered,
+            1
+        );
     }
 
     #[tokio::test]

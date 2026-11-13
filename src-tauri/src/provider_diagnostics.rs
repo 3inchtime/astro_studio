@@ -265,6 +265,20 @@ pub fn get_provider_smoke_plan(
 ) -> Result<ProviderSmokePlan, AppError> {
     smoke_plan(&model, &saved_profile(db.inner(), &model, &provider_id)?)
 }
+
+#[derive(Debug, Serialize)]
+pub struct ProviderSmokeError {
+    code: &'static str,
+    conversation_id: Option<String>,
+}
+impl From<AppError> for ProviderSmokeError {
+    fn from(error: AppError) -> Self {
+        Self {
+            code: error.stable_code(),
+            conversation_id: None,
+        }
+    }
+}
 #[tauri::command]
 pub async fn run_provider_smoke_test(
     app: tauri::AppHandle,
@@ -274,13 +288,13 @@ pub async fn run_provider_smoke_test(
     provider_id: String,
     fingerprint: String,
     client_request_id: String,
-) -> Result<GenerateResult, AppError> {
+) -> Result<GenerateResult, ProviderSmokeError> {
     let _write = crate::storage::write_operation::<AppError>()?;
     let plan = get_provider_smoke_plan(db.clone(), model, provider_id)?;
     if fingerprint != plan.fingerprint {
-        return Err(validation(
-            "Provider changed. Review a new test plan before generating.",
-        ));
+        return Err(
+            validation("Provider changed. Review a new test plan before generating.").into(),
+        );
     }
     let conversation = crate::commands::conversations::create_conversation(
         db.clone(),
@@ -314,11 +328,15 @@ pub async fn run_provider_smoke_test(
             aspect_ratio: plan.aspect_ratio,
             output_format: Some(plan.output_format),
             image_count: Some(1),
-            conversation_id: Some(conversation.id),
+            conversation_id: Some(conversation.id.clone()),
             ..Default::default()
         },
     )
     .await
+    .map_err(|error| ProviderSmokeError {
+        code: error.stable_code(),
+        conversation_id: Some(conversation.id),
+    })
 }
 
 #[cfg(test)]
@@ -426,6 +444,21 @@ mod tests {
 mod safety_tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[test]
+    fn smoke_error_exposes_record_identity_without_provider_error_details() {
+        let mut failure = ProviderSmokeError::from(AppError::Network {
+            endpoint: "https://private.example/?key=secret".into(),
+            reason: "provider body contains secret".into(),
+        });
+        failure.conversation_id = Some("test-conversation".into());
+        let serialized = serde_json::to_value(failure).unwrap();
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "code": "network_error", "conversation_id": "test-conversation"
+            })
+        );
+    }
     #[tokio::test]
     async fn redirect_does_not_forward_credentials_or_follow_location() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

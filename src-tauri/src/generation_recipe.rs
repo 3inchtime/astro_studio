@@ -41,6 +41,90 @@ pub(crate) fn saved_job(
         .transpose()
 }
 
+pub(crate) fn validate_saved_recipe_options(
+    model: &str,
+    saved: &GenerationJobOptions,
+    source_count: usize,
+) -> Result<(), AppError> {
+    let unsupported = || invalid("Unsupported image parameters for the selected model.");
+    if saved.output_compression.is_some_and(|value| value > 100)
+        || saved
+            .image_count
+            .is_some_and(|value| !(1..=10).contains(&value))
+        || saved
+            .moderation
+            .as_deref()
+            .is_some_and(|value| !["auto", "low"].contains(&value))
+        || saved
+            .input_fidelity
+            .as_deref()
+            .is_some_and(|value| !["high", "low"].contains(&value))
+    {
+        return Err(unsupported());
+    }
+    let defaults = crate::model_registry::sanitize_request_options_for_model(
+        model,
+        crate::generation_lifecycle::image_request_options(
+            None, None, None, None, None, None, None, None,
+        ),
+    );
+    let mut options = crate::generation_lifecycle::image_request_options(
+        saved.size.clone().or(Some(defaults.size)),
+        saved.quality.clone().or(Some(defaults.quality)),
+        saved.background.clone().or(Some(defaults.background)),
+        saved.output_format.clone().or(Some(defaults.output_format)),
+        saved
+            .output_compression
+            .or(Some(defaults.output_compression)),
+        saved.moderation.clone().or(Some(defaults.moderation)),
+        saved
+            .input_fidelity
+            .clone()
+            .or(Some(defaults.input_fidelity)),
+        saved.image_count.or(Some(defaults.image_count)),
+    );
+    options.advanced_options = saved.advanced_options.clone();
+    options.stream = saved
+        .advanced_options
+        .as_ref()
+        .and_then(|a| a.stream)
+        .or(saved.stream)
+        .unwrap_or(false);
+    options.partial_images = saved
+        .advanced_options
+        .as_ref()
+        .and_then(|a| a.partial_images)
+        .or(saved.partial_images)
+        .unwrap_or(0);
+    options.aspect_ratio = saved.aspect_ratio.clone();
+    options.resolution = saved.resolution.clone();
+    crate::model_registry::validate_request_options(model, &options, source_count)?;
+    let sanitized =
+        crate::model_registry::sanitize_request_options_for_model(model, options.clone());
+    if options.quality != sanitized.quality
+        || options.background != sanitized.background
+        || options.output_format != sanitized.output_format
+        || options.output_compression != sanitized.output_compression
+        || options.moderation != sanitized.moderation
+        || options.input_fidelity != sanitized.input_fidelity
+        || options.image_count != sanitized.image_count
+        || options.stream != sanitized.stream
+        || options.partial_images != sanitized.partial_images
+        || ((options.stream || options.partial_images > 0)
+            && !matches!(
+                model,
+                ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST
+            ))
+        || (options.output_compression != 100
+            && (crate::image_engines::provider_for_model(model)
+                != crate::image_engines::ImageProvider::OpenAi
+                || !["jpeg", "webp"].contains(&options.output_format.as_str())))
+    {
+        return Err(unsupported());
+    }
+    Ok(())
+}
+
 pub(crate) fn load_recipe(
     db: &Database,
     generation_id: &str,
@@ -186,52 +270,12 @@ pub(crate) fn load_recipe(
     {
         recipe.warnings.push("unknown_model".into());
     }
-    let mut options = crate::generation_lifecycle::image_request_options(
-        recipe.options.size.clone(),
-        recipe.options.quality.clone(),
-        recipe.options.background.clone(),
-        recipe.options.output_format.clone(),
-        recipe.options.output_compression,
-        recipe.options.moderation.clone(),
-        recipe.options.input_fidelity.clone(),
-        recipe.options.image_count,
-    );
-    options.advanced_options = recipe.options.advanced_options.clone();
-    options.stream = recipe
-        .options
-        .stream
-        .or_else(|| {
-            recipe
-                .options
-                .advanced_options
-                .as_ref()
-                .and_then(|a| a.stream)
-        })
-        .unwrap_or(false);
-    options.partial_images = recipe
-        .options
-        .partial_images
-        .or_else(|| {
-            recipe
-                .options
-                .advanced_options
-                .as_ref()
-                .and_then(|a| a.partial_images)
-        })
-        .unwrap_or(0);
-    options.aspect_ratio = recipe.options.aspect_ratio.clone();
-    options.resolution = recipe.options.resolution.clone();
-    if crate::model_registry::validate_request_options(
+    if validate_saved_recipe_options(
         &recipe.model,
-        &options,
+        &recipe.options,
         recipe.source_image_paths.len(),
     )
     .is_err()
-        || ((options.stream || options.partial_images > 0)
-            && !matches!(
-                recipe.model.as_str(),
-                ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST
-            ))
         || !(0..=100).contains(&generation.output_compression)
         || !(1..=10).contains(&generation.image_count)
         || !["auto", "low"].contains(&generation.moderation.as_str())
@@ -255,17 +299,178 @@ pub(crate) fn load_recipe(
     Ok(recipe)
 }
 
+pub(crate) fn load_recipe_for_client_request(
+    db: &Database,
+    client_request_id: &str,
+) -> Result<Option<GenerationRecipe>, AppError> {
+    let result = {
+        let conn = db
+            .conn
+            .lock()
+            .map_err(|_| invalid("Cannot read saved generation"))?;
+        generation_jobs::find_enqueue_result_by_client_request_id(&conn, client_request_id)?
+    };
+    result
+        .map(|result| load_recipe(db, &result.generation_id))
+        .transpose()
+}
+
 #[tauri::command]
 pub(crate) fn get_generation_recipe(
     db: tauri::State<'_, Database>,
-    generation_id: String,
-) -> Result<GenerationRecipe, AppError> {
-    load_recipe(db.inner(), &generation_id)
+    generation_id: Option<String>,
+    client_request_id: Option<String>,
+) -> Result<Option<GenerationRecipe>, AppError> {
+    match (generation_id, client_request_id) {
+        (Some(id), None) => load_recipe(db.inner(), &id).map(Some),
+        (None, Some(id)) => load_recipe_for_client_request(db.inner(), &id),
+        _ => Err(invalid("Select exactly one generation or client request")),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn all_registered_model_defaults_are_valid_but_explicit_unsupported_values_are_not() {
+        for model in [
+            ENGINE_GPT_IMAGE_26_FLARE,
+            ENGINE_GPT_IMAGE_26_SUNBURST,
+            ENGINE_GPT_IMAGE_2,
+            ENGINE_GPT_IMAGE_FLARE,
+            ENGINE_GPT_IMAGE_SUNBURST,
+            ENGINE_NANO_BANANA_21,
+            ENGINE_GROK,
+            ENGINE_SEEDREAM_PRO,
+            ENGINE_SEEDREAM_FLASH,
+            ENGINE_NANO_BANANA,
+            ENGINE_NANO_BANANA_2,
+            ENGINE_NANO_BANANA_PRO,
+        ] {
+            assert!(
+                validate_saved_recipe_options(model, &GenerationJobOptions::default(), 0).is_ok(),
+                "{model}"
+            );
+        }
+        let unsupported = GenerationJobOptions {
+            output_format: Some("png".into()),
+            ..Default::default()
+        };
+        assert!(validate_saved_recipe_options(ENGINE_GROK, &unsupported, 0).is_err());
+        let advanced = GenerationJobOptions {
+            advanced_options: Some(ImageAdvancedOptions {
+                complexity: Some("high".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(validate_saved_recipe_options(ENGINE_GPT_IMAGE_2, &advanced, 0).is_err());
+        let compression = GenerationJobOptions {
+            output_format: Some("png".into()),
+            output_compression: Some(75),
+            ..Default::default()
+        };
+        assert!(validate_saved_recipe_options(ENGINE_GPT_IMAGE_2, &compression, 0).is_err());
+    }
+
+    #[test]
+    fn legacy_parameters_that_would_be_silently_sanitized_require_review() {
+        let dir = std::env::temp_dir().join(format!("recipe-unsupported-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::open(&dir.join("test.db")).unwrap();
+        db.run_migrations().unwrap();
+        db.conn.lock().unwrap().execute("INSERT INTO generations(id,prompt,engine,image_count,background,output_format) VALUES('legacy','fixture','nano-banana',3,'transparent','webp')", []).unwrap();
+        let recipe = load_recipe(&db, "legacy").unwrap();
+        assert!(recipe.warnings.contains(&"invalid_parameters".into()));
+        assert_eq!(recipe.options.image_count, Some(3));
+        assert_eq!(recipe.options.output_format.as_deref(), Some("webp"));
+        let supported = GenerationJobOptions {
+            output_format: Some("jpeg".into()),
+            output_compression: Some(75),
+            image_count: Some(7),
+            moderation: Some("low".into()),
+            ..Default::default()
+        };
+        assert!(validate_saved_recipe_options(ENGINE_GPT_IMAGE_2, &supported, 0).is_ok());
+        let unsupported = GenerationJobOptions {
+            image_count: Some(12),
+            ..supported
+        };
+        assert!(validate_saved_recipe_options(ENGINE_GPT_IMAGE_2, &unsupported, 0).is_err());
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn client_request_lookup_distinguishes_missing_valid_and_corrupt_jobs() {
+        use generation_jobs::{enqueue_job, PreparedGenerationJob};
+        let dir = std::env::temp_dir().join(format!("recipe-client-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::open(&dir.join("test.db")).unwrap();
+        db.run_migrations().unwrap();
+        assert!(load_recipe_for_client_request(&db, "missing")
+            .unwrap()
+            .is_none());
+        let prepared = PreparedGenerationJob {
+            job_id: "job-current".into(),
+            client_request_id: "client-current".into(),
+            generation_id: "generation-current".into(),
+            requested_conversation_id: None,
+            requested_project_id: Some("default".into()),
+            prompt: "Edited prompt".into(),
+            model: "gpt-image-2".into(),
+            request_kind: "generate".into(),
+            size: "1024x1024".into(),
+            quality: "high".into(),
+            background: "auto".into(),
+            output_format: "png".into(),
+            output_compression: 100,
+            moderation: "auto".into(),
+            input_fidelity: "high".into(),
+            image_count: 1,
+            stream: false,
+            partial_images: 0,
+            source_image_paths: vec![],
+            request_options: GenerationJobOptions {
+                size: Some("1024x1024".into()),
+                quality: Some("high".into()),
+                ..Default::default()
+            },
+            parent_job_id: None,
+            source_kind: "generate".into(),
+            source_ref: serde_json::json!({"id":"client-current", "source_generation_id":"ancestor"}),
+            provider_kind: "openai".into(),
+            provider_profile_id: "saved-profile".into(),
+            endpoint_snapshot: "https://example.test/v1/images/generations".into(),
+            status: GenerationJobStatus::Queued,
+            chain_attempt: 1,
+            auto_attempt: 0,
+            max_auto_attempts: 2,
+            queued_at: "2026-11-13T00:00:00Z".into(),
+            finished_at: None,
+            error_code: None,
+            error_message: None,
+            retryable: false,
+        };
+        enqueue_job(&mut db.conn.lock().unwrap(), &prepared).unwrap();
+        let recipe = load_recipe_for_client_request(&db, "client-current")
+            .unwrap()
+            .unwrap();
+        assert_eq!(recipe.generation_id, "generation-current");
+        assert_eq!(recipe.prompt, "Edited prompt");
+        db.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE generation_jobs SET request_json='{}' WHERE id='job-current'",
+                [],
+            )
+            .unwrap();
+        assert!(load_recipe_for_client_request(&db, "client-current").is_err());
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn legacy_unknown_recipe_requires_charge_acknowledgement() {
         let dir = std::env::temp_dir().join(format!("recipe-unknown-{}", uuid::Uuid::new_v4()));

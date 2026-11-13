@@ -20,13 +20,13 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 const MAX_TOTAL: u64 = 128 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 200_000;
 const MANIFEST_LIMIT: u64 = 64 * 1024 * 1024;
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BackupFile {
     name: String,
     size: u64,
     sha256: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BackupManifest {
     pub version: u32,
     created_at: String,
@@ -44,7 +44,7 @@ pub(crate) struct BackupInspection {
     manifest: BackupManifest,
 }
 #[derive(Default)]
-pub(crate) struct BackupInspections(Mutex<HashMap<String, (PathBuf, String)>>);
+pub(crate) struct BackupInspections(Mutex<HashMap<String, (PathBuf, String, BackupManifest)>>);
 #[derive(Serialize)]
 pub(crate) struct LibraryOperationResult {
     status: &'static str,
@@ -140,9 +140,20 @@ fn credential_key(key: &str) -> bool {
         || key.contains("secret")
         || key.contains("token")
         || key.contains("apikey")
+        || key.contains("credential")
+        || key.ends_with("signature")
         || matches!(
             key.as_str(),
-            "key" | "authorization" | "auth" | "signature" | "sig"
+            "key"
+                | "accesskey"
+                | "accesskeyid"
+                | "appkey"
+                | "subscriptionkey"
+                | "ocpapimsubscriptionkey"
+                | "authorization"
+                | "auth"
+                | "signature"
+                | "sig"
         )
 }
 fn scrub(value: &mut Value) {
@@ -437,11 +448,17 @@ fn prepare_snapshot_files(
                     if response.is_none()
                         && size.is_none()
                         && sha256.is_none()
-                        && job.status == GenerationJobStatus::Running
-                        && matches!(
-                            job.stage,
-                            GenerationJobStage::ProviderRequest | GenerationJobStage::RetryBackoff
-                        ) => {}
+                        && ((job.status == GenerationJobStatus::Running
+                            && matches!(
+                                job.stage,
+                                GenerationJobStage::ProviderRequest
+                                    | GenerationJobStage::RetryBackoff
+                            ))
+                            || (matches!(
+                                job.status,
+                                GenerationJobStatus::Failed | GenerationJobStatus::Interrupted
+                            ) && job.stage == GenerationJobStage::Terminal
+                                && job.cancel_requested_at.is_none())) => {}
                 _ => {
                     return Err(
                         "Saved response metadata disagrees with the generation stage".into(),
@@ -780,6 +797,22 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
     }
     Ok(manifest)
 }
+fn restore_approved_archive(
+    paths: &StoragePaths,
+    archive: &Path,
+    approved: &BackupManifest,
+    op: &OperationGuard,
+    progress: &dyn Fn(&str, usize, usize),
+) -> Result<PathBuf> {
+    let current = inspect_archive_checked(archive, Some(op))?;
+    if &current != approved {
+        return Err("Backup changed after inspection; inspect it again".into());
+    }
+    // Retain the reviewed file list and hashes through extraction. Reopening an
+    // externally replaceable archive must never select a new manifest.
+    restore_archive_manifest(paths, archive, approved, op, progress)
+}
+#[cfg(test)]
 fn restore_archive(
     paths: &StoragePaths,
     archive: &Path,
@@ -787,6 +820,15 @@ fn restore_archive(
     progress: &dyn Fn(&str, usize, usize),
 ) -> Result<PathBuf> {
     let manifest = inspect_archive_checked(archive, Some(op))?;
+    restore_archive_manifest(paths, archive, &manifest, op, progress)
+}
+fn restore_archive_manifest(
+    paths: &StoragePaths,
+    archive: &Path,
+    manifest: &BackupManifest,
+    op: &OperationGuard,
+    progress: &dyn Fn(&str, usize, usize),
+) -> Result<PathBuf> {
     op.checkpoint()?;
     let parent = paths.bootstrap.join("libraries");
     fs::create_dir_all(&parent)?;
@@ -883,7 +925,12 @@ fn sync_restored_tree(root: &Path, op: &OperationGuard) -> Result<()> {
         if path.is_dir() {
             sync_restored_tree(&path, op)?;
         } else {
-            File::open(path)?.sync_all()?;
+            // Windows FlushFileBuffers requires a writable file handle.
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)?
+                .sync_all()?;
         }
     }
     crate::file_manager::sync_directory(root)?;
@@ -970,7 +1017,7 @@ pub(crate) async fn inspect_library_backup(
         .lock()
         .map_err(|_| "Backup inspection unavailable")?;
     entries.clear();
-    entries.insert(token.clone(), (path, hash));
+    entries.insert(token.clone(), (path, hash, manifest.clone()));
     Ok(Some(BackupInspection { token, manifest }))
 }
 #[tauri::command]
@@ -983,7 +1030,7 @@ pub(crate) async fn restore_library_backup(
     token: String,
     operation_id: String,
 ) -> std::result::Result<LibraryOperationResult, String> {
-    let (archive, expected_hash) = inspections
+    let (archive, expected_hash, approved) = inspections
         .0
         .lock()
         .map_err(|_| "Backup inspection unavailable")?
@@ -999,9 +1046,10 @@ pub(crate) async fn restore_library_backup(
             if hash_file_checked(&archive, Some(&op))?.1 != expected_hash {
                 return Err("Backup changed after inspection".into());
             }
-            let root = restore_archive(&paths, &archive, &op, &|phase, n, total| {
-                op.progress(&app, phase, n, total)
-            })?;
+            let root =
+                restore_approved_archive(&paths, &archive, &approved, &op, &|phase, n, total| {
+                    op.progress(&app, phase, n, total)
+                })?;
             op.checkpoint()?;
             paths.activate(&root)?;
             crate::storage::global_gate().require_restart();

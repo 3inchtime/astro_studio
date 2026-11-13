@@ -322,6 +322,9 @@ struct ResolvedConversationIdentity {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct GenerateEditSourceRef {
+    /// Version 1 records durable before/after provider milestones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_version: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1991,7 +1994,13 @@ impl GenerationJobSourceRef {
                 &source_ref.project_id,
             ]),
         };
-        if ids_valid {
+        let version_valid = match &source_ref {
+            Self::GenerateEdit(source) => {
+                source.execution_version.is_none_or(|version| version == 1)
+            }
+            Self::Canvas(_) => true,
+        };
+        if ids_valid && version_valid {
             Ok(source_ref)
         } else {
             Err(AppError::GenerationJobInvalidSnapshot)

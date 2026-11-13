@@ -204,3 +204,23 @@ it("keeps edit annotations on retries but never sends them to generation or othe
     buildEditParams({ ...retry, model: "nano-banana" }),
   ).not.toHaveProperty("advancedOptions");
 });
+
+it.each(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const)("preserves saved %s controls beyond the current composer presets", (model) => {
+  const saved = request({ model, sourceGenerationId: "original", imageCount: 7, outputCompression: 75 });
+  for (const params of [buildGenerationParams(saved), buildEditParams(saved)]) {
+    expect(params).toMatchObject({ imageCount: 7, outputCompression: 75, moderation: "low", quality: "high", background: "transparent", outputFormat: "webp" });
+  }
+  expect(buildEditParams(saved)).toMatchObject({ inputFidelity: "low", sourceImagePaths: ["/tmp/source-1.png"] });
+  const changed = buildGenerationParams({ ...saved, prompt: "Changed prompt" });
+  expect(changed).toEqual({ ...buildGenerationParams(saved), prompt: "Changed prompt" });
+});
+
+it("does not silently clamp an invalid saved count or quality before backend validation", () => {
+  const saved = request({ sourceGenerationId: "original", imageCount: 12, quality: "max" });
+  expect(buildGenerationParams(saved)).toMatchObject({ imageCount: 12, quality: "max" });
+});
+
+it("preserves a registered Gemini ratio even when the composer preset list is narrower", () => {
+  const saved = request({ sourceGenerationId: "original", model: "nano-banana", aspectRatio: "2:1", resolution: "1K", quality: "auto", background: "auto", outputFormat: "png", inputFidelity: "high", moderation: "auto", imageCount: 1 });
+  expect(buildGenerationParams(saved)).toMatchObject({ aspectRatio: "2:1", resolution: "1K" });
+});

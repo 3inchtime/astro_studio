@@ -111,14 +111,22 @@ export function ProviderDiagnostics({
           ),
         );
       }
-    } catch {
-      if (current === version.current)
+    } catch (error) {
+      if (current === version.current) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "conversation_id" in error &&
+          typeof error.conversation_id === "string"
+        )
+          setConversationId(error.conversation_id);
         setNotice(
           text(
             "unknownOutcome",
             "The test did not return a completed image. Its outcome may be unknown and a charge may still apply. Check your connection-test conversation and provider usage before trying again. No automatic retry was made.",
           ),
         );
+      }
     } finally {
       if (current === version.current) {
         active.current = false;

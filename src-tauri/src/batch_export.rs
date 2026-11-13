@@ -182,7 +182,9 @@ fn scrub_recipe(value: &mut serde_json::Value) {
         serde_json::Value::String(text)
             if text.starts_with('/')
                 || text.starts_with("\\\\")
-                || text.as_bytes().get(1) == Some(&b':') =>
+                || (text.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                    && text.as_bytes().get(1) == Some(&b':')
+                    && matches!(text.as_bytes().get(2), Some(b'/' | b'\\'))) =>
         {
             *value = serde_json::Value::Null
         }
@@ -410,6 +412,16 @@ pub(crate) async fn export_generations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recipe_scrubbing_preserves_labeled_prose_but_removes_absolute_paths() {
+        let mut recipe = serde_json::json!({
+            "prompt": "A: blue circle; B: red square",
+            "options": {"note": "C:\\Users\\private\\reference.png"}
+        });
+        scrub_recipe(&mut recipe);
+        assert_eq!(recipe["prompt"], "A: blue circle; B: red square");
+        assert!(recipe["options"]["note"].is_null());
+    }
     fn fixture() -> (PathBuf, PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!("astro-export-{}", uuid::Uuid::new_v4()));
         let assets = root.join("assets");

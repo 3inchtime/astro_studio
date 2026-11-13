@@ -1,6 +1,7 @@
 import RecoveryNotice from "../components/generate/RecoveryNotice";
 import {
   getGenerationRecipe,
+  getGenerationRecipeForRequest,
   recipeToRequest,
   listRecipeProviders,
 } from "../lib/recipeApi";
@@ -269,6 +270,14 @@ export default function GeneratePage() {
     const saved = takeProviderSettingsDraft();
     if (!saved) return;
     const request = saved.request;
+    // /generate has no conversation segment. Restore its routing context as
+    // well as the composer, without replaying a prior recipe launch intent.
+    if (location.pathname === "/generate" && request.conversationId) {
+      navigate("/generate", {
+        replace: true,
+        state: { activateConversationId: request.conversationId },
+      });
+    }
     restoredIntentState.current = location.state;
     navigationRecipeHandled.current = location.state;
     didUserSelectModelRef.current = true; hasComposerDraftRef.current = true;
@@ -742,7 +751,7 @@ export default function GeneratePage() {
     (recipe: GenerationRecipe) => {
       const request = recipeToRequest(recipe);
       didUserSelectModelRef.current = true;
-      hasComposerDraftRef.current = true;
+      markComposerDraftStarted();
       hydratedSourcePath.current = { path: request.editSources[0]?.path };
       setActiveImageModel(request.model);
       setPrompt(request.prompt);
@@ -768,17 +777,20 @@ export default function GeneratePage() {
       setPendingRecipe(null);
       textareaRef.current?.focus();
     },
-    [setActiveImageModel],
+    [setActiveImageModel, markComposerDraftStarted],
   );
 
   const handleReuseRecipe = useCallback(
-    async (generationId: string, mode: "edit" | "generate") => {
+    async (generationId: string, mode: "edit" | "generate", outcomeUnknown = false) => {
       if (recipeLoadPending.current) return;
       recipeLoadPending.current = true;
       const token = ++recipeLoadToken.current;
       setRecipeError(null);
       try {
-        const recipe = await getGenerationRecipe(generationId);
+        const loaded = await getGenerationRecipe(generationId);
+        const recipe = outcomeUnknown && !loaded.warnings.includes("provider_outcome_unknown")
+          ? { ...loaded, warnings: [...loaded.warnings, "provider_outcome_unknown"] }
+          : loaded;
         if (token !== recipeLoadToken.current) return;
         if (mode === "generate" && recipe.warnings.length === 0) {
           await submitGenerationRequest({
@@ -910,7 +922,7 @@ export default function GeneratePage() {
   const handleAcceptAgentDraft = useCallback(
     async (message: PromptAgentMessage) => {
       const draft = message.draft_prompt?.trim();
-      if (!draft || !promptAgentSessionId) return;
+      if (!draft || !promptAgentSessionId || recipeWarnings.length > 0) return;
 
       const accepted = await acceptPromptAgentDraftMutation.mutateAsync({
         sessionId: promptAgentSessionId,
@@ -939,6 +951,7 @@ export default function GeneratePage() {
       setPromptAgentSessionId(null);
 
       await submitGenerationRequest({
+        ...recipeIdentity,
         prompt: acceptedPrompt,
         advancedOptions,
         outputCompression,
@@ -970,6 +983,8 @@ export default function GeneratePage() {
       aspectRatio,
       resolution,
       acceptPromptAgentDraftMutation,
+      recipeIdentity,
+      recipeWarnings,
       activeConversationId,
       activeProjectId,
       background,
@@ -1062,12 +1077,21 @@ export default function GeneratePage() {
 
   const handleRetryMessage = useCallback(
     async (message: Message) => {
+      const clientRequestId = message.retryRequest?.clientRequestId;
+      if (clientRequestId && message.id === `assistant-${clientRequestId}`) {
+        try {
+          const saved = await getGenerationRecipeForRequest(clientRequestId);
+          if (saved) {
+            await handleReuseRecipe(saved.generation_id, "generate", unknownOutcomes.current.has(clientRequestId));
+            return;
+          }
+        } catch {
+          setRecipeError(t("recipe.loadFailed"));
+          return;
+        }
+      }
       if (message.retryRequest && unknownOutcomes.current.has(message.retryRequest.clientRequestId ?? "")) {
         setPendingUnknownRetry(message.retryRequest);
-        return;
-      }
-      if (message.retryRequest?.sourceGenerationId) {
-        await handleReuseRecipe(message.retryRequest.sourceGenerationId, "generate");
         return;
       }
       if (
@@ -1082,7 +1106,7 @@ export default function GeneratePage() {
       if (!message.retryRequest) return;
       await submitGenerationRequest(message.retryRequest);
     },
-    [submitGenerationRequest, handleReuseRecipe],
+    [submitGenerationRequest, handleReuseRecipe, t],
   );
 
   const handleEditPrompt = useCallback(

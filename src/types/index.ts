@@ -172,7 +172,7 @@ export interface CanvasGenerationRequest {
   project_id: string | null;
   frame: CanvasFrame;
   prompt: string;
-  status: "pending" | "completed" | "failed";
+  status: "pending" | "completed" | "failed" | "cancelled";
   image_ids: string[];
   error?: string;
   created_at: string;

@@ -38,6 +38,24 @@ const result = {
 };
 describe("provider diagnostics", () => {
   beforeEach(() => vi.clearAllMocks());
+  it("links the saved test conversation after an unknown provider outcome", async () => {
+    vi.mocked(getProviderSmokePlan).mockResolvedValue({
+      model: "gpt-image-2", provider_id: "p", provider_name: "Saved provider",
+      endpoint_host: "example.test", fingerprint: "f", prompt: "A circle",
+      image_count: 1, quality: "low", size: "1024x1024", resolution: null,
+      aspect_ratio: null, output_format: "png",
+    });
+    vi.mocked(runProviderSmokeTest).mockRejectedValue({
+      code: "network_error", conversation_id: "failed-test-conversation",
+    });
+    render(<ProviderDiagnostics model="gpt-image-2" profile={profile} dirty={false} />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByRole("button", { name: "Test one image…" }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Generate one test image" }));
+    expect(await screen.findByRole("link", { name: "Open test conversation" })).toHaveAttribute("href", "/projects/default/chat/failed-test-conversation");
+    expect(screen.getByText(/charge may still apply/)).toBeInTheDocument();
+    expect(runProviderSmokeTest).toHaveBeenCalledTimes(1);
+  });
   it("requires saved settings and ignores a response after edits", async () => {
     let resolve!: (value: unknown) => void;
     vi.mocked(diagnoseImageProvider).mockReturnValue(

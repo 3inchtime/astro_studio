@@ -4,6 +4,8 @@ import type { ImageModel, RetryGenerationRequest } from "../types";
 import type { GenerationRecipe } from "../types/recipe";
 export const getGenerationRecipe = (generationId: string) =>
   invoke<GenerationRecipe>("get_generation_recipe", { generationId });
+export const getGenerationRecipeForRequest = (clientRequestId: string) =>
+  invoke<GenerationRecipe | null>("get_generation_recipe", { clientRequestId });
 export function recipeToRequest(
   recipe: GenerationRecipe,
 ): RetryGenerationRequest {

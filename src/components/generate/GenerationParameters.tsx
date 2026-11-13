@@ -367,6 +367,9 @@ function SelectField({ label, value, onChange, options }: SelectFieldProps) {
         onChange={(e) => onChange(e.target.value)}
         className="studio-input focus-ring select-control h-9 w-full min-w-0 cursor-pointer truncate rounded-lg px-3 pr-8 text-sm text-foreground"
       >
+        {!options.some((option) => option.value === value) && (
+          <option value={value} disabled>{value}</option>
+        )}
         {options.map((option) => (
           <option
             key={option.value}

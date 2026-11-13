@@ -1438,7 +1438,21 @@ fn load_matching_execution_snapshot(
     tx: &Transaction<'_>,
     context: &GenerationExecutionContext,
 ) -> Result<GenerationExecutionSnapshot, AppError> {
-    let snapshot = load_generation_execution_snapshot_in_transaction(tx, &context.job_id)?;
+    let job = get_job_in_transaction(tx, &context.job_id)?;
+    if !matches!(
+        job.stage,
+        GenerationJobStage::Preparing
+            | GenerationJobStage::ProviderRequest
+            | GenerationJobStage::ResponseReady
+            | GenerationJobStage::LocalProcessing
+    ) {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let snapshot = load_generation_execution_snapshot_for_stage_in_transaction(
+        tx,
+        &context.job_id,
+        job.stage,
+    )?;
     if snapshot.context != *context {
         return Err(AppError::GenerationJobInvalidSnapshot);
     }
@@ -1499,6 +1513,18 @@ fn promote_verified_response_in_transaction(
     let job = get_job_in_transaction(tx, &context.job_id)?;
     if job.status != GenerationJobStatus::Running || job.generation_id != context.generation_id {
         return Err(AppError::GenerationJobInvalidTransition);
+    }
+    if job.stage == GenerationJobStage::ProviderRequest {
+        let updated = tx.execute("UPDATE generation_recoveries SET response_size=?1,response_sha256=?2 WHERE generation_id=?3 AND expected_response_file=?4", params![response.response_size, response.response_sha256, context.generation_id, response.response_file])?;
+        if updated != 1 {
+            return Err(AppError::GenerationJobInvalidTransition);
+        }
+        tx.execute("UPDATE generation_jobs SET stage='local_processing',last_heartbeat_at=?1 WHERE id=?2 AND stage='provider_request'", params![current_timestamp(), context.job_id])?;
+        validate_worker_recovery_for_stage(
+            tx,
+            &context.generation_id,
+            GenerationJobStage::LocalProcessing,
+        )?;
     }
     Ok(())
 }
@@ -1787,7 +1813,9 @@ fn finalize_generation_failure_in_transaction(
         return Err(AppError::GenerationJobCorruptPersistedData);
     }
     if disposition.preserve_response_ready {
-        if !response_ready {
+        let bound_request = requesting && tx.query_row("SELECT expected_response_file IS NOT NULL FROM generation_recoveries WHERE generation_id=?1", [&context.generation_id], |row| row.get::<_,bool>(0))?
+            && get_job_in_transaction(tx, &context.job_id)?.stage == GenerationJobStage::ProviderRequest;
+        if !response_ready && !bound_request {
             return Err(AppError::GenerationJobInvalidTransition);
         }
     } else {
@@ -2854,6 +2882,26 @@ fn prepare_compatibility_job(
             .unwrap_or(DEFAULT_IMAGE_MODEL),
     )
     .to_string();
+    if request.source_generation_id.is_some() {
+        crate::generation_recipe::validate_saved_recipe_options(
+            &model,
+            &GenerationJobOptions {
+                size: request.size.clone(),
+                quality: request.quality.clone(),
+                background: request.background.clone(),
+                output_format: request.output_format.clone(),
+                output_compression: request.output_compression,
+                moderation: request.moderation.clone(),
+                input_fidelity: request.input_fidelity.clone(),
+                image_count: request.image_count,
+                advanced_options: request.advanced_options.clone(),
+                aspect_ratio: request.aspect_ratio.clone(),
+                resolution: request.resolution.clone(),
+                ..Default::default()
+            },
+            request.source_image_paths.len(),
+        )?;
+    }
     let mut runtime_options = sanitize_request_options_for_model(
         &model,
         image_request_options(
@@ -3100,31 +3148,60 @@ fn prepare_compatibility_job(
                         && saved.model == model
                         && saved.source_image_paths == request.source_image_paths
                         && {
-                            let normalize_streaming = |mut options: GenerationJobOptions| {
-                                let mut advanced =
-                                    options.advanced_options.take().unwrap_or_default();
-                                options.stream =
-                                    Some(advanced.stream.or(options.stream).unwrap_or(false));
-                                options.partial_images = Some(
-                                    advanced
-                                        .partial_images
-                                        .or(options.partial_images)
-                                        .unwrap_or(0),
-                                );
-                                advanced.stream = None;
-                                advanced.partial_images = None;
-                                options.advanced_options = (advanced
-                                    != ImageAdvancedOptions::default())
-                                .then_some(advanced);
-                                options
-                            };
-                            let old = normalize_streaming(saved.options);
-                            let new = normalize_streaming(request_options.clone());
+                            let normalize_effective_options =
+                                |mut options: GenerationJobOptions| {
+                                    let effective = sanitize_request_options_for_model(
+                                        &model,
+                                        image_request_options(
+                                            options.size.clone(),
+                                            options.quality.clone(),
+                                            options.background.clone(),
+                                            options.output_format.clone(),
+                                            options.output_compression,
+                                            options.moderation.clone(),
+                                            options.input_fidelity.clone(),
+                                            options.image_count,
+                                        ),
+                                    );
+                                    options.size = Some(effective.size);
+                                    options.quality = Some(effective.quality);
+                                    options.background = Some(effective.background);
+                                    options.output_format = Some(effective.output_format);
+                                    options.output_compression = Some(effective.output_compression);
+                                    options.moderation = Some(effective.moderation);
+                                    options.input_fidelity = Some(effective.input_fidelity);
+                                    options.image_count = Some(effective.image_count);
+                                    options.resolution = options.resolution.or_else(|| {
+                                        match provider_for_model(&model) {
+                                            ImageProvider::Xai => Some("1K".into()),
+                                            ImageProvider::Seedream => Some("2K".into()),
+                                            _ => None,
+                                        }
+                                    });
+                                    let mut advanced =
+                                        options.advanced_options.take().unwrap_or_default();
+                                    options.stream =
+                                        Some(advanced.stream.or(options.stream).unwrap_or(false));
+                                    options.partial_images = Some(
+                                        advanced
+                                            .partial_images
+                                            .or(options.partial_images)
+                                            .unwrap_or(0),
+                                    );
+                                    advanced.stream = None;
+                                    advanced.partial_images = None;
+                                    options.advanced_options = (advanced
+                                        != ImageAdvancedOptions::default())
+                                    .then_some(advanced);
+                                    options
+                                };
+                            let old = normalize_effective_options(saved.options);
+                            let new = normalize_effective_options(request_options.clone());
                             old == new
                         }
                 })
         });
-    let mut source_ref = serde_json::json!({ "id": client_request_id });
+    let mut source_ref = serde_json::json!({ "id": client_request_id, "execution_version": 1 });
     if let Some(source_generation_id) = &request.source_generation_id {
         source_ref["source_generation_id"] = serde_json::json!(source_generation_id);
     }
@@ -3251,13 +3328,46 @@ fn terminalize_compatibility_error(
     status: GenerationJobStatus,
     preserve_response_ready: bool,
 ) -> Result<AppError, AppError> {
-    let disposition = GenerationTerminalDisposition {
-        status,
-        error_code: error.code().to_string(),
-        retryable: compatibility_error_is_manually_retryable(error),
-        preserve_response_ready,
+    let cancellation_error = compatibility_execution_error(
+        "cancelled_by_user",
+        "The generation was cancelled",
+        "cancellation",
+    );
+    let cancelled = {
+        let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+        let tx = begin_generation_job_write_transaction(&mut conn)?;
+        let cancelled = get_job_in_transaction(&tx, &snapshot.context.job_id)?
+            .cancel_requested_at
+            .is_some();
+        let effective_error = if cancelled {
+            &cancellation_error
+        } else {
+            error
+        };
+        let disposition = GenerationTerminalDisposition {
+            status: if cancelled {
+                GenerationJobStatus::Cancelled
+            } else {
+                status
+            },
+            error_code: effective_error.code().to_string(),
+            retryable: !cancelled && compatibility_error_is_manually_retryable(effective_error),
+            preserve_response_ready: !cancelled && preserve_response_ready,
+        };
+        finalize_generation_failure_in_transaction(
+            &tx,
+            &snapshot.context,
+            effective_error,
+            &disposition,
+        )?;
+        tx.commit()?;
+        cancelled
     };
-    finalize_generation_failure(db, &snapshot.context, error, &disposition)?;
+    let error = if cancelled {
+        &cancellation_error
+    } else {
+        error
+    };
     let kind = GenerationLifecycleKind::from(snapshot.request.kind);
     let _ = db.insert_log(
         "generation",
@@ -3299,6 +3409,7 @@ fn start_compatibility_job(
             (enqueue_result, None)
         } else {
             let tx = begin_generation_job_write_transaction(&mut conn)?;
+            tx.execute("UPDATE generation_jobs SET source_ref_json=json_set(source_ref_json,'$.execution_version',1) WHERE id=?1 AND status='queued' AND source_kind IN ('generate','edit')", [&prepared_job.job_id])?;
             let claimed = claim_job_in_transaction(&tx, &prepared_job.job_id)?;
             if claimed.id != prepared_job.job_id
                 || claimed.generation_id != prepared_job.generation_id
@@ -3404,6 +3515,45 @@ fn start_compatibility_job(
     Ok(snapshot)
 }
 
+// Compatibility requests run concurrently under the process library lock. Persist
+// the same recovery milestones used by the fenced restart worker before HTTP.
+fn begin_compatibility_provider_request(
+    db: &Database,
+    snapshot: &GenerationExecutionSnapshot,
+    expected: &Path,
+) -> Result<(), AppError> {
+    if !response_path_matches_context(expected, &snapshot.context) {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
+    let tx = begin_generation_job_write_transaction(&mut conn)?;
+    let current = load_matching_execution_snapshot(&tx, &snapshot.context)?;
+    if current.request != snapshot.request {
+        return Err(AppError::GenerationJobInvalidSnapshot);
+    }
+    validate_worker_recovery_for_stage(
+        &tx,
+        &snapshot.context.generation_id,
+        GenerationJobStage::Preparing,
+    )?;
+    let timestamp = current_timestamp();
+    let changed = tx.execute("UPDATE generation_jobs SET stage='provider_request',last_heartbeat_at=?1 WHERE id=?2 AND status='running' AND stage='preparing' AND cancel_requested_at IS NULL", params![timestamp, snapshot.context.job_id])?;
+    if changed != 1 {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    let changed = tx.execute("UPDATE generation_recoveries SET expected_response_file=?1,updated_at=?2 WHERE generation_id=?3 AND request_state='requesting' AND expected_response_file IS NULL", params![expected.to_string_lossy(), timestamp, snapshot.context.generation_id])?;
+    if changed != 1 {
+        return Err(AppError::GenerationJobInvalidTransition);
+    }
+    validate_worker_recovery_for_stage(
+        &tx,
+        &snapshot.context.generation_id,
+        GenerationJobStage::ProviderRequest,
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 async fn execute_claimed_compatibility_job(
     db: &Database,
     engine: &dyn ImageEngine,
@@ -3480,6 +3630,22 @@ async fn execute_claimed_compatibility_job(
             )?);
         }
     };
+    let begin = artifact_store
+        .expected_response_path(&snapshot.context)
+        .and_then(|path| {
+            begin_compatibility_provider_request(db, &snapshot, &path)
+                .map_err(|error| repository_execution_error(&error, "request_binding"))
+        });
+    if let Err(error) = begin {
+        return Err(terminalize_compatibility_error(
+            db,
+            event_sink,
+            &snapshot,
+            &error,
+            GenerationJobStatus::Failed,
+            false,
+        )?);
+    }
     let body =
         match perform_provider_http_attempt(engine, &snapshot, &credentials, &prepared_attempt)
             .await
@@ -3539,8 +3705,25 @@ async fn execute_claimed_compatibility_job(
             )?)
         }
         Err(error) => {
-            let preserve_response_ready =
+            let mut preserve_response_ready =
                 compatibility_response_ready_is_committed(db, &snapshot.context)?;
+            if !preserve_response_ready {
+                // The envelope can be durable while its response-ready DB
+                // publication failed. Keep the bound row for local recovery.
+                if let Ok(path) = artifact_store.expected_response_path(&snapshot.context) {
+                    preserve_response_ready = artifact_store
+                        .load_verified_response(&snapshot.context, &path)
+                        .await
+                        .is_ok_and(|response| {
+                            verified_response_shape_matches(
+                                &response,
+                                snapshot.runtime_options.image_count,
+                                Some(&path),
+                                None,
+                            )
+                        });
+                }
+            }
             Err(terminalize_compatibility_error(
                 db,
                 event_sink,
@@ -3761,6 +3944,9 @@ mod tests {
         fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
         fixture.db.conn.lock().unwrap().execute("INSERT INTO generations(id,prompt,status) VALUES('original-success','saved prompt','completed')", []).unwrap();
         let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.output_compression = Some(100);
+        request.moderation = Some("auto".into());
+        request.input_fidelity = Some("high".into());
         request.client_request_id = Some("fresh-reuse-request".into());
         request.source_generation_id = Some("original-success".into());
         let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
@@ -3809,6 +3995,9 @@ mod tests {
         let profile_id = state.profiles[0].id.clone();
         fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
         let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.output_compression = Some(100);
+        request.moderation = Some("auto".into());
+        request.input_fidelity = Some("high".into());
         request.provider_profile_id = Some(profile_id);
         let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
         let parent = {
@@ -3851,6 +4040,102 @@ mod tests {
     }
 
     #[test]
+    fn source_recipe_link_does_not_enable_silent_parameter_normalization() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut request = compatibility_request(ENGINE_NANO_BANANA);
+        request.quality = Some("auto".into());
+        request.background = Some("auto".into());
+        request.output_format = Some("png".into());
+        request.output_compression = None;
+        request.moderation = Some("auto".into());
+        request.input_fidelity = Some("high".into());
+        request.image_count = Some(3);
+        // Existing composer normalization remains unchanged for fresh requests.
+        assert_eq!(
+            prepare_compatibility_job(&fixture.db, &request)
+                .unwrap()
+                .image_count,
+            1
+        );
+        request.source_generation_id = Some("saved-origin".into());
+        assert!(
+            matches!(prepare_compatibility_job(&fixture.db, &request), Err(AppError::Validation { message }) if message == "Unsupported image parameters for the selected model.")
+        );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn recipe_retry_matches_materialized_defaults_but_not_changed_controls() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut state =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        state.profiles[0].api_key = "test-key".into();
+        let profile_id = state.profiles[0].id.clone();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.provider_profile_id = Some(profile_id);
+        request.size = None;
+        request.quality = None;
+        request.background = None;
+        request.output_format = None;
+        request.output_compression = None;
+        request.moderation = None;
+        request.input_fidelity = None;
+        request.image_count = None;
+        let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        let parent = {
+            let mut conn = fixture.db.conn.lock().unwrap();
+            let result = enqueue_job(&mut conn, &prepared).unwrap();
+            let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+            claim_job_in_transaction(&tx, &result.job_id).unwrap();
+            tx.commit().unwrap();
+            crate::generation_jobs::finish_job(
+                &conn,
+                &GenerationJobTerminalUpdate {
+                    job_id: result.job_id.clone(),
+                    expected_status: GenerationJobStatus::Running,
+                    status: GenerationJobStatus::Failed,
+                    finished_at: current_timestamp(),
+                    error_code: Some("provider_unavailable".into()),
+                    error_message: None,
+                    retryable: true,
+                },
+            )
+            .unwrap();
+            get_job(&conn, &result.job_id).unwrap()
+        };
+        request.source_generation_id = Some(parent.generation_id.clone());
+        request.size = Some(DEFAULT_IMAGE_SIZE.into());
+        request.quality = Some(DEFAULT_IMAGE_QUALITY.into());
+        request.background = Some(DEFAULT_IMAGE_BACKGROUND.into());
+        request.output_format = Some(DEFAULT_OUTPUT_FORMAT.into());
+        request.moderation = Some(DEFAULT_IMAGE_MODERATION.into());
+        request.input_fidelity = Some(DEFAULT_INPUT_FIDELITY.into());
+        request.image_count = Some(DEFAULT_IMAGE_COUNT);
+        request.image_count = Some(2);
+        assert!(prepare_compatibility_job(&fixture.db, &request)
+            .unwrap()
+            .parent_job_id
+            .is_none());
+        request.image_count = Some(DEFAULT_IMAGE_COUNT);
+        let retry = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        assert_eq!(retry.parent_job_id.as_deref(), Some(parent.id.as_str()));
+        let sink = CompatibilityEventSink::new(None);
+        let snapshot = start_compatibility_job(&fixture.db, &sink, retry).unwrap();
+        let conn = fixture.db.conn.lock().unwrap();
+        let child = get_job(&conn, &snapshot.context.job_id).unwrap();
+        assert_eq!(child.parent_job_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(child.chain_attempt, parent.chain_attempt + 1);
+        assert_ne!(child.generation_id, parent.generation_id);
+        assert_eq!(
+            get_job(&conn, &parent.id).unwrap().status,
+            GenerationJobStatus::Failed
+        );
+        drop(conn);
+        fixture.cleanup();
+    }
+
+    #[test]
     fn recipe_provider_endpoint_change_requires_explicit_acknowledgement() {
         let fixture = CompatibilityPreparationFixture::new();
         let mut state =
@@ -3859,6 +4144,9 @@ mod tests {
         let id = state.profiles[0].id.clone();
         fixture.save_profiles(ENGINE_GPT_IMAGE_2, state.clone());
         let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.output_compression = Some(100);
+        request.moderation = Some("auto".into());
+        request.input_fidelity = Some("high".into());
         request.provider_profile_id = Some(id.clone());
         let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
         let generation_id = prepared.generation_id.clone();
@@ -5109,6 +5397,376 @@ mod tests {
             ]
         );
         drop(sink);
+        fixture.cleanup();
+    }
+
+    struct RecoverableCompatibilityEngine {
+        db: Arc<Database>,
+        job_id: String,
+        calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl ImageEngine for RecoverableCompatibilityEngine {
+        async fn generate(
+            &self,
+            _model: &str,
+            _key: &str,
+            _endpoint: &str,
+            _prompt: &str,
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let conn = self.db.conn.lock().unwrap();
+            let job = get_job(&conn, &self.job_id).unwrap();
+            assert_eq!(
+                job.stage,
+                GenerationJobStage::ProviderRequest,
+                "HTTP must have a durable provider-request milestone"
+            );
+            let bound: bool = conn.query_row("SELECT expected_response_file IS NOT NULL FROM generation_recoveries WHERE generation_id=?1", [&job.generation_id], |row| row.get(0)).unwrap();
+            assert!(bound);
+            use base64::Engine;
+            Ok(ProviderAttemptBody { body_text: serde_json::json!({"data":[{"b64_json":base64::engine::general_purpose::STANDARD.encode(jpeg_bytes())}]}).to_string(), requested_image_count: options.image_count })
+        }
+        async fn edit(
+            &self,
+            model: &str,
+            key: &str,
+            endpoint: &str,
+            prompt: &str,
+            _sources: &[PreparedEditImage],
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.generate(model, key, endpoint, prompt, options).await
+        }
+    }
+
+    struct PausedCompatibilityEngine<'a> {
+        engine: &'a RecoverableCompatibilityEngine,
+        reached: Arc<tokio::sync::Notify>,
+    }
+    #[async_trait::async_trait]
+    impl ImageEngine for PausedCompatibilityEngine<'_> {
+        async fn generate(
+            &self,
+            model: &str,
+            key: &str,
+            endpoint: &str,
+            prompt: &str,
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            let _response = self
+                .engine
+                .generate(model, key, endpoint, prompt, options)
+                .await?;
+            self.reached.notify_one();
+            std::future::pending().await
+        }
+        async fn edit(
+            &self,
+            model: &str,
+            key: &str,
+            endpoint: &str,
+            prompt: &str,
+            _sources: &[PreparedEditImage],
+            options: &GptImageRequestOptions,
+        ) -> Result<ProviderAttemptBody, EngineCallError> {
+            self.generate(model, key, endpoint, prompt, options).await
+        }
+    }
+    struct PausedResponseStore {
+        store: FileResponseArtifactStore,
+        reached: Arc<tokio::sync::Notify>,
+    }
+    #[async_trait::async_trait]
+    impl ResponseArtifactStore for PausedResponseStore {
+        fn expected_response_path(
+            &self,
+            context: &GenerationExecutionContext,
+        ) -> Result<PathBuf, GenerationExecutionError> {
+            self.store.expected_response_path(context)
+        }
+        async fn persist_verified_response(
+            &self,
+            context: &GenerationExecutionContext,
+            body: ProviderAttemptBody,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            let _response = self.store.persist_verified_response(context, body).await?;
+            self.reached.notify_one();
+            std::future::pending().await
+        }
+        async fn load_verified_response(
+            &self,
+            context: &GenerationExecutionContext,
+            path: &Path,
+        ) -> Result<ProviderAttemptResponse, GenerationExecutionError> {
+            self.store.load_verified_response(context, path).await
+        }
+    }
+
+    #[tokio::test]
+    async fn production_executor_restart_distinguishes_unsent_unknown_and_saved_response() {
+        for phase in [
+            "before_send",
+            "after_send",
+            "after_response_saved",
+            "cancelled_after_response_saved",
+        ] {
+            let fixture = CompatibilityPreparationFixture::new();
+            let mut profiles =
+                settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2)
+                    .unwrap();
+            profiles.profiles[0].api_key = "fixture-only".into();
+            fixture.save_profiles(ENGINE_GPT_IMAGE_2, profiles);
+            let prepared =
+                prepare_compatibility_job(&fixture.db, &compatibility_request(ENGINE_GPT_IMAGE_2))
+                    .unwrap();
+            let job_id = prepared.job_id.clone();
+            let id = prepared.generation_id.clone();
+            let engine = RecoverableCompatibilityEngine {
+                db: fixture.db.clone(),
+                job_id: job_id.clone(),
+                calls: AtomicUsize::new(0),
+            };
+            let sink = CompatibilityEventSink::new(None);
+            let decoder = FailingCompatibilityDecoder {
+                calls: AtomicUsize::new(0),
+            };
+            let files = LocalGenerationFileStore::new(fixture.root.clone());
+            if phase == "before_send" {
+                start_compatibility_job(&fixture.db, &sink, prepared).unwrap();
+            } else {
+                let reached = Arc::new(tokio::sync::Notify::new());
+                let artifacts = FileResponseArtifactStore::new(fixture.root.clone());
+                let paused_engine = PausedCompatibilityEngine {
+                    engine: &engine,
+                    reached: reached.clone(),
+                };
+                let paused_store = PausedResponseStore {
+                    store: FileResponseArtifactStore::new(fixture.root.clone()),
+                    reached: reached.clone(),
+                };
+                let provider: &dyn ImageEngine = if phase == "after_send" {
+                    &paused_engine
+                } else {
+                    &engine
+                };
+                let store: &dyn ResponseArtifactStore = if phase == "after_send" {
+                    &artifacts
+                } else {
+                    &paused_store
+                };
+                // Dropping the executor simulates process exit at an actual
+                // production seam, before any compatibility terminal handler.
+                let operation = execute_compatibility_job(
+                    &fixture.db,
+                    provider,
+                    store,
+                    &decoder,
+                    &files,
+                    &sink,
+                    prepared,
+                );
+                tokio::pin!(operation);
+                tokio::select! {
+                    _ = reached.notified() => {},
+                    result = &mut operation => panic!("executor unexpectedly finished: {result:?}"),
+                }
+            }
+            if phase == "cancelled_after_response_saved" {
+                request_cancel(&fixture.db.conn.lock().unwrap(), &job_id).unwrap();
+            }
+            let recovery_engine =
+                crate::api_gateway::GptImageEngine::new(&crate::config::ApiConfig::default())
+                    .unwrap();
+            let summary = crate::generation_recovery::recover_pending(
+                &fixture.db,
+                &recovery_engine,
+                &fixture.root,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            let job = get_job(&fixture.db.conn.lock().unwrap(), &job_id).unwrap();
+            match phase {
+                "before_send" => {
+                    assert_eq!(summary.interrupted, 1);
+                    assert_eq!(job.error_code.as_deref(), Some("app_interrupted"));
+                }
+                "after_send" => {
+                    assert_eq!(summary.interrupted, 1);
+                    assert_eq!(job.error_code.as_deref(), Some("provider_outcome_unknown"));
+                }
+                "after_response_saved" => {
+                    assert_eq!(summary.recovered, 1);
+                    assert_eq!(job.status, GenerationJobStatus::Completed);
+                }
+                _ => {
+                    assert_eq!(summary.cancelled, 1);
+                    assert_eq!(job.status, GenerationJobStatus::Cancelled);
+                }
+            }
+            assert_eq!(
+                engine.calls.load(Ordering::SeqCst),
+                usize::from(phase != "before_send")
+            );
+            assert_eq!(
+                fixture
+                    .db
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .query_row(
+                        "SELECT COUNT(*) FROM images WHERE generation_id=?1",
+                        [&id],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                i64::from(phase == "after_response_saved")
+            );
+            assert_eq!(
+                crate::generation_recovery::recover_pending(
+                    &fixture.db,
+                    &recovery_engine,
+                    &fixture.root,
+                    None,
+                    None
+                )
+                .await
+                .unwrap()
+                .recovered,
+                0
+            );
+            fixture.cleanup();
+        }
+    }
+
+    #[tokio::test]
+    async fn production_response_promotion_failure_retains_bound_envelope_for_local_retry() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut profiles =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        profiles.profiles[0].api_key = "fixture-only".into();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, profiles);
+        let prepared =
+            prepare_compatibility_job(&fixture.db, &compatibility_request(ENGINE_GPT_IMAGE_2))
+                .unwrap();
+        let id = prepared.generation_id.clone();
+        let engine = RecoverableCompatibilityEngine {
+            db: fixture.db.clone(),
+            job_id: prepared.job_id.clone(),
+            calls: AtomicUsize::new(0),
+        };
+        let sink = CompatibilityEventSink::new(None);
+        let decoder = FailingCompatibilityDecoder {
+            calls: AtomicUsize::new(0),
+        };
+        let artifacts = FileResponseArtifactStore::new(fixture.root.clone());
+        let files = LocalGenerationFileStore::new(fixture.root.clone());
+        fixture.db.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_promotion BEFORE UPDATE ON generation_recoveries WHEN NEW.request_state='response_ready' BEGIN SELECT RAISE(ABORT,'simulated disk failure'); END;").unwrap();
+        assert!(execute_compatibility_job(
+            &fixture.db,
+            &engine,
+            &artifacts,
+            &decoder,
+            &files,
+            &sink,
+            prepared
+        )
+        .await
+        .is_err());
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            assert_eq!(
+                get_job(&conn, &engine.job_id).unwrap().status,
+                GenerationJobStatus::Failed
+            );
+            let bound: bool = conn.query_row("SELECT request_state='requesting' AND expected_response_file IS NOT NULL FROM generation_recoveries WHERE generation_id=?1", [&id], |r| r.get(0)).unwrap();
+            assert!(
+                bound,
+                "retain the paid response even when response-ready publication fails"
+            );
+            conn.execute_batch("DROP TRIGGER fail_promotion").unwrap();
+        }
+        let recovery_engine =
+            crate::api_gateway::GptImageEngine::new(&crate::config::ApiConfig::default()).unwrap();
+        let summary = crate::generation_recovery::recover_pending(
+            &fixture.db,
+            &recovery_engine,
+            &fixture.root,
+            Some(&id),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.recovered, 1);
+        assert_eq!(engine.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decoder.calls.load(Ordering::SeqCst), 0);
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn production_compatibility_local_failure_recovers_without_another_provider_call() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut profiles =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        profiles.profiles[0].api_key = "fixture-only".into();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, profiles);
+        let prepared =
+            prepare_compatibility_job(&fixture.db, &compatibility_request(ENGINE_GPT_IMAGE_2))
+                .unwrap();
+        let id = prepared.generation_id.clone();
+        let engine = RecoverableCompatibilityEngine {
+            db: fixture.db.clone(),
+            job_id: prepared.job_id.clone(),
+            calls: AtomicUsize::new(0),
+        };
+        let sink = CompatibilityEventSink::new(None);
+        let decoder = FailingCompatibilityDecoder {
+            calls: AtomicUsize::new(0),
+        };
+        let artifacts = FileResponseArtifactStore::new(fixture.root.clone());
+        let files = LocalGenerationFileStore::new(fixture.root.clone());
+        assert!(execute_compatibility_job(
+            &fixture.db,
+            &engine,
+            &artifacts,
+            &decoder,
+            &files,
+            &sink,
+            prepared
+        )
+        .await
+        .is_err());
+        let recovery_engine =
+            crate::api_gateway::GptImageEngine::new(&crate::config::ApiConfig::default()).unwrap();
+        let summary = crate::generation_recovery::recover_pending(
+            &fixture.db,
+            &recovery_engine,
+            &fixture.root,
+            Some(&id),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.recovered, 1);
+        assert_eq!(engine.calls.load(Ordering::SeqCst), 1);
+        let conn = fixture.db.conn.lock().unwrap();
+        assert_eq!(
+            get_job(&conn, &engine.job_id).unwrap().status,
+            GenerationJobStatus::Completed
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM images WHERE generation_id=?1",
+                [&id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        drop(conn);
         fixture.cleanup();
     }
 

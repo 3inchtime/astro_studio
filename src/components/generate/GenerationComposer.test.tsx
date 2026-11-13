@@ -138,3 +138,14 @@ describe("GenerationComposer workbench", () => {
   });
 
 });
+
+it("shows the actual saved image count outside current composer presets", () => {
+  const view = render(<GenerationComposer {...props({ imageCount: 7 })} />);
+  const select = screen.getByLabelText("generate.countLabel") as HTMLSelectElement;
+  expect(select).toHaveValue("7");
+  expect(select.selectedOptions[0]).toHaveTextContent("7");
+  expect(select.selectedOptions[0]).toBeDisabled();
+  view.rerender(<GenerationComposer {...props({ imageCount: 1 })} />);
+  expect(select).toHaveValue("1");
+  expect(Array.from(select.options).map((option) => option.value)).toEqual(["1", "2", "3", "4"]);
+});

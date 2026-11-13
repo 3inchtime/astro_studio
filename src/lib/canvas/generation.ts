@@ -6,19 +6,29 @@ export function failCanvasGeneration(
   content: CanvasDocumentContent,
   requestId: string,
   error: string,
+  status: "failed" | "cancelled" = "failed",
+  generationId?: string,
 ): CanvasDocumentContent {
+  const request = content.generation_requests?.find(
+    (r) => r.request_id === requestId,
+  );
   if (
-    !content.generation_requests?.some(
-      (request) =>
-        request.request_id === requestId && request.status === "pending",
-    )
+    !request ||
+    (request.status !== "pending" &&
+      !(status === "cancelled" && request.status === "failed")) ||
+    (generationId && request.generation_id && request.generation_id !== generationId)
   )
     return content;
   return {
     ...content,
     generation_requests: content.generation_requests?.map((r) =>
-      r.request_id === requestId && r.status === "pending"
-        ? { ...r, status: "failed", error }
+      r.request_id === requestId
+        ? {
+            ...r,
+            status,
+            error,
+            ...(generationId ? { generation_id: generationId } : {}),
+          }
         : r,
     ),
   };
@@ -28,11 +38,18 @@ export function completeCanvasGeneration(
   requestId: string,
   generationId: string,
   images: GeneratedImage[],
+  recoveredFailure = false,
 ): CanvasDocumentContent {
   const request = content.generation_requests?.find(
     (r) => r.request_id === requestId,
   );
-  if (!request || request.status !== "pending") return content;
+  if (
+    !request ||
+    (request.status !== "pending" &&
+      !(recoveredFailure && request.status === "failed")) ||
+    (request.generation_id && request.generation_id !== generationId)
+  )
+    return content;
   const unique = [
     ...new Map(images.map((image) => [image.id, image])).values(),
   ].filter((image) => image.width > 0 && image.height > 0);
