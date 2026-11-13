@@ -57,10 +57,10 @@ export function GeneralSettingsPanel({
   return (
     <motion.div
       key="general"
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.2 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
     >
       <div className="space-y-6">
         <motion.section custom={0} variants={sectionVariants} initial="hidden" animate="visible" className="space-y-3">
@@ -73,8 +73,8 @@ export function GeneralSettingsPanel({
               <p className="mt-0.5 text-[12px] text-muted">{t("settings.generalDesc")}</p>
             </div>
           </div>
-          <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
-            <div className="grid gap-4 p-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
+          <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible" className="border-b border-border-subtle">
+            <div className="grid gap-4 py-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/10 bg-primary/5">
                   <Languages size={14} className="text-primary" strokeWidth={2} />
@@ -85,6 +85,7 @@ export function GeneralSettingsPanel({
                 </div>
               </div>
               <select
+                aria-label={t("settings.language")}
                 value={language}
                 onChange={(e) => onLanguageChange(normalizeLanguage(e.target.value))}
                 className="select-control studio-input focus-ring h-9 w-full rounded-lg px-3 pr-8 text-[14px]"
@@ -97,8 +98,8 @@ export function GeneralSettingsPanel({
               </select>
             </div>
           </motion.div>
-          <motion.div custom={1} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
-            <div className="grid gap-4 p-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:gap-6">
+          <motion.div custom={1} variants={cardVariants} initial="hidden" animate="visible" className="border-b border-border-subtle">
+            <div className="grid gap-4 py-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/10 bg-primary/5">
                   <Palette size={14} className="text-primary" strokeWidth={2} />
@@ -125,8 +126,8 @@ export function GeneralSettingsPanel({
               </div>
             </div>
           </motion.div>
-          <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
-            <div className="grid gap-4 p-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
+          <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible" className="border-b border-border-subtle">
+            <div className="grid gap-4 py-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-error/10 bg-error/5">
                   <Trash2 size={14} className="text-error/70" strokeWidth={2} />
@@ -169,8 +170,8 @@ export function GeneralSettingsPanel({
               </div>
             </div>
           </motion.div>
-          <motion.div custom={3} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
-            <div className="grid gap-4 p-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
+          <motion.div custom={3} variants={cardVariants} initial="hidden" animate="visible" className="border-b border-border-subtle">
+            <div className="grid gap-4 py-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/10 bg-primary/5">
                   <Type size={14} className="text-primary" strokeWidth={2} />
@@ -192,7 +193,7 @@ export function GeneralSettingsPanel({
                         onClick={() => onFontSizeChange(option)}
                         className={`focus-ring cursor-pointer rounded-lg border px-3 py-3 text-left transition-colors ${
                           active
-                            ? "border-primary/30 bg-primary/6 shadow-card"
+                            ? "border-primary/30 bg-primary/6 "
                             : "border-border-subtle bg-subtle/20 hover:border-border hover:bg-subtle/40"
                         }`}
                       >
@@ -216,8 +217,8 @@ export function GeneralSettingsPanel({
               </div>
             </div>
           </motion.div>
-          <motion.div custom={4} variants={cardVariants} initial="hidden" animate="visible" className="studio-card rounded-[12px]">
-            <div className="grid gap-4 p-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
+          <motion.div custom={4} variants={cardVariants} initial="hidden" animate="visible" className="border-b border-border-subtle">
+            <div className="grid gap-4 py-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/10 bg-primary/5">
                   <Download size={14} className="text-primary" strokeWidth={2} />

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { motion } from "framer-motion";
 import {
   Archive,
   Image as ImageIcon,
@@ -29,6 +28,7 @@ import type { Project } from "../types";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
+import { formatConversationTime } from "../lib/utils";
 import { ROUTES } from "../app/routes/contracts";
 
 type Filter = "all" | "pinned" | "mostImages" | "recent";
@@ -58,6 +58,7 @@ export default function ProjectsPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [actionError, setActionError] = useState(false);
 
   const [reloadVersion, setReloadVersion] = useState(0);
   useEffect(() => {
@@ -193,6 +194,7 @@ export default function ProjectsPage() {
   ) {
     if (!project || actionPending) return;
     setActionPending(true);
+    setActionError(false);
     try {
       if (project.pinned_at) {
         await unpinProject(project.id);
@@ -212,7 +214,7 @@ export default function ProjectsPage() {
         );
       }
     } catch {
-      // ignore
+      setActionError(true);
     } finally {
       setActionPending(false);
       setActionProjectId(null);
@@ -224,11 +226,12 @@ export default function ProjectsPage() {
   ) {
     if (!project || actionPending) return;
     setActionPending(true);
+    setActionError(false);
     try {
       await archiveProject(project.id);
       setProjects((prev) => prev.filter((p) => p.id !== project.id));
     } catch {
-      // ignore
+      setActionError(true);
     } finally {
       setActionPending(false);
       setActionProjectId(null);
@@ -251,12 +254,6 @@ export default function ProjectsPage() {
     }
   }
 
-  function getMosaicLayout(index: number, imageCount: number) {
-    if (imageCount === 0) return "empty";
-    const layouts = ["layout-0", "layout-1", "layout-2", "layout-3"] as const;
-    return layouts[index % 4];
-  }
-
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex items-center justify-between px-6 pt-6 pb-4">
@@ -270,7 +267,7 @@ export default function ProjectsPage() {
             key={f}
             aria-pressed={filter === f}
             onClick={() => setFilter(f)}
-            className={`focus-ring cursor-pointer rounded-[8px] border px-3 py-1 text-[12px] font-medium transition-colors ${
+            className={`focus-ring cursor-pointer rounded-[8px] border px-3 py-2 text-[12px] font-medium transition-colors ${
               filter === f
                 ? "border-primary/14 bg-primary/10 text-primary"
                 : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/70 hover:text-foreground"
@@ -291,7 +288,7 @@ export default function ProjectsPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("projects.searchPlaceholder")}
-            className="studio-input focus-ring h-7 w-48 rounded-[8px] pl-7 pr-2.5 text-[12px] placeholder:text-muted"
+            className="studio-input focus-ring h-9 w-48 rounded-[8px] pl-7 pr-2.5 text-[12px] placeholder:text-muted"
           />
         </div>
         <button
@@ -299,12 +296,14 @@ export default function ProjectsPage() {
             setCreateError(null);
             setCreateDialogOpen(true);
           }}
-          className="studio-control-primary focus-ring flex h-7 items-center gap-1.5 rounded-[8px] px-3 text-[12px] font-medium"
+          className="studio-control-primary focus-ring flex h-9 items-center gap-1.5 rounded-[8px] px-3 text-[12px] font-medium"
         >
           <Plus size={13} />
           {t("sidebar.newProject")}
         </button>
       </div>
+
+      {actionError && <p role="alert" className="mx-6 mt-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-sm text-error">{t("studio.project.actionFailed", { defaultValue: "Could not update this project. Try the action again." })}</p>}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -338,15 +337,11 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
-            {filteredProjects.map((project, index) => (
+            {filteredProjects.map((project) => (
               <ProjectCard
                 key={project.id}
                 project={project}
-                index={index}
-                mosaicLayout={getMosaicLayout(
-                  index,
-                  project.previewImages.length,
-                )}
+                busy={actionPending}
                 onOpen={() => navigate(ROUTES.projectHome(project.id))}
                 onAction={(action) => {
                   setActionProjectId(project.id);
@@ -453,8 +448,7 @@ export default function ProjectsPage() {
 
 interface ProjectCardProps {
   project: ProjectWithImages;
-  index: number;
-  mosaicLayout: string;
+  busy: boolean;
   onOpen: () => void;
   onAction: (action: "rename" | "pin" | "archive" | "delete") => void;
   t: (key: string, opts?: Record<string, unknown>) => string;
@@ -462,8 +456,7 @@ interface ProjectCardProps {
 
 function ProjectCard({
   project,
-  index,
-  mosaicLayout,
+  busy,
   onOpen,
   onAction,
   t,
@@ -472,98 +465,37 @@ function ProjectCard({
   const images = project.previewImages;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{
-        delay: index * 0.03,
-        duration: 0.3,
-        ease: [0.22, 1, 0.36, 1],
-      }}
-      className="studio-card group relative cursor-pointer overflow-hidden rounded-[12px] hover:studio-card-hover"
-      onClick={onOpen}
-    >
-      {/* Mosaic Preview */}
-      <div className={`mosaic-preview mosaic-${mosaicLayout}`}>
-        {images.length === 0 ? (
-          <div className="col-span-full flex items-center justify-center gap-1.5 text-[12px] text-muted">
-            <ImageIcon size={14} className="opacity-40" />
-            {t("projects.noImages")}
-          </div>
-        ) : (
-          images.slice(0, 5).map((path, i) => (
-            <div key={i} className="mosaic-cell overflow-hidden">
-              <img
-                src={toAssetUrl(path)}
-                alt=""
-                className="h-full w-full object-cover"
-                loading="lazy"
-              />
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Card Body */}
-      <div className="px-4 py-3">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="flex-1 min-w-0 text-[14px] font-semibold text-foreground truncate">
-            {project.name}
-          </div>
-          {project.pinned_at && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-[12px] font-medium text-primary">
-              <Pin size={9} />
-              {t("projects.pinned")}
-            </span>
+    <article className="studio-card group relative rounded-xl transition-colors duration-[140ms] hover:border-border">
+      <button type="button" aria-label={project.name} onClick={onOpen} className="focus-ring block w-full rounded-xl text-left">
+        <div className="aspect-[16/10] overflow-hidden rounded-t-xl bg-subtle">
+          {images[0] ? (
+            <img src={toAssetUrl(images[0])} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <div className="flex h-full items-center justify-center gap-2 text-sm text-muted"><ImageIcon size={20} />{t("projects.noImages")}</div>
           )}
         </div>
-        <div className="flex items-center gap-3.5 text-[12px] text-muted">
-          <span className="flex items-center gap-1">
-            <ImageIcon size={12} />
-            <span className="font-semibold text-foreground/60 tabular-nums font-[family-name:var(--font-mono)]">
-              {project.image_count}
-            </span>
-            {t("projects.stats.images")}
-          </span>
-          <span className="flex items-center gap-1">
-            <MessageSquare size={12} />
-            <span className="font-semibold text-foreground/60 tabular-nums font-[family-name:var(--font-mono)]">
-              {project.conversation_count}
-            </span>
-            {t("projects.stats.chats")}
-          </span>
+        <div className="space-y-2 px-4 pt-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">{project.name}</h2>
+            {project.pinned_at && <span className="inline-flex shrink-0 items-center gap-1 text-xs text-primary"><Pin size={12} />{t("projects.pinned")}</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
+            <span className="flex items-center gap-1.5"><ImageIcon size={13} /><span className="tabular-nums">{project.image_count}</span>{t("projects.stats.images")}</span>
+            <span className="flex items-center gap-1.5"><MessageSquare size={13} /><span className="tabular-nums">{project.conversation_count}</span>{t("projects.stats.chats")}</span>
+          </div>
         </div>
-      </div>
-
-      {/* Action Tray */}
-      <div className="absolute bottom-3 right-3 z-10 flex items-center justify-center gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-          className="studio-control-primary focus-ring flex items-center gap-1.5 rounded-[8px] px-4 py-2 text-[12px] font-medium"
-        >
-          {t("projects.open")}
-        </button>
-        <div className="relative">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowActions((c) => !c);
-            }}
-            aria-label={t("projects.manage")}
-            aria-expanded={showActions}
-            className="studio-floating-panel focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] text-foreground transition-colors hover:text-foreground"
-          >
-            <MoreHorizontal size={15} />
-          </button>
+      </button>
+      <div className="flex min-w-0 items-center justify-between gap-2 px-4 pb-3 pt-2">
+        <time dateTime={project.updated_at} className="min-w-0 truncate text-xs text-muted">{t("studio.project.updated", { defaultValue: "Updated {{date}}", date: formatConversationTime(project.updated_at) })}</time>
+        <div className="relative shrink-0">
+          <button type="button" onClick={() => setShowActions((current) => !current)} disabled={busy} aria-label={t("projects.manage")} aria-expanded={showActions} className="focus-ring flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-[140ms] hover:bg-subtle hover:text-foreground disabled:opacity-50"><MoreHorizontal size={17} /></button>
           {showActions && (
             <div
-              className="studio-floating-panel absolute right-0 top-10 z-20 w-40 overflow-hidden rounded-[8px] py-1"
+              className="studio-floating-panel absolute right-0 bottom-10 z-20 w-40 overflow-hidden rounded-[8px] py-1"
               onClick={(e) => e.stopPropagation()}
             >
               <button
+                disabled={busy}
                 onClick={() => {
                   setShowActions(false);
                   onAction("rename");
@@ -574,6 +506,7 @@ function ProjectCard({
                 <span>{t("sidebar.rename")}</span>
               </button>
               <button
+                disabled={busy}
                 onClick={() => {
                   setShowActions(false);
                   onAction("pin");
@@ -586,6 +519,7 @@ function ProjectCard({
                 </span>
               </button>
               <button
+                disabled={busy}
                 onClick={() => {
                   setShowActions(false);
                   onAction("archive");
@@ -596,6 +530,7 @@ function ProjectCard({
                 <span>{t("sidebar.archive")}</span>
               </button>
               <button
+                disabled={busy}
                 onClick={() => {
                   setShowActions(false);
                   onAction("delete");
@@ -609,6 +544,6 @@ function ProjectCard({
           )}
         </div>
       </div>
-    </motion.div>
+    </article>
   );
 }

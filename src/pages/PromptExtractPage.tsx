@@ -177,13 +177,13 @@ export default function PromptExtractPage() {
             <button
               type="button"
               onClick={handlePickImage}
-              className="focus-ring flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-background px-6 py-8 text-center transition-colors hover:border-primary"
+              className="focus-ring flex min-h-[240px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-background px-6 py-8 text-center transition-colors hover:border-primary"
             >
               {imagePath ? (
                 <img
                   src={toAssetUrl(imagePath)}
                   alt=""
-                  className="max-h-[280px] w-full rounded-lg object-contain"
+                  className="max-h-[240px] w-full rounded-lg object-contain"
                 />
               ) : (
                 <>
@@ -237,7 +237,7 @@ export default function PromptExtractPage() {
                 <button
                   type="button"
                   onClick={handlePickImage}
-                  className="studio-control focus-ring rounded-lg px-4 py-2 text-[12px] font-medium hover:studio-control-hover"
+                  className="studio-control focus-ring rounded-lg min-h-9 px-4 py-2 text-[14px] font-medium hover:studio-control-hover"
                 >
                   {imagePath
                     ? t("extract.changeImage")
@@ -266,7 +266,7 @@ export default function PromptExtractPage() {
               </p>
             )}
             {!selectedConfigId && (
-              <div className="rounded-xl border border-warning/20 bg-warning/8 px-4 py-3 text-[12px] text-warning">
+              <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-sm text-foreground">
                 {t("extract.noMultimodalConfig")}
               </div>
             )}
@@ -294,7 +294,7 @@ export default function PromptExtractPage() {
               }}
               placeholder={t("extract.resultPlaceholder")}
               spellCheck={false}
-              className="studio-input focus-ring min-h-[300px] flex-1 w-full resize-y rounded-lg px-4 py-3 text-[14px] leading-relaxed placeholder:text-muted focus:border-primary"
+              className="studio-input focus-ring min-h-[260px] flex-1 w-full resize-y rounded-lg px-4 py-3 text-[14px] leading-relaxed placeholder:text-muted focus:border-primary"
             />
 
             {copyError && (
@@ -305,7 +305,7 @@ export default function PromptExtractPage() {
             {favoriteError && (
               <div
                 role="alert"
-                className="rounded-xl border border-error/20 bg-error/8 px-4 py-3 text-[12px] text-error"
+                className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-sm text-error"
               >
                 {favoriteError}
               </div>
@@ -316,7 +316,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleCopy}
                 disabled={!prompt}
-                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg min-h-9 px-4 py-2 text-[14px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Copy size={13} />
                 {copied ? t("extract.copied") : t("extract.copy")}
@@ -325,7 +325,7 @@ export default function PromptExtractPage() {
                 type="button"
                 onClick={handleFavorite}
                 disabled={!prompt}
-                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
+                className="studio-control focus-ring inline-flex items-center gap-2 rounded-lg min-h-9 px-4 py-2 text-[14px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Heart
                   size={13}

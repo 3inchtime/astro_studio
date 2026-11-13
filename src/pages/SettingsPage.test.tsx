@@ -612,6 +612,55 @@ describe("SettingsPage logs", () => {
     expect(saveModelProviderProfiles).toHaveBeenCalledTimes(2);
   });
 
+  it("shows unsaved provider edits until a successful save completes", async () => {
+    const pending = createDeferred<typeof openAiProviderState>();
+    saveModelProviderProfiles.mockReturnValueOnce(pending.promise);
+    renderSettingsPage();
+    fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
+    const name = await screen.findByDisplayValue("OpenAI Official");
+    expect(screen.queryByText("studio.settings.unsaved")).not.toBeInTheDocument();
+    fireEvent.change(name, { target: { value: "Studio provider" } });
+    expect(screen.getByText("studio.settings.unsaved")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
+    expect(screen.getByRole("status")).toHaveTextContent("studio.settings.saving");
+    await act(async () => pending.resolve(openAiProviderState));
+    expect(screen.queryByText("studio.settings.unsaved")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("studio.settings.savedLocally");
+  });
+
+  it("validates endpoint fields locally before allowing a provider save", async () => {
+    renderSettingsPage();
+    fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
+    const endpoint = await screen.findByDisplayValue("https://api.openai.com/v1");
+    fireEvent.change(endpoint, { target: { value: "file:///bad-endpoint" } });
+    expect(screen.getByLabelText("settings.endpoint")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("studio.settings.invalidEndpoint")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
+    expect(saveModelProviderProfiles).not.toHaveBeenCalled();
+    fireEvent.change(endpoint, { target: { value: "https://gateway.example/v1" } });
+    fireEvent.change(screen.getByDisplayValue("OpenAI Official"), { target: { value: "   " } });
+    expect(screen.getByText("studio.settings.nameRequired")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "settings.saveProvider" })).toBeDisabled();
+  });
+
+  it("clears a failed retry when the user changes the draft, and saves the latest values", async () => {
+    saveModelProviderProfiles.mockRejectedValueOnce(new Error("Offline"));
+    renderSettingsPage();
+    fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
+    const name = await screen.findByDisplayValue("OpenAI Official");
+    fireEvent.change(name, { target: { value: "First draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
+    await screen.findByRole("alert");
+    fireEvent.change(name, { target: { value: "Latest draft" } });
+    expect(screen.queryByRole("button", { name: "studio.settings.retry" })).not.toBeInTheDocument();
+    expect(screen.getByText("studio.settings.unsaved")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "settings.saveProvider" }));
+    await waitFor(() => expect(saveModelProviderProfiles).toHaveBeenLastCalledWith(
+      "gpt-image-2",
+      expect.objectContaining({ profiles: expect.arrayContaining([expect.objectContaining({ name: "Latest draft" })]) }),
+    ));
+  });
+
   it("saves edits to the selected provider profile", async () => {
     renderSettingsPage();
 

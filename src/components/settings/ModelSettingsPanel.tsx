@@ -82,10 +82,10 @@ export function ModelSettingsPanel({
     return (
       <motion.div
         key="model"
-        initial={{ opacity: 0, x: 10 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 10 }}
-        transition={{ duration: 0.2 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
       >
         <motion.section
           custom={0}
@@ -99,7 +99,7 @@ export function ModelSettingsPanel({
             variants={cardVariants}
             initial="hidden"
             animate="visible"
-            className="studio-card rounded-[12px] p-4"
+            className="border-b border-border-subtle pb-6"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-[20px] font-semibold leading-tight text-foreground">
@@ -108,8 +108,7 @@ export function ModelSettingsPanel({
               <motion.button
                 type="button"
                 onClick={onSaveModel}
-                whileTap={{ scale: 0.97 }}
-                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
               >
                 {modelSaved ? (
                   <>
@@ -136,7 +135,7 @@ export function ModelSettingsPanel({
                       onClick={() => onSelectImageModel(entry.id)}
                       className={`group flex min-h-[52px] items-center gap-3 rounded-[12px] border p-3 text-left transition-colors ${
                         active
-                          ? "border-primary/35 bg-primary/6 shadow-card"
+                          ? "border-primary/35 bg-primary/6 "
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
@@ -163,7 +162,7 @@ export function ModelSettingsPanel({
               </div>
 
               <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-stretch">
-                <div className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
+                <div className="space-y-3 border-border-subtle xl:border-r xl:pr-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h4 className="text-[14px] font-semibold text-foreground">{t("settings.providers")}</h4>
@@ -185,8 +184,7 @@ export function ModelSettingsPanel({
                   <motion.button
                     type="button"
                     onClick={onCreateProvider}
-                    whileTap={{ scale: 0.97 }}
-                    className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                            className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
                   >
                     <Plus size={13} />
                     {t("settings.newProvider")}
@@ -202,6 +200,17 @@ export function ModelSettingsPanel({
     );
   }
   const endpointSettings = selectedProvider.endpoint_settings;
+  // Empty URLs use the model defaults. Only validate fields used by this mode.
+  const validEndpoint = (value: string) => {
+    if (!value.trim()) return true;
+    try { return ["https:", "http:"].includes(new URL(value.trim()).protocol); }
+    catch { return false; }
+  };
+  const invalidName = !selectedProvider.name.trim();
+  const invalidBaseUrl = endpointSettings.mode === "base_url" && !validEndpoint(endpointSettings.base_url);
+  const invalidGenerationUrl = endpointSettings.mode === "full_url" && !validEndpoint(endpointSettings.generation_url);
+  const invalidEditUrl = endpointSettings.mode === "full_url" && modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && !validEndpoint(endpointSettings.edit_url);
+  const invalidProvider = invalidName || invalidBaseUrl || invalidGenerationUrl || invalidEditUrl;
   const apiKey = selectedProvider.api_key;
   const displayKey = showKey ? apiKey : (apiKey ? maskKey(apiKey) : "");
   const selectedProviderIsActive = selectedProvider.id === providerState.active_provider_id;
@@ -209,10 +218,10 @@ export function ModelSettingsPanel({
   return (
     <motion.div
       key="model"
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 10 }}
-      transition={{ duration: 0.2 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
     >
       <motion.section
         custom={0}
@@ -226,7 +235,7 @@ export function ModelSettingsPanel({
           variants={cardVariants}
           initial="hidden"
           animate="visible"
-          className="studio-card rounded-[12px] p-4"
+          className="border-b border-border-subtle pb-6"
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-[20px] font-semibold leading-tight text-foreground">
@@ -235,8 +244,7 @@ export function ModelSettingsPanel({
             <motion.button
               type="button"
               onClick={onSaveModel}
-              whileTap={{ scale: 0.97 }}
-              className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
             >
               {modelSaved ? (
                 <>
@@ -263,7 +271,7 @@ export function ModelSettingsPanel({
                       onClick={() => onSelectImageModel(entry.id)}
                       className={`group flex min-h-[52px] items-center gap-3 rounded-[12px] border p-3 text-left transition-colors ${
                         active
-                          ? "border-primary/35 bg-primary/6 shadow-card"
+                          ? "border-primary/35 bg-primary/6 "
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
@@ -290,7 +298,7 @@ export function ModelSettingsPanel({
               </div>
 
             <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-stretch">
-              <div className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
+              <div className="space-y-3 border-border-subtle xl:border-r xl:pr-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h4 className="text-[14px] font-semibold text-foreground">{t("settings.providers")}</h4>
@@ -326,7 +334,7 @@ export function ModelSettingsPanel({
                         }}
                         className={`rounded-lg border p-3 text-left transition-colors ${
                           selected
-                            ? "border-primary/35 bg-primary/6 shadow-card"
+                            ? "border-primary/35 bg-primary/6 "
                             : "border-border-subtle bg-surface hover:border-border hover:bg-subtle/25"
                         }`}
                       >
@@ -356,24 +364,27 @@ export function ModelSettingsPanel({
                 </div>
               </div>
 
-            <div className="min-w-0 space-y-3 rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
+            <div className="min-w-0 space-y-4">
               <div>
                 <h4 className="text-[14px] font-semibold text-foreground">{selectedProvider.name}</h4>
                 <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.endpointDesc")}</p>
               </div>
 
               <div className="min-w-0 space-y-3">
-                <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-surface/55 p-4">
+                <div className="grid gap-3 border-b border-border-subtle pb-4">
                   <div className="grid gap-2 sm:grid-cols-2">
                   <label className="grid gap-1.5">
                     <span className="text-[12px] font-medium text-muted">{t("settings.providerName")}</span>
                     <input
                       type="text"
                       value={selectedProvider.name}
+                      aria-invalid={invalidName}
+                      aria-describedby={invalidName ? "provider-name-error" : undefined}
                       onChange={(e) => onProviderNameChange(e.target.value)}
                       placeholder={t("settings.providerNamePlaceholder")}
                       className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                     />
+                    {invalidName && <span id="provider-name-error" className="text-xs text-error">{t("studio.settings.nameRequired", { defaultValue: "Enter a provider name." })}</span>}
                   </label>
                   <label className="grid gap-1.5">
                     <span className="text-[12px] font-medium text-muted">{t("settings.apiKey")}</span>
@@ -400,11 +411,12 @@ export function ModelSettingsPanel({
                 </div>
                 </div>
 
-                <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-surface/55 p-4">
+                <div className="grid gap-3 border-b border-border-subtle pb-4">
                   <div>
                     <h5 className="text-[12px] font-semibold text-foreground">{t("settings.endpoint")}</h5>
                     <p className="mt-1 text-[12px] leading-relaxed text-muted">
                       {t("settings.endpointModeHint")}
+                      {" "}{t("studio.settings.connectionHint", { defaultValue: "Saving stores these settings locally. It does not test the connection." })}
                     </p>
                   </div>
 
@@ -416,7 +428,7 @@ export function ModelSettingsPanel({
                         onClick={() => onProviderEndpointModeChange(mode)}
                         className={`h-9 rounded-[8px] px-3 text-[12px] font-medium transition-colors ${
                           endpointSettings.mode === mode
-                            ? "bg-subtle text-foreground shadow-card"
+                            ? "bg-subtle text-foreground "
                             : "text-muted hover:text-foreground"
                         }`}
                       >
@@ -431,10 +443,14 @@ export function ModelSettingsPanel({
                       <input
                         type="text"
                         value={endpointSettings.base_url}
+                        aria-label={t("settings.endpoint")}
+                        aria-invalid={invalidBaseUrl}
+                        aria-describedby={invalidBaseUrl ? "provider-base-url-error" : undefined}
                         onChange={(e) => onProviderBaseUrlChange(e.target.value)}
                         placeholder={defaultBaseUrlForModel(imageModel)}
                         className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                       />
+                      {invalidBaseUrl && <span id="provider-base-url-error" className="text-xs text-error">{t("studio.settings.invalidEndpoint", { defaultValue: "Enter an HTTP or HTTPS URL." })}</span>}
                     </label>
                   ) : (
                     <div className="grid gap-2">
@@ -443,10 +459,13 @@ export function ModelSettingsPanel({
                         <input
                           type="text"
                           value={endpointSettings.generation_url}
+                        aria-invalid={invalidGenerationUrl}
+                        aria-describedby={invalidGenerationUrl ? "provider-generation-url-error" : undefined}
                           onChange={(e) => onProviderGenerationUrlChange(e.target.value)}
                           placeholder={defaultGenerationUrlForModel(imageModel)}
                           className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                         />
+                      {invalidGenerationUrl && <span id="provider-generation-url-error" className="text-xs text-error">{t("studio.settings.invalidEndpoint", { defaultValue: "Enter an HTTP or HTTPS URL." })}</span>}
                       </label>
                       {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
                         <label className="grid gap-1.5">
@@ -454,10 +473,13 @@ export function ModelSettingsPanel({
                           <input
                             type="text"
                             value={endpointSettings.edit_url}
+                        aria-invalid={invalidEditUrl}
+                        aria-describedby={invalidEditUrl ? "provider-edit-url-error" : undefined}
                             onChange={(e) => onProviderEditUrlChange(e.target.value)}
                             placeholder={defaultEditUrlForModel(imageModel)}
                             className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
                           />
+                      {invalidEditUrl && <span id="provider-edit-url-error" className="text-xs text-error">{t("studio.settings.invalidEndpoint", { defaultValue: "Enter an HTTP or HTTPS URL." })}</span>}
                         </label>
                       )}
                     </div>
@@ -475,8 +497,7 @@ export function ModelSettingsPanel({
                       <motion.button
                         type="button"
                         onClick={() => onSetActiveProvider(selectedProvider.id)}
-                        whileTap={{ scale: 0.97 }}
-                        className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                       >
                         <Check size={13} />
                         {t("settings.activateProvider")}
@@ -485,8 +506,8 @@ export function ModelSettingsPanel({
                     <motion.button
                       type="button"
                       onClick={onSaveProvider}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                      disabled={invalidProvider}
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                     >
                       {providerSaved ? (
                         <>
@@ -500,8 +521,7 @@ export function ModelSettingsPanel({
                     <motion.button
                       type="button"
                       onClick={onCancelProviderEdit}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
                     >
                       <X size={13} />
                       {t("settings.cancelEdit")}
@@ -509,8 +529,7 @@ export function ModelSettingsPanel({
                     <motion.button
                       type="button"
                       onClick={() => onDeleteProvider(selectedProvider.id)}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
                     >
                       <Trash2 size={13} />
                       {t("settings.deleteProvider")}

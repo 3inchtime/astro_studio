@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
-import { Archive, ArrowRight, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { Archive, ArrowRight, MessageSquare, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   archiveProject,
   deleteGeneration,
   deleteProject,
   getProjects,
+  getConversations,
   pinProject,
   renameProject,
   searchGenerations,
@@ -17,6 +18,7 @@ import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { useUIStore } from "../lib/store";
 import { generationResultToLightboxImages } from "../lib/lightboxImages";
 import type {
+  Conversation,
   GenerationResult,
   GenerationSearchFilters,
   MessageImage,
@@ -32,10 +34,30 @@ import FolderSelector from "../components/favorites/FolderSelector";
 import { ROUTES } from "../app/routes/contracts";
 
 export default function ProjectHomePage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { projectId = "" } = useParams();
   const [project, setProject] = useState<Project | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [conversationsError, setConversationsError] = useState(false);
+  const conversationRequestId = useRef(0);
+  const loadConversations = useCallback(async () => {
+    const requestId = ++conversationRequestId.current;
+    setConversationsLoading(true);
+    setConversationsError(false);
+    try {
+      const items = await getConversations(undefined, projectId, false);
+      if (requestId !== conversationRequestId.current) return;
+      setConversations(items.filter((item) => !item.archived_at && !item.deleted_at)
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        .slice(0, 3));
+    } catch {
+      if (requestId === conversationRequestId.current) setConversationsError(true);
+    } finally {
+      if (requestId === conversationRequestId.current) setConversationsLoading(false);
+    }
+  }, [projectId]);
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -128,6 +150,8 @@ export default function ProjectHomePage() {
     setLoadError(false);
     setProject(null);
     setResults([]);
+    setConversations([]);
+    void loadConversations();
     setSelectedImage(null);
     getProjects(false)
       .then((items) => {
@@ -148,9 +172,10 @@ export default function ProjectHomePage() {
     return () => {
       cancelled = true;
       imageRequestId.current++;
+      conversationRequestId.current++;
       projectEpoch.current++;
     };
-  }, [projectId, reloadVersion, loadImages]);
+  }, [projectId, reloadVersion, loadImages, loadConversations]);
 
   async function handleRenameProject(name: string) {
     if (!project) return;
@@ -465,6 +490,34 @@ export default function ProjectHomePage() {
             </div>
           ) : null}
         </div>
+
+        <section aria-label={t("studio.project.recentConversations", { defaultValue: "Recent conversations" })} className="shrink-0 border-b border-border-subtle px-6 py-4">
+          <h2 className="mb-3 text-sm font-semibold text-foreground">{t("studio.project.recentConversations", { defaultValue: "Recent conversations" })}</h2>
+          {conversationsLoading ? (
+            <div role="status" aria-label={t("studio.project.loadingConversations", { defaultValue: "Loading conversations…" })} className="grid grid-cols-3 gap-3">
+              {[0, 1, 2].map((key) => <div key={key} className="h-16 rounded-lg bg-subtle" />)}
+            </div>
+          ) : conversationsError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-error">
+              <span>{t("studio.project.conversationsFailed", { defaultValue: "Could not load recent conversations." })}</span>
+              <button type="button" onClick={() => void loadConversations()} className="studio-control focus-ring min-h-9 rounded-lg px-3 text-foreground">{t("studio.project.retryConversations", { defaultValue: "Retry conversations" })}</button>
+            </div>
+          ) : conversations.length === 0 ? (
+            <p className="text-sm text-muted">{t("projects.emptyConversations")}</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {conversations.map((conversation) => (
+                <button key={conversation.id} type="button" onClick={() => navigate(ROUTES.projectChat(project.id, conversation.id))} className="studio-control focus-ring flex min-w-0 items-center gap-3 rounded-lg p-3 text-left hover:studio-control-hover">
+                  <MessageSquare size={16} className="shrink-0 text-muted" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{conversation.title}</span>
+                    <time dateTime={conversation.updated_at} className="mt-1 block text-xs text-muted">{new Date(conversation.updated_at).toLocaleDateString(i18n.resolvedLanguage ?? i18n.language)}</time>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Image Gallery */}
         <div className="flex-1 min-h-0 overflow-y-auto">

@@ -142,7 +142,7 @@ export default function ProjectConversationPanel({
           </div>
           <button
             onClick={handleCreate}
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-primary/8 text-primary transition-all hover:bg-primary/14 hover:scale-105 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-primary/8 text-primary transition-colors duration-[140ms] hover:bg-primary/14"
             aria-label={t("projects.newConversation")}
             title={t("projects.newConversation")}
           >
@@ -167,12 +167,12 @@ export default function ProjectConversationPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {sortedConversations.map((conv, i) => (
+            {sortedConversations.map((conv) => (
               <motion.div
                 key={conv.id}
-                initial={{ opacity: 0, y: 4 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.02, duration: 0.2 }}
+                transition={{ duration: 0.14 }}
                 className="group relative"
               >
                 <button

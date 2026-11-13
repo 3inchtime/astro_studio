@@ -109,6 +109,22 @@ describe("ProjectsPage", () => {
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
   });
 
+  it("offers a keyboard reachable project cover button", async () => {
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Brand Storyboards" }));
+    expect(navigate).toHaveBeenCalledWith(ROUTES.projectHome("project-1"));
+  });
+
+  it("shows a project action failure without hiding the project", async () => {
+    pinProject.mockRejectedValueOnce(new Error("Offline"));
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByText("Brand Storyboards");
+    fireEvent.click(screen.getByRole("button", { name: "projects.manage" }));
+    fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("studio.project.actionFailed");
+    expect(screen.getByText("Brand Storyboards")).toBeInTheDocument();
+  });
+
   it("opens the project dialog from the new project button", async () => {
     render(
       <MemoryRouter>
@@ -294,8 +310,7 @@ describe("ProjectsPage", () => {
     );
     expect(firstCard).not.toBeNull();
     const firstMenuButton = within(firstCard as HTMLElement)
-      .getAllByRole("button")
-      .find((button) => button.textContent === "");
+      .getByRole("button", { name: "projects.manage" });
     expect(firstMenuButton).toBeDefined();
     fireEvent.click(firstMenuButton!);
     fireEvent.click(screen.getByRole("button", { name: "sidebar.rename" }));
@@ -305,8 +320,7 @@ describe("ProjectsPage", () => {
       .closest(".studio-card");
     expect(secondCard).not.toBeNull();
     const secondMenuButton = within(secondCard as HTMLElement)
-      .getAllByRole("button")
-      .find((button) => button.textContent === "");
+      .getByRole("button", { name: "projects.manage" });
     expect(secondMenuButton).toBeDefined();
     fireEvent.click(secondMenuButton!);
     fireEvent.click(screen.getByRole("button", { name: "projects.pin" }));

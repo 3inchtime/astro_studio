@@ -59,10 +59,10 @@ function ConfigForm({
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.18 }}
       className="overflow-hidden"
     >
-      <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
+      <div className="grid gap-3">
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="grid gap-1.5">
             <span className="text-[12px] font-medium text-muted">
@@ -378,8 +378,8 @@ export function LlmConfigSection() {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: 10 }}
-      transition={{ duration: 0.2, delay: 0.1 }}
-      className="studio-card rounded-[12px] p-4"
+      transition={{ duration: 0.18 }}
+      className="pt-2"
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-[20px] font-semibold leading-tight text-foreground">
@@ -417,7 +417,7 @@ export function LlmConfigSection() {
         className="min-w-0 border-0 p-0"
       >
         <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-stretch">
-          <section className="space-y-3 rounded-[12px] border border-border-subtle bg-subtle/15 p-3">
+          <section className="space-y-3 xl:border-r xl:border-border-subtle xl:pr-4">
             <div>
               <h4 className="text-[14px] font-semibold text-foreground">
                 {t("settings.optimizationService")}
@@ -465,7 +465,7 @@ export function LlmConfigSection() {
                   onClick={() => handleEdit(config.id)}
                   className={`focus-ring w-full rounded-lg border p-3 text-left transition-colors disabled:cursor-wait ${
                     selected
-                      ? "border-primary/35 bg-primary/6 shadow-card"
+                      ? "border-primary/35 bg-primary/6 "
                       : "border-border-subtle bg-surface hover:border-border hover:bg-subtle/25"
                   }`}
                 >
@@ -496,7 +496,7 @@ export function LlmConfigSection() {
             })}
           </section>
 
-          <section className="min-w-0 rounded-[12px] border border-border-subtle bg-subtle/20 p-4">
+          <section className="min-w-0">
             {showNewForm ? (
               <NewConfigForm
                 showKey={false}
@@ -531,8 +531,7 @@ export function LlmConfigSection() {
                     <motion.button
                       type="button"
                       onClick={() => handleToggleEnable(selectedConfig.id)}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-[14px] font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-[14px] font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
                     >
                       <Check size={13} />
                       {selectedConfig.enabled
@@ -542,16 +541,14 @@ export function LlmConfigSection() {
                     <motion.button
                       type="button"
                       onClick={() => handleSaveEdit(selectedConfig)}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-[14px] font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-[14px] font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
                     >
                       {t("settings.llm.saveConfig")}
                     </motion.button>
                     <motion.button
                       type="button"
                       onClick={handleCancelEdit}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
                     >
                       <X size={13} />
                       {t("settings.cancelEdit")}
@@ -559,8 +556,7 @@ export function LlmConfigSection() {
                     <motion.button
                       type="button"
                       onClick={() => handleDelete(selectedConfig.id)}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
                     >
                       <Trash2 size={13} />
                       {t("settings.llm.deleteTitle")}
@@ -651,7 +647,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.18 }}
       className="overflow-hidden"
     >
       <div className="rounded-[12px] border border-primary/20 bg-primary/3 p-4">
@@ -798,7 +794,6 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           <motion.button
             type="button"
             onClick={onCancel}
-            whileTap={{ scale: 0.97 }}
             className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-3 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground"
           >
             <X size={13} />
@@ -807,7 +802,6 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           <motion.button
             type="button"
             onClick={() => onSave(config)}
-            whileTap={{ scale: 0.97 }}
             className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-3 text-[14px] font-medium text-accent transition-colors hover:border-accent/40 hover:bg-accent/15"
           >
             <Check size={13} />

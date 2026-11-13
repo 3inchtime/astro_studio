@@ -262,6 +262,30 @@ describe("ProjectHomePage", () => {
     expect(screen.getByText("projects.imageCountValue")).toBeInTheDocument();
   });
 
+  it("opens a recent conversation from the overview", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Homepage hero direction/ }));
+    expect(getConversations).toHaveBeenCalledWith(undefined, "project-1", false);
+    expect(navigate).toHaveBeenLastCalledWith(ROUTES.projectChat("project-1", "conversation-1"));
+  });
+
+  it("retries recent conversations independently after a load failure", async () => {
+    getConversations.mockRejectedValueOnce(new Error("Offline"));
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("studio.project.conversationsFailed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "studio.project.retryConversations" }));
+    expect(await screen.findByRole("button", { name: /Homepage hero direction/ })).toBeInTheDocument();
+    expect(searchGenerations).toHaveBeenCalledTimes(1);
+  });
+
   it("does not render a duplicate back button inside the project content header", async () => {
     render(
       <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>

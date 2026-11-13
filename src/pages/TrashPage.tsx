@@ -145,15 +145,15 @@ export default function TrashPage() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               placeholder={t("trash.search")}
-              className="studio-input focus-ring h-9 w-52 rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full sm:w-52 rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
             />
           </div>
         </div>
 
         <div className="border-b border-border-subtle bg-subtle/20 px-6 py-3">
-          <div className="studio-card flex items-start gap-3 rounded-[12px] px-4 py-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-error/10 bg-error/5">
-              <Trash2 size={14} className="text-error/70" />
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center text-muted">
+              <Trash2 size={14} className="text-muted" />
             </div>
             <div>
               <p className="text-[12px] font-medium text-foreground">
@@ -173,7 +173,7 @@ export default function TrashPage() {
             onRetry={handleSearch}
           />
           {actionError && !deleteTarget && (
-            <p role="alert" className="mb-4 text-sm text-error">
+            <p role="alert" className="mb-4 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-sm text-error">
               {actionError}
             </p>
           )}
