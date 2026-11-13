@@ -599,6 +599,7 @@ export default function SettingsPage() {
               providerState={providerState}
               selectedProviderId={selectedProviderId}
               providerSaved={providerSaved}
+              providerDirty={JSON.stringify(providerState) !== JSON.stringify(savedProviderState)}
               onSelectImageModel={handleSelectImageModel}
               onSaveModel={() => void runSettingsAction(() => handleSaveModel())}
               onSelectProvider={(providerId) => {
