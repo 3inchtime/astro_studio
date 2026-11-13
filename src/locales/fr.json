@@ -847,5 +847,19 @@
   "generate.returnToDraft": "Revenir au brouillon",
   "generate.unknownRetryTitle": "Réessayer un résultat inconnu ?",
   "generate.unknownRetryDescription": "La requête précédente peut avoir abouti et être facturée. Vérifiez d’abord la conversation et la consommation du fournisseur. Réessayer peut entraîner de nouveaux frais.",
-  "generate.confirmUnknownRetry": "Envoyer une nouvelle requête"
+  "generate.confirmUnknownRetry": "Envoyer une nouvelle requête",
+  "canvas.closeTitle": "Enregistrer les modifications",
+  "canvas.closeSaving": "Enregistrement du canevas avant la fermeture…",
+  "canvas.closeSaveError": "Les modifications n’ont pas pu être enregistrées. L’application reste ouverte. Réessayez ou poursuivez la modification pour résoudre le problème.",
+  "canvas.retrySaveAndClose": "Enregistrer et fermer",
+  "canvas.keepEditing": "Continuer la modification",
+  "canvas.closeGuardError": "La protection à la fermeture n’a pas pu démarrer. Enregistrez le canevas avant de quitter ou réessayez.",
+  "canvas.missingAssets": "Certaines images manquent. Retrouvez leurs fichiers pour restaurer le canevas.",
+  "canvas.relinkAsset": "Localiser",
+  "canvas.relinkingAsset": "Recherche…",
+  "canvas.relinkError": "Impossible de restaurer cette image. Choisissez une image accessible et réessayez.",
+  "canvas.saveConflict": "Ce canevas a été modifié ailleurs. Vos modifications sont conservées ici ; enregistrez une copie pour garder les deux versions.",
+  "canvas.saveCopy": "Enregistrer une copie",
+  "canvas.recoveredCanvas": "Canevas récupéré",
+  "trash.assetInUse": "Ces images sont encore utilisées aux emplacements suivants. Supprimez les références ou restaurez cette génération."
 }

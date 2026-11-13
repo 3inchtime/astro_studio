@@ -364,3 +364,9 @@ function createCanvasLayerForOrder(id: string) {
     objects: [],
   };
 }
+
+it("preserves managed asset identity through document sanitization", () => {
+  const content = createCanvasDocumentContent();
+  content.layers[0].objects.push({ ...createImageObject({ image_path: "/managed/ref.png", width: 80, height: 40 }), asset_id: "asset-1" });
+  expect(sanitizeCanvasDocumentContent(content).layers[0].objects[0]).toMatchObject({asset_id: "asset-1"});
+});

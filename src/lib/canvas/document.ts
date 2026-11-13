@@ -97,6 +97,7 @@ export function createStrokeObject(
 }
 
 export function createImageObject(params: {
+  asset_id?: string;
   image_path: string;
   x?: number;
   y?: number;
@@ -112,6 +113,7 @@ export function createImageObject(params: {
     type: "image",
     id: params.id ?? crypto.randomUUID(),
     image_path: params.image_path,
+    ...(params.asset_id ? { asset_id: params.asset_id } : {}),
     x: params.x ?? 0,
     y: params.y ?? 0,
     width: params.width,
@@ -219,6 +221,7 @@ function sanitizeCanvasObject(object: CanvasObject): CanvasObject {
   return createImageObject({
     id: object.id,
     image_path: object.image_path,
+    asset_id: object.asset_id,
     x: object.x,
     y: object.y,
     width: object.width,

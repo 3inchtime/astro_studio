@@ -847,5 +847,19 @@
   "generate.returnToDraft": "Zurück zum Entwurf",
   "generate.unknownRetryTitle": "Unbekanntes Ergebnis erneut anfragen?",
   "generate.unknownRetryDescription": "Die vorherige Anfrage könnte abgeschlossen und berechnet worden sein. Prüfen Sie zuerst den Chat und die Anbieternutzung. Ein erneuter Versuch kann weitere Kosten verursachen.",
-  "generate.confirmUnknownRetry": "Neue Anfrage senden"
+  "generate.confirmUnknownRetry": "Neue Anfrage senden",
+  "canvas.closeTitle": "Canvas-Änderungen speichern",
+  "canvas.closeSaving": "Canvas wird vor dem Schließen gespeichert…",
+  "canvas.closeSaveError": "Die Änderungen konnten nicht gespeichert werden. Die App bleibt geöffnet. Versuche es erneut oder bearbeite weiter, um den Fehler zu beheben.",
+  "canvas.retrySaveAndClose": "Speichern und schließen",
+  "canvas.keepEditing": "Weiter bearbeiten",
+  "canvas.closeGuardError": "Der Schutz beim Schließen konnte nicht starten. Speichere vor dem Beenden oder versuche es erneut.",
+  "canvas.missingAssets": "Einige Bilder fehlen. Wähle ihre Dateien erneut aus.",
+  "canvas.relinkAsset": "Datei suchen",
+  "canvas.relinkingAsset": "Datei wird gesucht…",
+  "canvas.relinkError": "Das Bild konnte nicht wiederhergestellt werden. Wähle ein zugängliches Bild und versuche es erneut.",
+  "canvas.saveConflict": "Dieser Canvas wurde an anderer Stelle geändert. Deine Änderungen bleiben hier erhalten. Speichere eine Kopie, um beide Versionen zu behalten.",
+  "canvas.saveCopy": "Kopie speichern",
+  "canvas.recoveredCanvas": "Wiederhergestellter Canvas",
+  "trash.assetInUse": "Diese Bilder werden an den folgenden Stellen verwendet. Entferne die Verweise oder stelle diese Generierung wieder her."
 }

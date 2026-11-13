@@ -96,3 +96,24 @@ describe("canvas saves before library maintenance", () => {
     expect(diskWrite).toHaveBeenCalledTimes(1);
   });
 });
+
+ it("flushes a mounted draft before its debounce expires", async () => {
+    const { registerCanvasDraftFlusher, queueCanvasSave, flushCanvasSaves } = await import("./persistence");
+    const disk = deferred();
+    const write = vi.fn(() => disk.promise);
+    const unregister = registerCanvasDraftFlusher(() => queueCanvasSave("draft", write).promise);
+    let complete = false;
+    const flush = flushCanvasSaves().then(() => { complete = true; });
+    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(complete).toBe(false);
+    disk.resolve(); await flush; unregister();
+    expect(complete).toBe(true);
+  });
+  it("explicit close retry recovers a failed save left by an unmounted page", async () => {
+    const { queueCanvasSave, flushCanvasSaves } = await import("./persistence");
+    const write = vi.fn().mockRejectedValueOnce(new Error("full")).mockResolvedValue(undefined);
+    await expect(queueCanvasSave("closed-page", write).promise).rejects.toThrow("full");
+    await expect(flushCanvasSaves(true)).resolves.toBeUndefined();
+    expect(write).toHaveBeenCalledTimes(2);
+  });

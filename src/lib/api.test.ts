@@ -17,6 +17,7 @@ import {
   deletePromptFolder,
   deletePromptFavorite,
   getCanvasDocument,
+  importCanvasAsset,
   getCanvasGenerationStatus,
   listCanvasDocuments,
   getConversations,
@@ -538,7 +539,7 @@ describe("api project and conversation commands", () => {
       viewport: { x: 0, y: 0, scale: 1 },
       frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
       layers: [],
-    });
+    }, null, 0);
     await renameCanvasDocument("canvas-1", "Renamed canvas");
     await deleteCanvasDocument("canvas-1");
     await saveCanvasExport("canvas-1", "data:image/png;base64,Zm9v");
@@ -570,6 +571,7 @@ describe("api project and conversation commands", () => {
         layers: [],
       },
       previewPngBase64: null,
+      expectedRevision: 0,
     });
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(
       5,
@@ -610,6 +612,7 @@ describe("api project and conversation commands", () => {
         layers: [],
       },
       "data:image/png;base64,Zm9v",
+      loaded.revision,
     );
     const exported = await saveCanvasExport(
       created.id,
@@ -623,6 +626,24 @@ describe("api project and conversation commands", () => {
     expect(saved.width).toBe(768);
     expect(exported).toBe("data:image/png;base64,Zm9v");
     expect(tauriApi.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("canvas asset and revision contracts", () => {
+  it("imports the chosen path through native managed storage", async () => {
+    tauriApi.invoke.mockResolvedValueOnce({ id: "asset-1", file_path: "/managed/asset.png" });
+    await expect(importCanvasAsset("/external/reference.png")).resolves.toEqual({ id: "asset-1", file_path: "/managed/asset.png" });
+    expect(tauriApi.invoke).toHaveBeenLastCalledWith("import_canvas_asset", { path: "/external/reference.png" });
+  });
+  it("rejects a stale browser save without losing the latest stored content", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: undefined });
+    const doc = await createCanvasDocument("revision-test", "revision-test");
+    const loaded = await getCanvasDocument(doc.id);
+    const latest = { ...loaded.content, viewport: { x: 20, y: 30, scale: 2 } };
+    const saved = await saveCanvasDocument(doc.id, latest, null, 0);
+    expect(saved.revision).toBe(1);
+    await expect(saveCanvasDocument(doc.id, loaded.content, null, 0)).rejects.toMatchObject({ kind: "CanvasRevisionConflict", detail: { expected_revision: 0, actual_revision: 1 } });
+    expect((await getCanvasDocument(doc.id)).content.viewport).toEqual(latest.viewport);
   });
 });
 

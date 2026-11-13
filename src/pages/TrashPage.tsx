@@ -104,8 +104,12 @@ export default function TrashPage() {
       setDeleteTarget(null);
       await loadTrash(1, appliedQueryRef.current);
       setSelected(null);
-    } catch {
+    } catch (error) {
+      const message = typeof error === "string" ? error : error instanceof Error ? error.message : "";
       setActionError(
+        message.startsWith("Asset is still in use:")
+          ? `${t("trash.assetInUse")}\n${message.slice("Asset is still in use:".length).trim()}`
+          :
         t("studio.collection.actionError", {
           defaultValue: "The change could not be saved. Please try again.",
         }),

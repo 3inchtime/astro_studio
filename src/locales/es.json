@@ -847,5 +847,19 @@
   "generate.returnToDraft": "Volver al borrador",
   "generate.unknownRetryTitle": "¿Reintentar un resultado desconocido?",
   "generate.unknownRetryDescription": "La solicitud anterior puede haberse completado y generado cargos. Revisa primero la conversación y el consumo del proveedor. Reintentar puede generar nuevos cargos.",
-  "generate.confirmUnknownRetry": "Enviar otra solicitud"
+  "generate.confirmUnknownRetry": "Enviar otra solicitud",
+  "canvas.closeTitle": "Guardar cambios del lienzo",
+  "canvas.closeSaving": "Guardando el lienzo antes de cerrar…",
+  "canvas.closeSaveError": "No se pudieron guardar los cambios. La aplicación seguirá abierta. Reintenta o sigue editando para resolver el error.",
+  "canvas.retrySaveAndClose": "Guardar y cerrar",
+  "canvas.keepEditing": "Seguir editando",
+  "canvas.closeGuardError": "No se pudo activar la protección al cerrar. Guarda el lienzo antes de salir o reintenta.",
+  "canvas.missingAssets": "Faltan algunas imágenes. Busca sus archivos para restaurar el lienzo.",
+  "canvas.relinkAsset": "Localizar",
+  "canvas.relinkingAsset": "Localizando…",
+  "canvas.relinkError": "No se pudo restaurar la imagen. Elige una imagen accesible y reintenta.",
+  "canvas.saveConflict": "Este lienzo cambió en otro lugar. Tus cambios siguen aquí; guarda una copia para conservar ambas versiones.",
+  "canvas.saveCopy": "Guardar copia",
+  "canvas.recoveredCanvas": "Lienzo recuperado",
+  "trash.assetInUse": "Estas imágenes aún se usan en las ubicaciones siguientes. Elimina las referencias o restaura esta generación."
 }

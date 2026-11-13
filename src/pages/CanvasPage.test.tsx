@@ -35,6 +35,7 @@ const getCanvasGenerationStatus = vi.fn().mockResolvedValue(null);
 const generationCompleteListeners = new Set<() => void>();
 const getImageModel = vi.fn();
 const pickSourceImages = vi.fn();
+const importCanvasAsset = vi.fn();
 const exportCanvasFrame = vi.fn();
 const readImageSize = vi.fn();
 
@@ -134,6 +135,7 @@ vi.mock("../lib/api", () => ({
   getImageModel: (...args: unknown[]) => getImageModel(...args),
   hasTauriRuntime: () => true,
   pickSourceImages: (...args: unknown[]) => pickSourceImages(...args),
+  importCanvasAsset: (...args: unknown[]) => importCanvasAsset(...args),
   toAssetUrl: (path: string) => path,
 }));
 
@@ -201,6 +203,7 @@ vi.mock("../components/canvas/CanvasStage", () => ({
 function canvasDocumentWithImage() {
   return {
     id: "canvas-1",
+    revision: 0,
     project_id: "project-1",
     name: "Mood board",
     document_path: "/tmp/canvas-1.json",
@@ -357,6 +360,7 @@ describe("CanvasPage", () => {
     generationCompleteListeners.clear();
     getImageModel.mockReset();
     pickSourceImages.mockReset();
+    importCanvasAsset.mockReset().mockImplementation(async (path: string) => ({ id: "asset-1", file_path: `/managed${path}` }));
     exportCanvasFrame.mockReset();
     readImageSize.mockReset();
 
@@ -376,6 +380,7 @@ describe("CanvasPage", () => {
     ]);
     getCanvasDocument.mockResolvedValue({
       id: "canvas-1",
+      revision: 0,
       project_id: "project-1",
       name: "Mood board",
       document_path: "/tmp/canvas-1.json",
@@ -414,6 +419,7 @@ describe("CanvasPage", () => {
     });
     saveCanvasDocument.mockResolvedValue({
       id: "canvas-1",
+      revision: 0,
       project_id: "project-1",
       name: "Mood board",
       document_path: "/tmp/canvas-1.json",
@@ -442,7 +448,7 @@ describe("CanvasPage", () => {
     // A failed write deliberately survives unmount for load/retry recovery.
     // Finish that write before the next test starts a fresh mocked app session.
     exportCanvasFrame.mockResolvedValue("preview");
-    saveCanvasDocument.mockResolvedValue({ id: "canvas-1" });
+    saveCanvasDocument.mockResolvedValue({ id: "canvas-1", revision: 1 });
     await waitForCanvasSaves("canvas-1", true, () => true);
     await waitForCanvasSaves("canvas-2", true, () => true);
     vi.restoreAllMocks();
@@ -593,6 +599,7 @@ describe("CanvasPage", () => {
           ],
         }),
         expect.any(String),
+        expect.any(Number),
       ),
     );
     expect(saveCanvasDocument.mock.invocationCallOrder[0]).toBeLessThan(
@@ -935,7 +942,8 @@ describe("CanvasPage", () => {
               objects: [
                 expect.objectContaining({
                   type: "image",
-                  image_path: "/tmp/reference.png",
+                  image_path: "/managed/tmp/reference.png",
+                  asset_id: "asset-1",
                   original_width: 512,
                   original_height: 512,
                 }),
@@ -944,6 +952,7 @@ describe("CanvasPage", () => {
           ],
         }),
         expect.any(String),
+        expect.any(Number),
       );
     });
 
@@ -969,6 +978,7 @@ describe("CanvasPage", () => {
         layers: [expect.objectContaining({ objects: [] })],
       }),
       expect.any(String),
+        expect.any(Number),
     );
   });
 
@@ -1052,6 +1062,7 @@ describe("CanvasPage", () => {
         viewport: { x: -200, y: -100, scale: 4 },
       }),
       expect.any(String),
+        expect.any(Number),
     );
   });
 
@@ -1222,6 +1233,7 @@ describe("CanvasPage", () => {
         ],
       }),
       expect.any(String),
+        expect.any(Number),
     );
   });
 
@@ -1292,6 +1304,7 @@ describe("CanvasPage", () => {
         ],
       }),
       "latest-preview",
+        expect.any(Number),
     );
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -1334,10 +1347,12 @@ describe("CanvasPage", () => {
 
     expect(saveCanvasDocument).toHaveBeenCalledTimes(1);
 
-    firstSave.resolve(document);
+    expect(saveCanvasDocument.mock.calls[0][3]).toBe(0);
+    firstSave.resolve({ ...document, revision: 1 });
     await flushAsyncWork();
 
     expect(saveCanvasDocument).toHaveBeenCalledTimes(2);
+    expect(saveCanvasDocument.mock.calls[1][3]).toBe(1);
     expect(saveCanvasDocument.mock.calls[1][0]).toBe("canvas-1");
     expect(
       saveCanvasDocument.mock.calls[1][1].layers[0].objects[0],
@@ -1395,6 +1410,7 @@ describe("CanvasPage", () => {
         ],
       }),
       expect.any(String),
+        expect.any(Number),
     );
 
     const secondLoadIndex = getCanvasDocument.mock.calls.findIndex(
@@ -1502,6 +1518,7 @@ describe("CanvasPage", () => {
         ],
       }),
       expect.any(String),
+        expect.any(Number),
     );
     expect(
       saveCanvasDocument.mock.calls.every(
@@ -1649,10 +1666,12 @@ describe("CanvasPage", () => {
     expect(saveCanvasDocument).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Saving...")).toBeInTheDocument();
 
-    firstSave.resolve(document);
+    expect(saveCanvasDocument.mock.calls[0][3]).toBe(0);
+    firstSave.resolve({ ...document, revision: 1 });
     await flushAsyncWork();
 
     expect(saveCanvasDocument).toHaveBeenCalledTimes(2);
+    expect(saveCanvasDocument.mock.calls[1][3]).toBe(1);
     expect(screen.getByText("Saving...")).toBeInTheDocument();
 
     secondSave.resolve(document);
@@ -1841,4 +1860,52 @@ describe("CanvasPage", () => {
       await screen.findByText("Selected objects: none"),
     ).toBeInTheDocument();
   });
+
+it("flushes a dirty mounted canvas while its autosave timer is pending", async () => {
+  getCanvasDocument.mockResolvedValue(canvasDocumentWithImage());
+  render(<CanvasPage />, { wrapper: TestWrapper });
+  await screen.findByText("Canvas objects: image-1");
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("button", {name: "select image"}));
+  fireEvent.click(screen.getByRole("button", {name: "move selection"}));
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
+  await act(async () => { await flushCanvasSaves(); });
+  expect(saveCanvasDocument.mock.calls[0][1].layers[0].objects[0]).toMatchObject({x:112,y:58});
+  vi.useRealTimers(); cleanup();
+});
+
+  it("relinks a missing image into managed storage without changing its transform", async () => {
+    const document = canvasDocumentWithImage();
+    getCanvasDocument.mockResolvedValue({ ...document, missing_assets: [{ object_id: "image-1", image_path: "/tmp/image-1.png" }] });
+    pickSourceImages.mockResolvedValue(["/new/replacement.png"]);
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    fireEvent.click(await screen.findByRole("button", { name: /canvas.relinkAsset/ }));
+    await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalled());
+    expect(importCanvasAsset).toHaveBeenCalledWith("/new/replacement.png");
+    expect(saveCanvasDocument.mock.calls[0][1].layers[0].objects[0]).toMatchObject({
+      id: "image-1", asset_id: "asset-1", image_path: "/managed/new/replacement.png",
+      x: 100, y: 50, width: 100, height: 100, rotation: 0, opacity: 1,
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /canvas.relinkAsset/ })).not.toBeInTheDocument());
+  });
+
+  it("preserves a conflicted draft as a new canvas without overwriting the remote revision", async () => {
+    const document = canvasDocumentWithImage();
+    getCanvasDocument.mockResolvedValue(document);
+    saveCanvasDocument.mockRejectedValueOnce({ kind: "CanvasRevisionConflict", detail: { expected_revision: 0, actual_revision: 4 } });
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    await act(async () => { await flushCanvasSaves().catch(() => {}); });
+    expect(await screen.findByText("canvas.saveConflict")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "canvas.saveCopy" }));
+    await waitFor(() => expect(saveCanvasDocument.mock.calls.some((call) => call[0] === "canvas-2")).toBe(true));
+    const copy = saveCanvasDocument.mock.calls.find((call) => call[0] === "canvas-2");
+    expect(copy?.[1].layers[0].objects[0]).toMatchObject({ x:112, y:58 });
+    expect(copy?.[3]).toBe(0);
+    expect(saveCanvasDocument.mock.calls.filter((call) => call[0] === "canvas-1")).toHaveLength(1);
+    await act(async () => { await flushCanvasSaves(); });
+  });
+
 });

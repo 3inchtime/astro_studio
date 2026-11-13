@@ -783,5 +783,19 @@
   "generate.returnToDraft": "Return to draft",
   "generate.unknownRetryTitle": "Retry an unknown result?",
   "generate.unknownRetryDescription": "The previous request may have completed and incurred a charge. Check the saved conversation and provider usage first. Retrying may incur another charge.",
-  "generate.confirmUnknownRetry": "Send another request"
+  "generate.confirmUnknownRetry": "Send another request",
+  "canvas.closeTitle": "Save canvas changes",
+  "canvas.closeSaving": "Saving your canvas before closing…",
+  "canvas.closeSaveError": "Your changes could not be saved. The app will stay open. Retry, or keep editing to resolve the save error.",
+  "canvas.retrySaveAndClose": "Retry save and close",
+  "canvas.keepEditing": "Keep editing",
+  "canvas.closeGuardError": "Close protection could not start. Save your canvas before quitting, or retry.",
+  "canvas.missingAssets": "Some images are missing. Locate them to restore this canvas.",
+  "canvas.relinkAsset": "Locate",
+  "canvas.relinkingAsset": "Locating…",
+  "canvas.relinkError": "Could not restore this image. Choose an accessible image and try again.",
+  "canvas.saveConflict": "This canvas changed elsewhere. Your edits are kept here; save a copy to preserve both versions.",
+  "canvas.saveCopy": "Save a copy",
+  "canvas.recoveredCanvas": "Recovered canvas",
+  "trash.assetInUse": "These images are still used below. Remove their references or restore this generation before trying again."
 }

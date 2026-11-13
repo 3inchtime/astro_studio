@@ -783,5 +783,19 @@
   "generate.returnToDraft": "返回草稿",
   "generate.unknownRetryTitle": "重试结果未知的请求？",
   "generate.unknownRetryDescription": "上次请求可能已完成并产生费用。请先检查已保存的会话和供应商用量。重试可能再次产生费用。",
-  "generate.confirmUnknownRetry": "发送新请求"
+  "generate.confirmUnknownRetry": "发送新请求",
+  "canvas.closeTitle": "保存画布更改",
+  "canvas.closeSaving": "正在保存画布，完成后关闭…",
+  "canvas.closeSaveError": "更改未能保存，应用将保持打开。你可以重试，或继续编辑以解决保存问题。",
+  "canvas.retrySaveAndClose": "重试保存并关闭",
+  "canvas.keepEditing": "继续编辑",
+  "canvas.closeGuardError": "关闭保护未能启动。退出前请先保存画布，或重试。",
+  "canvas.missingAssets": "部分图片已丢失，请重新定位文件以恢复画布。",
+  "canvas.relinkAsset": "重新定位",
+  "canvas.relinkingAsset": "正在定位…",
+  "canvas.relinkError": "无法恢复此图片。请选择可访问的图片后重试。",
+  "canvas.saveConflict": "此画布已在其他位置更改。你的编辑仍保留在这里，可保存副本以保留两个版本。",
+  "canvas.saveCopy": "保存副本",
+  "canvas.recoveredCanvas": "恢复的画布",
+  "trash.assetInUse": "这些图片仍被以下位置引用。请先移除引用，或还原此生成记录。"
 }

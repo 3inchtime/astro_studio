@@ -847,5 +847,19 @@
   "generate.returnToDraft": "返回草稿",
   "generate.unknownRetryTitle": "重試結果未知的請求？",
   "generate.unknownRetryDescription": "上次請求可能已完成並產生費用。請先檢查已儲存的對話和供應商用量。重試可能再次產生費用。",
-  "generate.confirmUnknownRetry": "傳送新請求"
+  "generate.confirmUnknownRetry": "傳送新請求",
+  "canvas.closeTitle": "儲存畫布變更",
+  "canvas.closeSaving": "正在儲存畫布，完成後關閉…",
+  "canvas.closeSaveError": "變更無法儲存，應用程式將保持開啟。你可以重試，或繼續編輯以解決儲存問題。",
+  "canvas.retrySaveAndClose": "重試儲存並關閉",
+  "canvas.keepEditing": "繼續編輯",
+  "canvas.closeGuardError": "關閉保護無法啟動。離開前請先儲存畫布，或重試。",
+  "canvas.missingAssets": "部分圖片已遺失，請重新定位檔案以恢復畫布。",
+  "canvas.relinkAsset": "重新定位",
+  "canvas.relinkingAsset": "正在定位…",
+  "canvas.relinkError": "無法恢復此圖片。請選擇可存取的圖片後重試。",
+  "canvas.saveConflict": "此畫布已在其他位置變更。你的編輯仍保留在此，可儲存副本以保留兩個版本。",
+  "canvas.saveCopy": "儲存副本",
+  "canvas.recoveredCanvas": "恢復的畫布",
+  "trash.assetInUse": "這些圖片仍被以下位置引用。請先移除引用，或還原此生成記錄。"
 }

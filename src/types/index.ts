@@ -84,6 +84,7 @@ export interface CanvasStrokeObject {
 }
 
 export interface CanvasImageObject {
+  asset_id?: string;
   type: "image";
   id: string;
   image_path: string;
@@ -187,6 +188,7 @@ export interface CanvasDocumentContent {
 }
 
 export interface CanvasDocument {
+  revision: number;
   id: string;
   project_id: string;
   name: string;
@@ -199,7 +201,14 @@ export interface CanvasDocument {
   deleted_at: string | null;
 }
 
+export interface CanvasMissingAsset {
+  object_id: string;
+  asset_id?: string | null;
+  image_path: string;
+}
+
 export interface CanvasDocumentWithContent extends CanvasDocument {
+  missing_assets?: CanvasMissingAsset[];
   content: CanvasDocumentContent;
 }
 

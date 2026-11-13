@@ -579,6 +579,7 @@ export async function createCanvasDocument(
       id: crypto.randomUUID(),
       project_id: browserProjectId,
       name: name?.trim() || "Untitled Canvas",
+      revision: 0,
       document_path: `browser-canvas://${crypto.randomUUID()}.json`,
       preview_path: null,
       width: 1024,
@@ -631,6 +632,7 @@ export async function getCanvasDocument(
     return {
       ...document,
       content: cloneCanvasContent(document.content),
+      revision: document.revision ?? 0,
     };
   }
 
@@ -640,14 +642,21 @@ export async function getCanvasDocument(
 export async function saveCanvasDocument(
   id: string,
   content: CanvasDocumentContent,
-  previewPngBase64?: string | null,
+  previewPngBase64: string | null | undefined,
+  expectedRevision: number,
 ): Promise<CanvasDocument> {
   if (!hasTauriRuntime()) {
     const documents = readBrowserCanvasDocuments();
+    const current = documents.find((document) => document.id === id);
+    if (!current) throw new Error(`Canvas document not found: ${id}`);
+    if ((current.revision ?? 0) !== expectedRevision) {
+      throw { kind: "CanvasRevisionConflict", detail: { expected_revision: expectedRevision, actual_revision: current.revision ?? 0 } };
+    }
     const nextDocuments = documents.map((document) =>
       document.id === id
         ? {
             ...document,
+            revision: expectedRevision + 1,
             preview_path: previewPngBase64 || document.preview_path,
             width: Math.round(content.frame.width),
             height: Math.round(content.frame.height),
@@ -668,7 +677,12 @@ export async function saveCanvasDocument(
     id,
     content,
     previewPngBase64: previewPngBase64 || null,
+    expectedRevision,
   });
+}
+
+export async function importCanvasAsset(path: string): Promise<{ id: string; file_path: string }> {
+  return invoke("import_canvas_asset", { path });
 }
 
 export async function renameCanvasDocument(
