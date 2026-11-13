@@ -87,6 +87,21 @@ components:
   image-card:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.card}"
+  canvas-tool:
+    backgroundColor: "transparent"
+    textColor: "{colors.muted}"
+    rounded: "{rounded.button}"
+    height: "36px"
+    width: "36px"
+  favorite-action:
+    textColor: "{colors.muted}"
+    rounded: "{rounded.button}"
+    height: "32px"
+    width: "32px"
+  button-danger:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.error}"
+    rounded: "{rounded.button}"
 ---
 
 # Design System: Astro Studio
@@ -100,6 +115,7 @@ Operate mode for creation, editing, settings and organization; image-led viewing
 The existing visual world is a precise image-first desktop workbench. Images occupy the flexible center; tools and metadata live in stable surrounding surfaces. Local platform typography, flat panels and short feedback keep repeated work legible across twelve themes and eight locales. Existing routes, IPC contracts, editor state and local data remain authoritative.
 
 **Key Characteristics:**
+
 - Neutral image inspection, theme-aware controls.
 - Readable semantic typography with a 12px floor.
 - Stable desktop docks with exclusive compact drawers.
@@ -137,7 +153,7 @@ Sidecar tonal ramps are non-normative swatch previews synthesized from the recor
 
 ### Hierarchy
 
-- **Title:** the shared page-heading role; compact workbench bar headings also use body size and medium weight.
+- **Title:** the shared page-heading role; the generation bar uses the existing 16px semantic base step and semibold weight within its 48px header.
 - **Body:** the application shell's main reading size and line height.
 - **Body small:** supporting descriptions and dense form content.
 - **Label:** secondary metadata and navigation labels.
@@ -153,10 +169,10 @@ A four-pixel base rhythm supports compact repeated controls. The application has
 
 Conversation and canvas document docks appear at 1440px; generation parameters, canvas inspector and collection details dock at 1200px. Below each threshold they become drawers. The main surface must fit a 900×600 window. Conversation and generation parameter drawers share one active-drawer state; canvas documents and inspector are mutually exclusive.
 
-- **Generation:** chronological image feed, bottom reference/prompt/action dock capped at 35% of workspace height and a 300px parameter inspector. Composer content scrolls above a persistent submit row. The composer also has an incumbent 152px minimum; keep compact-window checks around it. Model, size and count stay visible; advanced parameters use disclosure. A stable portal host preserves drafts and disclosures across breakpoints.
-- **Collections:** one header/filter/results/detail pattern, docked detail above the inspector threshold and modal detail below it. Batch selection addresses loaded generation records separately from the inspected record.
-- **Canvas:** 220px document dock, flexible neutral stage and 300px inspector. Drawing tools form a vertical left rail; fit/view/history controls stay at the bottom. Properties/Layers/Generate tabs persist, default to Properties and do not switch automatically with selection.
-- **Projects and settings:** covers, recent activity and direct continuation for projects; flat grouped forms with visible dirty, pending, success and failure states for settings.
+- **Generation:** chronological image feed, bottom reference/prompt/action dock capped at 35% of workspace height and a 300px parameter inspector. Composer content scrolls above a persistent submit row. The composer retains a 152px minimum and its writing field a 64px minimum. Mode controls are neutral 32px segments; prompt metadata and contextual actions share a quiet row. Result images are centered and sized from the remaining feed viewport budget. The feed observes both viewport and content resize and follows new content only while the user is already following the latest messages. Model, size and count stay visible; advanced parameters use disclosure. A stable portal host preserves drafts and disclosures across breakpoints.
+- **Collections:** one header/filter/results/detail pattern, docked detail above the inspector threshold and modal detail below it. Measured-width masonry explicitly distributes image records into columns with 16px gutters, filling three/four/five columns in the standard 900/1200/1440px collection views; opening a detail dock reduces the available grid width. Appending a page preserves prior column placement. Batch selection addresses visible loaded image-bearing generation records separately from the inspected record. Its action bar appears only after entering selection or selecting a record, and select-all excludes rows without images.
+- **Canvas:** 220px document dock, flexible neutral stage and 300px inspector. Drawing tools form a vertical left rail; fit/view/history controls stay at the bottom. Properties/Layers/Generate tabs persist, default to Properties and do not switch automatically with selection. Borderless tools form quiet groups separated by subtle rules. Neutral paper and the idle frame stay quiet; blue dashed frame treatment appears while editing the frame. The labeled Fit action is explicit and saved viewport state is preserved.
+- **Projects and settings:** covers, recent activity and direct continuation for projects; flat grouped forms with visible dirty, pending, success and failure states for settings. Settings show compact previews for all twelve themes, retaining full names/descriptions through title and accessible description; language and font controls appear early in the form. Selected settings choices use neutral surfaces and primary borders/ink to retain contrast. Projects place the context toggle inline with the page heading, without a duplicate toolbar.
 
 ## Elevation & Depth
 
@@ -176,7 +192,7 @@ Controls and fields have gently squared corners (button/input roles); panels and
 
 ### Buttons
 
-Primary submit actions use the filled primary treatment, the primary-foreground token and the larger primary height recorded in frontmatter. Hover darkens via brightness (0.94); disabled actions show reduced opacity and a non-interactive cursor. Secondary controls use opaque surfaces and the dedicated control border; subtle controls use muted text and a quiet hover fill. Feedback uses `--motion-feedback` with the established easing. Shared compact controls are 36px; the generation submit action is 40px. Existing utility icon actions may be smaller and do not define the shared minimum.
+Primary submit actions use the filled primary treatment, the primary-foreground token and the larger primary height recorded in frontmatter. Hover darkens via brightness (0.94); disabled actions show reduced opacity and a non-interactive cursor. Secondary controls use opaque surfaces and the dedicated control border; subtle controls use muted text and a quiet hover fill. Feedback uses `--motion-feedback` with the established easing. Shared compact controls are 36px; the generation submit action is 40px. Contextual utility and favorite actions use 32px targets. Favorite actions are named native buttons with aria-pressed; loading disables the action and exposes busy state. Status-only favorite indicators are named images, not controls. Danger actions use the neutral surface and control edge with error-colored ink; do not use an error tint as their general surface.
 
 ### Inputs / Fields
 
@@ -192,7 +208,7 @@ Metadata chips use subtle fill, foreground ink, badge corners and compact inset 
 
 ### Cards / Containers
 
-Cards remain opaque, bordered and flat. Image cards clip artwork using the card radius; list rows use the existing smaller control-radius shape. Loading, empty collection, no matches and request failure are distinct states. Delete affects the whole generation record; batch favorite checkpoints successful images and retries remaining failures. Deletion preserves loaded rows and refills shifted pagination boundaries.
+Cards remain opaque, bordered and flat. Image cards clip artwork using the card radius; list rows use the existing smaller control-radius shape. Loading, empty collection, no matches and request failure are distinct states. Delete affects the whole generation record; batch favorite checkpoints successful images and retries remaining failures. Deletion preserves loaded rows and refills shifted pagination boundaries. Contextual image actions and selection controls reveal on hover, keyboard focus or touch devices rather than competing with artwork at rest. Selection uses a real checkbox with a 32px target and 20px visible inner square; selected records keep their selection affordance visible.
 
 ### Generation and canvas workbench
 
@@ -200,7 +216,7 @@ Enter inserts a newline; Cmd/Ctrl+Enter submits outside IME composition. Canvas 
 
 ### Preview and modal surfaces
 
-Origin image ID/rect provides a short continuous preview transition where available, with a fade fallback. Keep the thumbnail until the full image loads. Opening preview keeps the list mounted and pauses infinite-load requests. Stack-aware focus management makes Escape close only the top surface and returns focus to its trigger. Busy confirmations cannot dismiss; permanent deletion requires confirmation. Copy success follows successful clipboard write. Generation progress uses backend status and never fabricated percentages.
+Origin image ID/rect provides a short continuous preview transition where available, with a fade fallback. Keep the thumbnail until the full image loads. Opening preview keeps the list mounted and pauses infinite-load requests. Stack-aware focus management makes Escape close only the top surface and returns focus to its trigger. Preview and edge drawers occupy their full available height; the viewport margin applies only to centered floating dialogs. Busy confirmations cannot dismiss; permanent deletion requires confirmation. Copy success follows successful clipboard write. Generation progress uses backend status and never fabricated percentages.
 
 ## Do's and Don'ts
 
@@ -221,7 +237,7 @@ Origin image ID/rect provides a short continuous preview transition where availa
 
 ### Verification boundary
 
-Interaction/request contracts, theme contrast and TypeScript/Vite build are checked independently of rendered browser acceptance. Browser verification covers 900×600 / 1200×800 / 1440×900 plus theme and locale smoke checks; mocks stay in verification tooling and never replace production IPC. Native OS integrations require actual platform runs and remain pending until observed. See `UI-REVIEW.md` for the current acceptance record; this design document does not certify those checks.
+Interaction/request contracts, theme contrast and TypeScript/Vite build are checked independently of rendered browser acceptance. Browser verification covers 900×600 / 1200×800 / 1440×900 plus theme and locale smoke checks; mocks stay in verification tooling and never replace production IPC. An earlier native functional workflow passed after unlocking the desktop. The latest polish-specific native check was blocked by the desktop locking again; its native visual acceptance remains pending. Windows and paid provider generation remain untested. See `UI-REVIEW.md` for the current acceptance record; this design document does not certify those checks.
 
 ### Provenance
 
