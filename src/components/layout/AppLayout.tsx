@@ -1,4 +1,5 @@
 import BackupOperationStatus from "../settings/BackupOperationStatus";
+import ExportStatus from "../gallery/ExportStatus";
 import {
   createContext,
   useCallback,
@@ -518,6 +519,7 @@ export default function AppLayout() {
               className="min-h-0 flex-1"
             >
               <Outlet />
+              <ExportStatus />
               <BackupOperationStatus />
           </motion.div>
         </main>

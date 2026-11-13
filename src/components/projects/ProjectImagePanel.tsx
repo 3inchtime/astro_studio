@@ -1,3 +1,5 @@
+import { useCollectionSelection } from "../gallery/useCollectionSelection";
+import ExportSelectionAction from "../gallery/ExportSelectionAction";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import CollectionStatus from "../gallery/CollectionStatus";
@@ -33,6 +35,9 @@ export default function ProjectImagePanel({
   onManageFolders: (imageId: string) => void;
 }) {
   const { t, i18n } = useTranslation();
+  const selectable = results.filter(row => row.images.length > 0);
+  const selection = useCollectionSelection(selectable.map(row => row.generation.id));
+  const [selectionMode, setSelectionMode] = useState(false);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<GenerationSearchFilters>({});
 
@@ -69,6 +74,11 @@ export default function ProjectImagePanel({
           }}
         />
 
+      <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border-subtle px-6 py-2">
+        <button type="button" aria-pressed={selectionMode} onClick={() => { setSelectionMode(!selectionMode); if (selectionMode) selection.clear(); }} className="studio-control focus-ring min-h-9 rounded-lg px-3 text-xs">{t("export.select", { defaultValue: "Select images" })}</button>
+        {(selectionMode || selection.selectedIds.size > 0) && <><button type="button" onClick={selection.selectLoaded} className="studio-control focus-ring min-h-9 rounded-lg px-3 text-xs">{t("studio.collection.selectVisible", { defaultValue: "Select all visible" })}</button><span className="text-xs text-muted">{t("studio.collection.selectedCount", { count: selection.selectedIds.size, defaultValue: "{{count}} generation record(s) selected" })}</span></>}
+        {selection.selectedIds.size > 0 && <ExportSelectionAction rows={selectable} selectedIds={selection.selectedIds} />}
+      </div>
       {/* Gallery Grid */}
       <div className="flex-1 overflow-y-auto p-6">
         <CollectionStatus loading={loading} error={error} onRetry={() => void onSearch(query, compactFilters(filters), page)} />
@@ -81,6 +91,9 @@ export default function ProjectImagePanel({
           <>
             <GenerationGrid
               results={results}
+              selectedIds={selection.selectedIds}
+              selectionMode={selectionMode || selection.selectedIds.size > 0}
+              onToggleSelection={selection.toggle}
               favoriteMode="manage"
               onSelect={onSelect}
               onPreview={onPreview}

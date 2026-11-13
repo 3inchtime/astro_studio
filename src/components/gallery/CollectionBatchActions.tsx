@@ -1,3 +1,4 @@
+import ExportSelectionAction from "./ExportSelectionAction";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { addImageToFolders, deleteGeneration, getFolders } from "../../lib/api";
@@ -67,6 +68,7 @@ export default function CollectionBatchActions({ rows, selectionMode = false, se
       <button type="button" disabled={!rows.length} onClick={onSelectLoaded} className={buttonClass}>{t("studio.collection.selectVisible", { defaultValue: "Select all visible" })}</button>
       <span aria-live="polite" className="text-xs text-muted">{t("studio.collection.selectedCount", { count: selectedIds.size, defaultValue: "{{count}} generation record(s) selected" })}</span>
       {selectedIds.size > 0 && <>
+        <ExportSelectionAction rows={rows} selectedIds={selectedIds} />
         <button type="button" onClick={() => begin("favorite")} className={buttonClass}>{t("studio.collection.bulkFavorite", { defaultValue: "Add to folders" })}</button>
         <button type="button" onClick={() => begin("delete")} className={`${buttonClass} text-error`}>{t("studio.collection.bulkDelete", { defaultValue: "Move to trash" })}</button>
         <button type="button" onClick={onClear} className={buttonClass}>{t("studio.collection.clearSelection", { defaultValue: "Clear selection" })}</button>
