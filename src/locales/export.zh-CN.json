@@ -2,7 +2,6 @@
   "action": "导出原图",
   "scope": "{{records}} 条生成记录，共 {{images}} 张图片",
   "description": "将按原始格式复制所选记录中的全部图片。保留已有文件，同名文件添加数字后缀。",
-  "recipe": "为每张图片附带 JSON 配方",
   "privacy": "配方包含提示词和生成参数，不含凭据、端点和本地文件路径。",
   "cancel": "取消",
   "chooseFolder": "选择导出文件夹",

@@ -224,3 +224,7 @@ The generation composer separates reference images, prompt input, and actions, w
 Flare and Sunburst now expose image complexity, SVG vector output (including transparent backgrounds), animated GIF output, markup-guided edits, masks, JPEG/WebP compression, up to ten outputs, and streaming partial previews. Advanced controls are available in the composer and for supported canvas edits. SVG is generation-only and always produces one image; GIF supports 2–16 frames and frame delays of at least 20 ms (encoded delay caps at 655,350 ms). New format controls are preserved through retries and recovery.
 
 GIF access and SVG author model selection depend on your provider/account. Original GIF/SVG files are preserved when exporting. The canvas shows GIFs as still frames; open the original to play them. SVG rendering accepts a bounded static subset. See [supported options, constraints, and validation](doc/gpt-image-2.6.md).
+
+## Reliability features
+
+Generation recovery, reusable generation recipes, original-image batch export, portable library backups with rollback, and non-generating provider diagnostics are described in [the usage and validation notes](RELIABILITY.md).

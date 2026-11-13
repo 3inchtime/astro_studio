@@ -2,7 +2,6 @@
   "action": "Export originals",
   "scope": "{{records}} generation record(s), {{images}} image(s)",
   "description": "Every image in the selected records is copied in its original format. Existing files are kept; matching names receive a numeric suffix.",
-  "recipe": "Include a JSON recipe beside each image",
   "privacy": "Recipes include prompts and generation settings. Credentials, endpoints and local file paths are omitted.",
   "cancel": "Cancel",
   "chooseFolder": "Choose export folder",

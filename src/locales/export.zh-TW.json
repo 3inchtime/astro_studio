@@ -2,7 +2,6 @@
   "action": "匯出原圖",
   "scope": "{{records}} 筆產生記錄，共 {{images}} 張圖片",
   "description": "將依原始格式複製所選記錄中的全部圖片。保留既有檔案，同名檔案加上數字後綴。",
-  "recipe": "為每張圖片附帶 JSON 配方",
   "privacy": "配方包含提示詞和產生參數，不含憑證、端點和本機檔案路徑。",
   "cancel": "取消",
   "chooseFolder": "選擇匯出資料夾",

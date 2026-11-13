@@ -48,29 +48,5 @@
     "unrecognized_response": "応答でモデルを確認できませんでした",
     "accepted": "モデル照会の認証情報が受理されました",
     "available": "モデルを利用できます"
-  },
-  "recipe": {
-    "useParameters": "Use parameters",
-    "regenerate": "Generate again",
-    "replaceDraft": "Load saved parameters?",
-    "replaceDraftDescription": "This replaces the current prompt, references and generation settings.",
-    "reviewParameters": "Review parameters",
-    "reviewRequired": "Review these changes before generating.",
-    "useCurrentProvider": "Use current provider configuration",
-    "removeSources": "Remove saved references and overlays",
-    "resetParameters": "Reset model parameters",
-    "loadFailed": "Could not load this recipe. Check the model and saved record before trying again.",
-    "warnings": {
-      "legacy_incomplete": "This older record has no complete provider snapshot. Choose the current provider explicitly.",
-      "provider_missing": "The saved provider was removed.",
-      "endpoint_changed": "The saved provider endpoint has changed.",
-      "provider_unconfigured": "The saved provider needs an API key.",
-      "unknown_model": "This model is no longer supported. Choose a supported model.",
-      "invalid_parameters": "Some saved parameters are no longer supported.",
-      "source_missing": "A saved reference image or overlay is missing.",
-      "sources_require_selection": "Select the original source images again, or remove them.",
-      "invalid_job": "The saved job could not be validated. Review its parameters and select references again."
-    },
-    "useCurrentModel": "Use current model and default parameters"
   }
 }

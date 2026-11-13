@@ -2,7 +2,6 @@
   "action": "Originale exportieren",
   "scope": "{{records}} Generierungen, {{images}} Bilder",
   "description": "Alle Bilder der ausgewählten Datensätze werden im Originalformat kopiert. Vorhandene Dateien bleiben erhalten; gleiche Namen erhalten einen Zahlensuffix.",
-  "recipe": "Eine JSON-Rezeptdatei je Bild hinzufügen",
   "privacy": "Rezepte enthalten Prompts und Generierungseinstellungen. Zugangsdaten, Endpunkte und lokale Dateipfade werden ausgelassen.",
   "cancel": "Abbrechen",
   "chooseFolder": "Exportordner wählen",

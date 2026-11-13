@@ -2,7 +2,6 @@
   "action": "Exporter les originaux",
   "scope": "{{records}} générations, {{images}} images",
   "description": "Toutes les images sélectionnées sont copiées au format original. Les fichiers existants sont conservés ; les noms identiques reçoivent un suffixe numérique.",
-  "recipe": "Ajouter une recette JSON à chaque image",
   "privacy": "Les recettes incluent les prompts et paramètres. Les identifiants, points d’accès et chemins locaux sont omis.",
   "cancel": "Annuler",
   "chooseFolder": "Choisir le dossier d’export",
