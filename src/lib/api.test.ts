@@ -12,11 +12,13 @@ import {
   createPromptFolder,
   createPromptFavorite,
   deleteCanvasDocument,
+  permanentlyDeleteGeneration,
   deleteConversation,
   deleteModelProviderProfile,
   deletePromptFolder,
   deletePromptFavorite,
   getCanvasDocument,
+  importCanvasAsset,
   getCanvasGenerationStatus,
   listCanvasDocuments,
   getConversations,
@@ -118,6 +120,7 @@ describe("api updater commands", () => {
   it("passes a Tauri channel to the install update command", async () => {
     const onEvent = vi.fn();
     tauriApi.invoke.mockImplementation(async (_command, args) => {
+      if (_command !== "download_update") return;
       const channel = (
         args as { onEvent: InstanceType<typeof tauriApi.Channel> }
       ).onEvent;
@@ -130,7 +133,7 @@ describe("api updater commands", () => {
     await installUpdate(onEvent);
 
     expect(tauriApi.createdChannels).toHaveLength(1);
-    expect(tauriApi.invoke).toHaveBeenCalledWith("install_update", {
+    expect(tauriApi.invoke).toHaveBeenCalledWith("download_update", {
       onEvent: tauriApi.createdChannels[0],
     });
     expect(tauriEvent.listen).not.toHaveBeenCalled();
@@ -191,7 +194,8 @@ describe("api model provider profile commands", () => {
 
     tauriApi.invoke.mockResolvedValue(state);
 
-    await getModelProviderProfiles("gpt-image-2");
+    const readState = await getModelProviderProfiles("gpt-image-2");
+    expect(JSON.stringify(readState)).not.toContain("sk-provider-1");
     await saveModelProviderProfiles("gpt-image-2", state);
     await createModelProviderProfile("gpt-image-2", "Company Gateway");
     await deleteModelProviderProfile("gpt-image-2", "provider-1");
@@ -208,7 +212,7 @@ describe("api model provider profile commands", () => {
       {
         model: "gpt-image-2",
         activeProviderId: "provider-1",
-        profiles: state.profiles,
+        profiles: state.profiles.map(({ api_key, ...profile }) => ({ ...profile, credential_update: { action: "replace", value: api_key } })),
       },
     );
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(
@@ -345,7 +349,9 @@ describe("api prompt agent commands", () => {
       configId: "llm-a",
       conversationId: "conv-a",
       projectId: "project-a",
-      sourceImagePaths: ["/tmp/ref.png"],
+      sourceImagePaths: ["/tmp/ref.png", "/tmp/other.png"],
+      visualSourceImagePaths: ["/tmp/ref.png"],
+      textOnly: false,
     });
 
     expect(tauriApi.invoke).toHaveBeenCalledWith("start_prompt_agent_session", {
@@ -354,7 +360,9 @@ describe("api prompt agent commands", () => {
         config_id: "llm-a",
         conversation_id: "conv-a",
         project_id: "project-a",
-        source_image_paths: ["/tmp/ref.png"],
+        source_image_paths: ["/tmp/ref.png", "/tmp/other.png"],
+        visual_source_image_paths: ["/tmp/ref.png"],
+        text_only: false,
       },
     });
   });
@@ -366,7 +374,9 @@ describe("api prompt agent commands", () => {
       sessionId: "session-a",
       message: "Make it dusk",
       configId: "llm-a",
-      sourceImagePaths: [],
+      sourceImagePaths: ["/tmp/ref.png"],
+      visualSourceImagePaths: [],
+      textOnly: true,
     });
     await acceptPromptAgentDraft("session-a", "Final prompt");
     await cancelPromptAgentSession("session-a");
@@ -380,7 +390,9 @@ describe("api prompt agent commands", () => {
           session_id: "session-a",
           message: "Make it dusk",
           config_id: "llm-a",
-          source_image_paths: [],
+          source_image_paths: ["/tmp/ref.png"],
+          visual_source_image_paths: [],
+          text_only: true,
         },
       },
     );
@@ -538,7 +550,7 @@ describe("api project and conversation commands", () => {
       viewport: { x: 0, y: 0, scale: 1 },
       frame: { x: 0, y: 0, width: 1024, height: 1024, aspect: "1:1" },
       layers: [],
-    });
+    }, null, 0);
     await renameCanvasDocument("canvas-1", "Renamed canvas");
     await deleteCanvasDocument("canvas-1");
     await saveCanvasExport("canvas-1", "data:image/png;base64,Zm9v");
@@ -570,6 +582,7 @@ describe("api project and conversation commands", () => {
         layers: [],
       },
       previewPngBase64: null,
+      expectedRevision: 0,
     });
     expect(tauriApi.invoke).toHaveBeenNthCalledWith(
       5,
@@ -610,6 +623,7 @@ describe("api project and conversation commands", () => {
         layers: [],
       },
       "data:image/png;base64,Zm9v",
+      loaded.revision,
     );
     const exported = await saveCanvasExport(
       created.id,
@@ -623,6 +637,24 @@ describe("api project and conversation commands", () => {
     expect(saved.width).toBe(768);
     expect(exported).toBe("data:image/png;base64,Zm9v");
     expect(tauriApi.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("canvas asset and revision contracts", () => {
+  it("imports the chosen path through native managed storage", async () => {
+    tauriApi.invoke.mockResolvedValueOnce({ id: "asset-1", file_path: "/managed/asset.png" });
+    await expect(importCanvasAsset("/external/reference.png")).resolves.toEqual({ id: "asset-1", file_path: "/managed/asset.png" });
+    expect(tauriApi.invoke).toHaveBeenLastCalledWith("import_canvas_asset", { path: "/external/reference.png" });
+  });
+  it("rejects a stale browser save without losing the latest stored content", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: undefined });
+    const doc = await createCanvasDocument("revision-test", "revision-test");
+    const loaded = await getCanvasDocument(doc.id);
+    const latest = { ...loaded.content, viewport: { x: 20, y: 30, scale: 2 } };
+    const saved = await saveCanvasDocument(doc.id, latest, null, 0);
+    expect(saved.revision).toBe(1);
+    await expect(saveCanvasDocument(doc.id, loaded.content, null, 0)).rejects.toMatchObject({ kind: "CanvasRevisionConflict", detail: { expected_revision: 0, actual_revision: 1 } });
+    expect((await getCanvasDocument(doc.id)).content.viewport).toEqual(latest.viewport);
   });
 });
 
@@ -671,5 +703,28 @@ describe("canvas generation recovery API", () => {
       "get_canvas_generation_status",
       { documentId: "document-id", requestId: "request-id" },
     );
+  });
+});
+
+describe("deletion waits for canvas references", () => {
+  it("waits for a pending canvas preview and save before deleting", async () => {
+    const { queueCanvasSave } = await import("./canvas/persistence");
+    let resolve!:()=>void;
+    queueCanvasSave("delete-pending",()=>new Promise<void>(yes=>{resolve=yes;}));
+    tauriApi.invoke.mockClear();
+    const deletion=permanentlyDeleteGeneration("generation-1");
+    await vi.waitFor(()=>expect(resolve).toBeTypeOf("function"));
+    expect(tauriApi.invoke).not.toHaveBeenCalledWith("permanently_delete_generation",expect.anything());
+    resolve();await deletion;
+    expect(tauriApi.invoke).toHaveBeenCalledWith("permanently_delete_generation",{id:"generation-1"});
+  });
+  it("blocks deletion when a canvas save failed", async () => {
+    const { queueCanvasSave, waitForCanvasSaves } = await import("./canvas/persistence");
+    const write=vi.fn().mockRejectedValueOnce(new Error("disk full")).mockResolvedValue(undefined);
+    await expect(queueCanvasSave("delete-failed",write).promise).rejects.toThrow("disk full");
+    tauriApi.invoke.mockClear();
+    await expect(permanentlyDeleteGeneration("generation-2")).rejects.toThrow("disk full");
+    expect(tauriApi.invoke).not.toHaveBeenCalledWith("permanently_delete_generation",expect.anything());
+    await waitForCanvasSaves("delete-failed",true,()=>true);
   });
 });

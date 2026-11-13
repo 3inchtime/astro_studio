@@ -11,6 +11,7 @@ import {
   editImage,
   getImageModel,
   getCanvasDocument,
+  importCanvasAsset,
   getCanvasGenerationStatus,
   hasTauriRuntime,
   pickSourceImages,
@@ -26,7 +27,7 @@ import {
   completeCanvasGeneration,
   failCanvasGeneration,
 } from "../lib/canvas/generation";
-import { queueCanvasSave, waitForCanvasSaves } from "../lib/canvas/persistence";
+import { queueCanvasSave, waitForCanvasSaves, registerCanvasDraftFlusher, acknowledgeCanvasSaveRecovery, getConflictedCanvasDraft } from "../lib/canvas/persistence";
 import { useCanvasGenerationRecovery } from "../lib/canvas/useCanvasGenerationRecovery";
 import {
   alignCanvasObjects,
@@ -76,6 +77,7 @@ import { translateCanvasObjects } from "../lib/canvas/transforms";
 import { useCanvasDocumentsQuery } from "../lib/queries/canvasDocuments";
 import type {
   CanvasDocumentContent,
+  CanvasMissingAsset,
   CanvasFrame,
   CanvasLayer,
   CanvasStrokeObject,
@@ -160,6 +162,8 @@ export default function CanvasPage() {
   const [frameEditing, setFrameEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [hasSaveConflict, setHasSaveConflict] = useState(false);
+  const recoveryCopyRef = useRef<{ sourceId: string; copyId: string } | null>(null);
   const [hasSaveError, setHasSaveError] = useState(false);
   const [hasLoadError, setHasLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -176,6 +180,10 @@ export default function CanvasPage() {
   const [history, setHistory] = useState(() =>
     createHistory<CanvasDocumentContent>(createCanvasDocumentContent()),
   );
+  const revisionsRef = useRef(new Map<string, number>());
+  const missingAssetsRef = useRef<CanvasMissingAsset[]>([]);
+  const [relinkingAsset, setRelinkingAsset] = useState<string | null>(null);
+  const [missingAssets, setMissingAssets] = useState<CanvasMissingAsset[]>([]);
   const saveTimerRef = useRef<number | null>(null);
   const loadRequestTokenRef = useRef(0);
   const retryLoadDocumentIdRef = useRef<string | null>(null);
@@ -207,7 +215,18 @@ export default function CanvasPage() {
 
   useEffect(() => {
     mountedRef.current = true;
+    const unregister = registerCanvasDraftFlusher(async () => {
+      clearSaveTimer();
+      // Repeat if an edit arrived while preview rendering or IPC was pending.
+      while (loadedDocumentIdRef.current && isDirtyRef.current) {
+        const id = loadedDocumentIdRef.current;
+        const snapshot = historyPresentRef.current;
+        await persistDocument(id, snapshot);
+        if (historyPresentRef.current === snapshot) break;
+      }
+    });
     return () => {
+      unregister();
       mountedRef.current = false;
       clearSaveTimer();
       const documentId = loadedDocumentIdRef.current;
@@ -246,6 +265,7 @@ export default function CanvasPage() {
     setDirtyState(false);
     setIsSaving(false);
     setHasSaveError(false);
+    setHasSaveConflict(false);
     setHasLoadError(false);
 
     if (!selectedDocumentId) {
@@ -271,6 +291,9 @@ export default function CanvasPage() {
       if (!isCurrentLoad()) return;
       const document = await getCanvasDocument(requestedDocumentId);
       if (!isCurrentLoad()) return;
+      revisionsRef.current.set(requestedDocumentId, document.revision ?? 0);
+      missingAssetsRef.current = document.missing_assets ?? [];
+      setMissingAssets(document.missing_assets ?? []);
       const nextContent = sanitizeCanvasDocumentContent(document.content);
       historyPresentRef.current = nextContent;
       loadedDocumentIdRef.current = requestedDocumentId;
@@ -284,7 +307,21 @@ export default function CanvasPage() {
       setHasSaveError(false);
       setHasLoadError(false);
     })().catch(() => {
-      if (isCurrentLoad()) setHasLoadError(true);
+      if (!isCurrentLoad()) return;
+      const recovered = getConflictedCanvasDraft(requestedDocumentId);
+      if (!recovered) { setHasLoadError(true); return; }
+      // A late conflict must remain editable after navigating away and back.
+      const nextContent = sanitizeCanvasDocumentContent(recovered.content);
+      revisionsRef.current.set(requestedDocumentId, recovered.revision);
+      historyPresentRef.current = nextContent;
+      loadedDocumentIdRef.current = requestedDocumentId;
+      setHistory(createHistory(nextContent));
+      setActiveLayerId(nextContent.layers[0]?.id ?? null);
+      setLoadedDocumentId(requestedDocumentId);
+      setDirtyState(true);
+      setHasSaveError(true);
+      setHasSaveConflict(true);
+      setHasLoadError(false);
     });
     return () => {
       disposed = true;
@@ -295,7 +332,7 @@ export default function CanvasPage() {
     if (
       !selectedDocumentId ||
       loadedDocumentId !== selectedDocumentId ||
-      !isDirty
+      !isDirty || hasSaveConflict
     ) {
       return;
     }
@@ -317,7 +354,7 @@ export default function CanvasPage() {
     }, 500);
 
     return clearSaveTimer;
-  }, [history.present, isDirty, loadedDocumentId, selectedDocumentId]);
+  }, [history.present, isDirty, hasSaveConflict, loadedDocumentId, selectedDocumentId]);
 
   const content = history.present;
   useEffect(() => {
@@ -513,6 +550,7 @@ export default function CanvasPage() {
     setDirtyState(false);
     setIsSaving(false);
     setHasSaveError(false);
+    setHasSaveConflict(false);
     setHasLoadError(false);
     setSelectedDocumentId(targetDocumentId);
     setTransitionState(false);
@@ -645,10 +683,23 @@ export default function CanvasPage() {
     const queuedSave = queueCanvasSave(
       documentId,
       async () => {
-        const previewPngBase64 = await exportCanvasFrame(snapshot);
-        await saveCanvasDocument(documentId, snapshot, previewPngBase64);
+        // A legacy missing image must not prevent saving the rest of the draft.
+        const missing = missingAssetsRef.current;
+        const previewContent = missing.length ? {
+          ...snapshot,
+          layers: snapshot.layers.map((layer) => ({ ...layer, objects: layer.objects.filter((object) =>
+            object.type !== "image" || !missing.some((asset) => asset.object_id === object.id && asset.image_path === object.image_path)
+          ) })),
+        } : snapshot;
+        const previewPngBase64 = await exportCanvasFrame(previewContent).catch(() => null);
+        const saved = await saveCanvasDocument(
+          documentId, snapshot, previewPngBase64,
+          revisionsRef.current.get(documentId) ?? 0,
+        );
+        revisionsRef.current.set(documentId, saved.revision);
       },
       saveQueueRef.current,
+      snapshot,
     ).promise;
     const promise = (async () => {
       try {
@@ -662,6 +713,7 @@ export default function CanvasPage() {
         if (isCurrentSnapshot()) {
           setDirtyState(true);
           setHasSaveError(true);
+          setHasSaveConflict(Boolean(error && typeof error === "object" && "kind" in error && error.kind === "CanvasRevisionConflict"));
         }
         throw error;
       } finally {
@@ -682,6 +734,34 @@ export default function CanvasPage() {
       promise,
     };
     return promise;
+  }
+
+  async function handleSaveCopy() {
+    const sourceId = loadedDocumentIdRef.current;
+    if (!sourceId || !isDocumentReady(sourceId)) return;
+    clearSaveTimer();
+    setTransitionState(true);
+    try {
+      if (recoveryCopyRef.current?.sourceId !== sourceId) {
+        const copy = await createCanvasDocument(activeProjectId, t("canvas.recoveredCanvas"));
+        revisionsRef.current.set(copy.id, copy.revision ?? 0);
+        recoveryCopyRef.current = { sourceId, copyId: copy.id };
+      }
+      const copyId = recoveryCopyRef.current.copyId;
+      await persistDocument(copyId, historyPresentRef.current);
+      acknowledgeCanvasSaveRecovery(sourceId);
+      setDirtyState(false);
+      setHasSaveError(false);
+      setHasSaveConflict(false);
+      setTransitionState(false);
+      await transitionToDocument(copyId);
+      await refetch();
+      recoveryCopyRef.current = null;
+    } catch {
+      setHasSaveError(true);
+    } finally {
+      setTransitionState(false);
+    }
   }
 
   function handleRetrySave() {
@@ -956,7 +1036,10 @@ export default function CanvasPage() {
     try {
       const paths = await pickSourceImages();
       const images = await Promise.all(
-        paths.map(async (path) => ({ path, size: await readImageSize(path) })),
+        paths.map(async (path) => {
+          const asset = await importCanvasAsset(path);
+          return { path: asset.file_path, assetId: asset.id, size: await readImageSize(asset.file_path) };
+        }),
       );
       if (
         !mountedRef.current ||
@@ -969,11 +1052,12 @@ export default function CanvasPage() {
       const layer = latest.layers.find((l) => l.id === layerId);
       if (!layer || !layer.visible || layer.locked) return;
       let x = latest.frame.x;
-      const objects = images.map(({ path, size }) => {
+      const objects = images.map(({ path, assetId, size }) => {
         const width = Math.min(960, size.width),
           height = (size.height / size.width) * width;
         const object = createImageObject({
           image_path: path,
+          asset_id: assetId,
           x,
           y: latest.frame.y,
           width,
@@ -1001,6 +1085,35 @@ export default function CanvasPage() {
         token === loadRequestTokenRef.current
       )
         setImportError(t("canvas.importError"));
+    }
+  }
+
+  async function handleRelinkAsset(missing: CanvasMissingAsset) {
+    const documentId = loadedDocumentIdRef.current;
+    const token = loadRequestTokenRef.current;
+    if (!documentId || relinkingAsset) return;
+    setRelinkingAsset(missing.object_id);
+    setImportError(null);
+    try {
+      const paths = await pickSourceImages();
+      if (!paths.length) return;
+      const asset = await importCanvasAsset(paths[0]);
+      const size = await readImageSize(asset.file_path);
+      if (!mountedRef.current || !isDocumentReady(documentId) || token !== loadRequestTokenRef.current) return;
+      const next = {
+        ...historyPresentRef.current,
+        layers: historyPresentRef.current.layers.map((layer) => ({
+          ...layer,
+          objects: layer.objects.map((object) => object.id === missing.object_id && object.type === "image"
+            ? { ...object, asset_id: asset.id, image_path: asset.file_path, original_width: size.width, original_height: size.height }
+            : object),
+        })),
+      };
+      if (updateContent(next, undefined, documentId)) await persistDocument(documentId, next);
+    } catch {
+      if (mountedRef.current && token === loadRequestTokenRef.current) setImportError(t("canvas.relinkError"));
+    } finally {
+      if (mountedRef.current) setRelinkingAsset(null);
     }
   }
 
@@ -1394,17 +1507,29 @@ export default function CanvasPage() {
                   role={hasSaveError ? "alert" : undefined}
                   className="absolute right-5 top-5 z-10 flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface/88 px-3 py-2 text-xs font-medium text-muted shadow-card backdrop-blur-xl"
                 >
-                  <span>{saveStatusLabel}</span>
+                  <span className="max-w-xs">{hasSaveConflict ? t("canvas.saveConflict") : saveStatusLabel}</span>
                   {hasSaveError ? (
                     <button
                       type="button"
                       className="focus-ring cursor-pointer rounded-[7px] bg-primary/10 px-2 py-1 font-semibold text-primary hover:bg-primary/15"
-                      onClick={handleRetrySave}
+                      onClick={hasSaveConflict ? () => void handleSaveCopy() : handleRetrySave}
                     >
-                      {t("canvas.retrySave")}
+                      {t(hasSaveConflict ? "canvas.saveCopy" : "canvas.retrySave")}
                     </button>
                   ) : null}
                 </div>
+                {missingAssets.some((asset) => content.layers.some((layer) => layer.objects.some((object) => object.id === asset.object_id && object.type === "image" && object.image_path === asset.image_path))) && (
+                  <div role="status" className="absolute bottom-20 right-5 z-30 max-h-[40%] w-72 max-w-[calc(100%-5rem)] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-body-sm text-foreground">
+                    <p className="mb-2 text-muted">{t("canvas.missingAssets")}</p>
+                    {missingAssets.filter((asset) => content.layers.some((layer) => layer.objects.some((object) => object.id === asset.object_id && object.type === "image" && object.image_path === asset.image_path))).map((asset) => (
+                      <div key={asset.object_id} className="flex min-w-0 items-center gap-2 py-1">
+                        <span className="min-w-0 flex-1 truncate" title={asset.image_path}>{asset.image_path.split(/[\\/]/).pop()}</span>
+                        <button type="button" disabled={Boolean(relinkingAsset)} aria-label={`${t("canvas.relinkAsset")} ${asset.image_path.split(/[\\/]/).pop()}`} className="focus-ring shrink-0 rounded-lg border border-control-border px-3 py-2 disabled:opacity-50" onClick={() => void handleRelinkAsset(asset)}>{t(relinkingAsset === asset.object_id ? "canvas.relinkingAsset" : "canvas.relinkAsset")}</button>
+                      </div>
+                    ))}
+                    {importError && <p role="alert" className="mt-2 text-error">{importError}</p>}
+                  </div>
+                )}
                 <div
                   data-testid="canvas-floating-toolbar"
                   className="pointer-events-none absolute inset-0 z-20"

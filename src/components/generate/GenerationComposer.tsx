@@ -74,8 +74,15 @@ export interface GenerationComposerProps {
   composerMode: ComposerMode;
   onComposerModeChange: (mode: ComposerMode) => void;
   onDeepThinkingSend: () => void;
-  onPromptAgentConfigChange?: (configId: string) => void;
+  promptAgentConfigId?: string;
+  onPromptAgentConfigChange?: (configId: string, userInitiated?: boolean) => void;
   isPromptAgentRunning?: boolean;
+  agentVisualSourcePaths?: string[];
+  onAgentVisualSourcePathsChange?: (paths: string[]) => void;
+  agentTextOnly?: boolean;
+  onAgentTextOnlyChange?: (enabled: boolean) => void;
+  promptAgentError?: string | null;
+  onRetryPromptAgent?: () => void;
   isGenerating?: boolean;
 }
 
@@ -119,8 +126,15 @@ export default function GenerationComposer({
   composerMode,
   onComposerModeChange,
   onDeepThinkingSend,
+  promptAgentConfigId,
   onPromptAgentConfigChange,
   isPromptAgentRunning = false,
+  agentVisualSourcePaths,
+  onAgentVisualSourcePathsChange,
+  agentTextOnly = false,
+  onAgentTextOnlyChange,
+  promptAgentError,
+  onRetryPromptAgent,
   isGenerating = false,
 }: GenerationComposerProps) {
   const { t } = useTranslation();
@@ -135,7 +149,7 @@ export default function GenerationComposer({
     useState<string>("");
   const [showConfigDropdown, setShowConfigDropdown] = useState(false);
 
-  const { data: llmConfigs = [] } = useLlmConfigsQuery();
+  const { data: llmConfigs = [], isSuccess: configsLoaded } = useLlmConfigsQuery();
 
   const enabledPromptConfigs = useMemo(
     () =>
@@ -214,11 +228,16 @@ export default function GenerationComposer({
   }, [showConfigDropdown]);
 
   const hasEditSources = editSources.length > 0;
+  const isVisualThinking = composerMode === "deep-thinking" && hasEditSources;
+  const uniqueSourcePaths = [...new Set(editSources.map((source) => source.path))];
+  const selectedVisualPaths = (agentVisualSourcePaths ?? (uniqueSourcePaths.length <= 3 ? uniqueSourcePaths : []))
+    .filter((path) => uniqueSourcePaths.includes(path));
+  const requiresVisionConfig = hasEditSources && !(isVisualThinking && agentTextOnly);
   const activeOptimizeConfigCount = hasEditSources
     ? enabledMultimodalConfigs.length
     : enabledPromptConfigs.length;
 
-  const effectiveConfigId = hasEditSources
+  const localOptimizeConfigId = hasEditSources
     ? enabledMultimodalConfigs.length === 1
       ? enabledMultimodalConfigs[0].id
       : selectedMultimodalConfigId
@@ -226,9 +245,22 @@ export default function GenerationComposer({
       ? enabledPromptConfigs[0].id
       : selectedConfigId;
 
+  const agentConfigs = requiresVisionConfig ? enabledMultimodalConfigs : enabledPromptConfigs;
+  const effectiveConfigId = promptAgentConfigId === undefined
+    ? requiresVisionConfig ? localOptimizeConfigId : enabledPromptConfigs.length === 1 ? enabledPromptConfigs[0].id : selectedConfigId
+    : agentConfigs.some((config) => config.id === promptAgentConfigId)
+      ? promptAgentConfigId
+      : agentConfigs.length === 1 ? agentConfigs[0].id : "";
+  const effectiveOptimizeConfigId = composerMode === "deep-thinking" &&
+    (!hasEditSources || enabledMultimodalConfigs.some((config) => config.id === effectiveConfigId))
+      ? effectiveConfigId : localOptimizeConfigId;
+  const displayedTextConfigId = composerMode === "deep-thinking" ? effectiveConfigId : selectedConfigId;
+  const displayedMultimodalConfigId = composerMode === "deep-thinking" ? effectiveConfigId : selectedMultimodalConfigId;
+
   useEffect(() => {
-    onPromptAgentConfigChange?.(effectiveConfigId);
-  }, [effectiveConfigId, onPromptAgentConfigChange]);
+    // Query hydration must not clear a restored choice or invalidate an in-flight draft.
+    if (configsLoaded && effectiveConfigId !== promptAgentConfigId) onPromptAgentConfigChange?.(effectiveConfigId);
+  }, [configsLoaded, effectiveConfigId, promptAgentConfigId, onPromptAgentConfigChange]);
 
   const handleOptimize = useCallback(async () => {
     const trimmed = prompt.trim();
@@ -249,7 +281,7 @@ export default function GenerationComposer({
       );
       return;
     }
-    if (!effectiveConfigId) {
+    if (!effectiveOptimizeConfigId) {
       setOptimizeError(t("generate.llm.selectConfigFirst"));
       setShowConfigDropdown(true);
       return;
@@ -266,7 +298,7 @@ export default function GenerationComposer({
     try {
       const result = await optimizeMutation.mutateAsync({
         prompt: trimmed,
-        configId: effectiveConfigId,
+        configId: effectiveOptimizeConfigId,
         imagePaths,
       });
       setOptimizedPrompt(result);
@@ -281,7 +313,7 @@ export default function GenerationComposer({
     t,
     activeOptimizeConfigCount,
     hasEditSources,
-    effectiveConfigId,
+    effectiveOptimizeConfigId,
     editSources,
   ]);
 
@@ -317,7 +349,8 @@ export default function GenerationComposer({
     !prompt.trim() ||
     isGenerating ||
     optimizeMutation.isPending ||
-    isPromptAgentRunning;
+    isPromptAgentRunning ||
+    (isVisualThinking && !agentTextOnly && (selectedVisualPaths.length === 0 || selectedVisualPaths.length > 3));
   const submit =
     composerMode === "deep-thinking" ? onDeepThinkingSend : onGenerate;
 
@@ -357,13 +390,18 @@ export default function GenerationComposer({
         ? createPortal(parameters, parametersTarget)
         : parameters}
 
+            {promptAgentError && <div role="alert" className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border-subtle bg-surface px-5 py-3 text-body-sm">
+              <p className="min-w-0 flex-1 text-error">{promptAgentError}</p>
+              <button type="button" disabled={isPromptAgentRunning || isGenerating || interactionDisabled} onClick={onRetryPromptAgent} className="focus-ring rounded-lg border border-control-border px-3 py-2 text-foreground disabled:opacity-50">{t("promptVision.retry")}</button>
+            </div>}
+
       <div className="generation-composer shrink-0 border-t border-border-subtle bg-surface px-5 py-4">
         <div className="mx-auto w-full max-w-[980px]">
           <div
             data-testid="generation-command-surface"
             className="relative flex w-full min-h-0 flex-col gap-2"
           >
-            <div className="generation-composer-scroll min-h-0 overflow-y-auto">
+                    <div className="generation-composer-scroll min-h-0 overflow-y-auto">
               {editingPromptMessageId && (
                 <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-primary/12 bg-primary/6 px-3 py-2">
                   <div className="text-xs font-medium text-foreground">
@@ -429,6 +467,13 @@ export default function GenerationComposer({
 
               {editSources.length > 0 && (
                 <div className="min-h-0 overflow-y-auto">
+                  {isVisualThinking && <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-body-sm">
+                    <span>{t("promptVision.selectedCount", { count: agentTextOnly ? 0 : selectedVisualPaths.length, total: uniqueSourcePaths.length })}</span>
+                    <label className="flex min-h-8 cursor-pointer items-center gap-2 text-muted">
+                      <input type="checkbox" role="switch" checked={agentTextOnly} onChange={(event) => onAgentTextOnlyChange?.(event.target.checked)} className="focus-ring h-4 w-4 accent-primary" />
+                      {t("promptVision.textOnly")}
+                    </label>
+                  </div>}
                   <div className="mb-2 flex items-center gap-2 text-xs font-medium text-foreground">
                     <Wand2 size={14} className="text-primary" />
                     {t("generate.editingSources", {
@@ -444,8 +489,13 @@ export default function GenerationComposer({
                         <img
                           src={toAssetUrl(source.path)}
                           alt={source.label}
-                          className="h-12 w-12 object-cover"
+                          className={isVisualThinking ? "h-16 w-16 object-cover" : "h-12 w-12 object-cover"}
                         />
+                        {isVisualThinking && !agentTextOnly && <label className="absolute bottom-0 left-0 flex h-8 w-8 cursor-pointer items-center justify-center rounded-tr-lg bg-surface/95">
+                          <input type="checkbox" aria-label={t("promptVision.selectReference", { name: source.label })} checked={selectedVisualPaths.includes(source.path)} disabled={!selectedVisualPaths.includes(source.path) && selectedVisualPaths.length >= 3}
+                            onChange={(event) => onAgentVisualSourcePathsChange?.(event.target.checked ? [...selectedVisualPaths, source.path] : selectedVisualPaths.filter((path) => path !== source.path))}
+                            className="focus-ring h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40" />
+                        </label>}
                         <button
                           onClick={() => onRemoveEditSource(source.id)}
                           className="focus-ring absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-black/60 text-white transition-colors hover:bg-black/80"
@@ -463,6 +513,7 @@ export default function GenerationComposer({
                 </div>
               )}
 
+              {isVisualThinking && <p className="my-2 text-body-sm leading-5 text-muted">{t(agentTextOnly ? "promptVision.textOnlyHint" : "promptVision.editReferencesKept")}</p>}
               <textarea
                 ref={textareaRef}
                 value={prompt}
@@ -495,7 +546,7 @@ export default function GenerationComposer({
                 })}
               </span>
               {/* Config selector — visible only when multiple enabled configs of the active type */}
-              {hasEditSources
+              {requiresVisionConfig
                 ? enabledMultimodalConfigs.length > 1 && (
                     <div className="relative" ref={configDropdownRef}>
                       <button
@@ -507,9 +558,9 @@ export default function GenerationComposer({
                         className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-lg px-2 text-xs font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
-                          {selectedMultimodalConfigId
+                          {displayedMultimodalConfigId
                             ? (enabledMultimodalConfigs.find(
-                                (c) => c.id === selectedMultimodalConfigId,
+                                (c) => c.id === displayedMultimodalConfigId,
                               )?.name ?? t("generate.llm.selectLlm"))
                             : t("generate.llm.selectLlm")}
                         </span>
@@ -523,10 +574,11 @@ export default function GenerationComposer({
                               type="button"
                               onClick={() => {
                                 setSelectedMultimodalConfigId(config.id);
+                                if (composerMode === "deep-thinking") onPromptAgentConfigChange?.(config.id, true);
                                 setShowConfigDropdown(false);
                               }}
                               className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-subtle ${
-                                selectedMultimodalConfigId === config.id
+                                displayedMultimodalConfigId === config.id
                                   ? "text-primary"
                                   : "text-foreground"
                               }`}
@@ -549,9 +601,9 @@ export default function GenerationComposer({
                         className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-lg px-2 text-xs font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
-                          {selectedConfigId
+                          {displayedTextConfigId
                             ? (enabledPromptConfigs.find(
-                                (c) => c.id === selectedConfigId,
+                                (c) => c.id === displayedTextConfigId,
                               )?.name ?? t("generate.llm.selectLlm"))
                             : t("generate.llm.selectLlm")}
                         </span>
@@ -565,10 +617,11 @@ export default function GenerationComposer({
                               type="button"
                               onClick={() => {
                                 setSelectedConfigId(config.id);
+                                if (composerMode === "deep-thinking") onPromptAgentConfigChange?.(config.id, true);
                                 setShowConfigDropdown(false);
                               }}
                               className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-subtle ${
-                                selectedConfigId === config.id
+                                displayedTextConfigId === config.id
                                   ? "text-primary"
                                   : "text-foreground"
                               }`}

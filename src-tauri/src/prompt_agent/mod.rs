@@ -2,6 +2,7 @@ pub mod runner;
 pub mod skills;
 pub mod tools;
 pub mod types;
+pub mod vision;
 
 pub const PROMPT_AGENT_MAX_TURNS: usize = 6;
 pub const PROMPT_AGENT_STATUS_ACTIVE: &str = "active";

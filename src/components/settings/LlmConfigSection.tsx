@@ -14,10 +14,7 @@ import {
 } from "../../lib/llmConfigDefaults";
 import { canEnableLlmConfig } from "../../lib/llmConfigRules";
 
-function maskKey(key: string): string {
-  if (key.length <= 8) return "sk-****";
-  return key.slice(0, 3) + "..." + key.slice(-4);
-}
+
 
 function protocolLabel(protocol: string): string {
   return protocol === "anthropic" ? "Anthropic" : "OpenAI";
@@ -39,11 +36,7 @@ function ConfigForm({
   onChange,
 }: ConfigFormProps) {
   const { t } = useTranslation();
-  const displayKey = showKey
-    ? config.api_key
-    : config.api_key
-      ? maskKey(config.api_key)
-      : "";
+  const displayKey = config.api_key ?? "";
 
   return (
     <motion.div
@@ -115,15 +108,12 @@ function ConfigForm({
                 type={showKey ? "text" : "password"}
                 value={displayKey}
                 onChange={(e) =>
-                  onChange({ ...config, api_key: e.target.value })
+                  onChange({ ...config, api_key: e.target.value, credential_update: undefined })
                 }
-                onFocus={() => {
-                  if (!showKey) onToggleShowKey();
-                }}
                 onBlur={() => {
                   if (showKey) onToggleShowKey();
                 }}
-                placeholder="sk-..."
+                placeholder={config.api_key_configured ? t("credentials.keepPlaceholder") : "sk-..."}
                 className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-sm placeholder:text-muted"
               />
               <button
@@ -144,6 +134,8 @@ function ConfigForm({
                 {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
               </button>
             </div>
+            <span className="text-xs text-muted">{t("credentials.vaultHint")}</span>
+            {config.api_key_configured && <button type="button" onClick={() => onChange({ ...config, api_key: "", credential_update: { action: "clear" } })} className="justify-self-start text-xs text-error">{t(config.credential_update?.action === "clear" ? "credentials.clearPending" : "credentials.clear")}</button>}
           </label>
 
           <label className="grid gap-1.5">
@@ -209,11 +201,9 @@ export function LlmConfigSection() {
   useEffect(() => {
     if (serverConfigs) {
       setConfigs(serverConfigs);
-      if (!editingId && serverConfigs[0]) {
-        setEditingId(serverConfigs[0].id);
-      }
+      setEditingId((current) => current ?? serverConfigs[0]?.id ?? null);
     }
-  }, [editingId, serverConfigs]);
+  }, [serverConfigs]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -223,6 +213,7 @@ export function LlmConfigSection() {
     try {
       setConfigs(updated);
       await saveMutation.mutateAsync(updated);
+      setConfigs(updated.map(c => ({ ...c, api_key: "", credential_update: undefined })));
       return true;
     } catch {
       setSaveError(t("settings.llm.saveError"));
@@ -317,6 +308,7 @@ export function LlmConfigSection() {
     try {
       setConfigs(updated);
       await saveMutation.mutateAsync(updated);
+      setConfigs(updated.map(c => ({ ...c, api_key: "", credential_update: undefined })));
       if (editingId === deleteTargetId) setEditingId(null);
       setDeleteTargetId(null);
     } catch {
@@ -595,11 +587,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
   const [config, setConfig] = useState<LlmConfig>(createDefaultLlmConfig());
   const [showKey, setShowKey] = useState(false);
 
-  const displayKey = showKey
-    ? config.api_key
-    : config.api_key
-      ? maskKey(config.api_key)
-      : "";
+  const displayKey = config.api_key ?? "";
 
   return (
     <motion.div
@@ -680,15 +668,12 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                 type={showKey ? "text" : "password"}
                 value={displayKey}
                 onChange={(e) =>
-                  setConfig({ ...config, api_key: e.target.value })
+                  setConfig({ ...config, api_key: e.target.value, credential_update: undefined })
                 }
-                onFocus={() => {
-                  if (!showKey) setShowKey(true);
-                }}
                 onBlur={() => {
                   if (showKey) setShowKey(false);
                 }}
-                placeholder="sk-..."
+                placeholder={config.api_key_configured ? t("credentials.keepPlaceholder") : "sk-..."}
                 className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-sm placeholder:text-muted"
               />
               <button

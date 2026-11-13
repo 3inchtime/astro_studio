@@ -473,3 +473,135 @@ fn extraction_keeps_approved_hashes_after_archive_replacement_and_cleans_staging
     );
     assert!(!f.paths.bootstrap.join("active-library.json").exists());
 }
+
+#[test]
+fn backup_roundtrip_keeps_managed_asset_identity_refs_and_revision() {
+    let f = Fixture::new();
+    let external = f.image("external/source.png", [1, 2, 3, 255]);
+    let asset;
+    let document = f.paths.assets.join("canvas/revision.json");
+    {
+        let conn = f.db.conn.lock().unwrap();
+        asset = crate::canvas_assets::import_asset(&conn, &f.paths.assets, &external).unwrap();
+        conn.execute(
+            "INSERT INTO projects(id,name) VALUES('project','Project')",
+            [],
+        )
+        .unwrap();
+        fs::write(&document,json!({"version":2,"layers":[{"objects":[{"id":"image","type":"image","asset_id":asset.id,"image_path":asset.file_path}]}]}).to_string()).unwrap();
+        conn.execute("INSERT INTO canvas_documents(id,project_id,name,document_path,revision) VALUES('board','project','Board',?1,9)",[document.to_string_lossy().as_ref()]).unwrap();
+        conn.execute("INSERT INTO canvas_asset_refs(document_id,object_id,asset_id) VALUES('board','image',?1)",[&asset.id]).unwrap();
+    }
+    let archive = f.archive();
+    let destination = restore_archive(&f.paths, &archive, &f.operation(), &|_, _, _| {}).unwrap();
+    fs::remove_file(&asset.file_path).unwrap();
+    fs::remove_file(&external).unwrap();
+    let restored = Database::open(&destination.join("library.db")).unwrap();
+    let conn = restored.conn.lock().unwrap();
+    let path = crate::canvas_assets::resolve_asset(&conn, &asset.id)
+        .unwrap()
+        .unwrap();
+    assert!(Path::new(&path).starts_with(&destination));
+    assert!(Path::new(&path).is_file());
+    assert_eq!(
+        conn.query_row(
+            "SELECT revision FROM canvas_documents WHERE id='board'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        9
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT asset_id FROM canvas_asset_refs WHERE document_id='board'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        asset.id
+    );
+    let doc: String = conn
+        .query_row(
+            "SELECT document_path FROM canvas_documents WHERE id='board'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let content: Value = serde_json::from_slice(&fs::read(doc).unwrap()).unwrap();
+    assert_eq!(content["layers"][0]["objects"][0]["asset_id"], asset.id);
+    assert_eq!(content["layers"][0]["objects"][0]["image_path"], path);
+}
+
+#[test]
+fn restore_pre_revision_backup_migrates_canvas_metadata_without_losing_content() {
+    let f = Fixture::new();
+    let document = f.paths.assets.join("old-board.json");
+    let original = json!({"version":1,"layers":[],"legacy_note":"preserve"});
+    fs::write(&document, original.to_string()).unwrap();
+    {
+        let conn = f.db.conn.lock().unwrap();
+        conn.execute("INSERT INTO projects(id,name) VALUES('old','Old')", [])
+            .unwrap();
+        conn.execute("INSERT INTO canvas_documents(id,project_id,name,document_path) VALUES('old-board','old','Old board',?1)",[document.to_string_lossy().as_ref()]).unwrap();
+    }
+    let archive = f.archive();
+    let mut entries = archive_entries(&archive);
+    let db_file = f._root.0.join("old-schema.db");
+    fs::write(
+        &db_file,
+        &entries.iter().find(|(n, _)| n == "library.db").unwrap().1,
+    )
+    .unwrap();
+    {
+        let conn = Connection::open(&db_file).unwrap();
+        // Later schema columns are stripped when present so this remains a real v18 fixture.
+        let has_visual_context:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('prompt_agent_messages') WHERE name='visual_context_json')",[],|r|r.get(0)).unwrap();
+        if has_visual_context {
+            conn.execute_batch(
+                "ALTER TABLE prompt_agent_messages DROP COLUMN visual_context_json;",
+            )
+            .unwrap();
+        }
+        conn.execute_batch("DROP TABLE canvas_asset_refs; DROP TABLE canvas_assets; ALTER TABLE canvas_documents DROP COLUMN revision; DELETE FROM schema_migrations WHERE version>=19; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    }
+    entries
+        .iter_mut()
+        .find(|(n, _)| n == "library.db")
+        .unwrap()
+        .1 = fs::read(&db_file).unwrap();
+    let manifest = &mut entries
+        .iter_mut()
+        .find(|(n, _)| n == "manifest.json")
+        .unwrap()
+        .1;
+    let mut m: BackupManifest = serde_json::from_slice(manifest).unwrap();
+    m.schema_version = 18;
+    let (size, sha256) = hash_file(&db_file).unwrap();
+    let database = m.files.iter_mut().find(|f| f.name == "library.db").unwrap();
+    database.size = size;
+    database.sha256 = sha256;
+    *manifest = serde_json::to_vec(&m).unwrap();
+    write_entries(&archive, &entries);
+    let destination = restore_archive(&f.paths, &archive, &f.operation(), &|_, _, _| {}).unwrap();
+    let restored = Database::open(&destination.join("library.db")).unwrap();
+    let conn = restored.conn.lock().unwrap();
+    let (path, revision): (String, i64) = conn
+        .query_row(
+            "SELECT document_path,revision FROM canvas_documents WHERE id='old-board'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(revision, 0);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM canvas_assets", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}

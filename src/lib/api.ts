@@ -1,3 +1,5 @@
+import { credentialWrite, credentialDraft } from "./credentialDraft";
+import { flushCanvasSaves } from "./canvas/persistence";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -137,7 +139,7 @@ export async function saveApiKey(key: string): Promise<void> {
   await invoke("save_api_key", { key });
 }
 
-export async function getApiKey(): Promise<string | null> {
+export async function getApiKey(): Promise<import("../types").CredentialStatus> {
   return invoke("get_api_key");
 }
 
@@ -155,7 +157,7 @@ export async function getEndpointSettings(): Promise<EndpointSettings> {
 
 export async function getModelApiKey(
   model: ImageModel,
-): Promise<string | null> {
+): Promise<import("../types").CredentialStatus> {
   return invoke("get_model_api_key", { model });
 }
 
@@ -199,7 +201,8 @@ export async function saveModelEndpointSettings(
 export async function getModelProviderProfiles(
   model: ImageModel,
 ): Promise<ModelProviderProfilesState> {
-  return invoke("get_model_provider_profiles", { model });
+  const state = await invoke<ModelProviderProfilesState>("get_model_provider_profiles", { model });
+  return { ...state, profiles: state.profiles.map(credentialDraft) };
 }
 
 export async function saveModelProviderProfiles(
@@ -209,7 +212,7 @@ export async function saveModelProviderProfiles(
   return invoke("save_model_provider_profiles", {
     model,
     activeProviderId: state.active_provider_id,
-    profiles: state.profiles,
+    profiles: state.profiles.map(credentialWrite),
   });
 }
 
@@ -468,6 +471,7 @@ export async function restoreGeneration(id: string): Promise<void> {
 }
 
 export async function permanentlyDeleteGeneration(id: string): Promise<void> {
+  await flushCanvasSaves();
   await invoke("permanently_delete_generation", { id });
 }
 
@@ -579,6 +583,7 @@ export async function createCanvasDocument(
       id: crypto.randomUUID(),
       project_id: browserProjectId,
       name: name?.trim() || "Untitled Canvas",
+      revision: 0,
       document_path: `browser-canvas://${crypto.randomUUID()}.json`,
       preview_path: null,
       width: 1024,
@@ -631,6 +636,7 @@ export async function getCanvasDocument(
     return {
       ...document,
       content: cloneCanvasContent(document.content),
+      revision: document.revision ?? 0,
     };
   }
 
@@ -640,14 +646,21 @@ export async function getCanvasDocument(
 export async function saveCanvasDocument(
   id: string,
   content: CanvasDocumentContent,
-  previewPngBase64?: string | null,
+  previewPngBase64: string | null | undefined,
+  expectedRevision: number,
 ): Promise<CanvasDocument> {
   if (!hasTauriRuntime()) {
     const documents = readBrowserCanvasDocuments();
+    const current = documents.find((document) => document.id === id);
+    if (!current) throw new Error(`Canvas document not found: ${id}`);
+    if ((current.revision ?? 0) !== expectedRevision) {
+      throw { kind: "CanvasRevisionConflict", detail: { expected_revision: expectedRevision, actual_revision: current.revision ?? 0 } };
+    }
     const nextDocuments = documents.map((document) =>
       document.id === id
         ? {
             ...document,
+            revision: expectedRevision + 1,
             preview_path: previewPngBase64 || document.preview_path,
             width: Math.round(content.frame.width),
             height: Math.round(content.frame.height),
@@ -668,7 +681,12 @@ export async function saveCanvasDocument(
     id,
     content,
     previewPngBase64: previewPngBase64 || null,
+    expectedRevision,
   });
+}
+
+export async function importCanvasAsset(path: string): Promise<{ id: string; file_path: string }> {
+  return invoke("import_canvas_asset", { path });
 }
 
 export async function renameCanvasDocument(
@@ -698,6 +716,7 @@ export async function renameCanvasDocument(
 }
 
 export async function deleteCanvasDocument(id: string): Promise<void> {
+  await flushCanvasSaves();
   if (!hasTauriRuntime()) {
     const timestamp = new Date().toISOString();
     writeBrowserCanvasDocuments(
@@ -878,6 +897,8 @@ export async function getTrashSettings(): Promise<TrashSettings> {
 }
 
 export async function saveTrashSettings(retentionDays: number): Promise<void> {
+  // Updating retention also purges expired images, including canvas sources.
+  await flushCanvasSaves();
   await invoke("save_trash_settings", { retentionDays });
 }
 
@@ -890,11 +911,11 @@ export async function saveFontSize(fontSize: AppFontSize): Promise<void> {
 }
 
 export async function getLlmConfigs(): Promise<LlmConfig[]> {
-  return invoke("get_llm_configs");
+  return (await invoke<LlmConfig[]>("get_llm_configs")).map(credentialDraft);
 }
 
 export async function saveLlmConfigs(configs: LlmConfig[]): Promise<void> {
-  return invoke("save_llm_configs", { configs });
+  return invoke("save_llm_configs", { configs: configs.map(credentialWrite) });
 }
 
 export async function optimizePrompt(
@@ -915,6 +936,8 @@ export async function startPromptAgentSession(params: {
   conversationId?: string | null;
   projectId?: string | null;
   sourceImagePaths?: string[];
+  visualSourceImagePaths?: string[];
+  textOnly?: boolean;
 }): Promise<PromptAgentTurnResponse> {
   return invoke("start_prompt_agent_session", {
     request: {
@@ -923,6 +946,8 @@ export async function startPromptAgentSession(params: {
       conversation_id: params.conversationId ?? null,
       project_id: params.projectId ?? null,
       source_image_paths: params.sourceImagePaths ?? [],
+      ...(params.visualSourceImagePaths !== undefined ? { visual_source_image_paths: params.visualSourceImagePaths } : {}),
+      text_only: params.textOnly ?? false,
     },
   });
 }
@@ -932,6 +957,8 @@ export async function sendPromptAgentMessage(params: {
   message: string;
   configId: string;
   sourceImagePaths?: string[];
+  visualSourceImagePaths?: string[];
+  textOnly?: boolean;
 }): Promise<PromptAgentTurnResponse> {
   return invoke("send_prompt_agent_message", {
     request: {
@@ -939,6 +966,8 @@ export async function sendPromptAgentMessage(params: {
       message: params.message,
       config_id: params.configId,
       source_image_paths: params.sourceImagePaths ?? [],
+      ...(params.visualSourceImagePaths !== undefined ? { visual_source_image_paths: params.visualSourceImagePaths } : {}),
+      text_only: params.textOnly ?? false,
     },
   });
 }
@@ -977,7 +1006,9 @@ export async function installUpdate(
   onEvent: (event: DownloadEvent) => void,
 ): Promise<void> {
   const channel = new Channel<DownloadEvent>(onEvent);
-  await invoke("install_update", { onEvent: channel });
+  const token = await invoke<string>("download_update", { onEvent: channel });
+  await flushCanvasSaves();
+  await invoke("install_update", { token });
 }
 
 export async function relaunchApp(): Promise<void> {
@@ -996,4 +1027,8 @@ export async function getCanvasGenerationStatus(
 ): Promise<CanvasGenerationStatus | null> {
   if (!hasTauriRuntime()) return null;
   return invoke("get_canvas_generation_status", { documentId, requestId });
+}
+
+export async function getCredentialStatus(): Promise<{ready: boolean; message: string | null}> {
+  return invoke("get_credential_status");
 }

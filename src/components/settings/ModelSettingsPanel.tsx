@@ -32,6 +32,7 @@ interface ModelSettingsPanelProps {
   onSelectProvider: (providerId: string) => void;
   onProviderNameChange: (name: string) => void;
   onProviderApiKeyChange: (apiKey: string) => void;
+  onProviderApiKeyClear?: () => void;
   onShowKeyChange: (showKey: boolean) => void;
   onProviderEndpointModeChange: (mode: EndpointMode) => void;
   onProviderBaseUrlChange: (url: string) => void;
@@ -44,10 +45,7 @@ interface ModelSettingsPanelProps {
   onCancelProviderEdit: () => void;
 }
 
-function maskKey(key: string): string {
-  if (key.length <= 8) return "sk-****";
-  return key.slice(0, 3) + "..." + key.slice(-4);
-}
+
 
 export function ModelSettingsPanel({
   t,
@@ -63,6 +61,7 @@ export function ModelSettingsPanel({
   onSelectProvider,
   onProviderNameChange,
   onProviderApiKeyChange,
+  onProviderApiKeyClear,
   onShowKeyChange,
   onProviderEndpointModeChange,
   onProviderBaseUrlChange,
@@ -204,8 +203,7 @@ export function ModelSettingsPanel({
   const invalidGenerationUrl = endpointSettings.mode === "full_url" && !validEndpoint(endpointSettings.generation_url);
   const invalidEditUrl = endpointSettings.mode === "full_url" && modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && !validEndpoint(endpointSettings.edit_url);
   const invalidProvider = invalidName || invalidBaseUrl || invalidGenerationUrl || invalidEditUrl;
-  const apiKey = selectedProvider.api_key;
-  const displayKey = showKey ? apiKey : (apiKey ? maskKey(apiKey) : "");
+  const displayKey = selectedProvider.api_key ?? "";
   const selectedProviderIsActive = selectedProvider.id === providerState.active_provider_id;
 
   return (
@@ -329,7 +327,7 @@ export function ModelSettingsPanel({
                           <div className="min-w-0">
                             <p className="truncate text-xs font-semibold text-foreground">{provider.name}</p>
                             <p className="mt-1 truncate font-mono text-xs text-muted">
-                              {provider.api_key ? maskKey(provider.api_key) : t("settings.noApiKey")}
+                              {provider.api_key_configured ? t("credentials.configured") : t("settings.noApiKey")}
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
@@ -375,8 +373,7 @@ export function ModelSettingsPanel({
                         type={showKey ? "text" : "password"}
                         value={displayKey}
                         onChange={(e) => onProviderApiKeyChange(e.target.value)}
-                        onFocus={() => { if (!showKey) onShowKeyChange(true); }}
-                        placeholder={t("settings.apiKeyPlaceholder")}
+                        placeholder={selectedProvider.api_key_configured ? t("credentials.keepPlaceholder") : t("settings.apiKeyPlaceholder")}
                         className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-sm placeholder:text-muted"
                       />
                       <button
@@ -389,6 +386,8 @@ export function ModelSettingsPanel({
                         {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
                       </button>
                     </div>
+                    <span className="text-xs text-muted">{t("credentials.vaultHint")}</span>
+                    {selectedProvider.api_key_configured && <button type="button" onClick={onProviderApiKeyClear} className="justify-self-start text-xs text-error">{t(selectedProvider.credential_update?.action === "clear" ? "credentials.clearPending" : "credentials.clear")}</button>}
                   </label>
                 </div>
                 </div>

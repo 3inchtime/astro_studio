@@ -45,6 +45,7 @@ rig = { version = "=0.37.0", default-features = false, features = ["derive", "ru
 schemars = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 same-file = "1"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
 cap-std = "3"
 cap-fs-ext = "3"
 

@@ -69,6 +69,20 @@ export default function MessageBubble({
             <p className="text-sm leading-[1.65] text-foreground whitespace-pre-wrap">
               {agentMessage.content}
             </p>
+            {agentMessage.visual_context && (
+              agentMessage.visual_context.text_only
+                ? <p className="mt-2 text-body-sm text-muted">{t("promptVision.textOnly")}</p>
+                : <details className="mt-3 border-t border-border-subtle pt-2 text-body-sm text-muted">
+                    <summary className="focus-ring cursor-pointer rounded-sm">{t("promptVision.summary", { count: agentMessage.visual_context.image_hashes.length })}</summary>
+                    <div className="mt-2 space-y-3">
+                      {agentMessage.visual_context.source_image_indices?.length ? <p>{t("promptVision.sourcePositions", { positions: agentMessage.visual_context.source_image_indices.join(", ") })}</p> : null}
+                      {(["observations", "preserve", "changes"] as const).map((field) => agentMessage.visual_context?.[field].length ? <div key={field}>
+                        <p className="font-medium text-foreground">{t(`promptVision.${field}`)}</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-4">{agentMessage.visual_context[field].map((line, index) => <li key={index} className="break-words">{line}</li>)}</ul>
+                      </div> : null)}
+                    </div>
+                  </details>
+            )}
           </div>
         </motion.div>
       );

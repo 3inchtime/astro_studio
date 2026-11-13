@@ -1,147 +1,139 @@
 name: Build Desktop
-
 on:
+  pull_request:
   push:
-    branches:
-      - main
-    tags:
-      - "v*"
+    branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build. Leave empty to use the latest v* tag."
+        description: "Release tag (empty uses latest v* tag). Creates a draft."
         required: false
         type: string
-
 permissions:
-  contents: write
-
-concurrency:
-  group: build-desktop-${{ inputs.tag || github.ref }}
-  cancel-in-progress: true
-
+  contents: read
 jobs:
-  build:
-    name: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            os: windows-latest
-            args: ""
-
-    runs-on: ${{ matrix.os }}
-
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      release: ${{ steps.ref.outputs.release }}
+      tag: ${{ steps.ref.outputs.tag }}
     steps:
-      - name: Resolve release tag
-        id: release-tag
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -n "${{ inputs.tag }}" ]; then
-            tag="${{ inputs.tag }}"
-          else
-            tag="$(
-              git ls-remote --tags --refs \
-                "${{ github.server_url }}/${{ github.repository }}.git" 'v*' \
-                | sed 's#.*refs/tags/##' \
-                | sort -V \
-                | tail -n 1
-            )"
-          fi
-
-          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $tag" >&2
-            exit 1
-          fi
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.release-tag.outputs.tag }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+          fetch-depth: 0
+      - name: Resolve exact source
+        id: ref
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            tag="$REQUESTED_TAG"
+            if [ -z "$tag" ]; then
+              if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME";
+              else tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"; fi
+            fi
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || exit 1
+            sha="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
+            echo "ref=$sha" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+  quality:
+    needs: resolve
+    uses: ./.github/workflows/quality.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+  build:
+    needs: [resolve, quality]
+    concurrency:
+      group: build-desktop-${{ needs.resolve.outputs.tag || github.ref_name }}
+      cancel-in-progress: false
+    if: github.event_name != 'pull_request'
+    name: Windows bundles
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
-      - name: Install Rust toolchain for Windows
-        if: ${{ matrix.os == 'windows-latest' }}
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
         with:
-          workspaces: |
-            src-tauri -> target
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Sync release version from tag
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - name: Check signing configuration and refuse published releases
+        if: needs.resolve.outputs.release == 'true'
         shell: bash
-        run: |
-          version="${RELEASE_TAG#v}"
-          npm version "$version" --no-git-tag-version --allow-same-version
-          RELEASE_VERSION="$version" node -e 'const fs = require("node:fs"); const path = "src-tauri/tauri.conf.json"; const config = JSON.parse(fs.readFileSync(path, "utf8")); config.version = process.env.RELEASE_VERSION; fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);'
         env:
-          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
-
-      - name: Build desktop bundles
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event_name != 'workflow_dispatch' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "Updater signing key is required" >&2; exit 1; }
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | {tag_name,draft}' > releases.jsonl
+          node --input-type=module -e 'import fs from "node:fs"; const releases=fs.readFileSync("releases.jsonl","utf8").trim().split("\n").filter(Boolean).map(JSON.parse); if(releases.some(r=>r.tag_name===process.env.RELEASE_TAG&&!r.draft)) throw Error("Refusing to replace a published release"); const version=process.env.RELEASE_TAG.slice(1); for(const p of ["package.json","src-tauri/tauri.conf.json"]) if(JSON.parse(fs.readFileSync(p)).version!==version) throw Error("Tag/version mismatch: "+p);'
+      - name: Build local bundles
+        if: needs.resolve.outputs.release != 'true'
         uses: tauri-apps/tauri-action@v0
         with:
-          args: ${{ matrix.args }}
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: astro-studio-[platform]-[arch]-[bundle]
-
-      - name: Read release notes from tag
-        id: release-notes
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+      - name: Read release notes
+        id: notes
+        if: needs.resolve.outputs.release == 'true'
         shell: bash
-        env:
-          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
         run: |
-          notes_ref="refs/release-notes/$RELEASE_TAG"
-          git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:$notes_ref"
-          notes=""
-          if [ "$(git cat-file -t "$notes_ref")" = "tag" ]; then
-            notes="$(git for-each-ref --format='%(contents)' "$notes_ref")"
-          fi
-          if [ -z "$notes" ]; then
-            notes="See the assets to download and install this version."
-          fi
-          delimiter="release_notes_$(node -p 'require("node:crypto").randomUUID()')"
+          notes="$(git for-each-ref --format='%(contents)' "refs/tags/$RELEASE_TAG")"
+          delimiter="notes_$(node -p 'require("node:crypto").randomUUID()')"
           {
             echo "body<<$delimiter"
             printf '%s\n' "$notes"
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Build and publish release bundles
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+      - name: Build signed draft release
+        if: needs.resolve.outputs.release == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: ${{ matrix.args }}
-          tagName: ${{ steps.release-tag.outputs.tag }}
-          releaseName: ${{ format('Astro Studio {0}', steps.release-tag.outputs.tag) }}
-          releaseBody: ${{ steps.release-notes.outputs.body }}
-          releaseDraft: false
-          prerelease: ${{ contains(steps.release-tag.outputs.tag, '-') }}
+          args: --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          tagName: ${{ needs.resolve.outputs.tag }}
+          releaseName: Astro Studio ${{ needs.resolve.outputs.tag }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          prerelease: ${{ contains(needs.resolve.outputs.tag, '-') }}
           generateReleaseNotes: true
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: astro-studio-[platform]-[arch]-[bundle]
-          releaseAssetNamePattern: astro-studio_[version]_[platform]_[arch][setup][ext]
+      - name: Validate uploaded bytes and manifest
+        if: needs.resolve.outputs.release == 'true'
+        shell: bash
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-check
+          node scripts/verify-release.mjs release-check "$RELEASE_TAG" "$GITHUB_REPOSITORY" src-tauri/tauri.conf.json > release-verification.json
+          cat release-verification.json >> "$GITHUB_STEP_SUMMARY"
+          echo 'Draft verified. Complete docs/release-validation.md before running Publish Validated Release with the tested installer SHA-256.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: needs.resolve.outputs.release == 'true'
+        with:
+          name: release-verification
+          path: release-verification.json
+          if-no-files-found: error

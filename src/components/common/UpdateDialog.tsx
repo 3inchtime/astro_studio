@@ -42,10 +42,11 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
             }));
             break;
           case "Finished":
-            setStatus("finished");
+            // Verified download completion still precedes canvas flushing and installation.
             break;
         }
       });
+      setStatus("finished");
     } catch (err) {
       setStatus("error");
       setError(err instanceof Error ? err.message : String(err));

@@ -1,6 +1,6 @@
 import { createRef, type ComponentProps } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import GenerationComposer from "./GenerationComposer";
 
 vi.mock("react-i18next", () => ({
@@ -10,9 +10,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 vi.mock("../../lib/api", () => ({ toAssetUrl: (path: string) => path }));
+const llmState = vi.hoisted(() => ({ optimize: vi.fn(), configs: [] as { id: string; name: string; enabled: boolean; capability: string }[] }));
+beforeEach(() => { llmState.configs = []; llmState.optimize.mockReset().mockResolvedValue("Optimized"); });
 vi.mock("../../lib/queries/llm", () => ({
-  useLlmConfigsQuery: () => ({ data: [] }),
-  useOptimizePromptMutation: () => ({ isPending: false }),
+  useLlmConfigsQuery: () => ({ data: llmState.configs, isSuccess: true }),
+  useOptimizePromptMutation: () => ({ isPending: false, mutateAsync: llmState.optimize }),
 }));
 
 function props(
@@ -148,4 +150,48 @@ it("shows the actual saved image count outside current composer presets", () => 
   view.rerender(<GenerationComposer {...props({ imageCount: 1 })} />);
   expect(select).toHaveValue("1");
   expect(Array.from(select.options).map((option) => option.value)).toEqual(["1", "2", "3", "4"]);
+});
+
+it("requires an explicit subset when more than three references are attached", () => {
+ const sources = Array.from({length:4}, (_,i) => ({id:`ref-${i}`,path:`/ref-${i}.png`,label:`Reference ${i}`}));
+ const onChange = vi.fn();
+ const base = props({composerMode:"deep-thinking",editSources:sources,agentVisualSourcePaths:[],onAgentVisualSourcePathsChange:onChange});
+ const view = render(<GenerationComposer {...base}/>);
+ expect(screen.getByRole("button",{name:"generate.submit"})).toBeDisabled();
+ const checks = screen.getAllByRole("checkbox");
+ expect(checks).toHaveLength(4);
+ fireEvent.click(checks[0]);
+ expect(onChange).toHaveBeenCalledWith(["/ref-0.png"]);
+ view.rerender(<GenerationComposer {...base} agentVisualSourcePaths={sources.slice(0,3).map(s=>s.path)}/>);
+ expect(screen.getAllByRole("checkbox")[3]).toBeDisabled();
+ expect(screen.getByRole("button",{name:"generate.submit"})).toBeEnabled();
+ expect(screen.getByText("promptVision.editReferencesKept")).toBeInTheDocument();
+});
+it("offers text configurations for explicit text-only deep thinking with image references", () => {
+ llmState.configs=[{id:"text-config",name:"Writer",enabled:true,capability:"text"}];
+ const changed=vi.fn(); const toggled=vi.fn();
+ const base=props({composerMode:"deep-thinking",editSources:[{id:"ref",path:"/ref.png",label:"Reference"}],onPromptAgentConfigChange:changed,onAgentTextOnlyChange:toggled});
+ const view=render(<GenerationComposer {...base}/>);
+ expect(changed).toHaveBeenLastCalledWith("");
+ fireEvent.click(screen.getByRole("switch",{name:"promptVision.textOnly"}));
+ expect(toggled).toHaveBeenCalledWith(true);
+ view.rerender(<GenerationComposer {...base} agentTextOnly/>);
+ expect(changed).toHaveBeenLastCalledWith("text-config");
+ expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+});
+
+it("keeps one recoverable error outside the capped composer so the draft remains usable", () => {
+ render(<GenerationComposer {...props({promptAgentError:"Analysis could not finish",onRetryPromptAgent:vi.fn()})}/>);
+ expect(screen.getAllByRole("alert")).toHaveLength(1);
+ expect(screen.getByRole("alert").closest(".generation-composer")).toBeNull();
+ expect(screen.getByTestId("generation-command-surface")).not.toContainElement(screen.getByRole("alert"));
+});
+
+
+it("uses the restored Agent dropdown choice for optimization while thinking", async () => {
+  llmState.configs = [{id:"first",name:"First",enabled:true,capability:"text"},{id:"second",name:"Second",enabled:true,capability:"text"}];
+  render(<GenerationComposer {...props({composerMode:"deep-thinking",promptAgentConfigId:"second"})}/>);
+  expect(screen.getByRole("button", {name:"Second"})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name:"generate.llm.optimize"}));
+  await waitFor(()=>expect(llmState.optimize).toHaveBeenCalledWith({prompt:"A quiet mountain lake",configId:"second",imagePaths:undefined}));
 });

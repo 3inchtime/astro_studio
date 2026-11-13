@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { MotionConfig } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 import { IMAGE_MODEL_CATALOG } from "../lib/modelCatalog";
 import { getVersion } from "@tauri-apps/api/app";
 import {
+  getCredentialStatus,
   getLogs,
   clearLogs,
   getLogSettings,
@@ -82,6 +84,9 @@ const SETTINGS_TABS = [
 ] as const;
 
 export default function SettingsPage() {
+  const queryClient = useQueryClient();
+  const [vaultUnavailable, setVaultUnavailable] = useState(false);
+  useEffect(() => { Promise.resolve().then(() => getCredentialStatus()).then(status => setVaultUnavailable(!status.ready)).catch(() => setVaultUnavailable(true)); }, []);
   const navigate = useNavigate();
   const location = useLocation();
   const routeQuery = new URLSearchParams(location.search);
@@ -596,6 +601,8 @@ export default function SettingsPage() {
               updateChecking={updateChecking}
             />
           ) : activeTab === "model" ? (
+            <>
+            {vaultUnavailable && <div role="alert" className="mb-3 rounded-lg border border-warning/30 p-3 text-sm">{t("credentials.unavailable")} <button type="button" onClick={() => void getCredentialStatus().then(async status => { setVaultUnavailable(!status.ready); if (status.ready) { const state = await getModelProviderProfiles(imageModel); setProviderState(state); setSavedProviderState(state); await queryClient.invalidateQueries({ queryKey: ["llm-configs"] }); } }).catch(() => setVaultUnavailable(true))}>{t("credentials.retry")}</button></div>}
             <ModelSettingsPanel
               t={t}
               imageModel={imageModel}
@@ -615,10 +622,12 @@ export default function SettingsPage() {
               onProviderNameChange={(name) =>
                 updateSelectedProvider((provider) => ({ ...provider, name }))
               }
+              onProviderApiKeyClear={() => updateSelectedProvider((profile) => ({ ...profile, api_key: "", credential_update: { action: "clear" } }))}
               onProviderApiKeyChange={(apiKey) =>
                 updateSelectedProvider((provider) => ({
                   ...provider,
                   api_key: apiKey,
+                  credential_update: undefined,
                 }))
               }
               onShowKeyChange={setShowKey}
@@ -668,6 +677,7 @@ export default function SettingsPage() {
               onSaveProvider={() => void runSettingsAction(() => handleSaveProvider())}
               onCancelProviderEdit={() => void handleCancelProviderEdit()}
             />
+            </>
           ) : (
             <LogsPanel
               t={t}

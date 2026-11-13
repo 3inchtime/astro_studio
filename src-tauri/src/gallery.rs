@@ -184,6 +184,7 @@ fn permanently_delete_generation_files_and_records(
     conn: &Connection,
     generation_id: &str,
 ) -> Result<(), String> {
+    crate::canvas_assets::ensure_generation_unreferenced(conn, generation_id)?;
     let mut stmt = conn
         .prepare("SELECT file_path, thumbnail_path FROM images WHERE generation_id = ?1")
         .map_err(|e| e.to_string())?;
@@ -215,13 +216,8 @@ fn permanently_delete_generation_files_and_records(
     Ok(())
 }
 
-pub(crate) fn purge_trashed_generations(
-    app: &tauri::AppHandle,
-    db: &Database,
-    retention_days: u32,
-) -> Result<u64, String> {
-    let cutoff = trash_cutoff_timestamp(retention_days);
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+/// Automatic cleanup is conservative: unreadable references also retain the asset.
+pub(crate) fn purge_candidates(conn: &Connection, cutoff: &str) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT id FROM generations WHERE deleted_at IS NOT NULL AND deleted_at <= ?1")
         .map_err(|e| e.to_string())?;
@@ -231,11 +227,28 @@ pub(crate) fn purge_trashed_generations(
         .filter_map(|r| r.ok())
         .collect();
 
+    Ok(ids
+        .into_iter()
+        .filter(|id| crate::canvas_assets::ensure_generation_unreferenced(conn, id).is_ok())
+        .collect())
+}
+
+pub(crate) fn purge_trashed_generations(
+    app: &tauri::AppHandle,
+    db: &Database,
+    retention_days: u32,
+) -> Result<u64, String> {
+    let cutoff = trash_cutoff_timestamp(retention_days);
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let ids = purge_candidates(&conn, &cutoff)?;
+
+    let mut deleted = 0;
     for id in &ids {
         permanently_delete_generation_files_and_records(app, &conn, id)?;
+        deleted += 1;
     }
 
-    Ok(ids.len() as u64)
+    Ok(deleted)
 }
 
 #[tauri::command]

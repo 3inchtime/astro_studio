@@ -74,7 +74,7 @@ export default function ConfirmDialog({
             {error ? (
               <div
                 role="alert"
-                className="mt-4 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-xs text-error"
+                className="mt-4 whitespace-pre-wrap break-words rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-xs text-error"
               >
                 {error}
               </div>

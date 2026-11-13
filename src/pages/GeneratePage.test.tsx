@@ -345,7 +345,7 @@ describe("GeneratePage", () => {
     fireEvent.click(await screen.findByRole("button",{name:"generate.configureProvider"}));
     expect(navigate).toHaveBeenCalledWith(expect.stringContaining("model=gpt-image-2.6-flare"));
     view.unmount();useLocation.mockReturnValue({state:{recipeGenerationId:"saved",recipeMode:"generate"}});queryClient.clear();
-    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[{id:"saved-profile",name:"Configured",api_key:"fixture",endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}}]});
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[{id:"saved-profile",name:"Configured",api_key:"",api_key_configured:true,endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}}]});
     render(<GeneratePage/>,{wrapper:TestWrapper});
     await screen.findByDisplayValue("Keep this draft");expect(editImage).not.toHaveBeenCalled();
     await waitFor(()=>expect(screen.getByRole("button",{name:"Generate"})).not.toBeDisabled());
@@ -479,7 +479,7 @@ describe("GeneratePage", () => {
     sessionStorage.clear();
     navigate.mockReset();
     getModelProviderProfiles.mockReset();
-    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[{id:"saved-profile",name:"Saved",api_key:"fixture",endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}},{id:"another",name:"Another",api_key:"fixture",endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}}]});
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[{id:"saved-profile",name:"Saved",api_key:"",api_key_configured:true,endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}},{id:"another",name:"Another",api_key:"",api_key_configured:true,endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}}]});
     getConversationGenerations.mockReset();
     getImageModel.mockReset();
     getGenerationRecipe.mockReset();
@@ -979,6 +979,8 @@ describe("GeneratePage", () => {
       conversationId: "conversation-1",
       projectId: "project-1",
       sourceImagePaths: [],
+      visualSourceImagePaths: [],
+      textOnly: false,
     });
     expect(generateImage).not.toHaveBeenCalled();
   });
@@ -1847,4 +1849,220 @@ describe("GeneratePage", () => {
       vi.unstubAllGlobals();
     }
   });
+  it("sends only the selected visual subset while retaining all editing references", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"vision",name:"Vision",capability:"multimodal",enabled:true}]);
+    pickSourceImages.mockResolvedValue(["/one.png","/two.png","/three.png","/four.png"]);
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Upload Source"}));
+    await screen.findByText("Editing 4 source images");
+    fireEvent.click(screen.getByRole("button", {name:"Deep thinking"}));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"Preserve the composition"}});
+    expect(screen.getByRole("button", {name:"Generate"})).toBeDisabled();
+    const checks=screen.getAllByRole("checkbox");
+    fireEvent.click(checks[1]);fireEvent.click(checks[3]);
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession.mock.calls[0]?.[0]).toMatchObject({sourceImagePaths:["/one.png","/two.png","/three.png","/four.png"],visualSourceImagePaths:["/two.png","/four.png"],textOnly:false}));
+    expect(generateImage).not.toHaveBeenCalled();expect(editImage).not.toHaveBeenCalled();
+  });
+  it("keeps the draft and references after vision failure and retries without exposing provider errors", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"vision",name:"Vision",capability:"multimodal",enabled:true}]);
+    pickSourceImages.mockResolvedValue(["/one.png"]);
+    startPromptAgentSession.mockRejectedValueOnce({kind:"Validation",detail:{message:"prompt_vision_analysis_failed"}});
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Upload Source"}));
+    await screen.findByText("Editing 1 source image");
+    fireEvent.click(screen.getByRole("button", {name:"Deep thinking"}));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"Keep my reference"}});
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await screen.findByText("promptVision.analysisFailed");
+    expect(screen.getByRole("textbox")).toHaveValue("Keep my reference");
+    expect(screen.getByText("Editing 1 source image")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"promptVision.retry"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
+    expect(startPromptAgentSession.mock.calls[1][0]).toEqual(startPromptAgentSession.mock.calls[0][0]);
+    expect(generateImage).not.toHaveBeenCalled();expect(editImage).not.toHaveBeenCalled();
+  });
+  it("ignores a late agent reply after the user edits the draft and prevents duplicate turns", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"text",name:"Writer",capability:"text",enabled:true}]);
+    let resolve!: (value: unknown)=>void;
+    startPromptAgentSession.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"First draft"}});
+    const button=screen.getByRole("button", {name:"Generate"});
+    act(()=>{fireEvent.click(button);fireEvent.click(button);});
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"A newer draft"}});
+    await act(async()=>resolve({session:{id:"stale-session"},messages:[]}));
+    expect(screen.getByRole("textbox")).toHaveValue("A newer draft");
+    await waitFor(() => expect(screen.getByRole("button", {name:"Generate"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
+    expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it("retains the existing agent session when a follow-up fails and safely retries it", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"text",name:"Writer",capability:"text",enabled:true}]);
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"First turn"}});
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(screen.getByRole("textbox")).toHaveValue(""));
+    sendPromptAgentMessage.mockRejectedValueOnce(new Error("provider secret sk-123"));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"Second turn"}});
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await screen.findByText("promptVision.analysisFailed");
+    expect(screen.queryByText(/sk-123/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"promptVision.retry"}));
+    await waitFor(()=>expect(sendPromptAgentMessage).toHaveBeenCalledTimes(2));
+    expect(sendPromptAgentMessage.mock.calls[1][0]).toMatchObject({sessionId:"agent-session-1",message:"Second turn"});
+    expect(startPromptAgentSession).toHaveBeenCalledTimes(1);
+  });
+  it("ignores an agent reply that arrives after navigating to another conversation", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"text",name:"Writer",capability:"text",enabled:true}]);
+    let resolve!: (value:unknown)=>void;
+    startPromptAgentSession.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    const view=render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"First conversation draft"}});
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));
+    activeConversationId="conversation-2";view.rerender(<GeneratePage/>);
+    await act(async()=>resolve({session:{id:"old-session"},messages:[]}));
+    expect(screen.getByRole("textbox")).toHaveValue("First conversation draft");
+    await waitFor(()=>expect(screen.getByRole("button",{name:"Generate"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
+    expect(startPromptAgentSession.mock.calls[1][0].conversationId).toBe("conversation-2");
+    expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it("starts a separate agent session after switching conversations", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"text",name:"Writer",capability:"text",enabled:true}]);
+    const view=render(<GeneratePage/>,{wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button",{name:"Deep thinking"}));
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"Old conversation"}});
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(screen.getByRole("textbox")).toHaveValue(""));
+    activeConversationId="conversation-new";view.rerender(<GeneratePage/>);
+    fireEvent.change(screen.getByRole("textbox"),{target:{value:"New conversation"}});
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
+    expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["edit", "navigate"])("does not generate from a deferred accepted draft after %s", async (change) => {
+    sessionStorage.setItem("astro:provider-settings-draft:v1",JSON.stringify({request:{prompt:"Existing draft",model:"gpt-image-2",size:"auto",quality:"auto",background:"auto",outputFormat:"png",moderation:"auto",inputFidelity:"high",imageCount:1,editSources:[]},recipeWarnings:[],composerMode:"deep-thinking",editingPromptMessageId:null,promptAgentSessionId:"agent-session-1",selectedPromptAgentConfigId:"text",promptAgentMessages:[{id:"ready",session_id:"agent-session-1",role:"assistant",content:"Ready",draft_prompt:"Accepted draft",ready_to_generate:true,selected_skill_ids:[],suggested_params:{},created_at:"2026-11-13"}]}));
+    getLlmConfigs.mockResolvedValue([{id:"text",name:"Writer",capability:"text",enabled:true}]);
+    let resolve!:(value:unknown)=>void;
+    acceptPromptAgentDraft.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    const view=render(<GeneratePage/>,{wrapper:TestWrapper});
+    const accept=await screen.findByRole("button",{name:"Accept and generate"});
+    act(()=>{fireEvent.click(accept);fireEvent.click(accept);});
+    await waitFor(()=>expect(acceptPromptAgentDraft).toHaveBeenCalledTimes(1));
+    if(change==="edit")fireEvent.change(screen.getByRole("textbox"),{target:{value:"A newer draft"}});
+    else {activeConversationId="conversation-new";view.rerender(<GeneratePage/>);}
+    await act(async()=>resolve({id:"agent-session-1",status:"accepted",accepted_prompt:"Accepted draft"}));
+    expect(generateImage).not.toHaveBeenCalled();expect(editImage).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue(change==="edit"?"A newer draft":"Existing draft");
+    await waitFor(()=>expect(screen.getByRole("button",{name:"Generate"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));
+    expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed acceptance without sending a new agent message even with an empty composer", async () => {
+    sessionStorage.setItem("astro:provider-settings-draft:v1",JSON.stringify({request:{prompt:"",model:"gpt-image-2",size:"auto",quality:"auto",background:"auto",outputFormat:"png",moderation:"auto",inputFidelity:"high",imageCount:1,editSources:[]},recipeWarnings:[],composerMode:"deep-thinking",editingPromptMessageId:null,promptAgentSessionId:"agent-session-1",selectedPromptAgentConfigId:"text",promptAgentMessages:[{id:"ready",session_id:"agent-session-1",role:"assistant",content:"Ready",draft_prompt:"Accepted draft",ready_to_generate:true,selected_skill_ids:[],suggested_params:{},created_at:"2026-11-13"}]}));
+    getLlmConfigs.mockResolvedValue([{id:"text",name:"Writer",capability:"text",enabled:true}]);
+    acceptPromptAgentDraft.mockRejectedValueOnce(new Error("private provider error"));
+    render(<GeneratePage/>,{wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button",{name:"Accept and generate"}));
+    await screen.findByText("promptVision.analysisFailed");
+    expect(screen.queryByText("private provider error")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button",{name:"promptVision.retry"}));
+    await waitFor(()=>expect(acceptPromptAgentDraft).toHaveBeenCalledTimes(2));
+    expect(startPromptAgentSession).not.toHaveBeenCalled();expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+    await waitFor(()=>expect(generateImage).toHaveBeenCalledTimes(1));
+  });
+
+  it("restores the selected Agent config across a provider-settings visit", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"first",name:"First writer",capability:"text",enabled:true},{id:"second",name:"Second writer",capability:"text",enabled:true}]);
+    getModelProviderProfiles.mockResolvedValue({ active_provider_id: null, profiles: [] });
+    const view = render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.click(await screen.findByRole("button", {name:"generate.llm.selectLlm"}));
+    fireEvent.click(screen.getByRole("button", {name:"Second writer"}));
+    fireEvent.change(screen.getByRole("textbox"), {target:{value:"Preserve selected writer"}});
+    fireEvent.click(await screen.findByRole("button", {name:"generate.configureProvider"}));
+    view.unmount();
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    await screen.findByDisplayValue("Preserve selected writer");
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession.mock.calls[0]?.[0]).toMatchObject({configId:"second"}));
+  });
+
+  it("ignores an old Agent response after an explicit config change", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"first",name:"First writer",capability:"text",enabled:true},{id:"second",name:"Second writer",capability:"text",enabled:true}]);
+    let resolve!: (value: unknown)=>void;
+    startPromptAgentSession.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.click(await screen.findByRole("button", {name:"generate.llm.selectLlm"}));
+    fireEvent.click(screen.getByRole("button", {name:"First writer"}));
+    fireEvent.change(screen.getByRole("textbox"), {target:{value:"Keep this idea"}});
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", {name:"First writer"}));
+    fireEvent.click(screen.getByRole("button", {name:"Second writer"}));
+    await act(async()=>resolve({session:{id:"old-config-session"},messages:[]}));
+    expect(screen.getByRole("textbox")).toHaveValue("Keep this idea");
+    await waitFor(()=>expect(screen.getByRole("button", {name:"Generate"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
+    expect(startPromptAgentSession.mock.calls[1][0].configId).toBe("second");
+    expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps an accepted model's aspect and resolution when provider setup interrupts generation", async () => {
+    sessionStorage.setItem("astro:provider-settings-draft:v1", JSON.stringify({
+      request:{prompt:"Refine",model:"gpt-image-2",size:"auto",quality:"auto",background:"auto",outputFormat:"png",moderation:"auto",inputFidelity:"high",imageCount:1,editSources:[]},
+      recipeWarnings:[],composerMode:"deep-thinking",editingPromptMessageId:null,promptAgentSessionId:"agent-session-1",selectedPromptAgentConfigId:"text",
+      promptAgentMessages:[{id:"ready",session_id:"agent-session-1",role:"assistant",content:"Ready",draft_prompt:"Accepted draft",ready_to_generate:true,selected_skill_ids:[],suggested_params:{model:"nano-banana"},created_at:"2026-11-13"}],
+    }));
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:null,profiles:[]});
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Accept and generate"}));
+    await screen.findByDisplayValue("Final prompt");
+    fireEvent.click(await screen.findByRole("button", {name:"generate.configureProvider"}));
+    const saved = JSON.parse(sessionStorage.getItem("astro:provider-settings-draft:v1")!);
+    expect(saved.request).toMatchObject({model:"nano-banana",aspectRatio:"1:1",resolution:"1K"});
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("waits for pending Agent acceptance before saving a provider-settings draft", async () => {
+    sessionStorage.setItem("astro:provider-settings-draft:v1", JSON.stringify({
+      request:{prompt:"",model:"gpt-image-2",size:"auto",quality:"auto",background:"auto",outputFormat:"png",moderation:"auto",inputFidelity:"high",imageCount:1,editSources:[]},
+      recipeWarnings:[],composerMode:"deep-thinking",editingPromptMessageId:null,promptAgentSessionId:"agent-session-1",selectedPromptAgentConfigId:"text",
+      promptAgentMessages:[{id:"ready",session_id:"agent-session-1",role:"assistant",content:"Ready",draft_prompt:"Accepted draft",ready_to_generate:true,selected_skill_ids:[],suggested_params:{},created_at:"2026-11-13"}],
+    }));
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:null,profiles:[]});
+    let resolve!: (value: unknown)=>void;
+    acceptPromptAgentDraft.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Accept and generate"}));
+    await waitFor(()=>expect(acceptPromptAgentDraft).toHaveBeenCalledTimes(1));
+    const configure = await screen.findByRole("button", {name:"generate.configureProvider"});
+    expect(configure).toBeDisabled();
+    fireEvent.click(configure);
+    expect(sessionStorage.getItem("astro:provider-settings-draft:v1")).toBeNull();
+    await act(async()=>resolve({id:"agent-session-1",status:"accepted",accepted_prompt:"Accepted draft"}));
+    await waitFor(()=>expect(configure).toBeEnabled());
+    fireEvent.click(configure);
+    const saved = JSON.parse(sessionStorage.getItem("astro:provider-settings-draft:v1")!);
+    expect(saved.promptAgentSessionId).toBeNull();
+    expect(saved.request.prompt).toBe("Accepted draft");
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
 });

@@ -55,6 +55,6 @@ export async function listRecipeProviders(
     { model },
   );
   return state.profiles
-    .filter((profile) => profile.api_key.trim())
+    .filter((profile) => profile.api_key_configured)
     .map(({ id, name }) => ({ id, name }));
 }

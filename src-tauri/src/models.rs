@@ -401,6 +401,8 @@ pub struct Project {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanvasDocument {
+    #[serde(default)]
+    pub revision: i64,
     pub id: String,
     pub project_id: String,
     pub name: String,
@@ -431,6 +433,8 @@ pub struct CanvasFrame {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanvasObject {
+    #[serde(default)]
+    pub asset_id: Option<String>,
     #[serde(rename = "type")]
     pub object_type: String,
     pub id: String,
@@ -490,7 +494,16 @@ pub struct CanvasDocumentContent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingCanvasAsset {
+    pub object_id: String,
+    pub asset_id: Option<String>,
+    pub image_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanvasDocumentWithContent {
+    #[serde(default)]
+    pub missing_assets: Vec<MissingCanvasAsset>,
     #[serde(flatten)]
     pub document: CanvasDocument,
     pub content: CanvasDocumentContent,

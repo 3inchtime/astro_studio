@@ -6,6 +6,8 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    CloseGuard(String),
     #[error(transparent)]
     Updater(#[from] tauri_plugin_updater::Error),
     #[error(transparent)]
@@ -14,6 +16,8 @@ pub enum Error {
     UnsupportedPlatform,
     #[error("there is no pending update")]
     NoPendingUpdate,
+    #[error("{0}")]
+    LibraryBusy(String),
 }
 
 impl Serialize for Error {
@@ -45,7 +49,6 @@ pub enum DownloadEvent {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct UpdateMetadata {
     pub version: String,
     pub current_version: String,
@@ -54,6 +57,32 @@ pub struct UpdateMetadata {
 }
 
 pub struct PendingUpdate(pub Mutex<Option<Update>>);
+struct PreparedUpdate<T> {
+    token: String,
+    update: T,
+    bytes: Vec<u8>,
+}
+#[derive(Default)]
+pub struct DownloadedUpdate(Mutex<Option<PreparedUpdate<Update>>>);
+
+fn install_prepared<T>(
+    gate: &crate::storage::MaintenanceGate,
+    prepared: &Mutex<Option<PreparedUpdate<T>>>,
+    token: &str,
+    install: impl FnOnce(&T, &[u8]) -> Result<()>,
+) -> Result<()> {
+    // Windows installers call process::exit and bypass RunEvent::ExitRequested.
+    // Exclude generation/backup/restore writes before entering that irreversible path.
+    let _maintenance = gate.maintain().map_err(Error::LibraryBusy)?;
+    let mut ready = prepared.lock().map_err(|_| Error::NoPendingUpdate)?;
+    let item = ready
+        .as_ref()
+        .filter(|item| item.token == token)
+        .ok_or(Error::NoPendingUpdate)?;
+    install(&item.update, &item.bytes)?;
+    *ready = None;
+    Ok(())
+}
 
 fn updater_supported_on_current_platform() -> bool {
     cfg!(target_os = "windows")
@@ -129,10 +158,11 @@ pub fn is_update_supported() -> bool {
 }
 
 #[tauri::command]
-pub async fn install_update(
+pub async fn download_update(
+    downloaded: State<'_, DownloadedUpdate>,
     pending_update: State<'_, PendingUpdate>,
     on_event: Channel<DownloadEvent>,
-) -> Result<()> {
+) -> Result<String> {
     if !updater_supported_on_current_platform() {
         *pending_update.0.lock().unwrap() = None;
         return Err(Error::UnsupportedPlatform);
@@ -142,11 +172,23 @@ pub async fn install_update(
         return Err(Error::NoPendingUpdate);
     };
 
+    if let Some(ready) = downloaded
+        .0
+        .lock()
+        .map_err(|_| Error::NoPendingUpdate)?
+        .as_ref()
+    {
+        if ready.update.version == update.version
+            && ready.update.download_url == update.download_url
+        {
+            return Ok(ready.token.clone());
+        }
+    }
     let mut started = false;
     let mut total_downloaded: u64 = 0;
 
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             |chunk_length, content_length| {
                 if !started {
                     let _ = on_event.send(DownloadEvent::Started { content_length });
@@ -159,25 +201,98 @@ pub async fn install_update(
                     total_downloaded,
                 });
             },
-            || {
-                let _ = on_event.send(DownloadEvent::Finished);
-            },
+            || {},
         )
         .await?;
 
-    *pending_update.0.lock().unwrap() = None;
+    let token = uuid::Uuid::new_v4().to_string();
+    *downloaded.0.lock().map_err(|_| Error::NoPendingUpdate)? = Some(PreparedUpdate {
+        token: token.clone(),
+        update,
+        bytes,
+    });
+    let _ = on_event.send(DownloadEvent::Finished);
+    Ok(token)
+}
 
-    Ok(())
+#[tauri::command]
+pub fn install_update(downloaded: State<'_, DownloadedUpdate>, token: String) -> Result<()> {
+    if !updater_supported_on_current_platform() {
+        return Err(Error::UnsupportedPlatform);
+    }
+    install_prepared(
+        crate::storage::global_gate(),
+        &downloaded.0,
+        &token,
+        |update, bytes| update.install(bytes).map_err(Error::from),
+    )
 }
 
 #[tauri::command]
 pub async fn relaunch_app(app: AppHandle) -> Result<()> {
-    app.restart();
+    if crate::canvas_close::guarded(&app) {
+        crate::canvas_close::request(&app, "restart", None).map_err(Error::CloseGuard)?;
+        Ok(())
+    } else {
+        app.restart();
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use reqwest::StatusCode;
+
+    #[test]
+    fn metadata_matches_frontend_current_version_field() {
+        let value = serde_json::to_value(UpdateMetadata {
+            version: "2.0.0".into(),
+            current_version: "1.0.0".into(),
+            body: None,
+            date: None,
+        })
+        .unwrap();
+        assert_eq!(value["current_version"], "1.0.0");
+        assert!(value.get("currentVersion").is_none());
+    }
+
+    #[test]
+    fn install_handoff_rejects_active_operations_and_retries_verified_bytes() {
+        let gate = crate::storage::MaintenanceGate::default();
+        let ready = Mutex::new(Some(PreparedUpdate {
+            token: "verified".into(),
+            update: (),
+            bytes: vec![1, 2, 3],
+        }));
+        let writer = gate.write().unwrap();
+        assert!(install_prepared(&gate, &ready, "verified", |_, _| panic!(
+            "must not exit while writing"
+        ))
+        .is_err());
+        drop(writer);
+        assert!(install_prepared(&gate, &ready, "stale", |_, _| panic!(
+            "must not install stale bytes"
+        ))
+        .is_err());
+        assert!(install_prepared(&gate, &ready, "verified", |_, _| Err(
+            Error::NoPendingUpdate
+        ))
+        .is_err());
+        assert!(ready.lock().unwrap().is_some());
+        install_prepared(&gate, &ready, "verified", |_, bytes| {
+            assert_eq!(bytes, [1, 2, 3]);
+            assert!(gate.write().is_err());
+            assert!(gate.maintain().is_err());
+            Ok(())
+        })
+        .unwrap();
+        assert!(ready.lock().unwrap().is_none());
+        assert!(gate.write().is_ok());
+        gate.require_restart();
+        assert!(
+            install_prepared(&gate, &ready, "verified", |_, _| panic!("library switched")).is_err()
+        );
+    }
 
     #[test]
     fn treats_missing_manifest_as_no_update() {

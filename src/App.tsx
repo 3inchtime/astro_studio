@@ -1,4 +1,5 @@
 import "./i18n";
+import CanvasCloseGuard from "./components/canvas/CanvasCloseGuard";
 import { useEffect } from "react";
 import { ApplicationRouter } from "./app/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -30,6 +31,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationRouter />
+      <CanvasCloseGuard />
     </QueryClientProvider>
   );
 }

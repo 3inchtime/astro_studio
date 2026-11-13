@@ -84,6 +84,7 @@ export interface CanvasStrokeObject {
 }
 
 export interface CanvasImageObject {
+  asset_id?: string;
   type: "image";
   id: string;
   image_path: string;
@@ -187,6 +188,7 @@ export interface CanvasDocumentContent {
 }
 
 export interface CanvasDocument {
+  revision: number;
   id: string;
   project_id: string;
   name: string;
@@ -199,7 +201,14 @@ export interface CanvasDocument {
   deleted_at: string | null;
 }
 
+export interface CanvasMissingAsset {
+  object_id: string;
+  asset_id?: string | null;
+  image_path: string;
+}
+
 export interface CanvasDocumentWithContent extends CanvasDocument {
+  missing_assets?: CanvasMissingAsset[];
   content: CanvasDocumentContent;
 }
 
@@ -279,7 +288,21 @@ export interface PromptAgentSession {
   updated_at: string;
 }
 
+export interface PromptAgentVisualContext {
+  source_image_indices?: number[];
+  version: number;
+  analysis_model: string;
+  analysis_protocol: string;
+  image_hashes: string[];
+  observations: string[];
+  preserve: string[];
+  changes: string[];
+  user_request: string;
+  text_only: boolean;
+}
+
 export interface PromptAgentMessage {
+  visual_context?: PromptAgentVisualContext | null;
   id: string;
   session_id: string;
   role: "user" | "assistant" | "tool";
@@ -450,10 +473,17 @@ export interface EndpointSettings {
   edit_url: string;
 }
 
+export type CredentialUpdate = { action: "keep" } | { action: "clear" } | { action: "replace"; value: string };
+export interface CredentialStatus { api_key_configured: boolean; api_key_masked: string | null; }
+
 export interface ModelProviderProfile {
   id: string;
   name: string;
+  /** Unsaved input only; never returned by the backend. */
   api_key: string;
+  api_key_configured?: boolean;
+  api_key_masked?: string | null;
+  credential_update?: CredentialUpdate;
   endpoint_settings: EndpointSettings;
 }
 
@@ -516,7 +546,11 @@ export interface LlmConfig {
   name: string;
   protocol: "openai" | "anthropic";
   model: string;
+  /** Unsaved input only; never returned by the backend. */
   api_key: string;
+  api_key_configured?: boolean;
+  api_key_masked?: string | null;
+  credential_update?: CredentialUpdate;
   base_url: string;
   capability: "text" | "multimodal";
   enabled: boolean;

@@ -173,4 +173,16 @@ describe("TrashPage", () => {
       expect(refreshConversations).toHaveBeenCalledTimes(1);
     });
   });
+  it("shows the canvas and recipe locations that block permanent deletion", async () => {
+    permanentlyDeleteGeneration.mockRejectedValueOnce("Asset is still in use:\nCanvas: Mood board (canvas-1), object image-1\nRecipe: generation-2 (generations)");
+    render(<TrashPage />);
+    fireEvent.click(await screen.findByText("Select generation"));
+    fireEvent.click(screen.getByText("Delete image"));
+    fireEvent.click(screen.getByRole("button", { name: "trash.deleteNow" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Canvas: Mood board (canvas-1), object image-1"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Recipe: generation-2 (generations)");
+    expect(refreshConversations).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
 });

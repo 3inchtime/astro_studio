@@ -42,11 +42,13 @@ export function useSaveCanvasDocumentMutation() {
       id,
       content,
       previewPngBase64,
+      expectedRevision,
     }: {
       id: string;
       content: CanvasDocumentContent;
       previewPngBase64?: string | null;
-    }) => api.saveCanvasDocument(id, content, previewPngBase64),
+      expectedRevision: number;
+    }) => api.saveCanvasDocument(id, content, previewPngBase64, expectedRevision),
     onSuccess: (document) => {
       queryClient.invalidateQueries({
         queryKey: ["canvas-documents", document.project_id],

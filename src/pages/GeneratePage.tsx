@@ -1,3 +1,4 @@
+import { resolveVisualSourcePaths, promptVisionErrorKey } from "../lib/promptVision";
 import RecoveryNotice from "../components/generate/RecoveryNotice";
 import {
   getGenerationRecipe,
@@ -152,7 +153,7 @@ export default function GeneratePage() {
   useEffect(() => {
     if (!recipeIdentity.providerProfileId) return;
     const exact = providerQuery.data?.profiles.find(profile => profile.id === recipeIdentity.providerProfileId);
-    if (exact?.api_key.trim()) setRecipeWarnings(current => current.includes("provider_missing") ? current.filter(warning => warning !== "provider_missing") : current);
+    if (exact?.api_key_configured) setRecipeWarnings(current => current.includes("provider_missing") ? current.filter(warning => warning !== "provider_missing") : current);
   }, [providerQuery.data, recipeIdentity.providerProfileId]);
   const [recipeProviders, setRecipeProviders] = useState<
     { id: string; name: string }[]
@@ -206,12 +207,38 @@ export default function GeneratePage() {
     });
   }, [firstSourcePath]);
   const [composerMode, setComposerMode] = useState<ComposerMode>("direct");
+  const [agentVisualSelection, setAgentVisualSelection] = useState<string[] | null>(null);
+  const [agentTextOnly, setAgentTextOnly] = useState(false);
+  const [promptAgentError, setPromptAgentError] = useState<string | null>(null);
+  const agentPendingRef = useRef(false);
+  const retryAgentAcceptanceRef = useRef<PromptAgentMessage | null>(null);
+  const retryAcceptedGenerationRef = useRef(false);
+  const agentMountedRef = useRef(true);
+  const agentScope = JSON.stringify([location.pathname, activeProjectId, activeConversationId]);
+  const agentScopeRef = useRef(agentScope);
+  agentScopeRef.current = agentScope;
+  useEffect(() => { agentMountedRef.current = true; return () => { agentMountedRef.current = false; }; }, []);
+  const agentVisualSourcePaths = resolveVisualSourcePaths(editSources.map((source) => source.path), agentVisualSelection);
   const [promptAgentSessionId, setPromptAgentSessionId] = useState<
     string | null
   >(null);
+  const agentSessionRef = useRef(promptAgentSessionId);
+  agentSessionRef.current = promptAgentSessionId;
   const [promptAgentMessages, setPromptAgentMessages] = useState<
     PromptAgentMessage[]
   >([]);
+  const previousAgentScopeRef = useRef(agentScope);
+  useEffect(() => {
+    if (previousAgentScopeRef.current === agentScope) return;
+    previousAgentScopeRef.current = agentScope;
+    draftRevision.current++;
+    if (!restoringSettingsDraft.current) {
+      setPromptAgentSessionId(null);
+      retryAgentAcceptanceRef.current = null;
+      setPromptAgentMessages([]);
+      setPromptAgentError(null);
+    }
+  }, [agentScope]);
   const [selectedPromptAgentConfigId, setSelectedPromptAgentConfigId] =
     useState("");
   const [editingPromptMessageId, setEditingPromptMessageId] = useState<
@@ -264,6 +291,9 @@ export default function GeneratePage() {
   const markComposerDraftStarted = useCallback(() => {
     draftRevision.current++;
     hasComposerDraftRef.current = true;
+    retryAgentAcceptanceRef.current = null;
+    retryAcceptedGenerationRef.current = false;
+    setPromptAgentError(null);
   }, []);
 
   useLayoutEffect(() => {
@@ -291,6 +321,7 @@ export default function GeneratePage() {
     setRecipeWarnings(saved.recipeWarnings ?? []); setComposerMode(saved.composerMode ?? "direct");
     setEditingPromptMessageId(saved.editingPromptMessageId);setPromptAgentSessionId(saved.promptAgentSessionId);
     setPromptAgentMessages(saved.promptAgentMessages ?? []);setSelectedPromptAgentConfigId(saved.selectedPromptAgentConfigId ?? "");
+    setAgentTextOnly(saved.agentTextOnly ?? false); setAgentVisualSelection(saved.agentVisualSelection ?? null);
   }, [setActiveImageModel]);
 
   const applyModelDefaults = useCallback((model: ImageModel) => {
@@ -644,7 +675,7 @@ export default function GeneratePage() {
       try {
         const saved = await getModelProviderProfiles(request.model);
         const profile = saved.profiles.find(profile => profile.id === (request.providerProfileId ?? saved.active_provider_id));
-        if (!profile?.api_key.trim()) {
+        if (!profile?.api_key_configured) {
           setProviderSetup({model:request.model,providerId:request.providerProfileId});
           if (request.providerProfileId && !profile) setRecipeWarnings(current => [...new Set([...current, "provider_missing"])]);
           submissionPending.current = false;
@@ -867,69 +898,75 @@ export default function GeneratePage() {
 
   const handleDeepThinkingSend = useCallback(async () => {
     const trimmed = prompt.trim();
-    if (!trimmed || isGenerating) return;
-
+    if (!trimmed || isGenerating || agentPendingRef.current) return;
     if (!selectedPromptAgentConfigId) {
-      setPromptAgentMessages((current) => [
-        ...current,
-        {
-          id: `agent-error-${Date.now()}`,
-          session_id: promptAgentSessionId ?? "local",
-          role: "assistant",
-          content: t("generate.agent.selectLlm"),
-          draft_prompt: null,
-          selected_skill_ids: [],
-          suggested_params: {},
-          ready_to_generate: false,
-          created_at: new Date().toISOString(),
-        },
-      ]);
+      setPromptAgentError(t("generate.agent.selectLlm"));
       return;
     }
-
-    const sourceImagePaths = editSources.map((source) => source.path);
-    const result = promptAgentSessionId
-      ? await sendPromptAgentMessageMutation.mutateAsync({
-          sessionId: promptAgentSessionId,
-          message: trimmed,
-          configId: selectedPromptAgentConfigId,
-          sourceImagePaths,
-        })
-      : await startPromptAgentSessionMutation.mutateAsync({
-          prompt: trimmed,
-          configId: selectedPromptAgentConfigId,
-          conversationId: activeConversationId,
-          projectId: activeProjectId,
-          sourceImagePaths,
-        });
-
-    setPromptAgentSessionId(result.session.id);
-    setPromptAgentMessages(result.messages);
-    setPrompt("");
-  }, [
-    activeConversationId,
-    activeProjectId,
-    editSources,
-    isGenerating,
-    prompt,
-    promptAgentSessionId,
-    selectedPromptAgentConfigId,
-    sendPromptAgentMessageMutation,
-    startPromptAgentSessionMutation,
-    t,
-  ]);
+    const sourceImagePaths = [...new Set(editSources.map((source) => source.path))];
+    const visualSourceImagePaths = agentTextOnly ? [] : resolveVisualSourcePaths(sourceImagePaths, agentVisualSelection);
+    if (sourceImagePaths.length && !agentTextOnly && (visualSourceImagePaths.length === 0 || visualSourceImagePaths.length > 3)) {
+      setPromptAgentError(t("promptVision.selectUpToThree"));
+      return;
+    }
+    const revision = draftRevision.current;
+    const scope = agentScopeRef.current;
+    const isCurrent = () => agentMountedRef.current && agentScopeRef.current === scope && draftRevision.current === revision;
+    agentPendingRef.current = true;
+    setPromptAgentError(null);
+    try {
+      const common = { configId: selectedPromptAgentConfigId, sourceImagePaths, visualSourceImagePaths, textOnly: agentTextOnly };
+      const result = promptAgentSessionId
+        ? await sendPromptAgentMessageMutation.mutateAsync({ ...common, sessionId: promptAgentSessionId, message: trimmed })
+        : await startPromptAgentSessionMutation.mutateAsync({ ...common, prompt: trimmed, conversationId: activeConversationId, projectId: activeProjectId });
+      if (!isCurrent()) return;
+      setPromptAgentSessionId(result.session.id);
+      setPromptAgentMessages(result.messages);
+      setPrompt("");
+    } catch (error) {
+      if (isCurrent()) setPromptAgentError(t(promptVisionErrorKey(error)));
+    } finally {
+      agentPendingRef.current = false;
+    }
+  }, [activeConversationId, activeProjectId, editSources, isGenerating, prompt, promptAgentSessionId,
+    selectedPromptAgentConfigId, sendPromptAgentMessageMutation, startPromptAgentSessionMutation,
+    agentTextOnly, agentVisualSelection, t]);
 
   const handleAcceptAgentDraft = useCallback(
     async (message: PromptAgentMessage) => {
       const draft = message.draft_prompt?.trim();
-      if (!draft || !promptAgentSessionId || recipeWarnings.length > 0) return;
+      if (!draft || !promptAgentSessionId || recipeWarnings.length > 0 || isGenerating || agentPendingRef.current) return;
+      const revision = draftRevision.current;
+      const scope = agentScopeRef.current;
+      const isCurrent = () => agentMountedRef.current && agentScopeRef.current === scope && draftRevision.current === revision;
+      agentPendingRef.current = true;
+      setPromptAgentError(null);
+      let acceptanceSucceeded = false;
+      try {
 
       const accepted = await acceptPromptAgentDraftMutation.mutateAsync({
         sessionId: promptAgentSessionId,
         acceptedPrompt: draft,
       });
+      acceptanceSucceeded = true;
+      if (!isCurrent()) {
+        // Acceptance is durable even when its response is stale. Do not reuse
+        // that inactive session for the user's newer draft.
+        if (agentMountedRef.current && agentScopeRef.current === scope && agentSessionRef.current === promptAgentSessionId) {
+          agentSessionRef.current = null;
+          setPromptAgentSessionId(null);
+          setPromptAgentMessages([]);
+        }
+        return;
+      }
+      retryAgentAcceptanceRef.current = null;
+      retryAcceptedGenerationRef.current = false;
       const acceptedPrompt = accepted.accepted_prompt ?? draft;
       const nextModel = message.suggested_params.model ?? imageModel;
+      const nextAspectRatio = nextModel === imageModel
+        ? aspectRatio : getImageModelCatalogEntry(nextModel).parameterDefaults.aspectRatio;
+      const nextResolution = nextModel === imageModel
+        ? resolution : getImageModelCatalogEntry(nextModel).parameterDefaults.resolution;
       const nextSize = message.suggested_params.size ?? size;
       const nextQuality = message.suggested_params.quality ?? quality;
       const nextBackground = message.suggested_params.background ?? background;
@@ -941,6 +978,8 @@ export default function GeneratePage() {
       setPrompt(acceptedPrompt);
       setActiveImageModel(nextModel);
       setSize(nextSize);
+      setAspectRatio(nextAspectRatio);
+      setResolution(nextResolution);
       setQuality(nextQuality);
       setBackground(nextBackground);
       setOutputFormat(nextOutputFormat);
@@ -957,15 +996,8 @@ export default function GeneratePage() {
         outputCompression,
         model: nextModel,
         size: nextSize,
-        aspectRatio:
-          nextModel === imageModel
-            ? aspectRatio
-            : getImageModelCatalogEntry(nextModel).parameterDefaults
-                .aspectRatio,
-        resolution:
-          nextModel === imageModel
-            ? resolution
-            : getImageModelCatalogEntry(nextModel).parameterDefaults.resolution,
+        aspectRatio: nextAspectRatio,
+        resolution: nextResolution,
         quality: nextQuality,
         background: nextBackground,
         outputFormat: nextOutputFormat,
@@ -976,8 +1008,19 @@ export default function GeneratePage() {
         projectId: activeProjectId,
         editSources: editSources.map((source) => ({ ...source })),
       });
+      } catch (error) {
+        if (isCurrent()) {
+          retryAgentAcceptanceRef.current = acceptanceSucceeded ? null : message;
+          retryAcceptedGenerationRef.current = acceptanceSucceeded;
+          setPromptAgentError(t(promptVisionErrorKey(error)));
+        }
+      } finally {
+        agentPendingRef.current = false;
+      }
     },
     [
+      isGenerating,
+      t,
       advancedOptions,
       outputCompression,
       aspectRatio,
@@ -1004,17 +1047,19 @@ export default function GeneratePage() {
 
   const handleContinueAgentDraft = useCallback(
     (message: PromptAgentMessage) => {
+      markComposerDraftStarted();
       setPrompt(message.draft_prompt ?? "");
       textareaRef.current?.focus();
     },
-    [],
+    [markComposerDraftStarted],
   );
 
   const handleEditAgentDraft = useCallback((message: PromptAgentMessage) => {
+    markComposerDraftStarted();
     setPrompt(message.draft_prompt ?? "");
     setComposerMode("direct");
     textareaRef.current?.focus();
-  }, []);
+  }, [markComposerDraftStarted]);
 
   const handleImageClick = useCallback(
     (images: MessageImage[], index: number) => {
@@ -1164,10 +1209,11 @@ export default function GeneratePage() {
   );
 
   const configuredProfile = providerQuery.data?.profiles.find(profile => profile.id === (recipeIdentity.providerProfileId ?? providerQuery.data?.active_provider_id));
-  const needsProviderSetup = !!providerSetup || (!!providerQuery.data && !configuredProfile?.api_key.trim()) || providerQuery.isError;
+  const needsProviderSetup = !!providerSetup || (!!providerQuery.data && !configuredProfile?.api_key_configured) || providerQuery.isError;
   function openProviderSettings() {
+    if (agentPendingRef.current) return;
     try {
-      saveProviderSettingsDraft({request:{...recipeIdentity,prompt,advancedOptions,outputCompression,model:imageModel,size,aspectRatio,resolution,quality,background,outputFormat,moderation,inputFidelity,imageCount,conversationId:activeConversationId,projectId:activeProjectId,editSources},recipeWarnings,composerMode,editingPromptMessageId,promptAgentSessionId,promptAgentMessages,selectedPromptAgentConfigId});
+      saveProviderSettingsDraft({request:{...recipeIdentity,prompt,advancedOptions,outputCompression,model:imageModel,size,aspectRatio,resolution,quality,background,outputFormat,moderation,inputFidelity,imageCount,conversationId:activeConversationId,projectId:activeProjectId,editSources},recipeWarnings,composerMode,editingPromptMessageId,promptAgentSessionId,promptAgentMessages,selectedPromptAgentConfigId,agentTextOnly,agentVisualSelection});
     } catch { setRecipeError(t("generate.draftSaveFailed")); return; }
     const target=providerSetup ?? {model:imageModel,providerId:recipeIdentity.providerProfileId};
     const query=new URLSearchParams({tab:"model",model:target.model,returnTo:location.pathname || "/generate"});
@@ -1208,7 +1254,7 @@ export default function GeneratePage() {
               agentMessages={promptAgentMessages}
               isPromptAgentRunning={
                 startPromptAgentSessionMutation.isPending ||
-                sendPromptAgentMessageMutation.isPending
+                sendPromptAgentMessageMutation.isPending || acceptPromptAgentDraftMutation.isPending
               }
               onAcceptAgentDraft={(message) =>
                 void handleAcceptAgentDraft(message)
@@ -1357,7 +1403,7 @@ export default function GeneratePage() {
               </div>
             </div>
           )}
-          {needsProviderSetup && <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-5 py-3 text-sm"><span className="text-muted">{t("generate.providerSetupRequired")}</span><button type="button" onClick={openProviderSettings} className="studio-control focus-ring min-h-9 rounded-lg px-3 py-2 text-xs font-medium">{t("generate.configureProvider")}</button></div>}
+          {needsProviderSetup && <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-5 py-3 text-sm"><span className="text-muted">{t("generate.providerSetupRequired")}</span><button type="button" disabled={startPromptAgentSessionMutation.isPending || sendPromptAgentMessageMutation.isPending || acceptPromptAgentDraftMutation.isPending} onClick={openProviderSettings} className="studio-control focus-ring min-h-9 rounded-lg px-3 py-2 text-xs font-medium">{t("generate.configureProvider")}</button></div>}
           <GenerationComposer
             parametersTarget={parametersTarget}
             interactionDisabled={drawerOpen}
@@ -1429,12 +1475,22 @@ export default function GeneratePage() {
             onCancelPromptEdit={handleCancelPromptEdit}
             onGenerate={() => void handleGenerate()}
             composerMode={composerMode}
-            onComposerModeChange={setComposerMode}
+            onComposerModeChange={(value) => { markComposerDraftStarted(); setComposerMode(value); }}
             onDeepThinkingSend={() => void handleDeepThinkingSend()}
-            onPromptAgentConfigChange={setSelectedPromptAgentConfigId}
+            promptAgentConfigId={selectedPromptAgentConfigId}
+            onPromptAgentConfigChange={(configId, userInitiated) => {
+              if (userInitiated && configId !== selectedPromptAgentConfigId) markComposerDraftStarted();
+              setSelectedPromptAgentConfigId(configId);
+            }}
+            agentVisualSourcePaths={agentVisualSourcePaths}
+            onAgentVisualSourcePathsChange={(paths) => { markComposerDraftStarted(); setAgentVisualSelection(paths); }}
+            agentTextOnly={agentTextOnly}
+            onAgentTextOnlyChange={(value) => { markComposerDraftStarted(); setAgentTextOnly(value); }}
+            promptAgentError={promptAgentError}
+            onRetryPromptAgent={() => { const message = retryAgentAcceptanceRef.current; void (message ? handleAcceptAgentDraft(message) : retryAcceptedGenerationRef.current ? handleGenerate() : handleDeepThinkingSend()); }}
             isPromptAgentRunning={
               startPromptAgentSessionMutation.isPending ||
-              sendPromptAgentMessageMutation.isPending
+              sendPromptAgentMessageMutation.isPending || acceptPromptAgentDraftMutation.isPending
             }
             isGenerating={isGenerating || recipeWarnings.length > 0}
           />

@@ -113,6 +113,17 @@ describe("ModelSettingsPanel provider profiles", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps a stored key out of the input and offers an explicit clear action", () => {
+    const onClear = vi.fn();
+    renderPanel({ providerState: { ...providerState, profiles: providerState.profiles.map(p => ({ ...p, api_key: "", api_key_configured: true, api_key_masked: "••••••••" })) }, onProviderApiKeyClear: onClear });
+    const input = screen.getByPlaceholderText("credentials.keepPlaceholder");
+    expect(input).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "settings.showKey" }));
+    expect(input).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "credentials.clear" }));
+    expect(onClear).toHaveBeenCalledOnce();
+  });
+
   it("renders provider rows and the selected provider editor", () => {
     renderPanel();
 

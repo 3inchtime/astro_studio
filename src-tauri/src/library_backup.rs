@@ -159,6 +159,15 @@ fn credential_key(key: &str) -> bool {
 fn scrub(value: &mut Value) {
     match value {
         Value::Object(map) => {
+            map.retain(|key, _| {
+                !matches!(
+                    key.as_str(),
+                    "credential_ref"
+                        | "credential_update"
+                        | "api_key_configured"
+                        | "api_key_masked"
+                )
+            });
             for (key, value) in map {
                 let key = key.to_lowercase();
                 if credential_key(&key) {
@@ -235,6 +244,7 @@ fn transform_database_paths(
 ) -> Result<()> {
     for (table, column) in [
         ("images", "file_path"),
+        ("canvas_assets", "file_path"),
         ("images", "thumbnail_path"),
         ("canvas_documents", "document_path"),
         ("canvas_documents", "preview_path"),
@@ -292,6 +302,8 @@ fn transform_database_paths(
     Ok(())
 }
 fn scrub_snapshot(conn: &Connection) -> Result<()> {
+    conn.execute_batch("PRAGMA secure_delete=ON;")?;
+    conn.execute("DELETE FROM settings WHERE key IN ('credential_migration_pending','credential_cleanup_pending','credential_pending_deletes')", [])?;
     conn.execute("DELETE FROM logs", [])?;
     let rows = conn
         .prepare("SELECT key,value FROM settings")?
@@ -761,7 +773,7 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
     if manifest.version != 1 {
         return Err("Unsupported backup format version".into());
     }
-    if manifest.schema_version > 18 {
+    if manifest.schema_version > 20 {
         return Err("Backup was created by a newer application".into());
     }
     if manifest.files.len() + 1 != names.len() || !names.contains("library.db") {
@@ -904,7 +916,7 @@ fn restore_archive_manifest(
         if foreign_errors != 0 {
             return Err("Restored database has broken references".into());
         }
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        conn.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
         drop(conn);
         drop(database);
         sync_restored_tree(&destination, op)?;
@@ -1100,6 +1112,12 @@ mod tests {
         fs::write(&image, b"original-image-bytes").unwrap();
         db.set_setting("api_key", "sk-backup-secret-marker")
             .unwrap();
+        db.set_setting("model_provider_profiles::gpt-image-2", r#"[{"id":"test","credential_ref":"vault:v1:backup-private-reference","api_key_configured":true,"api_key_masked":"masked"}]"#).unwrap();
+        db.set_setting(
+            "credential_migration_pending",
+            r#"{"test":"vault:v1:pending-private-reference"}"#,
+        )
+        .unwrap();
         db.conn.lock().unwrap().execute("INSERT INTO generations(id,prompt,engine,size,quality,status) VALUES('g','keep this prompt','gpt-image-2','1024x1024','high','completed')", []).unwrap();
         db.conn.lock().unwrap().execute("INSERT INTO images(id,generation_id,file_path,thumbnail_path,width,height,file_size) VALUES('i','g',?1,?1,1,1,20)", [image.to_string_lossy().as_ref()]).unwrap();
         let ops = Operations::default();
@@ -1115,6 +1133,19 @@ mod tests {
             Some("sk-backup-secret-marker")
         );
         assert_eq!(copy.get_setting("api_key").unwrap().as_deref(), Some(""));
+        assert!(copy
+            .get_setting("credential_migration_pending")
+            .unwrap()
+            .is_none());
+        let metadata = copy
+            .get_setting("model_provider_profiles::gpt-image-2")
+            .unwrap()
+            .unwrap();
+        assert!(!metadata.contains("credential_ref"));
+        assert!(!metadata.contains("api_key_configured"));
+        let bytes = fs::read(restored.join("library.db")).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("backup-private-reference"));
+        assert!(!String::from_utf8_lossy(&bytes).contains("pending-private-reference"));
         let restored_path: String = copy
             .conn
             .lock()
