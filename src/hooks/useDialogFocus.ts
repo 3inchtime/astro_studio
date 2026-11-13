@@ -2,13 +2,17 @@ import { useEffect, useRef } from "react";
 
 // Shared registration prevents an underlying dialog handling the same key event.
 const overlays: HTMLDivElement[] = [];
-const focusableSelector = "button, a[href], input, select, textarea, [tabindex]";
+const focusableSelector = "button, a[href], input, select, textarea, summary, [tabindex]";
 
 function isTabbable(element: HTMLElement, panel: HTMLElement) {
   if (element.tabIndex < 0 || element.matches(':disabled, input[type="hidden"]')) return false;
   if (element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
   // A child's computed display does not reveal display:none on its ancestors.
   for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    if (current instanceof HTMLDetailsElement && !current.open) {
+      const summary = current.querySelector(":scope > summary");
+      if (!summary?.contains(element)) return false;
+    }
     const style = getComputedStyle(current);
     if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
     if (current === panel) break;

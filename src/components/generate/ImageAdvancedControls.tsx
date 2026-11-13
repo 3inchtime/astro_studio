@@ -55,13 +55,13 @@ export default function ImageAdvancedControls({
   };
   const Container = embedded ? "div" : "details";
   return (
-    <Container className="mt-2 rounded-xl border border-border-subtle bg-surface px-3 py-2">
+    <Container className="@container mt-3 border-t border-border-subtle py-3">
       {!embedded && (
         <summary className="focus-ring cursor-pointer rounded-lg text-xs font-medium text-foreground">
           {t("generate.advanced.title")}
         </summary>
       )}
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 @min-[400px]:grid-cols-2 @min-[640px]:grid-cols-3">
         <label className={label}>
           {t("generate.advanced.complexity")}
           <select

@@ -798,3 +798,5 @@ button:disabled,
 [data-context-actions] { opacity: 0; transition: opacity var(--motion-feedback) var(--ease-out); }
 [data-message-role]:is(:hover, :focus-within) [data-context-actions] { opacity: 1; }
 @media (hover: none) { [data-context-actions] { opacity: 1; } }
+
+.studio-nav-item, .studio-nav-item > svg, .studio-nav-item > span { flex-shrink: 0; }
