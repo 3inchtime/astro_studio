@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import GenerationDetailPanel from "./GenerationDetailPanel";
+import { saveImageToFile } from "../../lib/api";
 import type { GenerationResult } from "../../types";
 
 vi.mock("react-i18next", () => ({
@@ -61,9 +62,21 @@ function buildResult(): GenerationResult {
 describe("GenerationDetailPanel", () => {
   it("presents an accessible drawer with a named close action on smaller windows", () => {
     const onClose = vi.fn();
-    render(<GenerationDetailPanel result={buildResult()} title="Detail" onClose={onClose} onDelete={vi.fn()} />);
-    expect(screen.getByRole("dialog", { name: "Detail" })).toHaveAttribute("aria-modal", "true");
-    fireEvent.click(screen.getByRole("button", { name: "studio.collection.closeDetail" }));
+    render(
+      <GenerationDetailPanel
+        result={buildResult()}
+        title="Detail"
+        onClose={onClose}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("dialog", { name: "Detail" })).toHaveAttribute(
+      "aria-modal",
+      "true",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "studio.collection.closeDetail" }),
+    );
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -81,10 +94,40 @@ describe("GenerationDetailPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "lightbox.preview 2" }));
-    fireEvent.click(screen.getByRole("button", {
-      name: "lightbox.preview Glass observatory",
-    }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "lightbox.preview Glass observatory",
+      }),
+    );
 
-    expect(onPreview).toHaveBeenCalledWith(1, expect.objectContaining({ imageId: "image-2" }));
+    expect(onPreview).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ imageId: "image-2" }),
+    );
+  });
+  it("shows save failure without losing the inspected image and retries", async () => {
+    vi.mocked(saveImageToFile)
+      .mockReset()
+      .mockRejectedValueOnce(new Error("Not available"))
+      .mockResolvedValueOnce(undefined);
+    render(
+      <GenerationDetailPanel
+        result={buildResult()}
+        title="Details"
+        showSaveButton
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    const save = screen.getByRole("button", { name: "gallery.saveImage" });
+    fireEvent.click(save);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "studio.saveImageFailed",
+    );
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(saveImageToFile).toHaveBeenLastCalledWith("/tmp/full-1.png");
   });
 });

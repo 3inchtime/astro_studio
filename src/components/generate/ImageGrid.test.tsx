@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ImageGrid from "./ImageGrid";
+import { copyImageToClipboard, saveImageToFile } from "../../lib/api";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -222,4 +223,40 @@ describe("ImageGrid", () => {
     expect(renderedImages[0]).toHaveAttribute("src", "/tmp/thumb-1.png");
     expect(renderedImages[1]).toHaveAttribute("src", "/tmp/thumb-2.png");
   });
+  it.each(["copy", "save"])(
+    "shows %s failures and lets the user retry",
+    async (kind) => {
+      const action = vi.mocked(
+        kind === "copy" ? copyImageToClipboard : saveImageToFile,
+      );
+      action
+        .mockReset()
+        .mockRejectedValueOnce(new Error("Not available"))
+        .mockResolvedValueOnce(undefined);
+      render(
+        <ImageGrid
+          images={[
+            {
+              path: "/tmp/action.png",
+              imageId: "action",
+              generationId: "generation-action",
+            },
+          ]}
+          onImageClick={vi.fn()}
+        />,
+      );
+      const button = screen.getByRole("button", {
+        name: kind === "copy" ? "lightbox.copy" : "lightbox.download",
+      });
+      fireEvent.click(button);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        kind === "copy" ? "studio.copyFailed" : "studio.saveImageFailed",
+      );
+      fireEvent.click(button);
+      await waitFor(() =>
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+      );
+      expect(action).toHaveBeenCalledTimes(2);
+    },
+  );
 });

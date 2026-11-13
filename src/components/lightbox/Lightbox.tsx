@@ -1,5 +1,11 @@
 import { useDialogFocus } from "../../hooks/useDialogFocus";
-import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   X,
@@ -62,6 +68,8 @@ export default function Lightbox({
 
   const currentImage = images[index];
   const currentPath = currentImage?.path;
+  const currentPathRef = useRef(currentPath);
+  currentPathRef.current = currentPath;
   const imageEpoch = useRef(0);
   const transitionEase: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -70,15 +78,37 @@ export default function Lightbox({
     if (rect && rect.width > 0 && rect.height > 0) setViewport(rect);
   }, [currentPath]);
 
-  const sourceRect = source?.imageId === currentImage?.imageId ? source?.rect : undefined;
-  const fittedScale = sourceRect && viewport ? Math.min(viewport.width / sourceRect.width, viewport.height / sourceRect.height) : 1;
-  const sourceTransform = sourceRect && viewport && !reducedMotion ? {
-    opacity: 1,
-    x: sourceRect.left + sourceRect.width / 2 - viewport.left - viewport.width / 2,
-    y: sourceRect.top + sourceRect.height / 2 - viewport.top - viewport.height / 2,
-    scale: 1 / fittedScale,
-  } : { opacity: 0, x: 0, y: 0, scale: 1 };
-  const sourceStillPresent = source && [...document.querySelectorAll("[data-preview-image-id]")].some((node) => node.getAttribute("data-preview-image-id") === source.imageId);
+  const sourceRect =
+    source?.imageId === currentImage?.imageId ? source?.rect : undefined;
+  const fittedScale =
+    sourceRect && viewport
+      ? Math.min(
+          viewport.width / sourceRect.width,
+          viewport.height / sourceRect.height,
+        )
+      : 1;
+  const sourceTransform =
+    sourceRect && viewport && !reducedMotion
+      ? {
+          opacity: 1,
+          x:
+            sourceRect.left +
+            sourceRect.width / 2 -
+            viewport.left -
+            viewport.width / 2,
+          y:
+            sourceRect.top +
+            sourceRect.height / 2 -
+            viewport.top -
+            viewport.height / 2,
+          scale: 1 / fittedScale,
+        }
+      : { opacity: 0, x: 0, y: 0, scale: 1 };
+  const sourceStillPresent =
+    source &&
+    [...document.querySelectorAll("[data-preview-image-id]")].some(
+      (node) => node.getAttribute("data-preview-image-id") === source.imageId,
+    );
 
   useEffect(() => {
     setCopied(false);
@@ -147,7 +177,8 @@ export default function Lightbox({
     function handleKey(e: KeyboardEvent) {
       if (
         showFolderSelector ||
-        (e.target instanceof HTMLElement && e.target.closest('[role="dialog"]') !== dialogRef.current) ||
+        (e.target instanceof HTMLElement &&
+          e.target.closest('[role="dialog"]') !== dialogRef.current) ||
         e.defaultPrevented ||
         (e.target instanceof HTMLElement &&
           e.target.closest("input,textarea,select"))
@@ -255,39 +286,59 @@ export default function Lightbox({
         }}
       >
         <AnimatePresence>
-          {(!sourceRect || viewport) && <motion.div
-            key={currentPath}
-            initial={sourceTransform}
-            animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
-            exit={sourceStillPresent ? sourceTransform : { opacity: 0 }}
-            transition={{ duration: 0.2, ease: transitionEase }}
-            className="absolute inset-0 flex items-center justify-center"
-          >
-            {readyPath !== currentPath && currentImage.thumbnailPath && <img
-              data-testid="preview-thumbnail"
-              aria-hidden="true"
-              src={toAssetUrl(currentImage.thumbnailPath)}
-              alt=""
-              className="absolute max-h-full max-w-full object-contain"
-              onClick={(event) => event.stopPropagation()}
-              onDoubleClick={toggleZoom}
-              style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
-            />}
-            <img
-              src={toAssetUrl(currentPath)}
-              alt={t("lightbox.preview")}
-              className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
-              style={{
-                opacity: readyPath === currentPath || !currentImage.thumbnailPath ? 1 : 0,
-                transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-              }}
-              onLoad={() => setReadyPath(currentPath)}
-              onError={() => setActionError(t("studio.collection.previewLoadFailed", { defaultValue: "Could not load the full image. The thumbnail is still available." }))}
-              onDoubleClick={toggleZoom}
-              onClick={(e) => e.stopPropagation()}
-              draggable={false}
-            />
-          </motion.div>}
+          {(!sourceRect || viewport) && (
+            <motion.div
+              key={currentPath}
+              initial={sourceTransform}
+              animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+              exit={sourceStillPresent ? sourceTransform : { opacity: 0 }}
+              transition={{ duration: 0.2, ease: transitionEase }}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              {readyPath !== currentPath && currentImage.thumbnailPath && (
+                <img
+                  data-testid="preview-thumbnail"
+                  aria-hidden="true"
+                  src={toAssetUrl(currentImage.thumbnailPath)}
+                  alt=""
+                  className="absolute max-h-full max-w-full object-contain"
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={toggleZoom}
+                  style={{
+                    transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                  }}
+                />
+              )}
+              <img
+                src={toAssetUrl(currentPath)}
+                alt={t("lightbox.preview")}
+                className="max-h-full max-w-full origin-center object-contain select-none will-change-transform"
+                style={{
+                  opacity:
+                    readyPath === currentPath || !currentImage.thumbnailPath
+                      ? 1
+                      : 0,
+                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                }}
+                onLoad={() => {
+                  if (currentPathRef.current === currentPath)
+                    setReadyPath(currentPath);
+                }}
+                onError={() => {
+                  if (currentPathRef.current === currentPath)
+                    setActionError(
+                      t("studio.collection.previewLoadFailed", {
+                        defaultValue:
+                          "Could not load the full image. The thumbnail is still available.",
+                      }),
+                    );
+                }}
+                onDoubleClick={toggleZoom}
+                onClick={(e) => e.stopPropagation()}
+                draggable={false}
+              />
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
