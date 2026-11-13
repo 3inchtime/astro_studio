@@ -94,12 +94,9 @@ fn default_canvas_content() -> CanvasDocumentContent {
 }
 
 fn canvas_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::FileSystem {
-            message: format!("Get app data dir failed: {}", e),
-        })?;
+    let app_data_dir = crate::storage::asset_root(app).map_err(|e| AppError::FileSystem {
+        message: format!("Get app data dir failed: {}", e),
+    })?;
     Ok(app_data_dir.join("canvas"))
 }
 
@@ -173,6 +170,7 @@ pub(crate) fn create_canvas_document(
     project_id: Option<String>,
     name: Option<String>,
 ) -> Result<CanvasDocument, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let (documents_dir, _, _) = ensure_canvas_dirs(&app)?;
     let timestamp = current_timestamp();
     let id = uuid::Uuid::new_v4().to_string();
@@ -217,6 +215,7 @@ pub(crate) fn list_canvas_documents(
     db: State<'_, Database>,
     project_id: Option<String>,
 ) -> Result<Vec<CanvasDocument>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -249,6 +248,7 @@ pub(crate) fn get_canvas_document(
     db: State<'_, Database>,
     id: String,
 ) -> Result<CanvasDocumentWithContent, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -271,6 +271,7 @@ pub(crate) fn save_canvas_document(
     content: CanvasDocumentContent,
     preview_png_base64: Option<String>,
 ) -> Result<CanvasDocument, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let timestamp = current_timestamp();
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
@@ -328,6 +329,7 @@ pub(crate) fn rename_canvas_document(
     id: String,
     name: String,
 ) -> Result<CanvasDocument, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let name = name.trim();
     if name.is_empty() {
         return Err(AppError::Validation {
@@ -352,6 +354,7 @@ pub(crate) fn rename_canvas_document(
 
 #[tauri::command]
 pub(crate) fn delete_canvas_document(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let timestamp = current_timestamp();
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
@@ -372,6 +375,7 @@ pub(crate) fn save_canvas_export(
     document_id: String,
     png_base64: String,
 ) -> Result<String, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let (_, _, exports_dir) = ensure_canvas_dirs(&app)?;
     let exports_dir = exports_dir
         .canonicalize()
@@ -512,6 +516,7 @@ pub(crate) fn get_canvas_generation_status(
     document_id: String,
     request_id: String,
 ) -> Result<Option<CanvasGenerationStatus>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|error| AppError::Database {
         message: format!("Lock canvas generation status failed: {error}"),
     })?;

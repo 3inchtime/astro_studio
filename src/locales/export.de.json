@@ -1,0 +1,32 @@
+{
+  "action": "Originale exportieren",
+  "scope": "{{records}} Generierungen, {{images}} Bilder",
+  "description": "Alle Bilder der ausgewählten Datensätze werden im Originalformat kopiert. Vorhandene Dateien bleiben erhalten; gleiche Namen erhalten einen Zahlensuffix.",
+  "recipe": "Eine JSON-Rezeptdatei je Bild hinzufügen",
+  "privacy": "Rezepte enthalten Prompts und Generierungseinstellungen. Zugangsdaten, Endpunkte und lokale Dateipfade werden ausgelassen.",
+  "cancel": "Abbrechen",
+  "chooseFolder": "Exportordner wählen",
+  "status": "Bildexport",
+  "progress": "{{completed}} / {{total}} Bilder werden exportiert…",
+  "completed": "{{completed}} / {{total}} Bilder exportiert",
+  "cancelled": "Export gestoppt. Fertige Dateien bleiben erhalten.",
+  "exportFailed": "Export nicht abgeschlossen. Fertige Dateien bleiben erhalten.",
+  "cancelFailed": "Export konnte nicht gestoppt werden. Prüfen Sie den Fortschritt.",
+  "failed": "{{count}} Bilder benötigen Aufmerksamkeit",
+  "stop": "Export stoppen",
+  "retry": "Verbleibende Bilder wiederholen",
+  "dismiss": "Schließen",
+  "select": "Bilder auswählen",
+  "preparing": "Export vorbereiten…",
+  "codes": {
+    "source_missing": "Originaldatei fehlt",
+    "unsafe_source": "Quelle liegt außerhalb der Bibliothek oder ist ein symbolischer Link",
+    "source_unreadable": "Originaldatei nicht lesbar",
+    "destination_write_failed": "Ziel nicht beschreibbar oder unterstützt keine atomare Dateiveröffentlichung",
+    "destination_name_conflict": "Kein freier Dateiname gefunden",
+    "verification_failed": "Byteprüfung der Kopie fehlgeschlagen",
+    "sidecar_failed": "Bild gespeichert; JSON-Rezept konnte nicht gespeichert werden",
+    "operation_cancelled": "Vor dem Abbruch nicht abgeschlossen"
+  },
+  "cancelledItems": "{{count}} Bilder abgebrochen"
+}

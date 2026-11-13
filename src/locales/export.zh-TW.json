@@ -1,0 +1,32 @@
+{
+  "action": "匯出原圖",
+  "scope": "{{records}} 筆產生記錄，共 {{images}} 張圖片",
+  "description": "將依原始格式複製所選記錄中的全部圖片。保留既有檔案，同名檔案加上數字後綴。",
+  "recipe": "為每張圖片附帶 JSON 配方",
+  "privacy": "配方包含提示詞和產生參數，不含憑證、端點和本機檔案路徑。",
+  "cancel": "取消",
+  "chooseFolder": "選擇匯出資料夾",
+  "status": "圖片匯出",
+  "progress": "正在匯出 {{completed}} / {{total}} 張圖片…",
+  "completed": "已匯出 {{completed}} / {{total}} 張圖片",
+  "cancelled": "匯出已停止，已完成的檔案會保留。",
+  "exportFailed": "匯出未能完成，已完成的檔案會保留。",
+  "cancelFailed": "無法停止匯出，請檢查進度後再試。",
+  "failed": "{{count}} 張圖片需要處理",
+  "stop": "停止匯出",
+  "retry": "重試剩餘圖片",
+  "dismiss": "關閉",
+  "select": "選擇圖片",
+  "preparing": "準備匯出…",
+  "codes": {
+    "source_missing": "原始檔案遺失",
+    "unsafe_source": "來源位於圖庫外或為符號連結",
+    "source_unreadable": "無法讀取原始檔案",
+    "destination_write_failed": "目的地不可寫入或不支援原子發布檔案",
+    "destination_name_conflict": "無法產生未使用的檔名",
+    "verification_failed": "副本位元組驗證失敗",
+    "sidecar_failed": "圖片已儲存，JSON 配方儲存失敗",
+    "operation_cancelled": "取消前尚未完成"
+  },
+  "cancelledItems": "{{count}} 張圖片已取消"
+}

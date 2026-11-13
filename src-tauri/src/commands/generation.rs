@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::State;
 
 pub(crate) const MAX_SOURCE_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 
@@ -197,7 +197,7 @@ pub(crate) fn resolve_source_image_paths(
 
 // Restart retries may reuse only the exact source list and overlay pair from a
 // validated failed job. Picker registration still governs every other request.
-fn persisted_edit_paths_match(
+pub(crate) fn persisted_edit_paths_match(
     request: &serde_json::Value,
     model: &str,
     sources: &[String],
@@ -255,6 +255,28 @@ pub(crate) fn persisted_retry_authorizes_edit(
     Ok(false)
 }
 
+// A reviewed saved recipe grants access only to its exact saved files. New
+// references still require picker or managed-image authorization.
+fn saved_recipe_authorizes_path(
+    request: &serde_json::Value,
+    model: &str,
+    path: &str,
+    role: &str,
+) -> bool {
+    if request["model"].as_str() != Some(model) {
+        return false;
+    }
+    match role {
+        "source" => request["source_image_paths"]
+            .as_array()
+            .is_some_and(|paths| paths.iter().any(|p| p.as_str() == Some(path))),
+        "markupPath" | "maskPath" => {
+            request["options"]["advanced_options"][role].as_str() == Some(path)
+        }
+        _ => false,
+    }
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -265,6 +287,9 @@ pub(crate) async fn generate_image(
     engine_state: State<'_, api_gateway::GptImageEngine>,
     prompt: String,
     client_request_id: Option<String>,
+    provider_profile_id: Option<String>,
+    provider_override_confirmed: Option<bool>,
+    source_generation_id: Option<String>,
     model: Option<String>,
     advanced_options: Option<ImageAdvancedOptions>,
     aspect_ratio: Option<String>,
@@ -284,6 +309,9 @@ pub(crate) async fn generate_image(
         db.inner(),
         engine_state.inner(),
         GenerationExecutionRequest {
+            provider_override_confirmed: provider_override_confirmed.unwrap_or(false),
+            provider_profile_id,
+            source_generation_id,
             advanced_options,
             aspect_ratio,
             resolution,
@@ -316,6 +344,9 @@ pub(crate) async fn edit_image(
     engine_state: State<'_, api_gateway::GptImageEngine>,
     selected_images: State<'_, SelectedImageRegistry>,
     client_request_id: Option<String>,
+    provider_profile_id: Option<String>,
+    provider_override_confirmed: Option<bool>,
+    source_generation_id: Option<String>,
     prompt: String,
     model: Option<String>,
     source_image_paths: Vec<String>,
@@ -338,58 +369,68 @@ pub(crate) async fn edit_image(
             message: "Please select at least one source image.".to_string(),
         });
     }
-    let persisted_retry = persisted_retry_authorizes_edit(
-        db.inner(),
-        model.as_deref(),
-        &source_image_paths,
-        advanced_options.as_ref(),
-    )?;
-    let source_image_paths = if persisted_retry {
-        source_image_paths
-            .iter()
-            .map(|path| {
-                let canonical = canonicalize_source_image_path(Path::new(path))?;
-                if canonical.to_string_lossy() != *path {
-                    return Err(AppError::Validation {
-                        message: "Saved source path changed.".into(),
-                    });
+    let saved_recipe = source_generation_id
+        .as_deref()
+        .map(|id| {
+            crate::generation_recipe::saved_job(db.inner(), id)?.ok_or_else(|| {
+                AppError::Validation {
+                    message:
+                        "Saved source authorization is unavailable; select the source images again."
+                            .into(),
                 }
-                validate_source_image_file(&canonical)?;
-                Ok(path.clone())
             })
-            .collect::<Result<Vec<_>, AppError>>()?
-    } else {
-        resolve_source_image_paths(
-            &app,
+        })
+        .transpose()?;
+    let persisted_retry = saved_recipe.is_none()
+        && persisted_retry_authorizes_edit(
             db.inner(),
-            selected_images.inner(),
+            model.as_deref(),
             &source_image_paths,
-        )?
+            advanced_options.as_ref(),
+        )?;
+    let resolve_path = |path: &String, role: &str| -> Result<String, AppError> {
+        let saved = saved_recipe.as_ref().is_some_and(|job| {
+            saved_recipe_authorizes_path(
+                &job.request,
+                model.as_deref().unwrap_or_default(),
+                path,
+                role,
+            )
+        });
+        if persisted_retry || saved {
+            let canonical = canonicalize_source_image_path(Path::new(path))?;
+            if canonical.to_string_lossy() != *path {
+                return Err(AppError::Validation {
+                    message: "Saved source path changed.".into(),
+                });
+            }
+            validate_source_image_file(&canonical)?;
+            Ok(path.clone())
+        } else {
+            Ok(resolve_source_image_paths(
+                &app,
+                db.inner(),
+                selected_images.inner(),
+                std::slice::from_ref(path),
+            )?[0]
+                .clone())
+        }
     };
+    let source_image_paths = source_image_paths
+        .iter()
+        .map(|path| resolve_path(path, "source"))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut advanced_options = advanced_options;
     if let Some(advanced) = &mut advanced_options {
-        for path in [&mut advanced.markup_path, &mut advanced.mask_path]
-            .into_iter()
-            .flatten()
-        {
-            if persisted_retry {
-                let canonical = canonicalize_source_image_path(Path::new(path))?;
-                if canonical.to_string_lossy() != *path {
-                    return Err(AppError::Validation {
-                        message: "Saved overlay path changed.".into(),
-                    });
-                }
-                validate_source_image_file(&canonical)?;
-            } else {
-                let resolved = resolve_source_image_paths(
-                    &app,
-                    db.inner(),
-                    selected_images.inner(),
-                    std::slice::from_ref(path),
-                )?;
-                *path = resolved[0].clone();
-            }
+        for (role, value) in [
+            ("markupPath", &mut advanced.markup_path),
+            ("maskPath", &mut advanced.mask_path),
+        ] {
+            let Some(path) = value else {
+                continue;
+            };
+            *path = resolve_path(path, role)?;
             let source =
                 std::fs::read(&source_image_paths[0]).map_err(|_| AppError::Validation {
                     message: "Cannot read source image.".into(),
@@ -405,6 +446,9 @@ pub(crate) async fn edit_image(
         db.inner(),
         engine_state.inner(),
         GenerationExecutionRequest {
+            provider_override_confirmed: provider_override_confirmed.unwrap_or(false),
+            provider_profile_id,
+            source_generation_id,
             advanced_options,
             aspect_ratio,
             resolution,
@@ -432,12 +476,9 @@ pub(crate) async fn edit_image(
 // ── Lightbox commands ────────────────────────────────────────────────────────
 
 fn managed_image_roots(app: &tauri::AppHandle) -> Result<Vec<PathBuf>, AppError> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::FileSystem {
-            message: format!("Get app data dir failed: {}", e),
-        })?;
+    let app_data_dir = crate::storage::asset_root(app).map_err(|e| AppError::FileSystem {
+        message: format!("Get app data dir failed: {}", e),
+    })?;
     Ok(vec![
         app_data_dir.join("images"),
         app_data_dir.join("thumbnails"),
@@ -662,6 +703,34 @@ mod image26_overlay_tests {
             "gpt-image-2.6-sunburst",
             &["/source.png".into()],
             Some(&a)
+        ));
+    }
+    #[test]
+    fn edited_recipe_authority_is_per_saved_path_and_overlay_role() {
+        let request = serde_json::json!({"model":"gpt-image-2.6-flare","source_image_paths":["/one.png","/two.png"],"options":{"advanced_options":{"markupPath":"/overlay.png"}}});
+        assert!(saved_recipe_authorizes_path(
+            &request,
+            "gpt-image-2.6-flare",
+            "/two.png",
+            "source"
+        ));
+        assert!(!saved_recipe_authorizes_path(
+            &request,
+            "gpt-image-2.6-flare",
+            "/arbitrary.png",
+            "source"
+        ));
+        assert!(saved_recipe_authorizes_path(
+            &request,
+            "gpt-image-2.6-flare",
+            "/overlay.png",
+            "markupPath"
+        ));
+        assert!(!saved_recipe_authorizes_path(
+            &request,
+            "gpt-image-2.6-flare",
+            "/overlay.png",
+            "maskPath"
         ));
     }
     #[test]

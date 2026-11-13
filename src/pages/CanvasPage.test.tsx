@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CanvasDocumentContent } from "../types";
 import CanvasPage from "./CanvasPage";
-import { waitForCanvasSaves } from "../lib/canvas/persistence";
+import {
+  waitForCanvasSaves,
+  flushCanvasSaves,
+} from "../lib/canvas/persistence";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -747,32 +750,55 @@ describe("CanvasPage", () => {
     getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
     render(<CanvasPage />, { wrapper: TestWrapper });
     await screen.findByText("Canvas stage");
-    const properties = screen.getByRole("tab", { name: "canvas.propertiesTitle" });
+    const properties = screen.getByRole("tab", {
+      name: "canvas.propertiesTitle",
+    });
     expect(properties).toHaveAttribute("aria-selected", "true");
     const generation = screen.getByRole("tab", { name: "Generation" });
     fireEvent.click(generation);
-    const editor = screen.getByPlaceholderText("Describe how to develop this framed sketch...");
+    const editor = screen.getByPlaceholderText(
+      "Describe how to develop this framed sketch...",
+    );
     fireEvent.change(editor, { target: { value: "A quiet mountain lake" } });
     fireEvent.click(screen.getByRole("tab", { name: "Layers" }));
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
-    expect(screen.getByRole("tab", { name: "Layers" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Layers" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     fireEvent.click(generation);
-    expect(screen.getByPlaceholderText("Describe how to develop this framed sketch...")).toBe(editor);
+    expect(
+      screen.getByPlaceholderText(
+        "Describe how to develop this framed sketch...",
+      ),
+    ).toBe(editor);
     expect(editor).toHaveValue("A quiet mountain lake");
   });
 
   it("docks the inspector at 1200px while documents remain a drawer until 1440px", async () => {
     const original = window.matchMedia;
-    const mediaSpy = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
-      ...original(query),
-      matches: query === "(min-width: 1200px)",
-    }));
+    const mediaSpy = vi
+      .spyOn(window, "matchMedia")
+      .mockImplementation((query) => ({
+        ...original(query),
+        matches: query === "(min-width: 1200px)",
+      }));
     render(<CanvasPage />, { wrapper: TestWrapper });
     await screen.findByText("Canvas stage");
-    expect(document.getElementById("canvas-inspector")).toHaveAttribute("data-layout", "docked");
-    expect(document.getElementById("canvas-documents")).toHaveAttribute("data-layout", "drawer");
-    fireEvent.click(screen.getByRole("button", { name: "studio.canvas.documents" }));
-    expect(screen.getByRole("dialog", { name: "studio.canvas.documents" })).toHaveAttribute("aria-modal", "true");
+    expect(document.getElementById("canvas-inspector")).toHaveAttribute(
+      "data-layout",
+      "docked",
+    );
+    expect(document.getElementById("canvas-documents")).toHaveAttribute(
+      "data-layout",
+      "drawer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "studio.canvas.documents" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "studio.canvas.documents" }),
+    ).toHaveAttribute("aria-modal", "true");
     mediaSpy.mockRestore();
   });
 
@@ -1227,6 +1253,53 @@ describe("CanvasPage", () => {
     });
 
     expect(await screen.findByText("Active tool: select")).toBeInTheDocument();
+  });
+
+  it("queues the latest dirty snapshot on unmount before maintenance can finish", async () => {
+    const preview = createDeferred<string>();
+    getCanvasDocument.mockResolvedValue(canvasDocumentWithImage());
+    exportCanvasFrame.mockReturnValueOnce(preview.promise);
+    const { unmount } = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    expect(screen.getByText("Unsaved")).toBeInTheDocument();
+    unmount();
+    let flushed = false;
+    const flush = flushCanvasSaves().then(() => {
+      flushed = true;
+    });
+    await flushAsyncWork();
+    expect(flushed).toBe(false);
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
+    preview.resolve("latest-preview");
+    await act(async () => {
+      await flush;
+    });
+    expect(saveCanvasDocument).toHaveBeenCalledWith(
+      "canvas-1",
+      expect.objectContaining({
+        layers: [
+          expect.objectContaining({
+            objects: [expect.objectContaining({ x: 112, y: 58 })],
+          }),
+        ],
+      }),
+      "latest-preview",
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(saveCanvasDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not queue a redundant save when a clean canvas unmounts", async () => {
+    const { unmount } = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: none");
+    unmount();
+    await flushCanvasSaves();
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
   });
 
   it("serializes same-document saves so the newest snapshot is written last", async () => {

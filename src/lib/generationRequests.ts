@@ -19,6 +19,15 @@ export function buildGenerationParams(
   ).parameterCapabilities;
 
   const params: GenerationParams = {
+    ...(request.providerOverrideConfirmed
+      ? { providerOverrideConfirmed: true }
+      : {}),
+    ...(request.providerProfileId
+      ? { providerProfileId: request.providerProfileId }
+      : {}),
+    ...(request.sourceGenerationId
+      ? { sourceGenerationId: request.sourceGenerationId }
+      : {}),
     ...(isGptImage26(request.model) && request.advancedOptions
       ? {
           advancedOptions: normalizeAdvancedOptions(

@@ -1,0 +1,20 @@
+{
+  "title": "Sauvegarde de la bibliothèque",
+  "description": "Sauvegardez images, projets, canevas et références. Les identifiants sont exclus et devront être saisis après restauration.",
+  "create": "Créer une sauvegarde",
+  "restore": "Restaurer une sauvegarde",
+  "rollback": "Revenir à la bibliothèque précédente",
+  "checking": "Vérification…",
+  "cancel": "Annuler",
+  "working": "Traitement…",
+  "progress": "Progression de la sauvegarde",
+  "completed": "Sauvegarde enregistrée et vérifiée.",
+  "cancelled": "Opération annulée.",
+  "restart_required": "Bibliothèque prête. Redémarrez pour terminer le changement.",
+  "restart": "Redémarrer maintenant",
+  "confirmRestore": "Restaurer et redémarrer",
+  "restoreWarning": "La bibliothèque active sera remplacée. La bibliothèque actuelle sera conservée pour un retour arrière.",
+  "counts": "{{projects}} projets · {{images}} images · {{canvases}} canevas",
+  "rollbackWarning": "Revenez à la bibliothèque conservée avant la restauration, puis redémarrez. La bibliothèque restaurée sera conservée.",
+  "cancelFailed": "Impossible d’annuler pour le moment. Vérifiez la progression et réessayez."
+}

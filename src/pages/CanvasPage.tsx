@@ -208,6 +208,11 @@ export default function CanvasPage() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      clearSaveTimer();
+      const documentId = loadedDocumentIdRef.current;
+      if (documentId && isDirtyRef.current) {
+        void persistDocument(documentId, historyPresentRef.current).catch(() => {});
+      }
     };
   }, []);
 

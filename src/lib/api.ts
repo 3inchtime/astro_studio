@@ -250,6 +250,9 @@ export async function generateImage(
   return invoke("generate_image", {
     prompt: params.prompt,
     clientRequestId: params.clientRequestId ?? null,
+    ...(params.providerProfileId ? { providerProfileId: params.providerProfileId } : {}),
+    ...(params.providerOverrideConfirmed ? { providerOverrideConfirmed: true } : {}),
+    ...(params.sourceGenerationId ? { sourceGenerationId: params.sourceGenerationId } : {}),
     model: params.model,
     size: params.size,
     aspectRatio: params.aspectRatio,
@@ -281,6 +284,9 @@ export async function editImage(
   return invoke("edit_image", {
     prompt: params.prompt,
     clientRequestId: params.clientRequestId ?? null,
+    ...(params.providerProfileId ? { providerProfileId: params.providerProfileId } : {}),
+    ...(params.providerOverrideConfirmed ? { providerOverrideConfirmed: true } : {}),
+    ...(params.sourceGenerationId ? { sourceGenerationId: params.sourceGenerationId } : {}),
     model: params.model,
     sourceImagePaths: params.sourceImagePaths,
     size: params.size,

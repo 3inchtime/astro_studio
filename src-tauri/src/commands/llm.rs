@@ -376,6 +376,7 @@ fn list_prompt_extractions(db: &Database, limit: u32) -> Result<Vec<PromptExtrac
 
 #[tauri::command]
 pub(crate) fn get_llm_configs(db: State<'_, Database>) -> Result<Vec<LlmConfig>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     read_llm_configs(db.inner())
 }
 
@@ -384,6 +385,7 @@ pub(crate) fn save_llm_configs(
     db: State<'_, Database>,
     configs: Vec<LlmConfig>,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     validate_and_store_llm_configs(db.inner(), configs)
 }
 
@@ -392,6 +394,7 @@ pub(crate) fn get_prompt_extractions(
     db: State<'_, Database>,
     limit: Option<u32>,
 ) -> Result<Vec<PromptExtraction>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     list_prompt_extractions(db.inner(), limit.unwrap_or(20))
 }
 
@@ -404,6 +407,7 @@ pub(crate) async fn optimize_prompt(
     config_id: String,
     image_paths: Option<Vec<String>>,
 ) -> Result<String, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let configs = read_llm_configs(db.inner())?;
     let has_images = image_paths.as_ref().is_some_and(|p| !p.is_empty());
 
@@ -475,6 +479,7 @@ pub(crate) async fn extract_prompt_from_image(
     config_id: String,
     language: String,
 ) -> Result<PromptExtraction, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let image_path = image_path.trim().to_string();
     if image_path.is_empty() {
         return Err(AppError::Validation {

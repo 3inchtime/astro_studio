@@ -32,10 +32,9 @@ const ALIASED_JOB_COLUMNS: &str = "g.id, g.client_request_id, g.generation_id, g
     g.last_heartbeat_at, g.error_code, g.error_message, g.retryable";
 
 const GENERATION_JOB_WRITE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-// Keep this repository-side recovery bound aligned with
-// `FileResponseArtifactStore::MAX_RESPONSE_BODY_BYTES` without widening the
-// current two-file worker-transition slice into lifecycle ownership.
-const MAX_WORKER_RESPONSE_BODY_BYTES: i64 = 64 * 1024 * 1024;
+// Use the same bound as provider reads and the verified artifact store.
+const MAX_WORKER_RESPONSE_BODY_BYTES: i64 =
+    crate::api_gateway::MAX_PROVIDER_RESPONSE_BODY_BYTES as i64;
 const MAX_PERSISTED_RESPONSE_PATH_BYTES: usize = 32_768;
 
 #[derive(Debug, thiserror::Error)]
@@ -2655,6 +2654,88 @@ fn load_modern_startup_recovery_in_transaction(
         }
         _ => Err(AppError::GenerationJobCorruptPersistedData),
     }
+}
+
+/// Prepare one restart candidate independently so a corrupt neighbour cannot
+/// prevent recovery of valid paid responses. Reopening a terminal local failure
+/// preserves the original job, provider snapshot, and saved response.
+pub(crate) fn prepare_modern_recovery_candidate_with_transaction_time<Now>(
+    conn: &Connection,
+    job_id: &str,
+    authority: &WorkerTransitionAuthority,
+    now: Now,
+) -> Result<ModernStartupCandidate, WorkerTransitionError>
+where
+    Now: FnOnce() -> i64,
+{
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let now_ms = now();
+    let timestamp = canonical_worker_timestamp(now_ms)?;
+    assert_worker_transition_authority_in_transaction(&tx, authority, now_ms)?;
+    let job = get_job_in_transaction(&tx, job_id)?;
+    match job.status {
+        GenerationJobStatus::Queued => {
+            claim_job_at_in_transaction(&tx, job_id, &timestamp)?;
+        }
+        GenerationJobStatus::Failed | GenerationJobStatus::Interrupted => {
+            if job.cancel_requested_at.is_some()
+                || !job
+                    .finished_at
+                    .as_deref()
+                    .is_some_and(|finished| timestamp_is_not_before(&timestamp, finished))
+            {
+                return Err(AppError::GenerationJobInvalidTransition.into());
+            }
+            validate_worker_recovery_for_stage(
+                &tx,
+                &job.generation_id,
+                GenerationJobStage::ResponseReady,
+            )?;
+            let changed = tx.execute(
+                "UPDATE generation_jobs SET status='running', stage='response_ready',
+                 finished_at=NULL, error_code=NULL, error_message=NULL, retryable=0,
+                 started_at=COALESCE(started_at, ?2), last_heartbeat_at=?2
+                 WHERE id=?1 AND status IN ('failed','interrupted') AND cancel_requested_at IS NULL",
+                params![job_id, timestamp],
+            ).map_err(AppError::from)?;
+            let generation_changed = tx
+                .execute(
+                    "UPDATE generations SET status='running', error_message=NULL
+                 WHERE id=?1 AND status IN ('failed','interrupted')",
+                    params![job.generation_id],
+                )
+                .map_err(AppError::from)?;
+            if changed != 1 || generation_changed != 1 {
+                return Err(AppError::GenerationJobInvalidTransition.into());
+            }
+        }
+        GenerationJobStatus::Running => {
+            // A backoff is a pre-response request stage on restart. Normalise it
+            // for the existing fenced response/failure transition; no HTTP runs.
+            if job.stage == GenerationJobStage::RetryBackoff {
+                validate_worker_recovery_for_stage(&tx, &job.generation_id, job.stage)?;
+                tx.execute(
+                    "UPDATE generation_jobs SET stage='provider_request' WHERE id=?1",
+                    params![job_id],
+                )
+                .map_err(AppError::from)?;
+            }
+        }
+        _ => return Err(AppError::GenerationJobInvalidTransition.into()),
+    }
+    let job = get_job_in_transaction(&tx, job_id)?;
+    let snapshot =
+        load_generation_execution_snapshot_for_stage_in_transaction(&tx, job_id, job.stage)?;
+    let recovery = load_modern_startup_recovery_in_transaction(&tx, &job.generation_id, job.stage)?;
+    let candidate = ModernStartupCandidate {
+        snapshot,
+        stage: job.stage,
+        cancel_requested: job.cancel_requested_at.is_some(),
+        recovery,
+    };
+    tx.commit()
+        .map_err(|error| database_error("Commit restart recovery preparation failed", error))?;
+    Ok(candidate)
 }
 
 /// Snapshots only modern, executable running jobs while the current worker

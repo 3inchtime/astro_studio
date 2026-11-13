@@ -199,6 +199,7 @@ pub(crate) fn create_conversation(
     title: Option<String>,
     project_id: Option<String>,
 ) -> Result<Conversation, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -228,6 +229,7 @@ pub(crate) fn get_conversations(
     project_id: Option<String>,
     include_archived: Option<bool>,
 ) -> Result<Vec<Conversation>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -331,6 +333,7 @@ pub(crate) fn rename_conversation(
     id: String,
     title: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let title = title.trim();
     if title.is_empty() {
         return Err(AppError::Validation {
@@ -357,6 +360,7 @@ pub(crate) fn move_conversation_to_project(
     id: String,
     project_id: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -371,6 +375,7 @@ pub(crate) fn move_conversation_to_project(
 
 #[tauri::command]
 pub(crate) fn archive_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -386,6 +391,7 @@ pub(crate) fn archive_conversation(db: State<'_, Database>, id: String) -> Resul
 
 #[tauri::command]
 pub(crate) fn unarchive_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -399,6 +405,7 @@ pub(crate) fn unarchive_conversation(db: State<'_, Database>, id: String) -> Res
 
 #[tauri::command]
 pub(crate) fn pin_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -413,6 +420,7 @@ pub(crate) fn pin_conversation(db: State<'_, Database>, id: String) -> Result<()
 
 #[tauri::command]
 pub(crate) fn unpin_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -426,6 +434,7 @@ pub(crate) fn unpin_conversation(db: State<'_, Database>, id: String) -> Result<
 
 #[tauri::command]
 pub(crate) fn delete_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -448,6 +457,7 @@ pub(crate) fn get_conversation_generations(
     db: State<'_, Database>,
     conversation_id: String,
 ) -> Result<Vec<GenerationResult>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;

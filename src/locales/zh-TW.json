@@ -811,5 +811,34 @@
   "studio.parameters.output": "輸出",
   "studio.collection.select": "選取",
   "studio.collection.selectVisible": "全選可見記錄",
-  "studio.collection.doneSelecting": "完成選取"
+  "studio.collection.doneSelecting": "完成選取",
+  "recipe": {
+    "useParameters": "沿用參數",
+    "regenerate": "以相同參數再次生成",
+    "replaceDraft": "載入歷史參數？",
+    "replaceDraftDescription": "將取代目前的提示詞、參考圖與生成參數。",
+    "reviewParameters": "載入並檢查參數",
+    "reviewRequired": "請先處理以下變更，再開始生成。",
+    "useCurrentProvider": "明確使用目前的供應商設定",
+    "removeSources": "移除歷史參考圖與疊加圖",
+    "resetParameters": "重設目前模型的參數",
+    "loadFailed": "無法載入這份配方，請檢查模型與歷史記錄後重試。",
+    "useCurrentModel": "改用目前模型與預設參數",
+    "providerLabel": "本次生成使用的供應商",
+    "confirmProvider": "確認使用所選供應商",
+    "noProviders": "此模型尚無可用的供應商，請先在設定中新增。",
+    "warnings": {
+      "legacy_incomplete": "舊記錄缺少完整的供應商快照，請明確選擇目前的設定。",
+      "provider_missing": "歷史供應商已移除。",
+      "endpoint_changed": "歷史供應商的連線地址已變更。",
+      "provider_unconfigured": "歷史供應商尚未填寫 API 金鑰。",
+      "unknown_model": "此模型已不受支援，請選擇其他模型。",
+      "invalid_parameters": "部分歷史參數已不受支援。",
+      "source_missing": "找不到歷史參考圖或疊加圖檔案。",
+      "sources_require_selection": "請重新選擇原始參考圖，或明確移除參考圖。",
+      "invalid_job": "歷史工作驗證失敗，請檢查參數並重新選擇參考圖。",
+      "provider_outcome_unknown": "原請求可能已生成圖片並計費。再次傳送新請求可能產生額外費用。"
+    },
+    "acknowledgeNewCharge": "我了解新請求可能再次收費"
+  }
 }

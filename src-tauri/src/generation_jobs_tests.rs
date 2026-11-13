@@ -6089,3 +6089,144 @@ fn dimensions_survive_execution_metadata_and_retry_without_changing_legacy_snaps
     assert_eq!(metadata["aspect_ratio"], "16:9");
     assert_eq!(metadata["resolution"], "2K");
 }
+
+#[test]
+fn recipe_completed_edit_authority_survives_reopen_but_rejects_other_paths() {
+    let fixture = JobFixture::new();
+    let root = fixture.path.parent().unwrap();
+    let source = root.join("recipe-source.png");
+    let overlay = root.join("recipe-overlay.png");
+    std::fs::write(&source, b"\x89PNG\r\n\x1a\n").unwrap();
+    std::fs::write(&overlay, b"\x89PNG\r\n\x1a\n").unwrap();
+    let source = source.to_string_lossy().into_owned();
+    let overlay = overlay.to_string_lossy().into_owned();
+    let mut request = fixture.prepared("recipe-completed", "recipe-completed");
+    request.model = crate::models::ENGINE_GPT_IMAGE_26_FLARE.into();
+    request.request_kind = "edit".into();
+    request.source_kind = "edit".into();
+    request.source_image_paths = vec![source.clone()];
+    request.request_options.advanced_options = Some(crate::models::ImageAdvancedOptions {
+        markup_path: Some(overlay.clone()),
+        ..Default::default()
+    });
+    let queued = fixture.enqueue_prepared(&request).unwrap();
+    fixture.claim().unwrap();
+    {
+        let conn = fixture.database.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        prepare_completed_projection(&tx, &queued.generation_id, 1);
+        finish_job_in_transaction(
+            &tx,
+            &GenerationJobTerminalUpdate {
+                job_id: queued.job_id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Completed,
+                finished_at: "2026-07-10T00:00:02Z".into(),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let reopened = Database::open(&fixture.path).unwrap();
+    let saved = crate::generation_recipe::saved_job(&reopened, &queued.generation_id)
+        .unwrap()
+        .unwrap();
+    let matches = crate::commands::generation::persisted_edit_paths_match;
+    assert!(matches(
+        &saved.request,
+        &request.model,
+        std::slice::from_ref(&source),
+        request.request_options.advanced_options.as_ref()
+    ));
+    assert!(!matches(
+        &saved.request,
+        &request.model,
+        std::slice::from_ref(&overlay),
+        request.request_options.advanced_options.as_ref()
+    ));
+    assert!(!matches(
+        &saved.request,
+        &request.model,
+        std::slice::from_ref(&source),
+        None
+    ));
+    let recipe = serde_json::to_value(
+        crate::generation_recipe::load_recipe(&reopened, &queued.generation_id).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(recipe["provenance"], "job");
+    assert_eq!(recipe["options"]["advanced_options"]["markupPath"], overlay);
+    std::fs::remove_file(source).unwrap();
+    let recipe = serde_json::to_value(
+        crate::generation_recipe::load_recipe(&reopened, &queued.generation_id).unwrap(),
+    )
+    .unwrap();
+    assert!(recipe["warnings"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("source_missing")));
+}
+
+#[test]
+fn recipe_preserves_legacy_stream_fields_and_flags_unsupported_models() {
+    for model in [
+        crate::models::ENGINE_GPT_IMAGE_2,
+        crate::models::ENGINE_GPT_IMAGE_26_FLARE,
+    ] {
+        let fixture = JobFixture::new();
+        let mut request = fixture.prepared("legacy-stream", "legacy-stream");
+        request.model = model.into();
+        request.stream = true;
+        request.partial_images = 2;
+        request.request_options.stream = Some(true);
+        request.request_options.partial_images = Some(2);
+        let job = fixture.enqueue_prepared(&request).unwrap();
+        let recipe = serde_json::to_value(
+            crate::generation_recipe::load_recipe(&fixture.database, &job.generation_id).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recipe["options"]["stream"], true);
+        assert_eq!(recipe["options"]["partial_images"], 2);
+        assert_eq!(
+            recipe["warnings"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("invalid_parameters")),
+            model == crate::models::ENGINE_GPT_IMAGE_2
+        );
+    }
+}
+
+#[test]
+fn recipe_unknown_provider_outcome_requires_review_before_new_generation() {
+    let fixture = JobFixture::new();
+    let queued = fixture.enqueue("unknown-recipe", "unknown-recipe");
+    fixture.claim().unwrap();
+    {
+        let conn = fixture.database.conn.lock().unwrap();
+        finish_job(
+            &conn,
+            &GenerationJobTerminalUpdate {
+                job_id: queued.id.clone(),
+                expected_status: GenerationJobStatus::Running,
+                status: GenerationJobStatus::Interrupted,
+                finished_at: "2026-07-10T00:00:02Z".into(),
+                error_code: Some("provider_outcome_unknown".into()),
+                error_message: None,
+                retryable: true,
+            },
+        )
+        .unwrap();
+    }
+    let recipe = serde_json::to_value(
+        crate::generation_recipe::load_recipe(&fixture.database, &queued.generation_id).unwrap(),
+    )
+    .unwrap();
+    assert!(recipe["warnings"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("provider_outcome_unknown")));
+}

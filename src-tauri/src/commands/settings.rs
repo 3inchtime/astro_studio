@@ -423,6 +423,7 @@ pub(crate) fn save_model_endpoint_settings_value(
 
 #[tauri::command]
 pub(crate) fn save_api_key(db: State<'_, Database>, key: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     log::info!("Saving API key");
     let model = current_image_model(db.inner())?;
     save_model_api_key_value(db.inner(), &model, &key)
@@ -430,12 +431,14 @@ pub(crate) fn save_api_key(db: State<'_, Database>, key: String) -> Result<(), A
 
 #[tauri::command]
 pub(crate) fn get_api_key(db: State<'_, Database>) -> Result<Option<String>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let model = current_image_model(db.inner())?;
     read_model_api_key(db.inner(), &model)
 }
 
 #[tauri::command]
 pub(crate) fn save_base_url(db: State<'_, Database>, url: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     log::info!("Saving base URL: {}", url);
     let model = current_image_model(db.inner())?;
     let settings = read_model_endpoint_settings(db.inner(), &model)?;
@@ -451,11 +454,13 @@ pub(crate) fn save_base_url(db: State<'_, Database>, url: String) -> Result<(), 
 
 #[tauri::command]
 pub(crate) fn get_base_url(db: State<'_, Database>) -> Result<String, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     Ok(read_model_endpoint_settings(db.inner(), &current_image_model(db.inner())?)?.base_url)
 }
 
 #[tauri::command]
 pub(crate) fn get_endpoint_settings(db: State<'_, Database>) -> Result<EndpointSettings, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     read_endpoint_settings(db.inner())
 }
 
@@ -467,6 +472,7 @@ pub(crate) fn save_endpoint_settings(
     generation_url: String,
     edit_url: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let model = current_image_model(db.inner())?;
     let defaults = default_endpoint_settings_for_model(&model);
     let mode = normalize_endpoint_mode(&mode);
@@ -493,6 +499,7 @@ pub(crate) fn get_model_api_key(
     db: State<'_, Database>,
     model: String,
 ) -> Result<Option<String>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     read_model_api_key(db.inner(), &model)
 }
 
@@ -502,6 +509,7 @@ pub(crate) fn save_model_api_key(
     model: String,
     key: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     save_model_api_key_value(db.inner(), &model, &key)
 }
 
@@ -510,6 +518,7 @@ pub(crate) fn get_model_endpoint_settings(
     db: State<'_, Database>,
     model: String,
 ) -> Result<EndpointSettings, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     read_model_endpoint_settings(db.inner(), &model)
 }
 
@@ -522,6 +531,7 @@ pub(crate) fn save_model_endpoint_settings(
     generation_url: String,
     edit_url: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     save_model_endpoint_settings_value(
         db.inner(),
         &model,
@@ -537,6 +547,7 @@ pub(crate) fn get_model_provider_profiles(
     db: State<'_, Database>,
     model: String,
 ) -> Result<ModelProviderProfilesState, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     read_model_provider_profiles_state(db.inner(), &model)
 }
 
@@ -547,6 +558,7 @@ pub(crate) fn save_model_provider_profiles(
     active_provider_id: String,
     profiles: Vec<ModelProviderProfile>,
 ) -> Result<ModelProviderProfilesState, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     save_model_provider_profiles_state(
         db.inner(),
         &model,
@@ -563,6 +575,7 @@ pub(crate) fn create_model_provider_profile(
     model: String,
     name: String,
 ) -> Result<ModelProviderProfilesState, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
     let provider_id = uuid::Uuid::new_v4().to_string();
@@ -581,6 +594,7 @@ pub(crate) fn delete_model_provider_profile(
     model: String,
     provider_id: String,
 ) -> Result<ModelProviderProfilesState, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
     state.profiles.retain(|profile| profile.id != provider_id);
@@ -604,6 +618,7 @@ pub(crate) fn set_active_model_provider(
     model: String,
     provider_id: String,
 ) -> Result<ModelProviderProfilesState, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let normalized_model = normalize_image_model(&model);
     let mut state = read_model_provider_profiles_state(db.inner(), normalized_model)?;
     if !state
@@ -621,6 +636,7 @@ pub(crate) fn set_active_model_provider(
 
 #[tauri::command]
 pub(crate) fn get_font_size(db: State<'_, Database>) -> Result<String, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     Ok(crate::normalize_font_size(
         db.get_setting(SETTING_FONT_SIZE)?
             .as_deref()
@@ -631,16 +647,19 @@ pub(crate) fn get_font_size(db: State<'_, Database>) -> Result<String, AppError>
 
 #[tauri::command]
 pub(crate) fn save_font_size(db: State<'_, Database>, font_size: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     db.set_setting(SETTING_FONT_SIZE, crate::normalize_font_size(&font_size))
 }
 
 #[tauri::command]
 pub(crate) fn get_image_model(db: State<'_, Database>) -> Result<String, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     current_image_model(db.inner())
 }
 
 #[tauri::command]
 pub(crate) fn save_image_model(db: State<'_, Database>, model: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     db.set_setting(SETTING_IMAGE_MODEL, normalize_image_model(&model))
 }
 

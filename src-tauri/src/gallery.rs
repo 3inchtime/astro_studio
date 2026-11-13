@@ -1,7 +1,6 @@
 use crate::{db::Database, file_manager, models::*};
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
-use tauri::Manager;
 
 fn active_generation_filter(alias: &str) -> String {
     format!("{alias}.deleted_at IS NULL")
@@ -196,7 +195,7 @@ fn permanently_delete_generation_files_and_records(
         .filter_map(|r| r.ok())
         .collect();
 
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = crate::storage::asset_root(app).map_err(|e| e.to_string())?;
     let fm = file_manager::FileManager::new(app_data_dir);
     for (file, thumb) in &paths {
         let _ = fm.delete_image(file, thumb);
@@ -248,6 +247,7 @@ pub(crate) fn search_generations(
     filters: Option<GenerationSearchFilters>,
     project_id: Option<String>,
 ) -> Result<SearchResult, String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let page = page.unwrap_or(1);
     let page_size = DEFAULT_PAGE_SIZE;
     let offset = (page - 1) * page_size;
@@ -322,6 +322,7 @@ mod tests {
 
 #[tauri::command]
 pub(crate) fn delete_generation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     log::info!("Moving generation {} to trash", id);
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
@@ -334,6 +335,7 @@ pub(crate) fn delete_generation(db: tauri::State<'_, Database>, id: String) -> R
 
 #[tauri::command]
 pub(crate) fn restore_generation(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     log::info!("Restoring generation {}", id);
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let conversation_id = conn
@@ -367,6 +369,7 @@ pub(crate) fn permanently_delete_generation(
     db: tauri::State<'_, Database>,
     id: String,
 ) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     log::info!("Permanently deleting generation {}", id);
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     permanently_delete_generation_files_and_records(&app, &conn, &id)
@@ -377,6 +380,7 @@ pub(crate) fn create_folder(
     db: tauri::State<'_, Database>,
     name: String,
 ) -> Result<Folder, String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let id = uuid::Uuid::new_v4().to_string();
     let created_at = crate::current_timestamp();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -398,6 +402,7 @@ pub(crate) fn rename_folder(
     id: String,
     name: String,
 ) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     if id == "default" {
         return Err("默认收藏文件夹不可重命名".to_string());
     }
@@ -412,6 +417,7 @@ pub(crate) fn rename_folder(
 
 #[tauri::command]
 pub(crate) fn delete_folder(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     if id == "default" {
         return Err("默认收藏文件夹不可删除".to_string());
     }
@@ -423,6 +429,7 @@ pub(crate) fn delete_folder(db: tauri::State<'_, Database>, id: String) -> Resul
 
 #[tauri::command]
 pub(crate) fn get_folders(db: tauri::State<'_, Database>) -> Result<Vec<Folder>, String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, created_at FROM folders ORDER BY created_at ASC")
@@ -447,6 +454,7 @@ pub(crate) fn add_image_to_folders(
     image_id: String,
     folder_ids: Vec<String>,
 ) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let added_at = crate::current_timestamp();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     for fid in &folder_ids {
@@ -464,6 +472,7 @@ pub(crate) fn remove_image_from_folders(
     image_id: String,
     folder_ids: Vec<String>,
 ) -> Result<(), String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     for fid in &folder_ids {
         conn.execute(
@@ -480,6 +489,7 @@ pub(crate) fn get_image_folders(
     db: tauri::State<'_, Database>,
     image_id: String,
 ) -> Result<Vec<String>, String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT folder_id FROM folder_images WHERE image_id = ?1")
@@ -499,6 +509,7 @@ pub(crate) fn get_favorite_images(
     query: Option<String>,
     page: Option<i32>,
 ) -> Result<SearchResult, String> {
+    let _library_operation = crate::storage::write_operation::<String>()?;
     let page = page.unwrap_or(1);
     let page_size = DEFAULT_PAGE_SIZE;
     let offset = (page - 1) * page_size;

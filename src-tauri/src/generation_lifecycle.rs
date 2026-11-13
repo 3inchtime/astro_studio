@@ -33,7 +33,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 const RECOVERY_STATE_REQUESTING: &str = "requesting";
 const RECOVERY_STATE_RESPONSE_READY: &str = "response_ready";
@@ -84,6 +84,9 @@ impl From<GenerationJobRequestKind> for GenerationLifecycleKind {
 }
 
 pub(crate) struct GenerationLifecycleRequest {
+    pub(crate) provider_override_confirmed: bool,
+    pub(crate) provider_profile_id: Option<String>,
+    pub(crate) source_generation_id: Option<String>,
     pub(crate) advanced_options: Option<crate::models::ImageAdvancedOptions>,
     pub(crate) aspect_ratio: Option<String>,
     pub(crate) resolution: Option<String>,
@@ -2977,7 +2980,38 @@ fn prepare_compatibility_job(
             uuid::Uuid::from_bytes(bytes).to_string()
         })
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let active_profile = settings::active_provider_profile_for_model(db, &model);
+    if let (Some(source), Some(profile_id)) =
+        (&request.source_generation_id, &request.provider_profile_id)
+    {
+        let recipe = crate::generation_recipe::load_recipe(db, source)?;
+        let value =
+            serde_json::to_value(recipe).map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
+        if !request.provider_override_confirmed
+            && value["provider_profile_id"].as_str() == Some(profile_id)
+            && value["warnings"].as_array().is_some_and(|warnings| {
+                warnings.iter().any(|warning| {
+                    matches!(
+                        warning.as_str(),
+                        Some("provider_missing" | "endpoint_changed" | "provider_unconfigured")
+                    )
+                })
+            })
+        {
+            return Err(AppError::Validation { message: "Review the saved recipe before generating: its provider, parameters or source files changed.".into() });
+        }
+    }
+    let active_profile = match request.provider_profile_id.as_deref() {
+        Some(id) => settings::read_model_provider_profiles_state(db, &model).and_then(|state| {
+            state
+                .profiles
+                .into_iter()
+                .find(|p| p.id == id)
+                .ok_or_else(|| AppError::ProviderProfileNotFound {
+                    model: model.clone(),
+                })
+        }),
+        None => settings::active_provider_profile_for_model(db, &model),
+    };
     let (provider_kind, provider_profile_id, endpoint_snapshot, status, finished_at, error_code) =
         match active_profile {
             Ok(profile) => {
@@ -3047,6 +3081,50 @@ fn prepare_compatibility_job(
             ),
         };
 
+    let retry_parent = request
+        .source_generation_id
+        .as_deref()
+        .map(|id| crate::generation_recipe::saved_job(db, id))
+        .transpose()?
+        .flatten()
+        .filter(|parent| {
+            let saved = serde_json::from_value::<GenerationJobRequest>(parent.request.clone()).ok();
+            parent.retryable
+                && matches!(
+                    parent.status,
+                    GenerationJobStatus::Failed | GenerationJobStatus::Interrupted
+                )
+                && parent.provider_profile_id == provider_profile_id
+                && parent.endpoint_snapshot == endpoint_snapshot
+                && saved.is_some_and(|saved| {
+                    saved.prompt == request.prompt
+                        && saved.model == model
+                        && saved.source_image_paths == request.source_image_paths
+                        && {
+                            let normalize_streaming = |mut options: GenerationJobOptions| {
+                                let mut advanced =
+                                    options.advanced_options.take().unwrap_or_default();
+                                options.stream =
+                                    Some(advanced.stream.or(options.stream).unwrap_or(false));
+                                options.partial_images = Some(
+                                    advanced
+                                        .partial_images
+                                        .or(options.partial_images)
+                                        .unwrap_or(0),
+                                );
+                                advanced.stream = None;
+                                advanced.partial_images = None;
+                                options.advanced_options = (advanced
+                                    != ImageAdvancedOptions::default())
+                                .then_some(advanced);
+                                options
+                            };
+                            let old = normalize_streaming(saved.options);
+                            let new = normalize_streaming(request_options.clone());
+                            old == new
+                        }
+                })
+        });
     Ok(PreparedGenerationJob {
         job_id,
         client_request_id: client_request_id.clone(),
@@ -3068,14 +3146,17 @@ fn prepare_compatibility_job(
         partial_images: runtime_options.partial_images,
         source_image_paths: request.source_image_paths.clone(),
         request_options,
-        parent_job_id: None,
+        parent_job_id: retry_parent.as_ref().map(|p| p.id.clone()),
         source_kind: request.kind.as_str().to_string(),
         source_ref: serde_json::json!({ "id": client_request_id }),
         provider_kind,
         provider_profile_id,
         endpoint_snapshot,
         status,
-        chain_attempt: 1,
+        chain_attempt: retry_parent
+            .as_ref()
+            .map(|p| p.chain_attempt.saturating_add(1))
+            .unwrap_or(1),
         auto_attempt: 0,
         max_auto_attempts: 2,
         queued_at,
@@ -3190,11 +3271,22 @@ fn terminalize_compatibility_error(
 fn start_compatibility_job(
     db: &Database,
     event_sink: &dyn LegacyGenerationEventSink,
-    prepared_job: PreparedGenerationJob,
+    mut prepared_job: PreparedGenerationJob,
 ) -> Result<GenerationExecutionSnapshot, AppError> {
     let (enqueue_result, snapshot) = {
         let mut conn = db.conn.lock().map_err(|_| lifecycle_lock_error())?;
-        let enqueue_result = enqueue_job(&mut conn, &prepared_job)?;
+        let enqueue_result = if let Some(parent_id) = prepared_job.parent_job_id.as_deref() {
+            let result = crate::generation_jobs::create_retry_job(
+                &mut conn,
+                parent_id,
+                &prepared_job.client_request_id,
+            )?;
+            prepared_job.job_id = result.job_id.clone();
+            prepared_job.generation_id = result.generation_id.clone();
+            result
+        } else {
+            enqueue_job(&mut conn, &prepared_job)?
+        };
         if enqueue_result.job_id != prepared_job.job_id
             || enqueue_result.generation_id != prepared_job.generation_id
         {
@@ -3489,7 +3581,7 @@ pub(crate) async fn run_generation_lifecycle(
     let prepared_job = prepare_compatibility_job(db, &request)?;
     let event_sink = TauriLegacyGenerationEventSink { app };
     let snapshot = start_compatibility_job(db, &event_sink, prepared_job)?;
-    let app_data_dir = match app.path().app_data_dir() {
+    let app_data_dir = match crate::storage::asset_root(app) {
         Ok(app_data_dir) => app_data_dir,
         Err(path_error) => {
             let execution_error = compatibility_execution_error(
@@ -3633,6 +3725,9 @@ mod tests {
 
     fn compatibility_request(model: &str) -> GenerationLifecycleRequest {
         GenerationLifecycleRequest {
+            provider_override_confirmed: false,
+            provider_profile_id: None,
+            source_generation_id: None,
             advanced_options: None,
             aspect_ratio: None,
             resolution: None,
@@ -3652,6 +3747,108 @@ mod tests {
             conversation_id: None,
             project_id: Some("default".to_string()),
         }
+    }
+
+    #[test]
+    fn recipe_failed_history_uses_parent_chain_and_does_not_rewrite_parent() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut state =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        state.profiles[0].api_key = "test-key".into();
+        let profile_id = state.profiles[0].id.clone();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.provider_profile_id = Some(profile_id);
+        let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        let parent = {
+            let mut conn = fixture.db.conn.lock().unwrap();
+            let result = enqueue_job(&mut conn, &prepared).unwrap();
+            let tx = begin_generation_job_write_transaction(&mut conn).unwrap();
+            claim_job_in_transaction(&tx, &result.job_id).unwrap();
+            tx.commit().unwrap();
+            crate::generation_jobs::finish_job(
+                &conn,
+                &GenerationJobTerminalUpdate {
+                    job_id: result.job_id.clone(),
+                    expected_status: GenerationJobStatus::Running,
+                    status: GenerationJobStatus::Failed,
+                    finished_at: current_timestamp(),
+                    error_code: Some("provider_unavailable".into()),
+                    error_message: None,
+                    retryable: true,
+                },
+            )
+            .unwrap();
+            get_job(&conn, &result.job_id).unwrap()
+        };
+        request.source_generation_id = Some(parent.generation_id.clone());
+        let retry = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        assert_eq!(retry.parent_job_id.as_deref(), Some(parent.id.as_str()));
+        let sink = CompatibilityEventSink::new(None);
+        let snapshot = start_compatibility_job(&fixture.db, &sink, retry).unwrap();
+        let conn = fixture.db.conn.lock().unwrap();
+        let child = get_job(&conn, &snapshot.context.job_id).unwrap();
+        assert_eq!(child.parent_job_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(child.chain_attempt, parent.chain_attempt + 1);
+        assert_ne!(child.generation_id, parent.generation_id);
+        assert_eq!(
+            get_job(&conn, &parent.id).unwrap().status,
+            GenerationJobStatus::Failed
+        );
+        drop(conn);
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn recipe_provider_endpoint_change_requires_explicit_acknowledgement() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut state =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        state.profiles[0].api_key = "test-key".into();
+        let id = state.profiles[0].id.clone();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, state.clone());
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.provider_profile_id = Some(id.clone());
+        let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        let generation_id = prepared.generation_id.clone();
+        enqueue_job(&mut fixture.db.conn.lock().unwrap(), &prepared).unwrap();
+        state.profiles[0].endpoint_settings.mode = "base_url".into();
+        state.profiles[0].endpoint_settings.base_url = "https://changed.example.test/v1".into();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
+        request.source_generation_id = Some(generation_id);
+        assert!(prepare_compatibility_job(&fixture.db, &request).is_err());
+        request.provider_override_confirmed = true;
+        assert_eq!(
+            prepare_compatibility_job(&fixture.db, &request)
+                .unwrap()
+                .provider_profile_id,
+            id
+        );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn recipe_explicit_profile_does_not_change_the_active_profile() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut state =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        state.profiles[0].api_key = "test-key".into();
+        let mut second = state.profiles[0].clone();
+        second.id = "recipe-provider".into();
+        state.profiles.push(second);
+        let original = state.active_provider_id.clone();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.provider_profile_id = Some("recipe-provider".into());
+        let job = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        assert_eq!(job.provider_profile_id, "recipe-provider");
+        assert_eq!(
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2)
+                .unwrap()
+                .active_provider_id,
+            original
+        );
+        fixture.cleanup();
     }
 
     #[test]

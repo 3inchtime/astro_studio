@@ -1,4 +1,4 @@
-import { isGptImage26 } from "./modelCatalog";
+import { IMAGE_MODEL_CATALOG } from "./modelCatalog";
 import type {
   GeneratedImage,
   Generation,
@@ -18,7 +18,7 @@ function persistedRetryRequest(
 ): RetryGenerationRequest | undefined {
   if (
     !["failed", "interrupted"].includes(generation.status) ||
-    !isGptImage26(generation.engine) ||
+    !IMAGE_MODEL_CATALOG.some((entry) => entry.id === generation.engine) ||
     !generation.request_metadata
   )
     return undefined;
@@ -73,6 +73,15 @@ function persistedRetryRequest(
     }
     return {
       prompt: generation.prompt,
+      sourceGenerationId: generation.id,
+      aspectRatio:
+        typeof metadata.aspect_ratio === "string"
+          ? metadata.aspect_ratio
+          : undefined,
+      resolution:
+        typeof metadata.resolution === "string"
+          ? metadata.resolution
+          : undefined,
       model: generation.engine as ImageModel,
       size: generation.size as ImageSize,
       quality: generation.quality as ImageQuality,

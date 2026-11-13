@@ -19,6 +19,7 @@ pub(crate) fn create_prompt_favorite(
     db: State<'_, Database>,
     prompt: String,
 ) -> Result<PromptFavorite, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let prompt = prompt.trim().to_string();
     if prompt.is_empty() {
         return Err(AppError::Validation {
@@ -95,6 +96,7 @@ pub(crate) fn get_prompt_favorites(
     query: Option<String>,
     folder_id: Option<String>,
 ) -> Result<Vec<PromptFavorite>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -192,6 +194,7 @@ pub(crate) fn get_prompt_favorites(
 
 #[tauri::command]
 pub(crate) fn delete_prompt_favorite(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -207,6 +210,7 @@ pub(crate) fn create_prompt_folder(
     db: State<'_, Database>,
     name: String,
 ) -> Result<Folder, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::Validation {
@@ -239,6 +243,7 @@ pub(crate) fn rename_prompt_folder(
     id: String,
     name: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     if id == "default" {
         return Err(AppError::Validation {
             message: "Default folder cannot be renamed".to_string(),
@@ -265,6 +270,7 @@ pub(crate) fn rename_prompt_folder(
 
 #[tauri::command]
 pub(crate) fn delete_prompt_folder(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     if id == "default" {
         return Err(AppError::Validation {
             message: "Default folder cannot be deleted".to_string(),
@@ -282,6 +288,7 @@ pub(crate) fn delete_prompt_folder(db: State<'_, Database>, id: String) -> Resul
 
 #[tauri::command]
 pub(crate) fn get_prompt_folders(db: State<'_, Database>) -> Result<Vec<Folder>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -312,6 +319,7 @@ pub(crate) fn add_prompt_favorite_to_folders(
     favorite_id: String,
     folder_ids: Vec<String>,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let added_at = current_timestamp();
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
@@ -334,6 +342,7 @@ pub(crate) fn remove_prompt_favorite_from_folders(
     favorite_id: String,
     folder_ids: Vec<String>,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -354,6 +363,7 @@ pub(crate) fn get_prompt_favorite_folders(
     db: State<'_, Database>,
     favorite_id: String,
 ) -> Result<Vec<String>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;

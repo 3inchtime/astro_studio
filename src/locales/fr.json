@@ -811,5 +811,34 @@
   "studio.parameters.output": "Sortie",
   "studio.collection.select": "Sélectionner",
   "studio.collection.selectVisible": "Tout sélectionner à l’écran",
-  "studio.collection.doneSelecting": "Terminer"
+  "studio.collection.doneSelecting": "Terminer",
+  "recipe": {
+    "useParameters": "Reprendre les paramètres",
+    "regenerate": "Générer à nouveau",
+    "replaceDraft": "Charger les paramètres enregistrés ?",
+    "replaceDraftDescription": "Le prompt, les images de référence et les paramètres de génération actuels seront remplacés.",
+    "reviewParameters": "Vérifier les paramètres",
+    "reviewRequired": "Vérifiez ces changements avant de lancer la génération.",
+    "useCurrentProvider": "Utiliser la configuration actuelle du fournisseur",
+    "removeSources": "Supprimer les références et superpositions enregistrées",
+    "resetParameters": "Réinitialiser les paramètres du modèle",
+    "loadFailed": "Impossible de charger cette recette. Vérifiez le modèle et l’enregistrement.",
+    "useCurrentModel": "Utiliser le modèle actuel et ses paramètres par défaut",
+    "providerLabel": "Fournisseur pour cette génération",
+    "confirmProvider": "Confirmer le fournisseur sélectionné",
+    "noProviders": "Aucun fournisseur configuré pour ce modèle. Ajoutez-en un dans les paramètres.",
+    "warnings": {
+      "legacy_incomplete": "Cet ancien enregistrement ne contient pas la configuration complète du fournisseur. Choisissez explicitement la configuration actuelle.",
+      "provider_missing": "Le fournisseur enregistré a été supprimé.",
+      "endpoint_changed": "L’adresse du fournisseur enregistré a changé.",
+      "provider_unconfigured": "Le fournisseur enregistré nécessite une clé API.",
+      "unknown_model": "Ce modèle n’est plus pris en charge. Choisissez un autre modèle.",
+      "invalid_parameters": "Certains paramètres enregistrés ne sont plus pris en charge.",
+      "source_missing": "Une image de référence ou une superposition enregistrée est introuvable.",
+      "sources_require_selection": "Sélectionnez à nouveau les images de référence d’origine ou supprimez-les.",
+      "invalid_job": "La tâche enregistrée n’a pas pu être validée. Vérifiez ses paramètres et sélectionnez à nouveau les références.",
+      "provider_outcome_unknown": "La demande initiale a peut-être déjà généré des images et été facturée. Une nouvelle demande peut entraîner des frais supplémentaires."
+    },
+    "acknowledgeNewCharge": "Je comprends qu’une nouvelle demande peut être facturée"
+  }
 }

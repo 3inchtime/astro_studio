@@ -1,0 +1,20 @@
+{
+  "title": "Bibliothek sichern",
+  "description": "Bilder, Projekte, Leinwände und Referenzdateien sichern. Zugangsdaten sind ausgeschlossen und müssen nach der Wiederherstellung erneut eingegeben werden.",
+  "create": "Sicherung erstellen",
+  "restore": "Sicherung wiederherstellen",
+  "rollback": "Zur vorherigen Bibliothek",
+  "checking": "Sicherung wird geprüft…",
+  "cancel": "Abbrechen",
+  "working": "Wird verarbeitet…",
+  "progress": "Sicherungsfortschritt",
+  "completed": "Sicherung gespeichert und geprüft.",
+  "cancelled": "Vorgang abgebrochen.",
+  "restart_required": "Bibliothek vorbereitet. Zum Wechsel neu starten.",
+  "restart": "Jetzt neu starten",
+  "confirmRestore": "Wiederherstellen und neu starten",
+  "restoreWarning": "Die aktive Bibliothek wird ersetzt. Die bisherige Bibliothek bleibt für eine Rückkehr erhalten.",
+  "counts": "{{projects}} Projekte · {{images}} Bilder · {{canvases}} Leinwände",
+  "rollbackWarning": "Zur vor der Wiederherstellung gespeicherten Bibliothek wechseln und neu starten. Die wiederhergestellte Bibliothek bleibt erhalten.",
+  "cancelFailed": "Abbrechen ist noch nicht möglich. Prüfe den Fortschritt und versuche es erneut."
+}

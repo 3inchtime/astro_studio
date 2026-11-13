@@ -1,0 +1,12 @@
+{
+  "title": "Examiner les résultats inachevés",
+  "continue": "Reprendre l’enregistrement",
+  "saving": "Enregistrement…",
+  "review": "Examiner la recette",
+  "localOnly": "Une réponse est enregistrée. Aucune nouvelle demande de génération ne sera envoyée.",
+  "unknown": "Le fournisseur a peut-être facturé cette demande interrompue. Examinez la recette avant une nouvelle demande.",
+  "saved": "Images récupérées et enregistrées.",
+  "failed": "Échec de l’enregistrement. La réponse est conservée ; réessayez après avoir résolu le problème local.",
+  "startupRecovered": "Résultats récupérés et enregistrés au démarrage : {{count}}.",
+  "notSent": "Interrompu avant l’envoi. Examinez la recette pour lancer une nouvelle génération."
+}

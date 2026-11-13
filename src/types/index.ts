@@ -233,6 +233,9 @@ export interface ImageAdvancedOptions {
 }
 
 export interface GenerationParams {
+  providerProfileId?: string;
+  providerOverrideConfirmed?: boolean;
+  sourceGenerationId?: string;
   advancedOptions?: ImageAdvancedOptions;
   prompt: string;
   clientRequestId?: string;
@@ -309,6 +312,9 @@ export interface EditSourceImage {
 }
 
 export interface RetryGenerationRequest {
+  providerProfileId?: string;
+  providerOverrideConfirmed?: boolean;
+  sourceGenerationId?: string;
   advancedOptions?: ImageAdvancedOptions;
   outputCompression?: number;
   prompt: string;

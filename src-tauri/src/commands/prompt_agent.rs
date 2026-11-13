@@ -15,6 +15,7 @@ use tauri::State;
 
 #[tauri::command]
 pub(crate) fn get_prompt_agent_health(_db: State<'_, Database>) -> Result<&'static str, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     Ok("ok")
 }
 
@@ -290,6 +291,7 @@ pub(crate) async fn start_prompt_agent_session(
     db: State<'_, Database>,
     request: StartPromptAgentSessionRequest,
 ) -> Result<PromptAgentTurnResponse, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let prompt = request.prompt.trim().to_string();
     if prompt.is_empty() {
         return Err(AppError::Validation {
@@ -340,6 +342,7 @@ pub(crate) async fn send_prompt_agent_message(
     db: State<'_, Database>,
     request: SendPromptAgentMessageRequest,
 ) -> Result<PromptAgentTurnResponse, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let message = request.message.trim().to_string();
     if message.is_empty() {
         return Err(AppError::Validation {
@@ -378,6 +381,7 @@ pub(crate) fn accept_prompt_agent_draft(
     session_id: String,
     accepted_prompt: String,
 ) -> Result<PromptAgentSession, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let accepted_prompt = accepted_prompt.trim();
     if accepted_prompt.is_empty() {
         return Err(AppError::Validation {
@@ -411,6 +415,7 @@ pub(crate) fn cancel_prompt_agent_session(
     db: State<'_, Database>,
     session_id: String,
 ) -> Result<PromptAgentSession, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -433,6 +438,7 @@ pub(crate) fn get_prompt_agent_session(
     db: State<'_, Database>,
     session_id: String,
 ) -> Result<PromptAgentTurnResponse, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
