@@ -15,6 +15,7 @@ import {
   usesSharedEditEndpoint,
 } from "../../lib/settingsEndpoints";
 import { cardVariants, sectionVariants } from "./settingsMotion";
+import { ProviderDiagnostics } from "./ProviderDiagnostics";
 import { LlmConfigSection } from "./LlmConfigSection";
 
 interface ModelSettingsPanelProps {
@@ -25,6 +26,7 @@ interface ModelSettingsPanelProps {
   providerState: ModelProviderProfilesState;
   selectedProviderId: string;
   providerSaved: boolean;
+  providerDirty?: boolean;
   onSelectImageModel: (model: ImageModel) => void;
   onSaveModel: () => void;
   onSelectProvider: (providerId: string) => void;
@@ -55,6 +57,7 @@ export function ModelSettingsPanel({
   providerState,
   selectedProviderId,
   providerSaved,
+  providerDirty = true,
   onSelectImageModel,
   onSaveModel,
   onSelectProvider,
@@ -464,6 +467,8 @@ export function ModelSettingsPanel({
                     </div>
                   )}
                 </div>
+
+                <ProviderDiagnostics model={imageModel} profile={selectedProvider} dirty={providerDirty} />
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
                   <p className="text-xs text-muted">

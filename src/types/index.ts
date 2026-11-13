@@ -172,7 +172,7 @@ export interface CanvasGenerationRequest {
   project_id: string | null;
   frame: CanvasFrame;
   prompt: string;
-  status: "pending" | "completed" | "failed";
+  status: "pending" | "completed" | "failed" | "cancelled";
   image_ids: string[];
   error?: string;
   created_at: string;
@@ -233,6 +233,9 @@ export interface ImageAdvancedOptions {
 }
 
 export interface GenerationParams {
+  providerProfileId?: string;
+  providerOverrideConfirmed?: boolean;
+  sourceGenerationId?: string;
   advancedOptions?: ImageAdvancedOptions;
   prompt: string;
   clientRequestId?: string;
@@ -309,6 +312,9 @@ export interface EditSourceImage {
 }
 
 export interface RetryGenerationRequest {
+  providerProfileId?: string;
+  providerOverrideConfirmed?: boolean;
+  sourceGenerationId?: string;
   advancedOptions?: ImageAdvancedOptions;
   outputCompression?: number;
   prompt: string;

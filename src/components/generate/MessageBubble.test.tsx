@@ -186,7 +186,9 @@ describe("MessageBubble", () => {
     expect(screen.getByTestId("image-grid").parentElement).toHaveClass(
       "bg-canvas",
     );
-    expect(screen.getByTestId("image-grid").parentElement).not.toHaveClass("overflow-hidden");
+    expect(screen.getByTestId("image-grid").parentElement).not.toHaveClass(
+      "overflow-hidden",
+    );
   });
 
   it("renders accept controls for ready prompt agent drafts", () => {
@@ -218,4 +220,21 @@ describe("MessageBubble", () => {
       screen.getByText("A cinematic glass observatory over a moonlit forest."),
     ).toBeInTheDocument();
   });
+});
+
+it("offers full parameter reuse and regeneration on completed history", () => {
+  const reuse = vi.fn();
+  const message: Message = {
+    id: "history",
+    role: "assistant",
+    content: "",
+    generationId: "saved",
+    status: "complete",
+    createdAt: "2026-11-13",
+  };
+  render(<MessageBubble message={message} onReuseRecipe={reuse} />);
+  fireEvent.click(screen.getByRole("button", { name: "recipe.useParameters" }));
+  expect(reuse).toHaveBeenCalledWith("saved", "edit");
+  fireEvent.click(screen.getByRole("button", { name: "recipe.regenerate" }));
+  expect(reuse).toHaveBeenCalledWith("saved", "generate");
 });

@@ -1,0 +1,31 @@
+{
+  "action": "Export originals",
+  "scope": "{{records}} generation record(s), {{images}} image(s)",
+  "description": "Every image in the selected records is copied in its original format. Existing files are kept; matching names receive a numeric suffix.",
+  "privacy": "Recipes include prompts and generation settings. Credentials, endpoints and local file paths are omitted.",
+  "cancel": "Cancel",
+  "chooseFolder": "Choose export folder",
+  "status": "Image export",
+  "progress": "Exporting {{completed}} / {{total}} images…",
+  "completed": "Exported {{completed}} / {{total}} images",
+  "cancelled": "Export stopped. Completed files are kept.",
+  "exportFailed": "Export could not finish. Completed files are kept.",
+  "cancelFailed": "Could not stop export. Check its progress before trying again.",
+  "failed": "{{count}} image(s) need attention",
+  "stop": "Stop export",
+  "retry": "Retry remaining images",
+  "dismiss": "Dismiss",
+  "select": "Select images",
+  "preparing": "Preparing export…",
+  "codes": {
+    "source_missing": "Original file is missing",
+    "unsafe_source": "Source is outside the managed library or is a symbolic link",
+    "source_unreadable": "Original file could not be read",
+    "destination_write_failed": "Destination is not writable or does not support atomic file publication",
+    "destination_name_conflict": "Could not choose an unused filename",
+    "verification_failed": "The copied bytes did not pass verification",
+    "sidecar_failed": "Image saved; JSON recipe could not be saved",
+    "operation_cancelled": "Not completed before cancellation"
+  },
+  "cancelledItems": "{{count}} image(s) cancelled"
+}

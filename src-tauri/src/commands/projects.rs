@@ -63,6 +63,7 @@ pub(crate) fn create_project(
     db: State<'_, Database>,
     name: Option<String>,
 ) -> Result<Project, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -91,6 +92,7 @@ pub(crate) fn get_projects(
     db: State<'_, Database>,
     include_archived: Option<bool>,
 ) -> Result<Vec<Project>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -123,6 +125,7 @@ pub(crate) fn rename_project(
     id: String,
     name: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let name = name.trim();
     if name.is_empty() {
         return Err(AppError::Validation {
@@ -145,6 +148,7 @@ pub(crate) fn rename_project(
 
 #[tauri::command]
 pub(crate) fn archive_project(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -170,6 +174,7 @@ pub(crate) fn archive_project(db: State<'_, Database>, id: String) -> Result<(),
 
 #[tauri::command]
 pub(crate) fn unarchive_project(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -194,6 +199,7 @@ pub(crate) fn unarchive_project(db: State<'_, Database>, id: String) -> Result<(
 
 #[tauri::command]
 pub(crate) fn pin_project(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -210,6 +216,7 @@ pub(crate) fn pin_project(db: State<'_, Database>, id: String) -> Result<(), App
 
 #[tauri::command]
 pub(crate) fn unpin_project(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -225,6 +232,7 @@ pub(crate) fn unpin_project(db: State<'_, Database>, id: String) -> Result<(), A
 
 #[tauri::command]
 pub(crate) fn delete_project(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     if id == DEFAULT_PROJECT_ID {
         return Err(AppError::Validation {
             message: "The default project cannot be deleted.".to_string(),

@@ -1,0 +1,20 @@
+{
+  "title": "라이브러리 백업",
+  "description": "이미지, 프로젝트, 캔버스 및 참조 파일을 백업합니다. 인증 정보는 제외되므로 복원 후 다시 입력해야 합니다.",
+  "create": "백업 만들기",
+  "restore": "백업 복원",
+  "rollback": "복원 전 라이브러리로 돌아가기",
+  "checking": "백업 확인 중…",
+  "cancel": "취소",
+  "working": "처리 중…",
+  "progress": "백업 진행률",
+  "completed": "백업을 저장하고 확인했습니다.",
+  "cancelled": "작업이 취소되었습니다.",
+  "restart_required": "라이브러리가 준비되었습니다. 전환을 완료하려면 다시 시작하세요.",
+  "restart": "지금 다시 시작",
+  "confirmRestore": "복원 후 다시 시작",
+  "restoreWarning": "현재 라이브러리를 교체합니다. 기존 라이브러리는 되돌릴 수 있도록 보관됩니다.",
+  "counts": "프로젝트 {{projects}}개 · 이미지 {{images}}개 · 캔버스 {{canvases}}개",
+  "rollbackWarning": "이전 복원 전에 보관된 라이브러리로 돌아간 후 다시 시작합니다. 복원된 라이브러리도 보관됩니다.",
+  "cancelFailed": "아직 취소할 수 없습니다. 진행 상황을 확인하고 다시 시도하세요."
+}

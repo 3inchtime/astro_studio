@@ -811,5 +811,41 @@
   "studio.parameters.output": "Ausgabe",
   "studio.collection.select": "Auswählen",
   "studio.collection.selectVisible": "Alle sichtbaren auswählen",
-  "studio.collection.doneSelecting": "Fertig"
+  "studio.collection.doneSelecting": "Fertig",
+  "recipe": {
+    "useParameters": "Parameter übernehmen",
+    "regenerate": "Erneut generieren",
+    "replaceDraft": "Gespeicherte Parameter laden?",
+    "replaceDraftDescription": "Dies ersetzt den aktuellen Prompt, die Referenzbilder und die Generierungseinstellungen.",
+    "reviewParameters": "Parameter prüfen",
+    "reviewRequired": "Prüfen Sie diese Änderungen vor der Generierung.",
+    "useCurrentProvider": "Aktuelle Anbieterkonfiguration verwenden",
+    "removeSources": "Gespeicherte Referenzen und Überlagerungen entfernen",
+    "resetParameters": "Modellparameter zurücksetzen",
+    "loadFailed": "Das Rezept konnte nicht geladen werden. Prüfen Sie das Modell und den gespeicherten Eintrag.",
+    "useCurrentModel": "Aktuelles Modell mit Standardparametern verwenden",
+    "providerLabel": "Anbieter für diese Generierung",
+    "confirmProvider": "Ausgewählten Anbieter bestätigen",
+    "noProviders": "Für dieses Modell ist kein konfigurierter Anbieter verfügbar. Fügen Sie in den Einstellungen einen Anbieter hinzu.",
+    "warnings": {
+      "legacy_incomplete": "Dieser ältere Eintrag enthält keinen vollständigen Anbieterstand. Wählen Sie die aktuelle Konfiguration ausdrücklich aus.",
+      "provider_missing": "Der gespeicherte Anbieter wurde entfernt.",
+      "endpoint_changed": "Die gespeicherte Anbieteradresse wurde geändert.",
+      "provider_unconfigured": "Der gespeicherte Anbieter benötigt einen API-Schlüssel.",
+      "unknown_model": "Dieses Modell wird nicht mehr unterstützt. Wählen Sie ein anderes Modell.",
+      "invalid_parameters": "Einige gespeicherte Parameter werden nicht mehr unterstützt.",
+      "source_missing": "Ein gespeichertes Referenzbild oder eine Überlagerung fehlt.",
+      "sources_require_selection": "Wählen Sie die ursprünglichen Referenzbilder erneut aus oder entfernen Sie sie.",
+      "invalid_job": "Der gespeicherte Auftrag konnte nicht validiert werden. Prüfen Sie die Parameter und wählen Sie die Referenzen erneut aus.",
+      "provider_outcome_unknown": "Die ursprüngliche Anfrage hat möglicherweise bereits Bilder erzeugt und Kosten verursacht. Eine neue Anfrage kann weitere Kosten verursachen."
+    },
+    "acknowledgeNewCharge": "Ich verstehe, dass erneut Kosten entstehen können"
+  },
+  "generate.providerSetupRequired": "Konfigurieren Sie den Anbieter vor der Generierung. Ihr Entwurf bleibt erhalten.",
+  "generate.configureProvider": "Anbieter konfigurieren",
+  "generate.draftSaveFailed": "Entwurf konnte nicht gesichert werden. Bleiben Sie hier und versuchen Sie es erneut.",
+  "generate.returnToDraft": "Zurück zum Entwurf",
+  "generate.unknownRetryTitle": "Unbekanntes Ergebnis erneut anfragen?",
+  "generate.unknownRetryDescription": "Die vorherige Anfrage könnte abgeschlossen und berechnet worden sein. Prüfen Sie zuerst den Chat und die Anbieternutzung. Ein erneuter Versuch kann weitere Kosten verursachen.",
+  "generate.confirmUnknownRetry": "Neue Anfrage senden"
 }

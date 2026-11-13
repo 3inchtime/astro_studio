@@ -56,6 +56,9 @@ impl Default for StorageConfig {
 
 impl AppConfig {
     pub fn config_dir() -> PathBuf {
+        if let Some(root) = crate::storage::development_library_root() {
+            return root.join("config");
+        }
         dirs::config_dir()
             .expect("Cannot determine config directory")
             .join("astro-studio")

@@ -19,6 +19,7 @@ interface MessageBubbleProps {
   isPromptFavorited?: boolean;
   onFavoriteClick?: (imageId: string) => void;
   onRetry?: (message: Message) => void;
+  onReuseRecipe?: (generationId: string, mode: "edit" | "generate") => void;
   onAcceptAgentDraft?: (message: PromptAgentMessage) => void;
   onContinueAgentDraft?: (message: PromptAgentMessage) => void;
   onEditAgentDraft?: (message: PromptAgentMessage) => void;
@@ -35,6 +36,7 @@ export default function MessageBubble({
   isPromptFavorited,
   onFavoriteClick,
   onRetry,
+  onReuseRecipe,
   agentMessage,
   onAcceptAgentDraft,
   onContinueAgentDraft,
@@ -249,6 +251,27 @@ export default function MessageBubble({
       className="flex items-start justify-start gap-3"
     >
       <div className="min-w-0 w-full">
+        {message.generationId &&
+          message.status !== "processing" &&
+          onReuseRecipe && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onReuseRecipe(message.generationId!, "edit")}
+                className="studio-control focus-ring min-h-8 rounded-lg px-3 text-xs"
+              >
+                {t("recipe.useParameters")}
+              </button>
+              <button
+                type="button"
+                onClick={() => onReuseRecipe(message.generationId!, "generate")}
+                className="studio-control focus-ring min-h-8 rounded-lg px-3 text-xs"
+              >
+                {t("recipe.regenerate")}
+              </button>
+            </div>
+          )}
+
         <AnimatePresence initial={false}>
           {message.status === "processing" && (
             <motion.div

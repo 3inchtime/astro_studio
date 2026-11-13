@@ -811,5 +811,41 @@
   "studio.parameters.output": "出力",
   "studio.collection.select": "選択",
   "studio.collection.selectVisible": "表示中をすべて選択",
-  "studio.collection.doneSelecting": "完了"
+  "studio.collection.doneSelecting": "完了",
+  "recipe": {
+    "useParameters": "パラメーターを引き継ぐ",
+    "regenerate": "同じ設定で再生成",
+    "replaceDraft": "保存したパラメーターを読み込みますか？",
+    "replaceDraftDescription": "現在のプロンプト、参照画像、生成設定を置き換えます。",
+    "reviewParameters": "パラメーターを確認",
+    "reviewRequired": "生成する前に、以下の変更を確認してください。",
+    "useCurrentProvider": "現在のプロバイダー設定を使う",
+    "removeSources": "保存した参照画像とオーバーレイを削除",
+    "resetParameters": "モデルのパラメーターをリセット",
+    "loadFailed": "レシピを読み込めませんでした。モデルと保存した記録を確認してください。",
+    "useCurrentModel": "現在のモデルと既定のパラメーターを使う",
+    "providerLabel": "今回の生成で使うプロバイダー",
+    "confirmProvider": "選択したプロバイダーを確認",
+    "noProviders": "このモデルには設定済みのプロバイダーがありません。設定から追加してください。",
+    "warnings": {
+      "legacy_incomplete": "古い記録にはプロバイダー設定が完全に保存されていません。現在の設定を明示的に選択してください。",
+      "provider_missing": "保存されたプロバイダーは削除されています。",
+      "endpoint_changed": "保存されたプロバイダーの接続先が変更されています。",
+      "provider_unconfigured": "保存されたプロバイダーには API キーが必要です。",
+      "unknown_model": "このモデルはサポートされていません。別のモデルを選択してください。",
+      "invalid_parameters": "保存された一部のパラメーターはサポートされていません。",
+      "source_missing": "保存された参照画像またはオーバーレイが見つかりません。",
+      "sources_require_selection": "元の参照画像を選択し直すか、参照画像を削除してください。",
+      "invalid_job": "保存されたタスクを検証できませんでした。パラメーターを確認し、参照画像を選択し直してください。",
+      "provider_outcome_unknown": "元のリクエストは、すでに画像を生成して料金が発生している可能性があります。新しいリクエストには追加料金が発生する場合があります。"
+    },
+    "acknowledgeNewCharge": "新しいリクエストで再度料金が発生する可能性を了承する"
+  },
+  "generate.providerSetupRequired": "生成前にプロバイダーを設定してください。下書きは保持されます。",
+  "generate.configureProvider": "プロバイダーを設定",
+  "generate.draftSaveFailed": "下書きを保持できません。このページで再試行してください。",
+  "generate.returnToDraft": "下書きに戻る",
+  "generate.unknownRetryTitle": "結果不明のリクエストを再試行しますか？",
+  "generate.unknownRetryDescription": "前のリクエストが完了し、料金が発生した可能性があります。先に保存済みの会話と利用状況を確認してください。再試行で追加料金が発生する場合があります。",
+  "generate.confirmUnknownRetry": "新しいリクエストを送信"
 }

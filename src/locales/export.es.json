@@ -1,0 +1,31 @@
+{
+  "action": "Exportar originales",
+  "scope": "{{records}} registros de generación, {{images}} imágenes",
+  "description": "Se copian todas las imágenes seleccionadas en su formato original. Se conservan los archivos existentes; los nombres repetidos reciben un sufijo numérico.",
+  "privacy": "Las recetas incluyen prompts y parámetros. Se omiten credenciales, destinos y rutas locales.",
+  "cancel": "Cancelar",
+  "chooseFolder": "Elegir carpeta de exportación",
+  "status": "Exportación de imágenes",
+  "progress": "Exportando {{completed}} / {{total}} imágenes…",
+  "completed": "{{completed}} / {{total}} imágenes exportadas",
+  "cancelled": "Exportación detenida. Se conservan los archivos completados.",
+  "exportFailed": "No se completó la exportación. Se conservan los archivos completados.",
+  "cancelFailed": "No se pudo detener la exportación. Revisa el progreso.",
+  "failed": "{{count}} imágenes requieren atención",
+  "stop": "Detener exportación",
+  "retry": "Reintentar imágenes pendientes",
+  "dismiss": "Cerrar",
+  "select": "Seleccionar imágenes",
+  "preparing": "Preparando exportación…",
+  "codes": {
+    "source_missing": "Falta el archivo original",
+    "unsafe_source": "Origen fuera de la biblioteca o enlace simbólico",
+    "source_unreadable": "No se puede leer el original",
+    "destination_write_failed": "Destino no escribible o sin publicación atómica de archivos",
+    "destination_name_conflict": "No se encontró un nombre libre",
+    "verification_failed": "La verificación de bytes falló",
+    "sidecar_failed": "Imagen guardada; no se pudo guardar la receta JSON",
+    "operation_cancelled": "No se completó antes de cancelar"
+  },
+  "cancelledItems": "{{count}} imágenes canceladas"
+}

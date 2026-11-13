@@ -811,5 +811,41 @@
   "studio.parameters.output": "Salida",
   "studio.collection.select": "Seleccionar",
   "studio.collection.selectVisible": "Seleccionar todos los visibles",
-  "studio.collection.doneSelecting": "Listo"
+  "studio.collection.doneSelecting": "Listo",
+  "recipe": {
+    "useParameters": "Usar parámetros",
+    "regenerate": "Generar de nuevo",
+    "replaceDraft": "¿Cargar los parámetros guardados?",
+    "replaceDraftDescription": "Se sustituirán el prompt, las imágenes de referencia y los ajustes de generación actuales.",
+    "reviewParameters": "Revisar parámetros",
+    "reviewRequired": "Revisa estos cambios antes de generar.",
+    "useCurrentProvider": "Usar la configuración actual del proveedor",
+    "removeSources": "Eliminar referencias y superposiciones guardadas",
+    "resetParameters": "Restablecer los parámetros del modelo",
+    "loadFailed": "No se pudo cargar esta receta. Comprueba el modelo y el registro guardado.",
+    "useCurrentModel": "Usar el modelo actual con parámetros predeterminados",
+    "providerLabel": "Proveedor para esta generación",
+    "confirmProvider": "Confirmar el proveedor seleccionado",
+    "noProviders": "No hay proveedores configurados para este modelo. Añade uno en Ajustes.",
+    "warnings": {
+      "legacy_incomplete": "Este registro antiguo no contiene una configuración completa del proveedor. Selecciona explícitamente la configuración actual.",
+      "provider_missing": "Se ha eliminado el proveedor guardado.",
+      "endpoint_changed": "Ha cambiado la dirección del proveedor guardado.",
+      "provider_unconfigured": "El proveedor guardado necesita una clave de API.",
+      "unknown_model": "Este modelo ya no es compatible. Elige otro modelo.",
+      "invalid_parameters": "Algunos parámetros guardados ya no son compatibles.",
+      "source_missing": "Falta una imagen de referencia o una superposición guardada.",
+      "sources_require_selection": "Vuelve a seleccionar las imágenes de referencia originales o elimínalas.",
+      "invalid_job": "No se pudo validar la tarea guardada. Revisa sus parámetros y vuelve a seleccionar las referencias.",
+      "provider_outcome_unknown": "Es posible que la solicitud original ya haya generado imágenes y un cobro. Una nueva solicitud puede generar un cobro adicional."
+    },
+    "acknowledgeNewCharge": "Entiendo que una nueva solicitud puede generar otro cobro"
+  },
+  "generate.providerSetupRequired": "Configura el proveedor antes de generar. Se conservará tu borrador.",
+  "generate.configureProvider": "Configurar proveedor",
+  "generate.draftSaveFailed": "No se pudo conservar el borrador. Quédate aquí e inténtalo de nuevo.",
+  "generate.returnToDraft": "Volver al borrador",
+  "generate.unknownRetryTitle": "¿Reintentar un resultado desconocido?",
+  "generate.unknownRetryDescription": "La solicitud anterior puede haberse completado y generado cargos. Revisa primero la conversación y el consumo del proveedor. Reintentar puede generar nuevos cargos.",
+  "generate.confirmUnknownRetry": "Enviar otra solicitud"
 }

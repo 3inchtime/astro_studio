@@ -1,0 +1,20 @@
+{
+  "title": "Copia de la biblioteca",
+  "description": "Guarda imágenes, proyectos, lienzos y referencias. Las credenciales se excluyen; introdúcelas de nuevo tras restaurar.",
+  "create": "Crear copia",
+  "restore": "Restaurar copia",
+  "rollback": "Volver a la biblioteca anterior",
+  "checking": "Comprobando copia…",
+  "cancel": "Cancelar",
+  "working": "Procesando…",
+  "progress": "Progreso de copia",
+  "completed": "Copia guardada y verificada.",
+  "cancelled": "Operación cancelada.",
+  "restart_required": "Biblioteca preparada. Reinicia para completar el cambio.",
+  "restart": "Reiniciar ahora",
+  "confirmRestore": "Restaurar y reiniciar",
+  "restoreWarning": "Se sustituirá la biblioteca activa. La actual se conservará para poder volver.",
+  "counts": "{{projects}} proyectos · {{images}} imágenes · {{canvases}} lienzos",
+  "rollbackWarning": "Vuelve a la biblioteca conservada antes de restaurar y reinicia. La biblioteca restaurada se conservará.",
+  "cancelFailed": "Aún no se pudo cancelar. Comprueba el progreso e inténtalo de nuevo."
+}

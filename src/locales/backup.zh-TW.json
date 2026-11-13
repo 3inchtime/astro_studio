@@ -1,0 +1,20 @@
+{
+  "title": "資料庫備份",
+  "description": "備份圖片、專案、畫布及引用素材。備份不含金鑰，恢復後需重新填寫。",
+  "create": "建立備份",
+  "restore": "恢復備份",
+  "rollback": "返回恢復前資料庫",
+  "checking": "正在檢查備份…",
+  "cancel": "取消",
+  "working": "正在處理…",
+  "progress": "備份進度",
+  "completed": "備份已儲存並通過驗證。",
+  "cancelled": "操作已取消。",
+  "restart_required": "資料庫已準備好，重新啟動後完成切換。",
+  "restart": "立即重新啟動",
+  "confirmRestore": "恢復並重新啟動",
+  "restoreWarning": "恢復將替換目前使用的資料庫；原資料庫會保留，可隨時返回。",
+  "counts": "{{projects}} 個專案 · {{images}} 張圖片 · {{canvases}} 個畫布",
+  "rollbackWarning": "切回上次恢復前保留的資料庫並重新啟動。恢復後的資料庫仍會保留。",
+  "cancelFailed": "暫時無法取消，請檢查進度後重試。"
+}

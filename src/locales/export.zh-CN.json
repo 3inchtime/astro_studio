@@ -1,0 +1,31 @@
+{
+  "action": "导出原图",
+  "scope": "{{records}} 条生成记录，共 {{images}} 张图片",
+  "description": "将按原始格式复制所选记录中的全部图片。保留已有文件，同名文件添加数字后缀。",
+  "privacy": "配方包含提示词和生成参数，不含凭据、端点和本地文件路径。",
+  "cancel": "取消",
+  "chooseFolder": "选择导出文件夹",
+  "status": "图片导出",
+  "progress": "正在导出 {{completed}} / {{total}} 张图片…",
+  "completed": "已导出 {{completed}} / {{total}} 张图片",
+  "cancelled": "导出已停止，已完成的文件会保留。",
+  "exportFailed": "导出未能完成，已完成的文件会保留。",
+  "cancelFailed": "无法停止导出，请检查进度后再试。",
+  "failed": "{{count}} 张图片需要处理",
+  "stop": "停止导出",
+  "retry": "重试剩余图片",
+  "dismiss": "关闭",
+  "select": "选择图片",
+  "preparing": "准备导出…",
+  "codes": {
+    "source_missing": "原始文件缺失",
+    "unsafe_source": "源文件位于图库外或为符号链接",
+    "source_unreadable": "无法读取原始文件",
+    "destination_write_failed": "目标不可写或不支持原子发布文件",
+    "destination_name_conflict": "无法生成未使用的文件名",
+    "verification_failed": "副本字节验证失败",
+    "sidecar_failed": "图片已保存，JSON 配方保存失败",
+    "operation_cancelled": "取消前尚未完成"
+  },
+  "cancelledItems": "{{count}} 张图片已取消"
+}

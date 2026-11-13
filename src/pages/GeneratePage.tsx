@@ -1,3 +1,11 @@
+import RecoveryNotice from "../components/generate/RecoveryNotice";
+import {
+  getGenerationRecipe,
+  getGenerationRecipeForRequest,
+  recipeToRequest,
+  listRecipeProviders,
+} from "../lib/recipeApi";
+import type { GenerationRecipe } from "../types/recipe";
 import {
   useState,
   useCallback,
@@ -7,12 +15,15 @@ import {
   useMemo,
 } from "react";
 import { AnimatePresence } from "framer-motion";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useModelProviderProfilesQuery } from "../lib/queries/settings";
+import { saveProviderSettingsDraft, takeProviderSettingsDraft } from "../lib/providerSettingsDraft";
 import {
   editImage,
   generateImage,
   getConversationGenerations,
   getImageModel,
+  getModelProviderProfiles,
   saveImageModel,
   deleteGeneration,
   messageImageToEditSource,
@@ -84,6 +95,14 @@ const DEFAULT_IMAGE_MODEL_ENTRY =
 export default function GeneratePage() {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
+  const draftRevision = useRef(0);
+  const submissionPending = useRef(false);
+  const unknownOutcomes = useRef(new Set<string>());
+  const [pendingUnknownRetry, setPendingUnknownRetry] = useState<RetryGenerationRequest|null>(null);
+  const restoringSettingsDraft = useRef(false);
+  const restoredIntentState = useRef<unknown>(Symbol("no restored intent"));
+  const [providerSetup, setProviderSetup] = useState<{model:ImageModel;providerId?:string}|null>(null);
   const {
     activeProjectId,
     activeConversationId,
@@ -120,9 +139,67 @@ export default function GeneratePage() {
     DEFAULT_IMAGE_MODEL_ENTRY.parameterDefaults.imageCount,
   );
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_IMAGE_MODEL);
+  const providerQuery = useModelProviderProfilesQuery(imageModel);
+  useEffect(() => { void providerQuery.refetch(); }, [imageModel]);
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
+  const hydratedSourcePath = useRef<{ path: string | undefined } | null>(null);
+  const [recipeIdentity, setRecipeIdentity] = useState<{
+    providerProfileId?: string;
+    providerOverrideConfirmed?: boolean;
+    sourceGenerationId?: string;
+  }>({});
+  const [recipeWarnings, setRecipeWarnings] = useState<string[]>([]);
+  useEffect(() => {
+    if (!recipeIdentity.providerProfileId) return;
+    const exact = providerQuery.data?.profiles.find(profile => profile.id === recipeIdentity.providerProfileId);
+    if (exact?.api_key.trim()) setRecipeWarnings(current => current.includes("provider_missing") ? current.filter(warning => warning !== "provider_missing") : current);
+  }, [providerQuery.data, recipeIdentity.providerProfileId]);
+  const [recipeProviders, setRecipeProviders] = useState<
+    { id: string; name: string }[]
+  >([]);
+  const [chosenRecipeProvider, setChosenRecipeProvider] = useState("");
+  const providerNeedsReview = recipeWarnings.some((w) =>
+    [
+      "legacy_incomplete",
+      "provider_missing",
+      "endpoint_changed",
+      "provider_unconfigured",
+    ].includes(w),
+  );
+  useEffect(() => {
+    if (!providerNeedsReview) return;
+    let cancelled = false;
+    setRecipeProviders([]);
+    setChosenRecipeProvider("");
+    listRecipeProviders(imageModel)
+      .then((providers) => {
+        if (!cancelled) {
+          setRecipeProviders(providers);
+          setChosenRecipeProvider(providers[0]?.id ?? "");
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [providerNeedsReview, imageModel]);
+  const [pendingRecipe, setPendingRecipe] = useState<GenerationRecipe | null>(
+    null,
+  );
+  const [recipeError, setRecipeError] = useState<string | null>(null);
+  const recipeLoadToken = useRef(0);
+  const recipeLoadPending = useRef(false);
   const firstSourcePath = editSources[0]?.path;
   useEffect(() => {
+    if (restoringSettingsDraft.current) {
+      if (hydratedSourcePath.current?.path === firstSourcePath) restoringSettingsDraft.current = false;
+      return;
+    }
+    if (hydratedSourcePath.current?.path === firstSourcePath) {
+      hydratedSourcePath.current = null;
+      return;
+    }
+    hydratedSourcePath.current = null;
     setAdvancedOptions((current) => {
       if (!current.markupPath && !current.maskPath) return current;
       return { ...current, markupPath: undefined, maskPath: undefined };
@@ -185,8 +262,36 @@ export default function GeneratePage() {
   }, []);
 
   const markComposerDraftStarted = useCallback(() => {
+    draftRevision.current++;
     hasComposerDraftRef.current = true;
   }, []);
+
+  useLayoutEffect(() => {
+    const saved = takeProviderSettingsDraft();
+    if (!saved) return;
+    const request = saved.request;
+    // /generate has no conversation segment. Restore its routing context as
+    // well as the composer, without replaying a prior recipe launch intent.
+    if (location.pathname === "/generate" && request.conversationId) {
+      navigate("/generate", {
+        replace: true,
+        state: { activateConversationId: request.conversationId },
+      });
+    }
+    restoredIntentState.current = location.state;
+    navigationRecipeHandled.current = location.state;
+    didUserSelectModelRef.current = true; hasComposerDraftRef.current = true;
+    restoringSettingsDraft.current = true; hydratedSourcePath.current = {path: request.editSources[0]?.path};
+    setActiveImageModel(request.model); setPrompt(request.prompt); setSize(request.size);
+    setQuality(request.quality); setBackground(request.background); setOutputFormat(request.outputFormat);
+    setModeration(request.moderation); setInputFidelity(request.inputFidelity); setImageCount(request.imageCount);
+    setAspectRatio(request.aspectRatio); setResolution(request.resolution); setAdvancedOptions(request.advancedOptions ?? {});
+    setOutputCompression(request.outputCompression ?? 100); setEditSources(request.editSources);
+    setRecipeIdentity({providerProfileId:request.providerProfileId,providerOverrideConfirmed:request.providerOverrideConfirmed,sourceGenerationId:request.sourceGenerationId});
+    setRecipeWarnings(saved.recipeWarnings ?? []); setComposerMode(saved.composerMode ?? "direct");
+    setEditingPromptMessageId(saved.editingPromptMessageId);setPromptAgentSessionId(saved.promptAgentSessionId);
+    setPromptAgentMessages(saved.promptAgentMessages ?? []);setSelectedPromptAgentConfigId(saved.selectedPromptAgentConfigId ?? "");
+  }, [setActiveImageModel]);
 
   const applyModelDefaults = useCallback((model: ImageModel) => {
     const { parameterDefaults, supportsEdit } =
@@ -394,6 +499,7 @@ export default function GeneratePage() {
   }, [prompt]);
 
   useEffect(() => {
+    if (restoredIntentState.current === location.state) return;
     const pendingSources = consumePendingEditSources();
     if (pendingSources.length > 0) {
       markComposerDraftStarted();
@@ -402,6 +508,7 @@ export default function GeneratePage() {
   }, [markComposerDraftStarted]);
 
   useEffect(() => {
+    if (restoredIntentState.current === location.state) return;
     if (navigationPendingPrompt) {
       markComposerDraftStarted();
       setPrompt(navigationPendingPrompt);
@@ -509,8 +616,11 @@ export default function GeneratePage() {
     (model: ImageModel) => {
       didUserSelectModelRef.current = true;
       markComposerDraftStarted();
+      setProviderSetup(null);
       setActiveImageModel(model);
       applyModelDefaults(model);
+      setRecipeIdentity({});
+      setRecipeWarnings([]);
       saveImageModel(model).catch(() => {});
     },
     [applyModelDefaults, markComposerDraftStarted, setActiveImageModel],
@@ -529,7 +639,23 @@ export default function GeneratePage() {
   const submitGenerationRequest = useCallback(
     async (request: RetryGenerationRequest) => {
       const promptText = request.prompt.trim();
-      if (!promptText) return;
+      if (!promptText || submissionPending.current) return false;
+      submissionPending.current = true;
+      try {
+        const saved = await getModelProviderProfiles(request.model);
+        const profile = saved.profiles.find(profile => profile.id === (request.providerProfileId ?? saved.active_provider_id));
+        if (!profile?.api_key.trim()) {
+          setProviderSetup({model:request.model,providerId:request.providerProfileId});
+          if (request.providerProfileId && !profile) setRecipeWarnings(current => [...new Set([...current, "provider_missing"])]);
+          submissionPending.current = false;
+          return false;
+        }
+        setProviderSetup(null);
+      } catch {
+        setProviderSetup({model:request.model,providerId:request.providerProfileId});
+        submissionPending.current = false;
+        return false;
+      }
 
       const tempId = crypto.randomUUID();
       const retryRequest: RetryGenerationRequest = {
@@ -596,7 +722,11 @@ export default function GeneratePage() {
         setMessages((prev) => completeGenerationMessage(prev, tempId, result));
         setActiveConversationId(result.conversation_id);
         refreshConversations();
+        return true;
       } catch (e) {
+        const failureText = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+        if ((e as {kind?:string})?.kind === "Network" || /unknown|outcome|timeout|timed out|connection lost|connection reset/i.test(failureText ?? "")) unknownOutcomes.current.add(tempId);
+        if (["ApiKeyNotSet", "ProviderProfileNotFound"].includes((e as {kind?:string})?.kind ?? "")) setProviderSetup({model:request.model,providerId:request.providerProfileId});
         messagesVersionRef.current += 1;
         setMessages((prev) =>
           failGenerationMessage(
@@ -611,19 +741,108 @@ export default function GeneratePage() {
           ),
         );
         refreshConversations();
-      }
+        return false;
+      } finally { submissionPending.current = false; }
     },
     [refreshConversations, setActiveConversationId, t],
   );
 
+  const hydrateRecipe = useCallback(
+    (recipe: GenerationRecipe) => {
+      const request = recipeToRequest(recipe);
+      didUserSelectModelRef.current = true;
+      markComposerDraftStarted();
+      hydratedSourcePath.current = { path: request.editSources[0]?.path };
+      setActiveImageModel(request.model);
+      setPrompt(request.prompt);
+      setSize(request.size);
+      setQuality(request.quality);
+      setBackground(request.background);
+      setOutputFormat(request.outputFormat);
+      setModeration(request.moderation);
+      setInputFidelity(request.inputFidelity);
+      setImageCount(request.imageCount);
+      setAspectRatio(request.aspectRatio);
+      setResolution(request.resolution);
+      setAdvancedOptions(request.advancedOptions ?? {});
+      setOutputCompression(request.outputCompression ?? 100);
+      setEditSources(request.editSources);
+      setRecipeIdentity({
+        providerProfileId: request.providerProfileId,
+        sourceGenerationId: request.sourceGenerationId,
+      });
+      setRecipeWarnings(recipe.warnings);
+      setComposerMode("direct");
+      setEditingPromptMessageId(null);
+      setPendingRecipe(null);
+      textareaRef.current?.focus();
+    },
+    [setActiveImageModel, markComposerDraftStarted],
+  );
+
+  const handleReuseRecipe = useCallback(
+    async (generationId: string, mode: "edit" | "generate", outcomeUnknown = false) => {
+      if (recipeLoadPending.current) return;
+      recipeLoadPending.current = true;
+      const token = ++recipeLoadToken.current;
+      setRecipeError(null);
+      try {
+        const loaded = await getGenerationRecipe(generationId);
+        const recipe = outcomeUnknown && !loaded.warnings.includes("provider_outcome_unknown")
+          ? { ...loaded, warnings: [...loaded.warnings, "provider_outcome_unknown"] }
+          : loaded;
+        if (token !== recipeLoadToken.current) return;
+        if (mode === "generate" && recipe.warnings.length === 0) {
+          await submitGenerationRequest({
+            ...recipeToRequest(recipe),
+            conversationId: activeConversationId,
+            projectId: activeProjectId,
+          });
+        } else if (hasComposerDraftRef.current || recipe.warnings.length > 0) {
+          setPendingRecipe(recipe);
+        } else {
+          hydrateRecipe(recipe);
+        }
+      } catch {
+        if (token === recipeLoadToken.current)
+          setRecipeError(t("recipe.loadFailed"));
+      } finally {
+        recipeLoadPending.current = false;
+      }
+    },
+    [
+      activeConversationId,
+      activeProjectId,
+      hydrateRecipe,
+      submitGenerationRequest,
+      t,
+    ],
+  );
+  const navigationRecipeHandled = useRef<unknown>(null);
+  useEffect(() => {
+    const state = location.state as {
+      recipeGenerationId?: string;
+      recipeMode?: "edit" | "generate";
+    } | null;
+    if (
+      state?.recipeGenerationId &&
+      navigationRecipeHandled.current !== state
+    ) {
+      navigationRecipeHandled.current = state;
+      void handleReuseRecipe(
+        state.recipeGenerationId,
+        state.recipeMode ?? "edit",
+      );
+    }
+  }, [location.state, handleReuseRecipe]);
+
   async function handleGenerate() {
     const promptText = prompt.trim();
-    if (!promptText) return;
+    if (!promptText || recipeWarnings.length > 0) return;
 
-    setPrompt("");
-    setEditSources([]);
-    setEditingPromptMessageId(null);
-    await submitGenerationRequest({
+    const revision = draftRevision.current;
+    const submitted = await submitGenerationRequest({
+      ...recipeIdentity,
       prompt: promptText,
       advancedOptions,
       outputCompression,
@@ -641,6 +860,9 @@ export default function GeneratePage() {
       projectId: activeProjectId,
       editSources: editSources.map((source) => ({ ...source })),
     });
+    if (submitted && revision === draftRevision.current) {
+      setPrompt(""); hasComposerDraftRef.current = false; setEditSources([]); setEditingPromptMessageId(null);
+    }
   }
 
   const handleDeepThinkingSend = useCallback(async () => {
@@ -700,7 +922,7 @@ export default function GeneratePage() {
   const handleAcceptAgentDraft = useCallback(
     async (message: PromptAgentMessage) => {
       const draft = message.draft_prompt?.trim();
-      if (!draft || !promptAgentSessionId) return;
+      if (!draft || !promptAgentSessionId || recipeWarnings.length > 0) return;
 
       const accepted = await acceptPromptAgentDraftMutation.mutateAsync({
         sessionId: promptAgentSessionId,
@@ -729,6 +951,7 @@ export default function GeneratePage() {
       setPromptAgentSessionId(null);
 
       await submitGenerationRequest({
+        ...recipeIdentity,
         prompt: acceptedPrompt,
         advancedOptions,
         outputCompression,
@@ -760,6 +983,8 @@ export default function GeneratePage() {
       aspectRatio,
       resolution,
       acceptPromptAgentDraftMutation,
+      recipeIdentity,
+      recipeWarnings,
       activeConversationId,
       activeProjectId,
       background,
@@ -852,10 +1077,36 @@ export default function GeneratePage() {
 
   const handleRetryMessage = useCallback(
     async (message: Message) => {
+      const clientRequestId = message.retryRequest?.clientRequestId;
+      if (clientRequestId && message.id === `assistant-${clientRequestId}`) {
+        try {
+          const saved = await getGenerationRecipeForRequest(clientRequestId);
+          if (saved) {
+            await handleReuseRecipe(saved.generation_id, "generate", unknownOutcomes.current.has(clientRequestId));
+            return;
+          }
+        } catch {
+          setRecipeError(t("recipe.loadFailed"));
+          return;
+        }
+      }
+      if (message.retryRequest && unknownOutcomes.current.has(message.retryRequest.clientRequestId ?? "")) {
+        setPendingUnknownRetry(message.retryRequest);
+        return;
+      }
+      if (
+        message.generationId &&
+        !message.id.startsWith(
+          "assistant-" + message.retryRequest?.clientRequestId,
+        )
+      ) {
+        await handleReuseRecipe(message.generationId, "generate");
+        return;
+      }
       if (!message.retryRequest) return;
       await submitGenerationRequest(message.retryRequest);
     },
-    [submitGenerationRequest],
+    [submitGenerationRequest, handleReuseRecipe, t],
   );
 
   const handleEditPrompt = useCallback(
@@ -912,10 +1163,24 @@ export default function GeneratePage() {
     ],
   );
 
+  const configuredProfile = providerQuery.data?.profiles.find(profile => profile.id === (recipeIdentity.providerProfileId ?? providerQuery.data?.active_provider_id));
+  const needsProviderSetup = !!providerSetup || (!!providerQuery.data && !configuredProfile?.api_key.trim()) || providerQuery.isError;
+  function openProviderSettings() {
+    try {
+      saveProviderSettingsDraft({request:{...recipeIdentity,prompt,advancedOptions,outputCompression,model:imageModel,size,aspectRatio,resolution,quality,background,outputFormat,moderation,inputFidelity,imageCount,conversationId:activeConversationId,projectId:activeProjectId,editSources},recipeWarnings,composerMode,editingPromptMessageId,promptAgentSessionId,promptAgentMessages,selectedPromptAgentConfigId});
+    } catch { setRecipeError(t("generate.draftSaveFailed")); return; }
+    const target=providerSetup ?? {model:imageModel,providerId:recipeIdentity.providerProfileId};
+    const query=new URLSearchParams({tab:"model",model:target.model,returnTo:location.pathname || "/generate"});
+    if(target.providerId)query.set("provider",target.providerId);
+    navigate(`/settings?${query.toString()}`);
+  }
+
   return (
     <GenerationWorkbench>
       {(parametersTarget, drawerOpen) => (
         <>
+          <RecoveryNotice />
+          <ConfirmDialog open={pendingUnknownRetry !== null} title={t("generate.unknownRetryTitle")} description={t("generate.unknownRetryDescription")} confirmLabel={t("generate.confirmUnknownRetry")} cancelLabel={t("favorites.cancel")} onCancel={() => setPendingUnknownRetry(null)} onConfirm={() => { const request = pendingUnknownRetry; setPendingUnknownRetry(null); if (request) void submitGenerationRequest(request); }} />
           <div
             ref={scrollRef}
             onScroll={handleScroll}
@@ -939,6 +1204,7 @@ export default function GeneratePage() {
               }
               onFavoriteClick={openFolderSelector}
               onRetry={(message) => void handleRetryMessage(message)}
+              onReuseRecipe={(id, mode) => void handleReuseRecipe(id, mode)}
               agentMessages={promptAgentMessages}
               isPromptAgentRunning={
                 startPromptAgentSessionMutation.isPending ||
@@ -952,6 +1218,146 @@ export default function GeneratePage() {
             />
           </div>
 
+          {recipeError && (
+            <p role="alert" className="px-5 py-2 text-sm text-error">
+              {recipeError}
+            </p>
+          )}
+          {recipeWarnings.length > 0 && (
+            <div
+              role="status"
+              className="border-t border-border-subtle bg-surface px-5 py-3 text-sm"
+            >
+              <p>{t("recipe.reviewRequired")}</p>
+              <ul className="my-2 list-inside list-disc text-muted">
+                {recipeWarnings.map((w) => (
+                  <li key={w}>{t(`recipe.warnings.${w}`)}</li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                {providerNeedsReview && (
+                  <div className="grid w-full gap-2 sm:flex sm:items-end">
+                    <label className="grid gap-1 text-xs">
+                      {t("recipe.providerLabel")}
+                      <select
+                        className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                        value={chosenRecipeProvider}
+                        onChange={(event) =>
+                          setChosenRecipeProvider(event.target.value)
+                        }
+                      >
+                        <option value="" disabled>
+                          {t("recipe.providerLabel")}
+                        </option>
+                        {recipeProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!chosenRecipeProvider}
+                      className="studio-control focus-ring min-h-9 rounded-lg px-3 disabled:opacity-50"
+                      onClick={() => {
+                        setProviderSetup(null);
+                        setRecipeIdentity((current) => ({
+                          ...current,
+                          providerProfileId: chosenRecipeProvider,
+                          providerOverrideConfirmed: true,
+                        }));
+                        setRecipeWarnings((current) =>
+                          current.filter(
+                            (w) =>
+                              ![
+                                "legacy_incomplete",
+                                "provider_missing",
+                                "endpoint_changed",
+                                "provider_unconfigured",
+                              ].includes(w),
+                          ),
+                        );
+                      }}
+                    >
+                      {t("recipe.confirmProvider")}
+                    </button>
+                    {recipeProviders.length === 0 && (
+                      <p className="text-xs text-muted">
+                        {t("recipe.noProviders")}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {recipeWarnings.some((w) =>
+                  [
+                    "source_missing",
+                    "sources_require_selection",
+                    "invalid_job",
+                  ].includes(w),
+                ) && (
+                  <button
+                    type="button"
+                    className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                    onClick={() => {
+                      setEditSources([]);
+                      setAdvancedOptions((current) => ({
+                        ...current,
+                        markupPath: undefined,
+                        maskPath: undefined,
+                      }));
+                      setRecipeIdentity((current) => ({
+                        ...current,
+                        sourceGenerationId: undefined,
+                      }));
+                      setRecipeWarnings((current) =>
+                        current.filter(
+                          (w) =>
+                            ![
+                              "source_missing",
+                              "sources_require_selection",
+                              "invalid_job",
+                            ].includes(w),
+                        ),
+                      );
+                    }}
+                  >
+                    {t("recipe.removeSources")}
+                  </button>
+                )}
+                {recipeWarnings.includes("provider_outcome_unknown") && (
+                  <button
+                    type="button"
+                    className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                    onClick={() =>
+                      setRecipeWarnings((current) =>
+                        current.filter((w) => w !== "provider_outcome_unknown"),
+                      )
+                    }
+                  >
+                    {t("recipe.acknowledgeNewCharge")}
+                  </button>
+                )}
+                {recipeWarnings.includes("invalid_parameters") && (
+                  <button
+                    type="button"
+                    className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                    onClick={() => {
+                      applyModelDefaults(imageModel);
+
+                      setRecipeWarnings((current) =>
+                        current.filter((w) => w !== "invalid_parameters"),
+                      );
+                    }}
+                  >
+                    {t("recipe.resetParameters")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {needsProviderSetup && <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-5 py-3 text-sm"><span className="text-muted">{t("generate.providerSetupRequired")}</span><button type="button" onClick={openProviderSettings} className="studio-control focus-ring min-h-9 rounded-lg px-3 py-2 text-xs font-medium">{t("generate.configureProvider")}</button></div>}
           <GenerationComposer
             parametersTarget={parametersTarget}
             interactionDisabled={drawerOpen}
@@ -1030,7 +1436,7 @@ export default function GeneratePage() {
               startPromptAgentSessionMutation.isPending ||
               sendPromptAgentMessageMutation.isPending
             }
-            isGenerating={isGenerating}
+            isGenerating={isGenerating || recipeWarnings.length > 0}
           />
 
           <AnimatePresence>
@@ -1056,6 +1462,46 @@ export default function GeneratePage() {
             />
           )}
 
+          <ConfirmDialog
+            open={pendingRecipe !== null}
+            title={t("recipe.replaceDraft")}
+            description={
+              pendingRecipe?.warnings.length
+                ? pendingRecipe.warnings
+                    .map((w) => t(`recipe.warnings.${w}`))
+                    .join(" · ")
+                : t("recipe.replaceDraftDescription")
+            }
+            confirmLabel={t(
+              pendingRecipe?.warnings.includes("unknown_model")
+                ? "recipe.useCurrentModel"
+                : "recipe.reviewParameters",
+            )}
+            cancelLabel={t("favorites.cancel")}
+            onConfirm={() => {
+              if (pendingRecipe) {
+                try {
+                  hydrateRecipe(
+                    pendingRecipe.warnings.includes("unknown_model")
+                      ? {
+                          ...pendingRecipe,
+                          model: imageModel,
+                          options: {},
+                          provider_profile_id: undefined,
+                          warnings: pendingRecipe.warnings.filter(
+                            (w) => w !== "unknown_model",
+                          ),
+                        }
+                      : pendingRecipe,
+                  );
+                } catch {
+                  setRecipeError(t("recipe.loadFailed"));
+                  setPendingRecipe(null);
+                }
+              }
+            }}
+            onCancel={() => setPendingRecipe(null)}
+          />
           <ConfirmDialog
             open={pendingDeleteGenerationId !== null}
             title={t("lightbox.deleteConfirm")}

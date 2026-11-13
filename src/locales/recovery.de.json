@@ -1,0 +1,12 @@
+{
+  "title": "Unfertige Ergebnisse prüfen",
+  "continue": "Speichern fortsetzen",
+  "saving": "Wird gespeichert…",
+  "review": "Rezept prüfen",
+  "localOnly": "Eine gespeicherte Antwort ist verfügbar. Es wird keine neue Generierungsanfrage gesendet.",
+  "unknown": "Der Anbieter hat diese unterbrochene Anfrage möglicherweise berechnet. Prüfen Sie das Rezept vor einer neuen Anfrage.",
+  "saved": "Bilder wiederhergestellt und gespeichert.",
+  "failed": "Speichern fehlgeschlagen. Die Antwort bleibt erhalten. Versuchen Sie es nach Behebung des lokalen Problems erneut.",
+  "startupRecovered": "Beim Start wiederhergestellte und gespeicherte Ergebnisse: {{count}}.",
+  "notSent": "Vor dem Senden unterbrochen. Prüfen Sie das Rezept, um eine neue Generierung zu starten."
+}

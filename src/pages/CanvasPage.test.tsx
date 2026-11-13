@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CanvasDocumentContent } from "../types";
 import CanvasPage from "./CanvasPage";
-import { waitForCanvasSaves } from "../lib/canvas/persistence";
+import {
+  waitForCanvasSaves,
+  flushCanvasSaves,
+} from "../lib/canvas/persistence";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -29,6 +32,7 @@ const saveCanvasDocument = vi.fn();
 const saveCanvasExport = vi.fn();
 const editImage = vi.fn();
 const getCanvasGenerationStatus = vi.fn().mockResolvedValue(null);
+const generationCompleteListeners = new Set<() => void>();
 const getImageModel = vi.fn();
 const pickSourceImages = vi.fn();
 const exportCanvasFrame = vi.fn();
@@ -120,7 +124,10 @@ vi.mock("../lib/api", () => ({
   editImage: (...args: unknown[]) => editImage(...args),
   getCanvasGenerationStatus: (...args: unknown[]) =>
     getCanvasGenerationStatus(...args),
-  onGenerationComplete: () => Promise.resolve(() => {}),
+  onGenerationComplete: (handler: () => void) => {
+    generationCompleteListeners.add(handler);
+    return Promise.resolve(() => generationCompleteListeners.delete(handler));
+  },
   onGenerationPartial: () => Promise.resolve(() => {}),
   onGenerationFailed: () => Promise.resolve(() => {}),
   onGenerationProgress: () => Promise.resolve(() => {}),
@@ -347,6 +354,7 @@ describe("CanvasPage", () => {
     saveCanvasExport.mockReset();
     editImage.mockReset();
     getCanvasGenerationStatus.mockReset().mockResolvedValue(null);
+    generationCompleteListeners.clear();
     getImageModel.mockReset();
     pickSourceImages.mockReset();
     exportCanvasFrame.mockReset();
@@ -747,32 +755,55 @@ describe("CanvasPage", () => {
     getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
     render(<CanvasPage />, { wrapper: TestWrapper });
     await screen.findByText("Canvas stage");
-    const properties = screen.getByRole("tab", { name: "canvas.propertiesTitle" });
+    const properties = screen.getByRole("tab", {
+      name: "canvas.propertiesTitle",
+    });
     expect(properties).toHaveAttribute("aria-selected", "true");
     const generation = screen.getByRole("tab", { name: "Generation" });
     fireEvent.click(generation);
-    const editor = screen.getByPlaceholderText("Describe how to develop this framed sketch...");
+    const editor = screen.getByPlaceholderText(
+      "Describe how to develop this framed sketch...",
+    );
     fireEvent.change(editor, { target: { value: "A quiet mountain lake" } });
     fireEvent.click(screen.getByRole("tab", { name: "Layers" }));
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
-    expect(screen.getByRole("tab", { name: "Layers" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Layers" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     fireEvent.click(generation);
-    expect(screen.getByPlaceholderText("Describe how to develop this framed sketch...")).toBe(editor);
+    expect(
+      screen.getByPlaceholderText(
+        "Describe how to develop this framed sketch...",
+      ),
+    ).toBe(editor);
     expect(editor).toHaveValue("A quiet mountain lake");
   });
 
   it("docks the inspector at 1200px while documents remain a drawer until 1440px", async () => {
     const original = window.matchMedia;
-    const mediaSpy = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
-      ...original(query),
-      matches: query === "(min-width: 1200px)",
-    }));
+    const mediaSpy = vi
+      .spyOn(window, "matchMedia")
+      .mockImplementation((query) => ({
+        ...original(query),
+        matches: query === "(min-width: 1200px)",
+      }));
     render(<CanvasPage />, { wrapper: TestWrapper });
     await screen.findByText("Canvas stage");
-    expect(document.getElementById("canvas-inspector")).toHaveAttribute("data-layout", "docked");
-    expect(document.getElementById("canvas-documents")).toHaveAttribute("data-layout", "drawer");
-    fireEvent.click(screen.getByRole("button", { name: "studio.canvas.documents" }));
-    expect(screen.getByRole("dialog", { name: "studio.canvas.documents" })).toHaveAttribute("aria-modal", "true");
+    expect(document.getElementById("canvas-inspector")).toHaveAttribute(
+      "data-layout",
+      "docked",
+    );
+    expect(document.getElementById("canvas-documents")).toHaveAttribute(
+      "data-layout",
+      "drawer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "studio.canvas.documents" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "studio.canvas.documents" }),
+    ).toHaveAttribute("aria-modal", "true");
     mediaSpy.mockRestore();
   });
 
@@ -1227,6 +1258,53 @@ describe("CanvasPage", () => {
     });
 
     expect(await screen.findByText("Active tool: select")).toBeInTheDocument();
+  });
+
+  it("queues the latest dirty snapshot on unmount before maintenance can finish", async () => {
+    const preview = createDeferred<string>();
+    getCanvasDocument.mockResolvedValue(canvasDocumentWithImage());
+    exportCanvasFrame.mockReturnValueOnce(preview.promise);
+    const { unmount } = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    expect(screen.getByText("Unsaved")).toBeInTheDocument();
+    unmount();
+    let flushed = false;
+    const flush = flushCanvasSaves().then(() => {
+      flushed = true;
+    });
+    await flushAsyncWork();
+    expect(flushed).toBe(false);
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
+    preview.resolve("latest-preview");
+    await act(async () => {
+      await flush;
+    });
+    expect(saveCanvasDocument).toHaveBeenCalledWith(
+      "canvas-1",
+      expect.objectContaining({
+        layers: [
+          expect.objectContaining({
+            objects: [expect.objectContaining({ x: 112, y: 58 })],
+          }),
+        ],
+      }),
+      "latest-preview",
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(saveCanvasDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not queue a redundant save when a clean canvas unmounts", async () => {
+    const { unmount } = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: none");
+    unmount();
+    await flushCanvasSaves();
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
   });
 
   it("serializes same-document saves so the newest snapshot is written last", async () => {
@@ -1709,6 +1787,40 @@ describe("CanvasPage", () => {
     expect(
       saveCanvasDocument.mock.calls.at(-1)?.[1].generation_requests[0].status,
     ).toBe("completed");
+  });
+
+  it("reconciles a failed canvas request after manual save recovery and does not insert again on reopen", async () => {
+    const document = canvasDocumentWithImage();
+    let disk: CanvasDocumentContent = structuredClone(document.content);
+    disk.generation_requests = [{
+      request_id: "recover-request", generation_id: "recover-generation", project_id: "project-1",
+      frame: disk.frame, prompt: "Recover this drawing", status: "failed", image_ids: [],
+      error: "Image save failed", created_at: "2026-05-12T00:00:00Z",
+    }];
+    getCanvasDocument.mockImplementation(async () => ({ ...document, content: structuredClone(disk) }));
+    saveCanvasDocument.mockImplementation(async (_id: string, content: CanvasDocumentContent) => {
+      disk = structuredClone(content);
+      return document;
+    });
+    getCanvasGenerationStatus.mockResolvedValue({ generation_id: "recover-generation", status: "failed", error: "Image save failed", images: [] });
+    const mounted = render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    await waitFor(() => expect(getCanvasGenerationStatus).toHaveBeenCalledWith("canvas-1", "recover-request"));
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "recover-generation", status: "succeeded", error: null,
+      images: [{ id: "recovered", file_path: "/recovered.png", width: 100, height: 100 }],
+    });
+    await act(async () => generationCompleteListeners.forEach(listener => listener()));
+    await waitFor(() => expect(screen.getByText(/Canvas objects: canvas-result:recover-request:recovered/)).toBeInTheDocument());
+    await flushAsyncWork();
+    expect(disk.generation_requests?.[0]).toMatchObject({ status: "completed", image_ids: ["recovered"] });
+    expect(disk.layers.flatMap(layer => layer.objects).filter(object => object.id === "canvas-result:recover-request:recovered")).toHaveLength(1);
+    mounted.unmount();
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText(/Canvas objects: canvas-result:recover-request:recovered/);
+    await flushAsyncWork();
+    expect(disk.layers.flatMap(layer => layer.objects).filter(object => object.id === "canvas-result:recover-request:recovered")).toHaveLength(1);
+    expect(editImage).not.toHaveBeenCalled();
   });
 
   it("clears external selection when its layer becomes locked", async () => {

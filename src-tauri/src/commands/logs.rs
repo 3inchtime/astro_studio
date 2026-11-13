@@ -6,7 +6,7 @@ use crate::models::*;
 use crate::runtime_logs;
 use chrono::Utc;
 use std::path::Path;
-use tauri::{Manager, State};
+use tauri::State;
 
 #[tauri::command]
 pub(crate) fn get_logs(
@@ -16,6 +16,7 @@ pub(crate) fn get_logs(
     page: Option<i32>,
     page_size: Option<i32>,
 ) -> Result<LogSearchResult, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let page = page.unwrap_or(1);
     let page_size = page_size.unwrap_or(DEFAULT_PAGE_SIZE);
     let (logs, total) = db.search_logs(log_type.as_deref(), level.as_deref(), page, page_size)?;
@@ -34,6 +35,7 @@ pub(crate) fn get_runtime_logs(limit: Option<usize>) -> Result<Vec<RuntimeLogEnt
 
 #[tauri::command]
 pub(crate) fn get_log_detail(db: State<'_, Database>, id: String) -> Result<LogEntry, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     db.get_log(&id)?.ok_or_else(|| AppError::Validation {
         message: "Log not found".to_string(),
     })
@@ -45,18 +47,16 @@ pub(crate) fn read_log_response_file(
     db: State<'_, Database>,
     path: String,
 ) -> Result<String, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     if !db.response_file_exists(&path)? {
         return Err(AppError::Validation {
             message: "Response file is not recorded.".to_string(),
         });
     }
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::FileSystem {
-            message: format!("Get app data dir failed: {}", e),
-        })?;
+    let app_data_dir = crate::storage::asset_root(&app).map_err(|e| AppError::FileSystem {
+        message: format!("Get app data dir failed: {}", e),
+    })?;
     let path = canonicalize_existing_managed_path(
         Path::new(&path),
         &[app_data_dir.join("logs").join("responses")],
@@ -97,6 +97,7 @@ pub(crate) fn clear_logs(
     db: State<'_, Database>,
     before_days: Option<u32>,
 ) -> Result<u64, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let days = before_days.unwrap_or(DEFAULT_LOG_RETENTION_DAYS);
     let before_str = format_log_clear_cutoff(Utc::now(), days);
     db.clear_logs_before(&before_str)
@@ -104,6 +105,7 @@ pub(crate) fn clear_logs(
 
 #[tauri::command]
 pub(crate) fn get_log_settings(db: State<'_, Database>) -> Result<LogSettings, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let enabled = db
         .get_setting(SETTING_LOG_ENABLED)?
         .map(|v| v == "true")
@@ -124,6 +126,7 @@ pub(crate) fn save_log_settings(
     enabled: bool,
     retention_days: u32,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     db.set_setting(SETTING_LOG_ENABLED, if enabled { "true" } else { "false" })?;
     db.set_setting(SETTING_LOG_RETENTION_DAYS, &retention_days.to_string())?;
     Ok(())
@@ -131,6 +134,7 @@ pub(crate) fn save_log_settings(
 
 #[tauri::command]
 pub(crate) fn get_trash_settings(db: State<'_, Database>) -> Result<TrashSettings, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     Ok(TrashSettings {
         retention_days: db.get_trash_retention_days()?,
     })
@@ -142,6 +146,7 @@ pub(crate) fn save_trash_settings(
     db: State<'_, Database>,
     retention_days: u32,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let retention_days = retention_days.max(1);
     db.set_setting(SETTING_TRASH_RETENTION_DAYS, &retention_days.to_string())?;
     let _ = crate::gallery::purge_trashed_generations(&app, db.inner(), retention_days);

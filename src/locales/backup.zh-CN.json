@@ -1,0 +1,20 @@
+{
+  "title": "资料库备份",
+  "description": "备份图片、项目、画布及引用素材。备份不含密钥，恢复后需重新填写。",
+  "create": "创建备份",
+  "restore": "恢复备份",
+  "rollback": "回滚到恢复前资料库",
+  "checking": "正在检查备份…",
+  "cancel": "取消",
+  "working": "正在处理…",
+  "progress": "备份进度",
+  "completed": "备份已保存并通过校验。",
+  "cancelled": "操作已取消。",
+  "restart_required": "资料库已准备好，重启后完成切换。",
+  "restart": "立即重启",
+  "confirmRestore": "恢复并重启",
+  "restoreWarning": "恢复将替换当前使用的资料库；原资料库会保留，可随时回滚。",
+  "counts": "{{projects}} 个项目 · {{images}} 张图片 · {{canvases}} 个画布",
+  "rollbackWarning": "切回上次恢复前保留的资料库并重启。恢复后的资料库仍会保留。",
+  "cancelFailed": "暂时无法取消，请检查进度后重试。"
+}

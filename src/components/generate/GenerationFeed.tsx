@@ -15,6 +15,7 @@ interface GenerationFeedProps {
   onFavoritePrompt: (prompt: string) => void;
   onFavoriteClick: (imageId: string) => void;
   onRetry: (message: Message) => void;
+  onReuseRecipe?: (generationId: string, mode: "edit" | "generate") => void;
   agentMessages?: PromptAgentMessage[];
   isPromptAgentRunning?: boolean;
   onAcceptAgentDraft?: (message: PromptAgentMessage) => void;
@@ -33,6 +34,7 @@ export default function GenerationFeed({
   onFavoritePrompt,
   onFavoriteClick,
   onRetry,
+  onReuseRecipe,
   agentMessages = [],
   isPromptAgentRunning = false,
   onAcceptAgentDraft,
@@ -80,6 +82,7 @@ export default function GenerationFeed({
               isPromptFavorited={isPromptFavorited(msg)}
               onFavoriteClick={onFavoriteClick}
               onRetry={onRetry}
+              onReuseRecipe={onReuseRecipe}
               chatViewportHeight={chatViewportHeight}
             />
           ))}

@@ -1,0 +1,12 @@
+{
+  "title": "Revisar resultados pendientes",
+  "continue": "Continuar guardando",
+  "saving": "Guardando…",
+  "review": "Revisar receta",
+  "localOnly": "Hay una respuesta guardada. No se enviará una nueva solicitud de generación.",
+  "unknown": "El proveedor puede haber cobrado esta solicitud interrumpida. Revisa la receta antes de enviar otra.",
+  "saved": "Imágenes recuperadas y guardadas.",
+  "failed": "No se pudo guardar. La respuesta se conserva; vuelve a intentarlo tras resolver el problema local.",
+  "startupRecovered": "Resultados recuperados y guardados al iniciar: {{count}}.",
+  "notSent": "Se interrumpió antes del envío. Revisa la receta para iniciar una nueva generación."
+}

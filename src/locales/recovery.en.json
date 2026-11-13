@@ -1,0 +1,12 @@
+{
+  "title": "Review unfinished results",
+  "continue": "Continue saving",
+  "saving": "Saving…",
+  "review": "Review recipe",
+  "localOnly": "A saved response is available. No new generation request will be sent.",
+  "unknown": "The provider may have charged for this interrupted request. Review the recipe before sending a new request.",
+  "saved": "Images recovered and saved.",
+  "failed": "Could not finish saving. The saved response is retained; try again when the local issue is resolved.",
+  "startupRecovered": "Saved results recovered at startup: {{count}}.",
+  "notSent": "Interrupted before sending. Review the recipe to start a new generation."
+}

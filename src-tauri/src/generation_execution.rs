@@ -18,6 +18,9 @@ pub(crate) enum GenerationExecutionMode {
 
 #[derive(Debug, Clone)]
 pub(crate) struct GenerationExecutionRequest {
+    pub(crate) provider_override_confirmed: bool,
+    pub(crate) provider_profile_id: Option<String>,
+    pub(crate) source_generation_id: Option<String>,
     pub(crate) advanced_options: Option<crate::models::ImageAdvancedOptions>,
     pub(crate) aspect_ratio: Option<String>,
     pub(crate) resolution: Option<String>,
@@ -42,6 +45,9 @@ pub(crate) struct GenerationExecutionRequest {
 impl GenerationExecutionRequest {
     pub(crate) fn into_lifecycle_request(self) -> GenerationLifecycleRequest {
         GenerationLifecycleRequest {
+            provider_override_confirmed: self.provider_override_confirmed,
+            provider_profile_id: self.provider_profile_id,
+            source_generation_id: self.source_generation_id,
             advanced_options: self.advanced_options,
             aspect_ratio: self.aspect_ratio,
             resolution: self.resolution,
@@ -67,6 +73,9 @@ impl GenerationExecutionRequest {
 impl Default for GenerationExecutionRequest {
     fn default() -> Self {
         Self {
+            provider_override_confirmed: false,
+            provider_profile_id: None,
+            source_generation_id: None,
             advanced_options: None,
             aspect_ratio: None,
             resolution: None,
@@ -96,6 +105,13 @@ pub(crate) async fn submit_generation_request(
     engine: &GptImageEngine,
     request: GenerationExecutionRequest,
 ) -> Result<GenerateResult, AppError> {
+    use tauri::Manager;
+    let gate = app.try_state::<crate::storage::MaintenanceGate>();
+    let _permit = gate
+        .as_ref()
+        .map(|gate| gate.write())
+        .transpose()
+        .map_err(|message| AppError::Validation { message })?;
     match request.execution_mode {
         GenerationExecutionMode::Compatibility => {
             run_generation_lifecycle(app, db, engine, request.into_lifecycle_request()).await

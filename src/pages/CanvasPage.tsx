@@ -1,3 +1,4 @@
+import RecoveryNotice from "../components/generate/RecoveryNotice";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useDialogFocus } from "../hooks/useDialogFocus";
@@ -208,6 +209,11 @@ export default function CanvasPage() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      clearSaveTimer();
+      const documentId = loadedDocumentIdRef.current;
+      if (documentId && isDirtyRef.current) {
+        void persistDocument(documentId, historyPresentRef.current).catch(() => {});
+      }
     };
   }, []);
 
@@ -852,6 +858,7 @@ export default function CanvasPage() {
               requestId,
               status.generation_id ?? "",
               status.images,
+              true,
             ),
           );
         } else if (
@@ -864,6 +871,8 @@ export default function CanvasPage() {
               current,
               requestId,
               status.error ?? String(error),
+              status.status === "cancelled" ? "cancelled" : "failed",
+              status.generation_id ?? undefined,
             ),
           );
         } else if (
@@ -1275,6 +1284,7 @@ export default function CanvasPage() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+      <RecoveryNotice />
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3 min-[1440px]:hidden">
         <button
           ref={documentsToggleRef}

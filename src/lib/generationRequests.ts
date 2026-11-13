@@ -18,7 +18,19 @@ export function buildGenerationParams(
     request.model,
   ).parameterCapabilities;
 
+  // Saved requests are checked against the backend model registry. UI preset
+  // lists are intentionally narrower and must not rewrite a recipe.
+  const savedRecipe = Boolean(request.sourceGenerationId);
   const params: GenerationParams = {
+    ...(request.providerOverrideConfirmed
+      ? { providerOverrideConfirmed: true }
+      : {}),
+    ...(request.providerProfileId
+      ? { providerProfileId: request.providerProfileId }
+      : {}),
+    ...(request.sourceGenerationId
+      ? { sourceGenerationId: request.sourceGenerationId }
+      : {}),
     ...(isGptImage26(request.model) && request.advancedOptions
       ? {
           advancedOptions: normalizeAdvancedOptions(
@@ -28,7 +40,7 @@ export function buildGenerationParams(
           ),
         }
       : {}),
-    ...(isGptImage26(request.model) &&
+    ...((savedRecipe || isGptImage26(request.model)) &&
     ["jpeg", "webp"].includes(request.outputFormat) &&
     request.outputCompression !== undefined
       ? { outputCompression: request.outputCompression }
@@ -36,37 +48,37 @@ export function buildGenerationParams(
     prompt: request.prompt,
     model: request.model,
     size: request.size,
-    ...(capabilities.aspectRatios?.includes(request.aspectRatio ?? "")
+    ...((savedRecipe || capabilities.aspectRatios?.includes(request.aspectRatio ?? ""))
       ? { aspectRatio: request.aspectRatio }
       : {}),
-    ...(capabilities.resolutions?.includes(request.resolution ?? "")
+    ...((savedRecipe || capabilities.resolutions?.includes(request.resolution ?? ""))
       ? { resolution: request.resolution }
       : {}),
-    ...(capabilities.qualities.length > 1
+    ...((savedRecipe || capabilities.qualities.length > 1)
       ? {
-          quality: capabilities.qualities.includes(request.quality)
+          quality: savedRecipe || capabilities.qualities.includes(request.quality)
             ? request.quality
             : "auto",
         }
       : {}),
-    ...(capabilities.backgrounds.length > 1
+    ...((savedRecipe || capabilities.backgrounds.length > 1)
       ? { background: request.background }
       : {}),
-    ...(capabilities.outputFormats.length > 1
+    ...((savedRecipe || capabilities.outputFormats.length > 1)
       ? {
-          outputFormat: capabilities.outputFormats.includes(
+          outputFormat: savedRecipe || capabilities.outputFormats.includes(
             request.outputFormat,
           )
             ? request.outputFormat
             : capabilities.outputFormats[0],
         }
       : {}),
-    ...(capabilities.moderationLevels.length > 1
+    ...((savedRecipe || capabilities.moderationLevels.length > 1)
       ? { moderation: request.moderation }
       : {}),
     ...(capabilities.imageCounts.length > 0
       ? {
-          imageCount: capabilities.imageCounts.includes(request.imageCount)
+          imageCount: savedRecipe || capabilities.imageCounts.includes(request.imageCount)
             ? request.imageCount
             : 1,
         }
@@ -102,7 +114,7 @@ export function buildEditParams(
           ),
         }
       : {}),
-    ...(capabilities.inputFidelityOptions.length > 1
+    ...((request.sourceGenerationId || capabilities.inputFidelityOptions.length > 1)
       ? { inputFidelity: request.inputFidelity }
       : {}),
   };

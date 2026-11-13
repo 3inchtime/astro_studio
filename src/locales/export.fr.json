@@ -1,0 +1,31 @@
+{
+  "action": "Exporter les originaux",
+  "scope": "{{records}} générations, {{images}} images",
+  "description": "Toutes les images sélectionnées sont copiées au format original. Les fichiers existants sont conservés ; les noms identiques reçoivent un suffixe numérique.",
+  "privacy": "Les recettes incluent les prompts et paramètres. Les identifiants, points d’accès et chemins locaux sont omis.",
+  "cancel": "Annuler",
+  "chooseFolder": "Choisir le dossier d’export",
+  "status": "Export d’images",
+  "progress": "Export de {{completed}} / {{total}} images…",
+  "completed": "{{completed}} / {{total}} images exportées",
+  "cancelled": "Export arrêté. Les fichiers terminés sont conservés.",
+  "exportFailed": "Export non terminé. Les fichiers terminés sont conservés.",
+  "cancelFailed": "Impossible d’arrêter l’export. Vérifiez la progression.",
+  "failed": "{{count}} images nécessitent votre attention",
+  "stop": "Arrêter l’export",
+  "retry": "Réessayer les images restantes",
+  "dismiss": "Fermer",
+  "select": "Sélectionner les images",
+  "preparing": "Préparation de l’export…",
+  "codes": {
+    "source_missing": "Fichier original manquant",
+    "unsafe_source": "Source hors bibliothèque ou lien symbolique",
+    "source_unreadable": "Original illisible",
+    "destination_write_failed": "Destination non accessible en écriture ou publication atomique non prise en charge",
+    "destination_name_conflict": "Aucun nom de fichier libre trouvé",
+    "verification_failed": "Échec de vérification des octets copiés",
+    "sidecar_failed": "Image enregistrée ; recette JSON non enregistrée",
+    "operation_cancelled": "Non terminé avant l’annulation"
+  },
+  "cancelledItems": "{{count}} images annulées"
+}

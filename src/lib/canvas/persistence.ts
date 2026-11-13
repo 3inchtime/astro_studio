@@ -48,3 +48,12 @@ export async function waitForCanvasSaves(
     entry = next;
   }
 }
+
+// Maintenance must not snapshot a library while accepted canvas saves are pending.
+export async function flushCanvasSaves() {
+  while (documentSaveQueues.size) {
+    const entries = [...documentSaveQueues.values()];
+    await Promise.all(entries.map((entry) => entry.promise));
+    if (entries.some((entry) => entry.failed)) throw new Error("Canvas changes could not be saved. Retry the canvas save first.");
+  }
+}

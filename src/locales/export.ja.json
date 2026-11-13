@@ -1,0 +1,31 @@
+{
+  "action": "元画像をエクスポート",
+  "scope": "生成記録 {{records}} 件、画像 {{images}} 枚",
+  "description": "選択した記録の全画像を元の形式でコピーします。既存ファイルは保持し、同名の場合は番号を付けます。",
+  "privacy": "レシピにはプロンプトと生成設定を含めます。認証情報、接続先、ローカルパスは除外します。",
+  "cancel": "キャンセル",
+  "chooseFolder": "保存先フォルダーを選択",
+  "status": "画像のエクスポート",
+  "progress": "{{completed}} / {{total}} 枚をエクスポート中…",
+  "completed": "{{completed}} / {{total}} 枚をエクスポート済み",
+  "cancelled": "エクスポートを停止しました。完了したファイルは保持します。",
+  "exportFailed": "完了できませんでした。完了したファイルは保持します。",
+  "cancelFailed": "停止できませんでした。進捗を確認してください。",
+  "failed": "{{count}} 枚の画像を確認してください",
+  "stop": "エクスポートを停止",
+  "retry": "残りの画像を再試行",
+  "dismiss": "閉じる",
+  "select": "画像を選択",
+  "preparing": "エクスポートを準備中…",
+  "codes": {
+    "source_missing": "元ファイルがありません",
+    "unsafe_source": "管理対象外のファイルまたはシンボリックリンクです",
+    "source_unreadable": "元ファイルを読み取れません",
+    "destination_write_failed": "保存先に書き込めないか原子的な保存に非対応です",
+    "destination_name_conflict": "未使用のファイル名を選べません",
+    "verification_failed": "コピーデータの検証に失敗しました",
+    "sidecar_failed": "画像は保存済みですがJSONレシピを保存できません",
+    "operation_cancelled": "キャンセル前に完了しませんでした"
+  },
+  "cancelledItems": "{{count}} 枚の画像をキャンセル"
+}

@@ -1,0 +1,20 @@
+{
+  "title": "Library backup",
+  "description": "Back up your images, projects, canvas documents and reference files. Credentials are excluded; re-enter them after restoring.",
+  "create": "Create backup",
+  "restore": "Restore backup",
+  "rollback": "Return to previous library",
+  "checking": "Checking backup…",
+  "cancel": "Cancel",
+  "working": "Working…",
+  "progress": "Backup progress",
+  "completed": "Backup saved and verified.",
+  "cancelled": "Operation cancelled.",
+  "restart_required": "Library prepared. Restart to finish switching.",
+  "restart": "Restart now",
+  "confirmRestore": "Restore and restart",
+  "restoreWarning": "This replaces the active library. Your current library is retained for rollback.",
+  "counts": "{{projects}} projects · {{images}} images · {{canvases}} canvases",
+  "rollbackWarning": "Switch back to the library kept before the last restore, then restart. The restored library is retained.",
+  "cancelFailed": "Could not cancel yet. Check progress and try again."
+}

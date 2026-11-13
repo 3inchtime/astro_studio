@@ -1,6 +1,6 @@
 [package]
 name = "astro-studio"
-version = "0.0.33"
+version = "0.0.34"
 description = "Astro Studio - AI Image Generation Desktop Client"
 authors = ["Astro Studio"]
 edition = "2021"
@@ -31,7 +31,10 @@ httpdate = "1"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 async-trait = "0.1"
-rusqlite = { version = "0.31", features = ["bundled", "modern_sqlite"] }
+rusqlite = { version = "0.31", features = ["bundled", "modern_sqlite", "backup"] }
+fs2 = "0.4"
+libc = "0.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 dirs = "6"
 log = "0.4"
 env_logger = "0.11"

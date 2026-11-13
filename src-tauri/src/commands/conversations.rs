@@ -9,6 +9,34 @@ use tauri::State;
 const DEFAULT_PROJECT_ID: &str = "default";
 const DEFAULT_CONVERSATION_TITLE: &str = "New Conversation";
 
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+    #[test]
+    fn first_generation_preserves_explicit_title_and_names_default_conversation() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT,created_at TEXT,updated_at TEXT,deleted_at TEXT);
+            CREATE TABLE conversations(id TEXT,project_id TEXT,title TEXT,created_at TEXT,updated_at TEXT,archived_at TEXT,pinned_at TEXT,deleted_at TEXT);
+            CREATE TABLE generations(id TEXT,conversation_id TEXT,deleted_at TEXT);
+            INSERT INTO conversations(id,project_id,title) VALUES ('test','default','Connection test · Saved provider'),('regular','default','New Conversation');").unwrap();
+        let prompt = "A small blue circle on a plain white background.";
+        for id in ["test", "regular"] {
+            assert_eq!(
+                resolve_conversation_id(&conn, Some(id), None, prompt).unwrap(),
+                id
+            );
+        }
+        let title = |id| {
+            conn.query_row("SELECT title FROM conversations WHERE id=?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(title("test"), "Connection test · Saved provider");
+        assert_eq!(title("regular"), conversation_title_from_prompt(prompt));
+    }
+}
+
 fn ensure_default_project(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute(
         "INSERT OR IGNORE INTO projects (id, name, created_at, updated_at)
@@ -117,8 +145,8 @@ fn resolve_conversation_id(
             if count == 0 {
                 let timestamp = current_timestamp();
                 conn.execute(
-                    "UPDATE conversations SET title = ?1, project_id = ?2, archived_at = NULL, updated_at = ?3 WHERE id = ?4",
-                    params![conversation_title_from_prompt(prompt), project_id, timestamp, conv_id],
+                    "UPDATE conversations SET title = CASE WHEN title = ?5 THEN ?1 ELSE title END, project_id = ?2, archived_at = NULL, updated_at = ?3 WHERE id = ?4",
+                    params![conversation_title_from_prompt(prompt), project_id, timestamp, conv_id, DEFAULT_CONVERSATION_TITLE],
                 )
                 .map_err(|e| e.to_string())?;
                 return Ok(conv_id.to_string());
@@ -199,6 +227,7 @@ pub(crate) fn create_conversation(
     title: Option<String>,
     project_id: Option<String>,
 ) -> Result<Conversation, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -228,6 +257,7 @@ pub(crate) fn get_conversations(
     project_id: Option<String>,
     include_archived: Option<bool>,
 ) -> Result<Vec<Conversation>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -331,6 +361,7 @@ pub(crate) fn rename_conversation(
     id: String,
     title: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let title = title.trim();
     if title.is_empty() {
         return Err(AppError::Validation {
@@ -357,6 +388,7 @@ pub(crate) fn move_conversation_to_project(
     id: String,
     project_id: String,
 ) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -371,6 +403,7 @@ pub(crate) fn move_conversation_to_project(
 
 #[tauri::command]
 pub(crate) fn archive_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -386,6 +419,7 @@ pub(crate) fn archive_conversation(db: State<'_, Database>, id: String) -> Resul
 
 #[tauri::command]
 pub(crate) fn unarchive_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -399,6 +433,7 @@ pub(crate) fn unarchive_conversation(db: State<'_, Database>, id: String) -> Res
 
 #[tauri::command]
 pub(crate) fn pin_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -413,6 +448,7 @@ pub(crate) fn pin_conversation(db: State<'_, Database>, id: String) -> Result<()
 
 #[tauri::command]
 pub(crate) fn unpin_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -426,6 +462,7 @@ pub(crate) fn unpin_conversation(db: State<'_, Database>, id: String) -> Result<
 
 #[tauri::command]
 pub(crate) fn delete_conversation(db: State<'_, Database>, id: String) -> Result<(), AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
@@ -448,6 +485,7 @@ pub(crate) fn get_conversation_generations(
     db: State<'_, Database>,
     conversation_id: String,
 ) -> Result<Vec<GenerationResult>, AppError> {
+    let _library_operation = crate::storage::write_operation::<AppError>()?;
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;

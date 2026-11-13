@@ -21,6 +21,22 @@ const image = (id: string): GeneratedImage => ({
   file_size: 1,
 });
 describe("canvas generation merge", () => {
+  it("merges a durable recovered failure once and rejects different or cancelled requests", () => {
+    const content = createCanvasDocumentContent();
+    content.generation_requests = [{ ...request, generation_id: "g", status: "failed", error: "Save failed" }];
+    expect(completeCanvasGeneration(content, "r", "g", [image("a")])).toBe(content);
+    expect(completeCanvasGeneration(content, "r", "other", [image("a")], true)).toBe(content);
+    const next = completeCanvasGeneration(content, "r", "g", [image("a")], true);
+    expect(next.generation_requests?.[0]).toMatchObject({ status: "completed", image_ids: ["a"] });
+    expect(next.generation_requests?.[0].error).toBeUndefined();
+    expect(next.layers[0].objects).toHaveLength(1);
+    expect(completeCanvasGeneration(next, "r", "g", [image("a")], true)).toBe(next);
+    const cancelled = failCanvasGeneration(content, "r", "Cancelled", "cancelled", "g");
+    expect(cancelled.generation_requests?.[0].status).toBe("cancelled");
+    expect(completeCanvasGeneration(cancelled, "r", "g", [image("a")], true)).toBe(cancelled);
+    content.generation_requests[0] = { ...request, generation_id: "g", status: "cancelled" };
+    expect(completeCanvasGeneration(content, "r", "g", [image("a")], true)).toBe(content);
+  });
   it("places a batch beside the submission frame, preserving latest edits and avoiding collisions", () => {
     const content = createCanvasDocumentContent();
     content.generation_requests = [request];
