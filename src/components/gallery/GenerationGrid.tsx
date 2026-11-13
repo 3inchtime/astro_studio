@@ -245,13 +245,14 @@ export default function GenerationGrid({
                     className={cn(
                       "focus-ring flex h-8 w-8 items-center justify-center rounded-[8px] bg-black/65 text-white backdrop-blur-sm transition-all hover:bg-black/75 hover:text-white",
                       favoriteMode === "manage"
-                        ? "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                        ? "opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                         : "",
                     )}
                   >
                     <FavoriteButton
                       imageId={img.id}
                       size={14}
+                      className="text-white hover:bg-transparent hover:text-white"
                       onClick={
                         favoriteMode === "manage"
                           ? () => onManageFolders?.(img.id)

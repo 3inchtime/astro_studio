@@ -152,7 +152,15 @@ describe("GenerationGrid", () => {
     expect(checkbox.parentElement?.className).not.toContain("bg-black");
     const detail = screen.getByRole("button", { name: "gallery.detail" });
     expect(detail).toHaveClass("h-8", "w-8");
-    expect(detail.parentElement).toHaveClass("group-focus-within:opacity-100");
+    expect(detail.parentElement).toHaveClass("group-focus-within:opacity-100", "[@media(hover:none)]:opacity-100");
+    expect(checkbox.parentElement).toHaveClass("[@media(hover:none)]:opacity-100");
+  });
+
+  it("keeps folder management visible for pointer users without hover", () => {
+    render(<GenerationGrid results={[buildResult("wide", 1536, 1024)]} favoriteMode="manage" onManageFolders={vi.fn()} onSelect={vi.fn()} />);
+    const favoriteWrapper = screen.getByTestId("favorite-image-wide").parentElement;
+    expect(favoriteWrapper).toHaveClass("h-8", "w-8", "[@media(hover:none)]:opacity-100");
+    expect(favoriteWrapper?.tagName).toBe("DIV");
   });
 
   it("renders results as a compact list when list view is selected", () => {

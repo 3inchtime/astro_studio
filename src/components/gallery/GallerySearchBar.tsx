@@ -1,6 +1,7 @@
 import { Filter, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import type { ReactNode } from "react";
 import type { GallerySearchConfig } from "../../lib/galleryFilterConfig";
+import { cn } from "../../lib/utils";
 import DateRangeFilterField from "./DateRangeFilterField";
 
 interface GallerySearchBarProps {
@@ -12,6 +13,7 @@ interface GallerySearchBarProps {
   onSearch: () => void;
   onReset: () => void;
   actions?: ReactNode;
+  headingLevel?: "page" | "section";
 }
 
 export default function GallerySearchBar({
@@ -23,12 +25,16 @@ export default function GallerySearchBar({
   onSearch,
   onReset,
   actions,
+  headingLevel = "page",
 }: GallerySearchBarProps) {
   return (
     <div className="studio-toolbar px-5 py-4">
       <div className="flex flex-col gap-4">
         <div className="flex shrink-0 items-center gap-3 pb-0.5">
-          <h2 className="text-[20px] font-semibold tracking-tight text-foreground">
+          <h2 className={cn(
+            "tracking-tight text-foreground",
+            headingLevel === "section" ? "text-base font-medium" : "text-[20px] font-semibold",
+          )}>
             {config.title}
           </h2>
           {total > 0 && (
