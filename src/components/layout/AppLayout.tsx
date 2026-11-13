@@ -423,16 +423,15 @@ export default function AppLayout() {
           </NavLink>
 
           <nav aria-label={t("studio.navigation", { defaultValue: "Main navigation" })} className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1">
-            {navItems.map(({ key, to, icon: Icon, labelKey }, index) => (
-              <div key={to} className={index === 3 || index === 4 ? "mt-3 border-t border-border pt-3" : ""}>
+            {navItems.map(({ to, icon: Icon, labelKey }, index) => (
+              <div key={to} className={index === 3 ? "mt-3 border-t border-border pt-3" : ""}>
                 <NavLink to={to} title={t(labelKey)} aria-label={t(labelKey)} className="studio-nav-item focus-ring">
                   <Icon size={20} strokeWidth={1.8} aria-hidden="true" />
-                  <span>{t(key === "extract" ? "studio.nav.extractShort" : labelKey)}</span>
                 </NavLink>
               </div>
             ))}
             <NavLink to={ROUTES.trash} title={t("trash.title")} aria-label={t("trash.title")} className="studio-nav-item focus-ring">
-              <Trash2 size={20} strokeWidth={1.8} aria-hidden="true" /><span>{t("trash.title")}</span>
+              <Trash2 size={20} strokeWidth={1.8} aria-hidden="true" />
             </NavLink>
           </nav>
 
@@ -445,7 +444,7 @@ export default function AppLayout() {
               aria-haspopup="dialog"
               aria-expanded={themePickerOpen}
               onClick={() => setThemePickerOpen((open) => !open)}
-              className={`focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
+              className={`focus-ring flex h-11 w-11 cursor-pointer items-center justify-center rounded-[10px] border transition-colors ${
                 themePickerOpen
                   ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
                   : "border-transparent text-muted dark:text-foreground hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"
@@ -464,8 +463,9 @@ export default function AppLayout() {
             <NavLink
               to={ROUTES.settings}
               title={t("nav.settings")}
+              aria-label={t("nav.settings")}
               className={({ isActive }) =>
-                `focus-ring flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
+                `focus-ring flex h-11 w-11 cursor-pointer items-center justify-center rounded-[10px] border transition-all duration-200 ${
                   isActive
                     ? "border-white/70 dark:border-border bg-surface text-primary dark:text-foreground shadow-float ring-1 ring-primary/12"
                     : "border-transparent text-muted dark:text-foreground hover:border-border-subtle hover:bg-surface/72 hover:text-foreground dark:hover:text-foreground hover:shadow-card"

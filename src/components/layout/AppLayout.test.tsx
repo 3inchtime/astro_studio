@@ -133,7 +133,7 @@ describe("AppLayout", () => {
     });
   });
 
-  it("marks the current labeled navigation destination", () => {
+  it("keeps icon-only navigation named and marks the current destination", () => {
     render(
       <MemoryRouter initialEntries={[ROUTES.generate]}>
         <Routes>
@@ -145,7 +145,8 @@ describe("AppLayout", () => {
     );
 
     expect(screen.getByTitle("Generate")).toHaveAttribute("aria-current", "page");
-    expect(screen.getByTitle("Generate")).toHaveTextContent("Generate");
+    expect(screen.getByRole("link", { name: "Generate" })).not.toHaveTextContent("Generate");
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("title", "Settings");
   });
 
   it("uses the white preset as the default theme when nothing is stored", async () => {

@@ -74,3 +74,7 @@ macOS已使用独立QA身份与数据库启动真实WKWebView，未读取或复�
 - [原生功能检查](output/playwright/v2/native-verification.json) · [最新原生复查边界](output/playwright/v3/native-targeted-recheck.json) · [QA隔离说明](output/playwright/v2/native-harness.json)
 
 上一轮2026-11-08的v0.0.32验收记录可从基线提交查看。
+
+## 纯图标导航调整
+
+按用户最新偏好去掉侧栏可见文字，保留本地化title与aria-label。主导航按钮统一44×44px，组内间距4px，创作与资源仅保留一处分隔；底部工具同步44px。900×600与1440×900实际浏览器检查无侧栏文字、无横向溢出，导航可访问名称完整。AppLayout的14项测试及生产构建通过。最新截图：[生成页](output/playwright/v3/icon-nav/generate-1440.png)、[窄窗口](output/playwright/v3/icon-nav/generate-900.png)。本次覆盖此前截图中的带文字导航。

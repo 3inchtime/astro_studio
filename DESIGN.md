@@ -200,7 +200,7 @@ Opaque surface, solid ink, dedicated control edge and input radius. Placeholder 
 
 ### Navigation
 
-A 64px-wide, 48px-minimum icon-and-label item sits inside the 80px rail. Default labels use muted text; hover and active states use a surface fill, and active destinations use primary ink. Translated labels wrap without flex compression; extraction uses a localized short label, while accessible names and tooltips retain the full label. Dark-rail focus receives the explicit foreground outline.
+Icon-only 44px-square destinations sit centered inside the 80px rail, with 20px icons and 4px item gaps. Creation and resource destinations have one group separator. Visible text labels are omitted; localized accessible names and hover titles identify every destination. Active destinations use a surface fill and primary ink. Dark-rail focus receives the explicit foreground outline.
 
 ### Chips
 
