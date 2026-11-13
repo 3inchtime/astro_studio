@@ -74,7 +74,8 @@ export interface GenerationComposerProps {
   composerMode: ComposerMode;
   onComposerModeChange: (mode: ComposerMode) => void;
   onDeepThinkingSend: () => void;
-  onPromptAgentConfigChange?: (configId: string) => void;
+  promptAgentConfigId?: string;
+  onPromptAgentConfigChange?: (configId: string, userInitiated?: boolean) => void;
   isPromptAgentRunning?: boolean;
   agentVisualSourcePaths?: string[];
   onAgentVisualSourcePathsChange?: (paths: string[]) => void;
@@ -125,6 +126,7 @@ export default function GenerationComposer({
   composerMode,
   onComposerModeChange,
   onDeepThinkingSend,
+  promptAgentConfigId,
   onPromptAgentConfigChange,
   isPromptAgentRunning = false,
   agentVisualSourcePaths,
@@ -147,7 +149,7 @@ export default function GenerationComposer({
     useState<string>("");
   const [showConfigDropdown, setShowConfigDropdown] = useState(false);
 
-  const { data: llmConfigs = [] } = useLlmConfigsQuery();
+  const { data: llmConfigs = [], isSuccess: configsLoaded } = useLlmConfigsQuery();
 
   const enabledPromptConfigs = useMemo(
     () =>
@@ -235,7 +237,7 @@ export default function GenerationComposer({
     ? enabledMultimodalConfigs.length
     : enabledPromptConfigs.length;
 
-  const effectiveOptimizeConfigId = hasEditSources
+  const localOptimizeConfigId = hasEditSources
     ? enabledMultimodalConfigs.length === 1
       ? enabledMultimodalConfigs[0].id
       : selectedMultimodalConfigId
@@ -243,12 +245,22 @@ export default function GenerationComposer({
       ? enabledPromptConfigs[0].id
       : selectedConfigId;
 
-  const effectiveConfigId = requiresVisionConfig ? effectiveOptimizeConfigId
-    : enabledPromptConfigs.length === 1 ? enabledPromptConfigs[0].id : selectedConfigId;
+  const agentConfigs = requiresVisionConfig ? enabledMultimodalConfigs : enabledPromptConfigs;
+  const effectiveConfigId = promptAgentConfigId === undefined
+    ? requiresVisionConfig ? localOptimizeConfigId : enabledPromptConfigs.length === 1 ? enabledPromptConfigs[0].id : selectedConfigId
+    : agentConfigs.some((config) => config.id === promptAgentConfigId)
+      ? promptAgentConfigId
+      : agentConfigs.length === 1 ? agentConfigs[0].id : "";
+  const effectiveOptimizeConfigId = composerMode === "deep-thinking" &&
+    (!hasEditSources || enabledMultimodalConfigs.some((config) => config.id === effectiveConfigId))
+      ? effectiveConfigId : localOptimizeConfigId;
+  const displayedTextConfigId = composerMode === "deep-thinking" ? effectiveConfigId : selectedConfigId;
+  const displayedMultimodalConfigId = composerMode === "deep-thinking" ? effectiveConfigId : selectedMultimodalConfigId;
 
   useEffect(() => {
-    onPromptAgentConfigChange?.(effectiveConfigId);
-  }, [effectiveConfigId, onPromptAgentConfigChange]);
+    // Query hydration must not clear a restored choice or invalidate an in-flight draft.
+    if (configsLoaded && effectiveConfigId !== promptAgentConfigId) onPromptAgentConfigChange?.(effectiveConfigId);
+  }, [configsLoaded, effectiveConfigId, promptAgentConfigId, onPromptAgentConfigChange]);
 
   const handleOptimize = useCallback(async () => {
     const trimmed = prompt.trim();
@@ -546,9 +558,9 @@ export default function GenerationComposer({
                         className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-lg px-2 text-xs font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
-                          {selectedMultimodalConfigId
+                          {displayedMultimodalConfigId
                             ? (enabledMultimodalConfigs.find(
-                                (c) => c.id === selectedMultimodalConfigId,
+                                (c) => c.id === displayedMultimodalConfigId,
                               )?.name ?? t("generate.llm.selectLlm"))
                             : t("generate.llm.selectLlm")}
                         </span>
@@ -562,10 +574,11 @@ export default function GenerationComposer({
                               type="button"
                               onClick={() => {
                                 setSelectedMultimodalConfigId(config.id);
+                                if (composerMode === "deep-thinking") onPromptAgentConfigChange?.(config.id, true);
                                 setShowConfigDropdown(false);
                               }}
                               className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-subtle ${
-                                selectedMultimodalConfigId === config.id
+                                displayedMultimodalConfigId === config.id
                                   ? "text-primary"
                                   : "text-foreground"
                               }`}
@@ -588,9 +601,9 @@ export default function GenerationComposer({
                         className="studio-control focus-ring flex h-[34px] items-center gap-1 rounded-lg px-2 text-xs font-medium hover:studio-control-hover"
                       >
                         <span className="max-w-[90px] truncate">
-                          {selectedConfigId
+                          {displayedTextConfigId
                             ? (enabledPromptConfigs.find(
-                                (c) => c.id === selectedConfigId,
+                                (c) => c.id === displayedTextConfigId,
                               )?.name ?? t("generate.llm.selectLlm"))
                             : t("generate.llm.selectLlm")}
                         </span>
@@ -604,10 +617,11 @@ export default function GenerationComposer({
                               type="button"
                               onClick={() => {
                                 setSelectedConfigId(config.id);
+                                if (composerMode === "deep-thinking") onPromptAgentConfigChange?.(config.id, true);
                                 setShowConfigDropdown(false);
                               }}
                               className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-subtle ${
-                                selectedConfigId === config.id
+                                displayedTextConfigId === config.id
                                   ? "text-primary"
                                   : "text-foreground"
                               }`}

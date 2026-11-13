@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::llm::{LlmClient, LLM_REQUEST_TIMEOUT_SECS};
+use crate::llm::{api_error, network_error, LlmClient, LLM_REQUEST_TIMEOUT_SECS};
 use crate::models::LlmConfig;
 use async_trait::async_trait;
 use base64::Engine;
@@ -18,10 +18,7 @@ impl AnthropicLlmClient {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(LLM_REQUEST_TIMEOUT_SECS))
             .build()
-            .map_err(|e| AppError::Network {
-                endpoint: String::new(),
-                reason: e.to_string(),
-            })?;
+            .map_err(|e| network_error("", &e))?;
         Ok(Self {
             client,
             config: config.clone(),
@@ -32,10 +29,7 @@ impl AnthropicLlmClient {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .build()
-            .map_err(|e| AppError::Network {
-                endpoint: String::new(),
-                reason: e.to_string(),
-            })?;
+            .map_err(|e| network_error("", &e))?;
         Ok(Self {
             client,
             config: config.clone(),
@@ -61,12 +55,8 @@ impl AnthropicLlmClient {
                 Ok((status, body_text)) if status < 500 || attempt >= 1 => {
                     return Ok((status, body_text));
                 }
-                Ok((status, body_text)) => {
-                    last_error = Some(AppError::Api {
-                        status,
-                        endpoint: url.to_string(),
-                        body_preview: body_text.chars().take(500).collect(),
-                    });
+                Ok((status, _)) => {
+                    last_error = Some(api_error(url, status));
                 }
                 Err(e @ AppError::Network { .. }) => {
                     if attempt >= 1 {
@@ -94,16 +84,10 @@ impl AnthropicLlmClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| AppError::Network {
-                endpoint: url.to_string(),
-                reason: e.to_string(),
-            })?;
+            .map_err(|e| network_error(url, &e))?;
 
         let status = response.status().as_u16();
-        let body_text = response.text().await.map_err(|e| AppError::Network {
-            endpoint: url.to_string(),
-            reason: e.to_string(),
-        })?;
+        let body_text = response.text().await.map_err(|e| network_error(url, &e))?;
 
         Ok((status, body_text))
     }
@@ -126,28 +110,16 @@ impl LlmClient for AnthropicLlmClient {
         let (status, body_text) = self.send_request(&url, &body).await?;
 
         if status >= 400 {
-            return Err(AppError::Api {
-                status,
-                endpoint: url,
-                body_preview: body_text.chars().take(500).collect(),
-            });
+            return Err(api_error(&url, status));
         }
 
         let parsed: serde_json::Value =
-            serde_json::from_str(&body_text).map_err(|_e| AppError::Api {
-                status,
-                endpoint: url.clone(),
-                body_preview: body_text.chars().take(500).collect(),
-            })?;
+            serde_json::from_str(&body_text).map_err(|_| api_error(&url, status))?;
 
         parsed["content"][0]["text"]
             .as_str()
             .map(|s| s.to_string())
-            .ok_or_else(|| AppError::Api {
-                status: 200,
-                endpoint: url,
-                body_preview: body_text.chars().take(500).collect(),
-            })
+            .ok_or_else(|| api_error(&url, status))
     }
 
     async fn chat_with_images(
@@ -181,27 +153,15 @@ impl LlmClient for AnthropicLlmClient {
         let (status, body_text) = self.send_request(&url, &body).await?;
 
         if status >= 400 {
-            return Err(AppError::Api {
-                status,
-                endpoint: url,
-                body_preview: body_text.chars().take(500).collect(),
-            });
+            return Err(api_error(&url, status));
         }
 
         let parsed: serde_json::Value =
-            serde_json::from_str(&body_text).map_err(|_e| AppError::Api {
-                status,
-                endpoint: url.clone(),
-                body_preview: body_text.chars().take(500).collect(),
-            })?;
+            serde_json::from_str(&body_text).map_err(|_| api_error(&url, status))?;
 
         parsed["content"][0]["text"]
             .as_str()
             .map(|s| s.to_string())
-            .ok_or_else(|| AppError::Api {
-                status: 200,
-                endpoint: url,
-                body_preview: body_text.chars().take(500).collect(),
-            })
+            .ok_or_else(|| api_error(&url, status))
     }
 }

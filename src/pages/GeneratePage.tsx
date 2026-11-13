@@ -963,6 +963,10 @@ export default function GeneratePage() {
       retryAcceptedGenerationRef.current = false;
       const acceptedPrompt = accepted.accepted_prompt ?? draft;
       const nextModel = message.suggested_params.model ?? imageModel;
+      const nextAspectRatio = nextModel === imageModel
+        ? aspectRatio : getImageModelCatalogEntry(nextModel).parameterDefaults.aspectRatio;
+      const nextResolution = nextModel === imageModel
+        ? resolution : getImageModelCatalogEntry(nextModel).parameterDefaults.resolution;
       const nextSize = message.suggested_params.size ?? size;
       const nextQuality = message.suggested_params.quality ?? quality;
       const nextBackground = message.suggested_params.background ?? background;
@@ -974,6 +978,8 @@ export default function GeneratePage() {
       setPrompt(acceptedPrompt);
       setActiveImageModel(nextModel);
       setSize(nextSize);
+      setAspectRatio(nextAspectRatio);
+      setResolution(nextResolution);
       setQuality(nextQuality);
       setBackground(nextBackground);
       setOutputFormat(nextOutputFormat);
@@ -990,15 +996,8 @@ export default function GeneratePage() {
         outputCompression,
         model: nextModel,
         size: nextSize,
-        aspectRatio:
-          nextModel === imageModel
-            ? aspectRatio
-            : getImageModelCatalogEntry(nextModel).parameterDefaults
-                .aspectRatio,
-        resolution:
-          nextModel === imageModel
-            ? resolution
-            : getImageModelCatalogEntry(nextModel).parameterDefaults.resolution,
+        aspectRatio: nextAspectRatio,
+        resolution: nextResolution,
         quality: nextQuality,
         background: nextBackground,
         outputFormat: nextOutputFormat,
@@ -1212,6 +1211,7 @@ export default function GeneratePage() {
   const configuredProfile = providerQuery.data?.profiles.find(profile => profile.id === (recipeIdentity.providerProfileId ?? providerQuery.data?.active_provider_id));
   const needsProviderSetup = !!providerSetup || (!!providerQuery.data && !configuredProfile?.api_key_configured) || providerQuery.isError;
   function openProviderSettings() {
+    if (agentPendingRef.current) return;
     try {
       saveProviderSettingsDraft({request:{...recipeIdentity,prompt,advancedOptions,outputCompression,model:imageModel,size,aspectRatio,resolution,quality,background,outputFormat,moderation,inputFidelity,imageCount,conversationId:activeConversationId,projectId:activeProjectId,editSources},recipeWarnings,composerMode,editingPromptMessageId,promptAgentSessionId,promptAgentMessages,selectedPromptAgentConfigId,agentTextOnly,agentVisualSelection});
     } catch { setRecipeError(t("generate.draftSaveFailed")); return; }
@@ -1403,7 +1403,7 @@ export default function GeneratePage() {
               </div>
             </div>
           )}
-          {needsProviderSetup && <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-5 py-3 text-sm"><span className="text-muted">{t("generate.providerSetupRequired")}</span><button type="button" onClick={openProviderSettings} className="studio-control focus-ring min-h-9 rounded-lg px-3 py-2 text-xs font-medium">{t("generate.configureProvider")}</button></div>}
+          {needsProviderSetup && <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-5 py-3 text-sm"><span className="text-muted">{t("generate.providerSetupRequired")}</span><button type="button" disabled={startPromptAgentSessionMutation.isPending || sendPromptAgentMessageMutation.isPending || acceptPromptAgentDraftMutation.isPending} onClick={openProviderSettings} className="studio-control focus-ring min-h-9 rounded-lg px-3 py-2 text-xs font-medium">{t("generate.configureProvider")}</button></div>}
           <GenerationComposer
             parametersTarget={parametersTarget}
             interactionDisabled={drawerOpen}
@@ -1477,7 +1477,11 @@ export default function GeneratePage() {
             composerMode={composerMode}
             onComposerModeChange={(value) => { markComposerDraftStarted(); setComposerMode(value); }}
             onDeepThinkingSend={() => void handleDeepThinkingSend()}
-            onPromptAgentConfigChange={setSelectedPromptAgentConfigId}
+            promptAgentConfigId={selectedPromptAgentConfigId}
+            onPromptAgentConfigChange={(configId, userInitiated) => {
+              if (userInitiated && configId !== selectedPromptAgentConfigId) markComposerDraftStarted();
+              setSelectedPromptAgentConfigId(configId);
+            }}
             agentVisualSourcePaths={agentVisualSourcePaths}
             onAgentVisualSourcePathsChange={(paths) => { markComposerDraftStarted(); setAgentVisualSelection(paths); }}
             agentTextOnly={agentTextOnly}

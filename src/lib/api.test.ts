@@ -120,6 +120,7 @@ describe("api updater commands", () => {
   it("passes a Tauri channel to the install update command", async () => {
     const onEvent = vi.fn();
     tauriApi.invoke.mockImplementation(async (_command, args) => {
+      if (_command !== "download_update") return;
       const channel = (
         args as { onEvent: InstanceType<typeof tauriApi.Channel> }
       ).onEvent;
@@ -132,7 +133,7 @@ describe("api updater commands", () => {
     await installUpdate(onEvent);
 
     expect(tauriApi.createdChannels).toHaveLength(1);
-    expect(tauriApi.invoke).toHaveBeenCalledWith("install_update", {
+    expect(tauriApi.invoke).toHaveBeenCalledWith("download_update", {
       onEvent: tauriApi.createdChannels[0],
     });
     expect(tauriEvent.listen).not.toHaveBeenCalled();

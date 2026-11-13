@@ -251,12 +251,26 @@ pub(crate) fn read_model_provider_profiles_state(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn save_model_provider_profiles_state(
     db: &Database,
     model: &str,
     state: ModelProviderProfilesState,
 ) -> Result<ModelProviderProfilesState, AppError> {
     save_model_provider_profiles_with_kept_ids(db, model, state, &std::collections::HashSet::new())
+}
+
+fn save_model_provider_metadata_state(
+    db: &Database,
+    model: &str,
+    state: ModelProviderProfilesState,
+) -> Result<ModelProviderProfilesState, AppError> {
+    let kept_ids = state
+        .profiles
+        .iter()
+        .map(|profile| profile.id.clone())
+        .collect();
+    save_model_provider_profiles_with_kept_ids(db, model, state, &kept_ids)
 }
 
 fn save_model_provider_profiles_with_kept_ids(
@@ -281,7 +295,9 @@ fn save_model_provider_profiles_with_kept_ids(
         &state.active_provider_id,
     )?;
 
-    Ok(state)
+    // Keep resolves against the latest reference, not necessarily the snapshot
+    // used to assemble this update. Return the committed credential status.
+    read_model_provider_profiles_state(db, normalized_model)
 }
 
 pub(crate) fn active_provider_profile_for_model(
@@ -361,12 +377,18 @@ pub(crate) fn save_model_api_key_value(
     let normalized_model = normalize_image_model(model);
     let key = normalize_api_key_for_storage(key);
     let mut state = read_model_provider_profiles_state(db, normalized_model)?;
+    let kept_ids = state
+        .profiles
+        .iter()
+        .filter(|profile| profile.id != state.active_provider_id)
+        .map(|profile| profile.id.clone())
+        .collect();
     for profile in &mut state.profiles {
         if profile.id == state.active_provider_id {
             profile.api_key = key.clone();
         }
     }
-    save_model_provider_profiles_state(db, normalized_model, state)?;
+    save_model_provider_profiles_with_kept_ids(db, normalized_model, state, &kept_ids)?;
 
     Ok(())
 }
@@ -395,7 +417,7 @@ pub(crate) fn save_model_endpoint_settings_value(
             profile.endpoint_settings = endpoint_settings.clone();
         }
     }
-    save_model_provider_profiles_state(db, normalized_model, state)?;
+    save_model_provider_metadata_state(db, normalized_model, state)?;
 
     if normalized_model == ENGINE_GPT_IMAGE_2 {
         db.set_setting(SETTING_ENDPOINT_MODE, &endpoint_settings.mode)?;
@@ -620,7 +642,7 @@ pub(crate) fn create_model_provider_profile(
         api_key: String::new(),
         endpoint_settings: default_endpoint_settings_for_model(normalized_model),
     });
-    save_model_provider_profiles_state(db.inner(), normalized_model, state).map(Into::into)
+    save_model_provider_metadata_state(db.inner(), normalized_model, state).map(Into::into)
 }
 
 #[tauri::command]
@@ -644,7 +666,7 @@ pub(crate) fn delete_model_provider_profile(
             .map(|profile| profile.id.clone())
             .unwrap_or_default();
     }
-    save_model_provider_profiles_state(db.inner(), normalized_model, state).map(Into::into)
+    save_model_provider_metadata_state(db.inner(), normalized_model, state).map(Into::into)
 }
 
 #[tauri::command]
@@ -666,7 +688,7 @@ pub(crate) fn set_active_model_provider(
         });
     }
     state.active_provider_id = provider_id;
-    save_model_provider_profiles_state(db.inner(), normalized_model, state).map(Into::into)
+    save_model_provider_metadata_state(db.inner(), normalized_model, state).map(Into::into)
 }
 
 #[tauri::command]
@@ -1146,6 +1168,31 @@ mod tests {
             normalize_provider_endpoint_settings(ENGINE_NANO_BANANA_PRO, &custom).generation_url,
             custom.generation_url
         );
+    }
+
+    #[test]
+    fn metadata_only_updates_do_not_restore_a_replaced_or_cleared_credential() {
+        let db_path =
+            std::env::temp_dir().join(format!("astro-metadata-keep-{}.db", uuid::Uuid::new_v4()));
+        let db = Database::open(&db_path).unwrap();
+        db.run_migrations().unwrap();
+        save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, "original-secret").unwrap();
+        let mut stale = read_model_provider_profiles_state(&db, ENGINE_GPT_IMAGE_2).unwrap();
+        stale.profiles[0].name = "Metadata edit".into();
+        for updated in ["replacement-secret", ""] {
+            save_model_api_key_value(&db, ENGINE_GPT_IMAGE_2, updated).unwrap();
+            let result =
+                save_model_provider_metadata_state(&db, ENGINE_GPT_IMAGE_2, stale.clone()).unwrap();
+            assert_eq!(
+                read_model_api_key(&db, ENGINE_GPT_IMAGE_2)
+                    .unwrap()
+                    .unwrap_or_default(),
+                updated
+            );
+            assert_eq!(result.profiles[0].api_key, updated);
+        }
+        drop(db);
+        remove_temp_test_db(db_path);
     }
 
     #[test]

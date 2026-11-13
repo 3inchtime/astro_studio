@@ -99,7 +99,7 @@ export function verifyNativeEvidence(evidenceUrl, testedHash, actualHash) {
   let url;
   try { url = new URL(evidenceUrl); } catch { throw new Error("Native Windows evidence URL is required"); }
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("Native evidence must use HTTPS");
-  if (!/^[a-f0-9]{64}$/.test(testedHash) || testedHash !== actualHash) {
+  if (!/^[a-f0-9]{64}$/i.test(testedHash) || testedHash.toLowerCase() !== actualHash.toLowerCase()) {
     throw new Error("Native Windows installer hash does not match verified release bytes");
   }
 }

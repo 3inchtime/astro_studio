@@ -1986,4 +1986,83 @@ describe("GeneratePage", () => {
     await waitFor(()=>expect(generateImage).toHaveBeenCalledTimes(1));
   });
 
+  it("restores the selected Agent config across a provider-settings visit", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"first",name:"First writer",capability:"text",enabled:true},{id:"second",name:"Second writer",capability:"text",enabled:true}]);
+    getModelProviderProfiles.mockResolvedValue({ active_provider_id: null, profiles: [] });
+    const view = render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.click(await screen.findByRole("button", {name:"generate.llm.selectLlm"}));
+    fireEvent.click(screen.getByRole("button", {name:"Second writer"}));
+    fireEvent.change(screen.getByRole("textbox"), {target:{value:"Preserve selected writer"}});
+    fireEvent.click(await screen.findByRole("button", {name:"generate.configureProvider"}));
+    view.unmount();
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    await screen.findByDisplayValue("Preserve selected writer");
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession.mock.calls[0]?.[0]).toMatchObject({configId:"second"}));
+  });
+
+  it("ignores an old Agent response after an explicit config change", async () => {
+    getLlmConfigs.mockResolvedValue([{id:"first",name:"First writer",capability:"text",enabled:true},{id:"second",name:"Second writer",capability:"text",enabled:true}]);
+    let resolve!: (value: unknown)=>void;
+    startPromptAgentSession.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Deep thinking"}));
+    fireEvent.click(await screen.findByRole("button", {name:"generate.llm.selectLlm"}));
+    fireEvent.click(screen.getByRole("button", {name:"First writer"}));
+    fireEvent.change(screen.getByRole("textbox"), {target:{value:"Keep this idea"}});
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", {name:"First writer"}));
+    fireEvent.click(screen.getByRole("button", {name:"Second writer"}));
+    await act(async()=>resolve({session:{id:"old-config-session"},messages:[]}));
+    expect(screen.getByRole("textbox")).toHaveValue("Keep this idea");
+    await waitFor(()=>expect(screen.getByRole("button", {name:"Generate"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", {name:"Generate"}));
+    await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
+    expect(startPromptAgentSession.mock.calls[1][0].configId).toBe("second");
+    expect(sendPromptAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps an accepted model's aspect and resolution when provider setup interrupts generation", async () => {
+    sessionStorage.setItem("astro:provider-settings-draft:v1", JSON.stringify({
+      request:{prompt:"Refine",model:"gpt-image-2",size:"auto",quality:"auto",background:"auto",outputFormat:"png",moderation:"auto",inputFidelity:"high",imageCount:1,editSources:[]},
+      recipeWarnings:[],composerMode:"deep-thinking",editingPromptMessageId:null,promptAgentSessionId:"agent-session-1",selectedPromptAgentConfigId:"text",
+      promptAgentMessages:[{id:"ready",session_id:"agent-session-1",role:"assistant",content:"Ready",draft_prompt:"Accepted draft",ready_to_generate:true,selected_skill_ids:[],suggested_params:{model:"nano-banana"},created_at:"2026-11-13"}],
+    }));
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:null,profiles:[]});
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Accept and generate"}));
+    await screen.findByDisplayValue("Final prompt");
+    fireEvent.click(await screen.findByRole("button", {name:"generate.configureProvider"}));
+    const saved = JSON.parse(sessionStorage.getItem("astro:provider-settings-draft:v1")!);
+    expect(saved.request).toMatchObject({model:"nano-banana",aspectRatio:"1:1",resolution:"1K"});
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("waits for pending Agent acceptance before saving a provider-settings draft", async () => {
+    sessionStorage.setItem("astro:provider-settings-draft:v1", JSON.stringify({
+      request:{prompt:"",model:"gpt-image-2",size:"auto",quality:"auto",background:"auto",outputFormat:"png",moderation:"auto",inputFidelity:"high",imageCount:1,editSources:[]},
+      recipeWarnings:[],composerMode:"deep-thinking",editingPromptMessageId:null,promptAgentSessionId:"agent-session-1",selectedPromptAgentConfigId:"text",
+      promptAgentMessages:[{id:"ready",session_id:"agent-session-1",role:"assistant",content:"Ready",draft_prompt:"Accepted draft",ready_to_generate:true,selected_skill_ids:[],suggested_params:{},created_at:"2026-11-13"}],
+    }));
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:null,profiles:[]});
+    let resolve!: (value: unknown)=>void;
+    acceptPromptAgentDraft.mockReturnValueOnce(new Promise(yes=>{resolve=yes;}));
+    render(<GeneratePage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"Accept and generate"}));
+    await waitFor(()=>expect(acceptPromptAgentDraft).toHaveBeenCalledTimes(1));
+    const configure = await screen.findByRole("button", {name:"generate.configureProvider"});
+    expect(configure).toBeDisabled();
+    fireEvent.click(configure);
+    expect(sessionStorage.getItem("astro:provider-settings-draft:v1")).toBeNull();
+    await act(async()=>resolve({id:"agent-session-1",status:"accepted",accepted_prompt:"Accepted draft"}));
+    await waitFor(()=>expect(configure).toBeEnabled());
+    fireEvent.click(configure);
+    const saved = JSON.parse(sessionStorage.getItem("astro:provider-settings-draft:v1")!);
+    expect(saved.promptAgentSessionId).toBeNull();
+    expect(saved.request.prompt).toBe("Accepted draft");
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
 });

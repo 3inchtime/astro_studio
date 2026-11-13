@@ -716,6 +716,7 @@ export async function renameCanvasDocument(
 }
 
 export async function deleteCanvasDocument(id: string): Promise<void> {
+  await flushCanvasSaves();
   if (!hasTauriRuntime()) {
     const timestamp = new Date().toISOString();
     writeBrowserCanvasDocuments(
@@ -896,6 +897,8 @@ export async function getTrashSettings(): Promise<TrashSettings> {
 }
 
 export async function saveTrashSettings(retentionDays: number): Promise<void> {
+  // Updating retention also purges expired images, including canvas sources.
+  await flushCanvasSaves();
   await invoke("save_trash_settings", { retentionDays });
 }
 
@@ -1003,7 +1006,9 @@ export async function installUpdate(
   onEvent: (event: DownloadEvent) => void,
 ): Promise<void> {
   const channel = new Channel<DownloadEvent>(onEvent);
-  await invoke("install_update", { onEvent: channel });
+  const token = await invoke<string>("download_update", { onEvent: channel });
+  await flushCanvasSaves();
+  await invoke("install_update", { token });
 }
 
 export async function relaunchApp(): Promise<void> {

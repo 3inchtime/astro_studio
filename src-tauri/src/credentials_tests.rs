@@ -423,3 +423,145 @@ fn keep_uses_the_current_reference_even_when_a_form_was_read_before_replacement(
         .unwrap()
         .contains("after"));
 }
+
+#[test]
+fn first_profile_save_keeps_the_legacy_scalar_credential() {
+    for key in ["api_key", "model_config::gpt-image-2::api_key"] {
+        let f = Fixture::new();
+        f.db.set_setting(key, "legacy-key-to-keep").unwrap();
+        let state =
+            crate::commands::settings::read_model_provider_profiles_state(&f.db, "gpt-image-2")
+                .unwrap();
+        let previous = &state.profiles[0];
+        let update = serde_json::from_value::<ProviderProfileWrite>(json!({
+            "id": previous.id,
+            "name": "Renamed legacy provider",
+            "endpoint_settings": previous.endpoint_settings,
+            "credential_update": {"action": "keep"}
+        }))
+        .unwrap();
+        crate::commands::settings::save_provider_profile_updates(
+            &f.db,
+            "gpt-image-2",
+            state.active_provider_id,
+            vec![update],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::commands::settings::read_model_api_key(&f.db, "gpt-image-2")
+                .unwrap()
+                .as_deref(),
+            Some("legacy-key-to-keep"),
+            "first profile save must preserve the legacy credential from {key}"
+        );
+        assert!(!f
+            .db
+            .get_setting(PROFILES)
+            .unwrap()
+            .unwrap()
+            .contains("legacy-key-to-keep"));
+    }
+}
+
+#[test]
+fn interrupted_profile_write_removes_provisional_vault_entries_on_reopen() {
+    let f = Fixture::new();
+    let vault = Arc::new(FailingVault {
+        memory: MemoryVault::default(),
+        writes: AtomicUsize::new(0),
+        fail_at: AtomicUsize::new(2),
+        bad_readback: false,
+    });
+    let db = Database::open_with_vault(&f.dir.join("library.db"), vault.clone()).unwrap();
+    let mut profiles: Value = serde_json::from_str(&profile("provisional-secret-one")).unwrap();
+    let mut second = profiles[0].clone();
+    second["id"] = json!("two");
+    second["api_key"] = json!("provisional-secret-two");
+    profiles.as_array_mut().unwrap().push(second);
+    assert!(db
+        .write_credential_json(PROFILES, &profiles.to_string())
+        .is_err());
+    assert!(db.get_setting(PROFILES).unwrap().is_none());
+    assert_eq!(vault.memory.0.lock().unwrap().len(), 1);
+    drop(db);
+    let reopened = Database::open_with_vault(&f.dir.join("library.db"), vault.clone()).unwrap();
+    reopened.migrate_credentials().unwrap();
+    assert!(
+        vault.memory.0.lock().unwrap().is_empty(),
+        "uncommitted secrets must be cleaned on recovery"
+    );
+    assert!(reopened.get_setting(DELETES).unwrap().is_none());
+}
+
+#[test]
+fn failed_profile_metadata_commit_cleans_only_provisional_credentials() {
+    let f = Fixture::new();
+    f.db.write_credential_json(PROFILES, &profile("original-immutable-secret"))
+        .unwrap();
+    let original = f.db.get_setting(PROFILES).unwrap().unwrap();
+    f.db.conn.lock().unwrap().execute_batch(
+        "CREATE TRIGGER reject_profile_update BEFORE UPDATE ON settings WHEN NEW.key = 'model_provider_profiles::gpt-image-2' BEGIN SELECT RAISE(FAIL, 'injected metadata failure'); END;"
+    ).unwrap();
+    assert!(f
+        .db
+        .write_credential_json(PROFILES, &profile("uncommitted-replacement"))
+        .is_err());
+    assert_eq!(f.vault.0.lock().unwrap().len(), 2);
+    let reopened = f.reopen();
+    reopened.migrate_credentials().unwrap();
+    assert_eq!(f.vault.0.lock().unwrap().len(), 1);
+    assert_eq!(reopened.get_setting(PROFILES).unwrap().unwrap(), original);
+    assert!(reopened
+        .read_credential_json(PROFILES)
+        .unwrap()
+        .unwrap()
+        .contains("original-immutable-secret"));
+}
+
+struct DeleteFailingVault {
+    memory: MemoryVault,
+    fail_delete: std::sync::atomic::AtomicBool,
+}
+impl CredentialVault for DeleteFailingVault {
+    fn get(&self, reference: &str) -> Result<Option<String>> {
+        self.memory.get(reference)
+    }
+    fn set(&self, reference: &str, secret: &str) -> Result<()> {
+        self.memory.set(reference, secret)
+    }
+    fn delete(&self, reference: &str) -> Result<()> {
+        if self.fail_delete.load(Ordering::SeqCst) {
+            Err(unavailable())
+        } else {
+            self.memory.delete(reference)
+        }
+    }
+}
+
+#[test]
+fn failed_vault_cleanup_keeps_the_journal_until_recovery_succeeds() {
+    let f = Fixture::new();
+    let vault = Arc::new(DeleteFailingVault {
+        memory: MemoryVault::default(),
+        fail_delete: std::sync::atomic::AtomicBool::new(true),
+    });
+    let db = Database::open_with_vault(&f.dir.join("library.db"), vault.clone()).unwrap();
+    db.write_credential_json(PROFILES, &profile("key-to-clear"))
+        .unwrap();
+    assert!(
+        db.get_setting(DELETES).unwrap().is_none(),
+        "committed entries must be disarmed"
+    );
+    assert!(db.write_credential_json(PROFILES, &profile("")).is_err());
+    let journal = db.get_setting(DELETES).unwrap().unwrap();
+    assert!(!journal.contains("key-to-clear"));
+    assert!(db.migrate_credentials().is_err());
+    assert_eq!(
+        db.get_setting(DELETES).unwrap().as_deref(),
+        Some(journal.as_str())
+    );
+    vault.fail_delete.store(false, Ordering::SeqCst);
+    db.migrate_credentials().unwrap();
+    assert!(db.get_setting(DELETES).unwrap().is_none());
+    assert!(vault.memory.0.lock().unwrap().is_empty());
+}

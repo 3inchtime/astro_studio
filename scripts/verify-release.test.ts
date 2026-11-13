@@ -123,6 +123,11 @@ describe("signed release validation", () => {
     expect(() => verifyNativeEvidence("https://github.com/3inchtime/astro_studio/issues/1", "b".repeat(64), hash)).toThrow(/hash/i);
     expect(() => verifyNativeEvidence("https://github.com/3inchtime/astro_studio/issues/1", hash, hash)).not.toThrow();
   });
+  it("accepts PowerShell's uppercase SHA-256 without weakening the byte comparison", () => {
+    const hash = "abcdef01".repeat(8);
+    expect(() => verifyNativeEvidence("https://example.com/acceptance", hash.toUpperCase(), hash)).not.toThrow();
+    expect(() => verifyNativeEvidence("https://example.com/acceptance", "F".repeat(64), hash)).toThrow(/hash/i);
+  });
   it("gates release uploads behind quality checks and keeps them draft until native acceptance", () => {
     const workflow = readFileSync(join(__dirname, "../.github/workflows/build-desktop.yml"), "utf8");
     expect(workflow).toContain("pull_request:");

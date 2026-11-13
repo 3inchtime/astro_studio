@@ -565,6 +565,7 @@ pub fn run() {
         .manage(library_backup::BackupInspections::default())
         .manage(commands::generation::SelectedImageRegistry::default())
         .manage(updater::PendingUpdate(Mutex::new(None)))
+        .manage(updater::DownloadedUpdate::default())
         .invoke_handler(tauri::generate_handler![
             generation_recovery::get_generation_recovery_summary,
             generation_recovery::recover_generation,
@@ -678,6 +679,7 @@ pub fn run() {
             commands::llm::extract_prompt_from_image,
             updater::is_update_supported,
             updater::check_update,
+            updater::download_update,
             updater::install_update,
             updater::relaunch_app,
         ])

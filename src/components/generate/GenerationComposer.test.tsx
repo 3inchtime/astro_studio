@@ -1,5 +1,5 @@
 import { createRef, type ComponentProps } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GenerationComposer from "./GenerationComposer";
 
@@ -10,11 +10,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 vi.mock("../../lib/api", () => ({ toAssetUrl: (path: string) => path }));
-const llmState = vi.hoisted(() => ({ configs: [] as { id: string; name: string; enabled: boolean; capability: string }[] }));
-beforeEach(() => { llmState.configs = []; });
+const llmState = vi.hoisted(() => ({ optimize: vi.fn(), configs: [] as { id: string; name: string; enabled: boolean; capability: string }[] }));
+beforeEach(() => { llmState.configs = []; llmState.optimize.mockReset().mockResolvedValue("Optimized"); });
 vi.mock("../../lib/queries/llm", () => ({
-  useLlmConfigsQuery: () => ({ data: llmState.configs }),
-  useOptimizePromptMutation: () => ({ isPending: false }),
+  useLlmConfigsQuery: () => ({ data: llmState.configs, isSuccess: true }),
+  useOptimizePromptMutation: () => ({ isPending: false, mutateAsync: llmState.optimize }),
 }));
 
 function props(
@@ -185,4 +185,13 @@ it("keeps one recoverable error outside the capped composer so the draft remains
  expect(screen.getAllByRole("alert")).toHaveLength(1);
  expect(screen.getByRole("alert").closest(".generation-composer")).toBeNull();
  expect(screen.getByTestId("generation-command-surface")).not.toContainElement(screen.getByRole("alert"));
+});
+
+
+it("uses the restored Agent dropdown choice for optimization while thinking", async () => {
+  llmState.configs = [{id:"first",name:"First",enabled:true,capability:"text"},{id:"second",name:"Second",enabled:true,capability:"text"}];
+  render(<GenerationComposer {...props({composerMode:"deep-thinking",promptAgentConfigId:"second"})}/>);
+  expect(screen.getByRole("button", {name:"Second"})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name:"generate.llm.optimize"}));
+  await waitFor(()=>expect(llmState.optimize).toHaveBeenCalledWith({prompt:"A quiet mountain lake",configId:"second",imagePaths:undefined}));
 });

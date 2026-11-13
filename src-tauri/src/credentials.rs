@@ -404,12 +404,15 @@ impl Database {
     ) -> Result<()> {
         let _guard = self.credentials.gate.lock().map_err(|_| unavailable())?;
         self.migrate_credentials_locked()?;
-        let old: Value = self
-            .get_setting(key)?
+        let stored = self.get_setting(key)?;
+        let materializing_legacy_profile =
+            stored.is_none() && key.starts_with("model_provider_profiles::");
+        let old: Value = stored
             .map(|v| serde_json::from_str(&v))
             .transpose()?
             .unwrap_or(Value::Array(vec![]));
         let mut value: Value = serde_json::from_str(text)?;
+        let mut provisional = Vec::new();
         for item in value.as_array_mut().ok_or_else(unavailable)? {
             let secret = normalize(
                 item.get("api_key")
@@ -429,6 +432,10 @@ impl Database {
                 .get("id")
                 .and_then(Value::as_str)
                 .is_some_and(|id| kept_ids.contains(id))
+                // The first saved profile may be the implicit legacy scalar profile.
+                // Persist its resolved secret once; later Keep writes must use only
+                // the current reference, including when that reference was cleared.
+                && (!materializing_legacy_profile || secret.is_empty())
             {
                 if let Some(reference) = old_ref {
                     item["credential_ref"] = Value::String(reference.to_owned());
@@ -442,7 +449,14 @@ impl Database {
             } else {
                 let reference = match old_ref {
                     Some(r) if self.credentials.resolve(r)? == secret => r.to_owned(),
-                    _ => format!("{REF_PREFIX}{}", uuid::Uuid::new_v4()),
+                    _ => {
+                        let reference = format!("{REF_PREFIX}{}", uuid::Uuid::new_v4());
+                        // Arm recovery before touching the vault. Until the metadata
+                        // transaction commits these entries belong to no saved profile.
+                        provisional.push(reference.clone());
+                        self.set_setting(DELETES, &serde_json::to_string(&provisional)?)?;
+                        reference
+                    }
                 };
                 self.credentials.verified_write(&reference, &secret)?;
                 item["credential_ref"] = Value::String(reference);
@@ -477,6 +491,9 @@ impl Database {
                 .iter()
                 .any(|(key, text)| key != DELETES && text.contains(reference))
         });
+        // Publishing the new references and disarming their cleanup is atomic.
+        // A rollback leaves the provisional journal available for the next open.
+        tx.execute("DELETE FROM settings WHERE key=?1", [DELETES])?;
         if !deletions.is_empty() {
             put(&tx, DELETES, &serde_json::to_string(&deletions)?)?;
         }
