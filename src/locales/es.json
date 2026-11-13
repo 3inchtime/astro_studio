@@ -840,5 +840,12 @@
       "provider_outcome_unknown": "Es posible que la solicitud original ya haya generado imágenes y un cobro. Una nueva solicitud puede generar un cobro adicional."
     },
     "acknowledgeNewCharge": "Entiendo que una nueva solicitud puede generar otro cobro"
-  }
+  },
+  "generate.providerSetupRequired": "Configura el proveedor antes de generar. Se conservará tu borrador.",
+  "generate.configureProvider": "Configurar proveedor",
+  "generate.draftSaveFailed": "No se pudo conservar el borrador. Quédate aquí e inténtalo de nuevo.",
+  "generate.returnToDraft": "Volver al borrador",
+  "generate.unknownRetryTitle": "¿Reintentar un resultado desconocido?",
+  "generate.unknownRetryDescription": "La solicitud anterior puede haberse completado y generado cargos. Revisa primero la conversación y el consumo del proveedor. Reintentar puede generar nuevos cargos.",
+  "generate.confirmUnknownRetry": "Enviar otra solicitud"
 }

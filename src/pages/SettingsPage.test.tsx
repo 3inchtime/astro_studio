@@ -110,14 +110,14 @@ const geminiProviderState = {
   ],
 } as const;
 
-function renderWithProviders(ui: ReactElement) {
+function renderWithProviders(ui: ReactElement, initialEntry = "/settings") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
 
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -243,6 +243,13 @@ describe("SettingsPage logs", () => {
     Object.assign(navigator, {
       clipboard: { writeText },
     });
+  });
+
+  it("opens the requested model settings without replacing it with the saved default", async () => {
+    renderWithProviders(<SettingsPage/>, "/settings?tab=model&model=nano-banana&returnTo=%2Fgenerate");
+    await waitFor(()=>expect(getModelProviderProfiles).toHaveBeenCalledWith("nano-banana"));
+    expect(await screen.findByRole("button",{name:"Select Nano Banana model"})).toHaveAttribute("aria-pressed","true");
+    expect(screen.getByRole("button",{name:"generate.returnToDraft"})).toBeInTheDocument();
   });
 
   it("shows the newest runtime logs at the top", async () => {

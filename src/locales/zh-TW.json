@@ -840,5 +840,12 @@
       "provider_outcome_unknown": "原請求可能已生成圖片並計費。再次傳送新請求可能產生額外費用。"
     },
     "acknowledgeNewCharge": "我了解新請求可能再次收費"
-  }
+  },
+  "generate.providerSetupRequired": "請先設定目前供應商。前往設定時會保留完整草稿。",
+  "generate.configureProvider": "設定供應商",
+  "generate.draftSaveFailed": "無法儲存目前草稿，請留在本頁後重試。",
+  "generate.returnToDraft": "返回草稿",
+  "generate.unknownRetryTitle": "重試結果未知的請求？",
+  "generate.unknownRetryDescription": "上次請求可能已完成並產生費用。請先檢查已儲存的對話和供應商用量。重試可能再次產生費用。",
+  "generate.confirmUnknownRetry": "傳送新請求"
 }

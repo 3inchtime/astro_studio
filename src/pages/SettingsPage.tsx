@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { MotionConfig } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { IMAGE_MODEL_CATALOG } from "../lib/modelCatalog";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   getLogs,
@@ -82,6 +83,12 @@ const SETTINGS_TABS = [
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeQuery = new URLSearchParams(location.search);
+  const requestedModel = IMAGE_MODEL_CATALOG.find(entry => entry.id === routeQuery.get("model"))?.id;
+  const requestedProvider = routeQuery.get("provider");
+  const returnTo = routeQuery.get("returnTo");
+  const safeReturnTo = returnTo && (returnTo === "/generate" || returnTo.startsWith("/projects/")) ? returnTo : null;
   const { checkForUpdates, updateSupported } = useLayoutContext();
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -110,7 +117,7 @@ export default function SettingsPage() {
     finally { settingsPendingRef.current = false; setSavingSettings(false); }
   }
   const [activeTab, setActiveTab] = useState<"general" | "model" | "logs">(
-    "general",
+    routeQuery.get("tab") === "model" ? "model" : "general",
   );
   const { theme, setThemeWithEvent } = useTheme();
 
@@ -123,7 +130,7 @@ export default function SettingsPage() {
   const [selectedProviderId, setSelectedProviderId] =
     useState(DEFAULT_PROVIDER_ID);
   const [providerSaved, setProviderSaved] = useState(false);
-  const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_MODEL);
+  const [imageModel, setImageModel] = useState<ImageModel>(requestedModel ?? DEFAULT_MODEL);
   const [modelSaved, setModelSaved] = useState(false);
   const { t, i18n } = useTranslation();
   const [language, setLanguage] = useState<SupportedLanguage>(() =>
@@ -160,7 +167,7 @@ export default function SettingsPage() {
   const runtimeLogsRef = useRef<HTMLDivElement | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageModelRef = useRef(imageModel);
-  const didUserSelectModelRef = useRef(false);
+  const didUserSelectModelRef = useRef(!!requestedModel);
 
   const pageSize = 20;
 
@@ -179,12 +186,9 @@ export default function SettingsPage() {
 
     getImageModel()
       .then((model) => {
-        if (cancelled || didUserSelectModelRef.current) {
-          return;
-        }
-
-        setImageModel(model);
+        if (cancelled) return;
         setSavedImageModel(model);
+        if (!didUserSelectModelRef.current) setImageModel(model);
       })
       .catch(() => {
         // Ignore persisted model load failures and keep catalog default.
@@ -225,7 +229,7 @@ export default function SettingsPage() {
 
         setProviderState(state);
         setSavedProviderState(state);
-        setSelectedProviderId(state.active_provider_id);
+        setSelectedProviderId(state.profiles.some(profile => profile.id === requestedProvider) ? requestedProvider! : state.active_provider_id);
       })
       .catch(() => {
         if (cancelled || imageModelRef.current !== modelAtLoadStart) {
@@ -547,6 +551,7 @@ export default function SettingsPage() {
       <div className="mx-auto w-full max-w-[1120px] px-6 py-6">
         <header className="mb-6">
           <h1 className="text-xl font-semibold tracking-tight text-foreground">{t("settings.title")}</h1>
+          {safeReturnTo && <button type="button" onClick={() => navigate(safeReturnTo)} className="studio-control focus-ring mt-3 min-h-9 rounded-lg px-3 py-2 text-sm">{t("generate.returnToDraft")}</button>}
         </header>
         <div className="grid min-w-0 gap-8 md:grid-cols-[160px_minmax(0,1fr)]">
         <nav aria-label={t("settings.sections", { defaultValue: "Settings sections" })} className="flex flex-wrap content-start gap-1 md:flex-col">

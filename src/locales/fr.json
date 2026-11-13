@@ -840,5 +840,12 @@
       "provider_outcome_unknown": "La demande initiale a peut-être déjà généré des images et été facturée. Une nouvelle demande peut entraîner des frais supplémentaires."
     },
     "acknowledgeNewCharge": "Je comprends qu’une nouvelle demande peut être facturée"
-  }
+  },
+  "generate.providerSetupRequired": "Configurez le fournisseur avant de générer. Votre brouillon sera conservé.",
+  "generate.configureProvider": "Configurer le fournisseur",
+  "generate.draftSaveFailed": "Impossible de conserver le brouillon. Restez ici et réessayez.",
+  "generate.returnToDraft": "Revenir au brouillon",
+  "generate.unknownRetryTitle": "Réessayer un résultat inconnu ?",
+  "generate.unknownRetryDescription": "La requête précédente peut avoir abouti et être facturée. Vérifiez d’abord la conversation et la consommation du fournisseur. Réessayer peut entraîner de nouveaux frais.",
+  "generate.confirmUnknownRetry": "Envoyer une nouvelle requête"
 }

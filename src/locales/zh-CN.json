@@ -776,5 +776,12 @@
     "confirmProvider": "确认使用所选供应商",
     "noProviders": "此模型暂无可用供应商，请先在设置中添加。",
     "acknowledgeNewCharge": "我理解新请求可能再次收费"
-  }
+  },
+  "generate.providerSetupRequired": "请先配置当前供应商。前往设置时会保留完整草稿。",
+  "generate.configureProvider": "配置供应商",
+  "generate.draftSaveFailed": "无法保存当前草稿，请留在本页后重试。",
+  "generate.returnToDraft": "返回草稿",
+  "generate.unknownRetryTitle": "重试结果未知的请求？",
+  "generate.unknownRetryDescription": "上次请求可能已完成并产生费用。请先检查已保存的会话和供应商用量。重试可能再次产生费用。",
+  "generate.confirmUnknownRetry": "发送新请求"
 }

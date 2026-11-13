@@ -840,5 +840,12 @@
       "provider_outcome_unknown": "元のリクエストは、すでに画像を生成して料金が発生している可能性があります。新しいリクエストには追加料金が発生する場合があります。"
     },
     "acknowledgeNewCharge": "新しいリクエストで再度料金が発生する可能性を了承する"
-  }
+  },
+  "generate.providerSetupRequired": "生成前にプロバイダーを設定してください。下書きは保持されます。",
+  "generate.configureProvider": "プロバイダーを設定",
+  "generate.draftSaveFailed": "下書きを保持できません。このページで再試行してください。",
+  "generate.returnToDraft": "下書きに戻る",
+  "generate.unknownRetryTitle": "結果不明のリクエストを再試行しますか？",
+  "generate.unknownRetryDescription": "前のリクエストが完了し、料金が発生した可能性があります。先に保存済みの会話と利用状況を確認してください。再試行で追加料金が発生する場合があります。",
+  "generate.confirmUnknownRetry": "新しいリクエストを送信"
 }

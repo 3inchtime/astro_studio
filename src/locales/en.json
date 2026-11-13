@@ -776,5 +776,12 @@
     "confirmProvider": "Confirm selected provider",
     "noProviders": "No configured provider is available for this model. Add one in Settings.",
     "acknowledgeNewCharge": "I understand a new request may charge again"
-  }
+  },
+  "generate.providerSetupRequired": "Configure the selected provider before generating. Your draft will be preserved.",
+  "generate.configureProvider": "Configure provider",
+  "generate.draftSaveFailed": "Could not preserve this draft. Stay on this page and try again.",
+  "generate.returnToDraft": "Return to draft",
+  "generate.unknownRetryTitle": "Retry an unknown result?",
+  "generate.unknownRetryDescription": "The previous request may have completed and incurred a charge. Check the saved conversation and provider usage first. Retrying may incur another charge.",
+  "generate.confirmUnknownRetry": "Send another request"
 }

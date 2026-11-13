@@ -840,5 +840,12 @@
       "provider_outcome_unknown": "Die ursprüngliche Anfrage hat möglicherweise bereits Bilder erzeugt und Kosten verursacht. Eine neue Anfrage kann weitere Kosten verursachen."
     },
     "acknowledgeNewCharge": "Ich verstehe, dass erneut Kosten entstehen können"
-  }
+  },
+  "generate.providerSetupRequired": "Konfigurieren Sie den Anbieter vor der Generierung. Ihr Entwurf bleibt erhalten.",
+  "generate.configureProvider": "Anbieter konfigurieren",
+  "generate.draftSaveFailed": "Entwurf konnte nicht gesichert werden. Bleiben Sie hier und versuchen Sie es erneut.",
+  "generate.returnToDraft": "Zurück zum Entwurf",
+  "generate.unknownRetryTitle": "Unbekanntes Ergebnis erneut anfragen?",
+  "generate.unknownRetryDescription": "Die vorherige Anfrage könnte abgeschlossen und berechnet worden sein. Prüfen Sie zuerst den Chat und die Anbieternutzung. Ein erneuter Versuch kann weitere Kosten verursachen.",
+  "generate.confirmUnknownRetry": "Neue Anfrage senden"
 }

@@ -22,6 +22,8 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 
 const getConversationGenerations = vi.fn();
 const getImageModel = vi.fn();
+const getModelProviderProfiles = vi.fn();
+const navigate = vi.fn();
 const getGenerationRecipe = vi.fn();
 const listRecipeProviders = vi.fn();
 vi.mock("../lib/recipeApi", async () => ({
@@ -139,6 +141,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../lib/api", () => ({
+  getModelProviderProfiles: (...args: unknown[]) => getModelProviderProfiles(...args),
   createPromptFavorite: (...args: unknown[]) => createPromptFavorite(...args),
   deleteGeneration: vi.fn(),
   deletePromptFavorite: (...args: unknown[]) => deletePromptFavorite(...args),
@@ -194,6 +197,7 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useLocation: () => useLocation(),
+    useNavigate: () => navigate,
   };
 });
 
@@ -233,11 +237,13 @@ vi.mock("../components/generate/MessageBubble", () => ({
     onEditPrompt,
     onFavoritePrompt,
     isPromptFavorited,
+    onRetry,
   }: {
     message: {
       id: string;
       role: string;
       content: string;
+      status?: string;
       images?: Array<{
         path: string;
         imageId: string;
@@ -260,6 +266,7 @@ vi.mock("../components/generate/MessageBubble", () => ({
       content: string;
     }) => void;
     isPromptFavorited?: boolean;
+    onRetry?: (message: unknown) => void;
   }) =>
     message.role === "user" ? (
       <div>
@@ -275,7 +282,7 @@ vi.mock("../components/generate/MessageBubble", () => ({
           Edit image
         </button>
       </div>
-    ) : null,
+    ) : message.status === "failed" ? <button onClick={() => onRetry?.(message)}>Retry failed generation</button> : null,
 }));
 
 vi.mock("../components/lightbox/Lightbox", () => ({
@@ -298,8 +305,71 @@ function createDeferred<T>() {
 }
 
 describe("GeneratePage", () => {
+  it("reviews persisted failed recipes before retrying an unknown provider outcome", async () => {
+    getConversationGenerations.mockResolvedValue([{generation:{id:"failed-saved",prompt:"Saved failed prompt",engine:"gpt-image-2",status:"failed",size:"1024x1024",quality:"high",background:"auto",output_format:"png",moderation:"auto",input_fidelity:"high",image_count:1,source_image_paths:[],created_at:"2026-11-13",request_metadata:JSON.stringify({model:"gpt-image-2",project_id:"project-1",conversation_id:"conversation-1"})},images:[]}]);
+    getGenerationRecipe.mockResolvedValue({version:1,generation_id:"failed-saved",provenance:"job",prompt:"Saved failed prompt",model:"gpt-image-2",request_kind:"generate",provider_profile_id:"saved-profile",source_image_paths:[],warnings:["provider_outcome_unknown"],options:{size:"1024x1024",quality:"high",image_count:1}});
+    render(<GeneratePage/>,{wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button",{name:"Retry failed generation"}));
+    await waitFor(()=>expect(getGenerationRecipe).toHaveBeenCalledWith("failed-saved"));
+    expect(generateImage).not.toHaveBeenCalled();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("requires explicit confirmation before retrying an in-memory unknown network outcome", async () => {
+    generateImage.mockRejectedValue({kind:"Network",detail:{message:"connection lost"}});
+    render(<GeneratePage/>,{wrapper:TestWrapper});
+    fireEvent.change(screen.getByPlaceholderText("Describe the image you want to generate..."),{target:{value:"Unknown result prompt"}});
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    fireEvent.click(await screen.findByRole("button",{name:"Retry failed generation"}));
+    expect(generateImage).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"generate.confirmUnknownRetry"})).toBeInTheDocument();
+  });
+
+  it("keeps a full recipe draft through provider settings without generating automatically", async () => {
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[]});
+    getGenerationRecipe.mockResolvedValue({version:1,generation_id:"saved",provenance:"job",prompt:"Keep this draft",model:"gpt-image-2.6-flare",request_kind:"edit",provider_profile_id:"saved-profile",source_image_paths:["/tmp/first.png","/tmp/second.png"],warnings:[],options:{size:"1024x1024",quality:"high",background:"opaque",output_format:"webp",output_compression:73,moderation:"auto",input_fidelity:"high",image_count:2,advanced_options:{markupPath:"/tmp/overlay.png",complexity:"high"}}});
+    useLocation.mockReturnValue({state:{recipeGenerationId:"saved",recipeMode:"edit"}});
+    const view=render(<GeneratePage/>,{wrapper:TestWrapper});
+    await screen.findByDisplayValue("Keep this draft");
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(getModelProviderProfiles).toHaveBeenCalled());
+    expect(screen.getByDisplayValue("Keep this draft")).toBeInTheDocument();
+    expect(editImage).not.toHaveBeenCalled();expect(generateImage).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button",{name:"generate.configureProvider"}));
+    expect(navigate).toHaveBeenCalledWith(expect.stringContaining("model=gpt-image-2.6-flare"));
+    view.unmount();useLocation.mockReturnValue({state:{recipeGenerationId:"saved",recipeMode:"generate"}});queryClient.clear();
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[{id:"saved-profile",name:"Configured",api_key:"fixture",endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}}]});
+    render(<GeneratePage/>,{wrapper:TestWrapper});
+    await screen.findByDisplayValue("Keep this draft");expect(editImage).not.toHaveBeenCalled();
+    await waitFor(()=>expect(screen.getByRole("button",{name:"Generate"})).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(editImage).toHaveBeenCalledWith(expect.objectContaining({prompt:"Keep this draft",model:"gpt-image-2.6-flare",providerProfileId:"saved-profile",sourceGenerationId:"saved",sourceImagePaths:["/tmp/first.png","/tmp/second.png"],quality:"high",imageCount:2,outputCompression:73,advancedOptions:{markupPath:"/tmp/overlay.png",complexity:"high"}})));
+  });
+
+  it("requires an explicit replacement when the recipe provider was deleted", async () => {
+    getGenerationRecipe.mockResolvedValue({version:1,generation_id:"saved",provenance:"job",prompt:"Keep deleted provider draft",model:"gpt-image-2",request_kind:"generate",provider_profile_id:"deleted-profile",source_image_paths:[],warnings:[],options:{size:"1024x1024",quality:"high",image_count:1}});
+    useLocation.mockReturnValue({state:{recipeGenerationId:"saved",recipeMode:"edit"}});
+    render(<GeneratePage/>,{wrapper:TestWrapper});
+    await screen.findByDisplayValue("Keep deleted provider draft");
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    const picker=await screen.findByLabelText("recipe.providerLabel");
+    expect(generateImage).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("Keep deleted provider draft")).toBeInTheDocument();
+    await waitFor(()=>expect(picker).toHaveValue("saved-profile"));
+    fireEvent.change(picker,{target:{value:"another"}});
+    fireEvent.click(screen.getByRole("button",{name:"recipe.confirmProvider"}));
+    expect(screen.queryByRole("button",{name:"generate.configureProvider"})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Generate"}));
+    await waitFor(()=>expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({providerProfileId:"another",providerOverrideConfirmed:true,sourceGenerationId:"saved",prompt:"Keep deleted provider draft"})));
+  });
+
   beforeEach(() => {
     queryClient.clear();
+    sessionStorage.clear();
+    navigate.mockReset();
+    getModelProviderProfiles.mockReset();
+    getModelProviderProfiles.mockResolvedValue({active_provider_id:"saved-profile",profiles:[{id:"saved-profile",name:"Saved",api_key:"fixture",endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}},{id:"another",name:"Another",api_key:"fixture",endpoint_settings:{mode:"base_url",base_url:"https://example.test/v1",generation_url:"",edit_url:""}}]});
     getConversationGenerations.mockReset();
     getImageModel.mockReset();
     getGenerationRecipe.mockReset();
