@@ -807,6 +807,12 @@ export default function CanvasStage({
       }}
     >
       <div className="absolute inset-0 bg-canvas" />
+      <div
+        data-testid="canvas-artboard"
+        aria-hidden="true"
+        className="pointer-events-none absolute bg-white shadow-[0_3px_16px_rgba(0,0,0,0.08)] dark:bg-[#232427]"
+        style={{ left: frameRect.x, top: frameRect.y, width: frameRect.width, height: frameRect.height }}
+      />
       {content.layers.every((layer) => layer.objects.length === 0) && (
         <div className="pointer-events-none absolute left-20 top-4 z-10 max-w-[calc(100%-240px)] line-clamp-2 text-xs text-muted">
           {t("canvas.emptyStateHint")}
@@ -959,12 +965,10 @@ export default function CanvasStage({
             y={frameRect.y}
             width={frameRect.width}
             height={frameRect.height}
-            cornerRadius={18}
-            stroke="rgba(79,106,255,0.92)"
-            strokeWidth={2}
-            dash={[10, 6]}
-            shadowColor="rgba(79,106,255,0.2)"
-            shadowBlur={18}
+            cornerRadius={0}
+            stroke={frameEditing ? "#4f6aff" : "rgba(128,128,128,0.5)"}
+            strokeWidth={frameEditing ? 1.5 : 1}
+            dash={frameEditing ? [6, 4] : undefined}
             listening={false}
           />
 

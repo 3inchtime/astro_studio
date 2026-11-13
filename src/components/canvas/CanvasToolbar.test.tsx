@@ -51,6 +51,15 @@ describe("canvas tool panel", () => {
       screen.getByRole("button", { name: "canvas.tool.select" }),
     ).toHaveAttribute("aria-pressed", "true");
   });
+  it("names Fit frame visibly and only changes view after an explicit action", () => {
+    props.onFitFrame.mockClear();
+    render(<CanvasToolbar {...props} />);
+    const fit = screen.getByRole("button", { name: "canvas.fitFrame" });
+    expect(fit).toHaveTextContent("canvas.fitFrame");
+    expect(props.onFitFrame).not.toHaveBeenCalled();
+    fireEvent.click(fit);
+    expect(props.onFitFrame).toHaveBeenCalledTimes(1);
+  });
   it("keeps object actions in a compact menu with alignment controls", () => {
     const align = vi.fn();
     render(<CanvasToolbar {...props} onAlignSelection={align} />);

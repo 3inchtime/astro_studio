@@ -180,6 +180,8 @@ vi.mock("react-konva", async () => {
           "data-points": domValue(props.points),
           "data-visible": domValue(props.visible),
           "data-listening": domValue(props.listening),
+          "data-stroke": domValue(props.stroke),
+          "data-dash": domValue(props.dash),
         },
         props.children as React.ReactNode,
       );
@@ -1059,6 +1061,24 @@ describe("CanvasStage", () => {
     expect(konvaNodeByName("canvas-selection-outline")).toBeNull();
     act(() => pointerUp());
     expect(callbacks.onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("keeps the artboard aligned to the saved viewport without fitting it", () => {
+    const content = createContent({ viewport: { x: 93, y: -41, scale: 0.5 } });
+    renderStage({ content });
+    expect(screen.getByTestId("canvas-artboard")).toHaveStyle({ left: "93px", top: "-41px", width: "256px", height: "256px" });
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it("reserves frame accent for frame editing", () => {
+    const props = baseProps();
+    const view = render(<CanvasStage {...props} />);
+    const idle = konvaNodeByName("canvas-generation-frame")!;
+    expect(idle).toHaveAttribute("data-stroke", "rgba(128,128,128,0.5)");
+    expect(idle).not.toHaveAttribute("data-dash");
+    view.rerender(<CanvasStage {...props} frameEditing />);
+    expect(konvaNodeByName("canvas-generation-frame")).toHaveAttribute("data-stroke", "#4f6aff");
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
   });
 
   it("adds stable ids and names for objects and non-listening canvas chrome", () => {
