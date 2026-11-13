@@ -29,6 +29,15 @@ const props = {
   onFitSelection: vi.fn(),
 };
 describe("canvas tool panel", () => {
+  it("separates the vertical tool rail from the bottom view controls", () => {
+    render(<CanvasToolbar {...props} />);
+    const drawing = screen.getByRole("toolbar", { name: "studio.canvas.drawingTools" });
+    const view = screen.getByRole("toolbar", { name: "studio.canvas.viewControls" });
+    expect(drawing).toHaveAttribute("aria-orientation", "vertical");
+    expect(drawing).not.toContainElement(screen.getByRole("button", { name: "canvas.tool.undo" }));
+    expect(view).toContainElement(screen.getByRole("button", { name: "canvas.tool.undo" }));
+    expect(view).not.toContainElement(screen.getByRole("button", { name: "canvas.tool.brush" }));
+  });
   it("provides shape and text tools with selected state and shortcut hints", () => {
     render(<CanvasToolbar {...props} />);
     fireEvent.click(

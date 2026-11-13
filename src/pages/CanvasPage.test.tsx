@@ -499,6 +499,7 @@ describe("CanvasPage", () => {
         },
       },
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
 
     expect(
@@ -570,6 +571,7 @@ describe("CanvasPage", () => {
       ),
       { target: { value: "draw" } },
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     await waitFor(() =>
       expect(saveCanvasDocument).toHaveBeenCalledWith(
@@ -602,11 +604,13 @@ describe("CanvasPage", () => {
     fireEvent.change(screen.getByLabelText("Generation prompt"), {
       target: { value: "draw" },
     });
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     expect(await screen.findByText(/PNG write failed/)).toBeInTheDocument();
     expect(editImage).not.toHaveBeenCalled();
     const firstId =
       saveCanvasDocument.mock.calls[0][1].generation_requests[0].request_id;
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(
       screen.getByRole("button", { name: "canvas.generationRetry" }),
     );
@@ -639,6 +643,7 @@ describe("CanvasPage", () => {
     await screen.findByText("Canvas objects: image-1");
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
     fireEvent.click(screen.getByRole("button", { name: "move selection" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(
       screen.getByRole("button", { name: "canvas.generationRetry" }),
     );
@@ -662,6 +667,7 @@ describe("CanvasPage", () => {
     fireEvent.change(screen.getByLabelText("Generation prompt"), {
       target: { value: "draw" },
     });
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     await waitFor(() => expect(editImage).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "select image" }));
@@ -709,6 +715,7 @@ describe("CanvasPage", () => {
     fireEvent.change(screen.getByLabelText("Generation prompt"), {
       target: { value: "draw" },
     });
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     await waitFor(() => expect(editImage).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Second canvas" }));
@@ -736,12 +743,45 @@ describe("CanvasPage", () => {
     expect(promptEditor).toHaveClass("min-h-[144px]");
   });
 
+  it("starts with properties and preserves the generation draft while switching inspector tabs", async () => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas stage");
+    const properties = screen.getByRole("tab", { name: "canvas.propertiesTitle" });
+    expect(properties).toHaveAttribute("aria-selected", "true");
+    const generation = screen.getByRole("tab", { name: "Generation" });
+    fireEvent.click(generation);
+    const editor = screen.getByPlaceholderText("Describe how to develop this framed sketch...");
+    fireEvent.change(editor, { target: { value: "A quiet mountain lake" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Layers" }));
+    fireEvent.click(screen.getByRole("button", { name: "select image" }));
+    expect(screen.getByRole("tab", { name: "Layers" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(generation);
+    expect(screen.getByPlaceholderText("Describe how to develop this framed sketch...")).toBe(editor);
+    expect(editor).toHaveValue("A quiet mountain lake");
+  });
+
+  it("docks the inspector at 1200px while documents remain a drawer until 1440px", async () => {
+    const original = window.matchMedia;
+    const mediaSpy = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      ...original(query),
+      matches: query === "(min-width: 1200px)",
+    }));
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas stage");
+    expect(document.getElementById("canvas-inspector")).toHaveAttribute("data-layout", "docked");
+    expect(document.getElementById("canvas-documents")).toHaveAttribute("data-layout", "drawer");
+    fireEvent.click(screen.getByRole("button", { name: "studio.canvas.documents" }));
+    expect(screen.getByRole("dialog", { name: "studio.canvas.documents" })).toHaveAttribute("aria-modal", "true");
+    mediaSpy.mockRestore();
+  });
+
   it("uses the professional editor layout with floating canvas tools", async () => {
     render(<CanvasPage />, { wrapper: TestWrapper });
 
     expect(await screen.findByLabelText("Canvas workspace")).toHaveClass(
       "min-w-0",
-      "min-[1100px]:grid-cols-[220px_minmax(0,1fr)_300px]",
+      "min-[1440px]:grid-cols-[220px_minmax(0,1fr)_300px]",
     );
     await screen.findByText("Canvas stage");
     expect(screen.getByText("1 canvas")).toBeInTheDocument();
@@ -802,7 +842,7 @@ describe("CanvasPage", () => {
     const mediaSpy = vi
       .spyOn(window, "matchMedia")
       .mockImplementation((query) =>
-        query === "(min-width: 1100px)"
+        query === "(min-width: 1200px)"
           ? {
               ...originalMatchMedia(query),
               get matches() {
@@ -836,6 +876,7 @@ describe("CanvasPage", () => {
     render(<CanvasPage />, { wrapper: TestWrapper });
 
     await screen.findByText("0 objects");
+    fireEvent.click(screen.getByRole("tab", { name: "Layers" }));
     fireEvent.click(screen.getByRole("button", { name: "New Layer" }));
 
     expect(screen.getByText("Canvas Layer 2")).toBeInTheDocument();
@@ -1628,6 +1669,7 @@ describe("CanvasPage", () => {
     fireEvent.change(screen.getByLabelText("Generation prompt"), {
       target: { value: "draw" },
     });
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     await waitFor(() =>
       expect(getCanvasGenerationStatus).toHaveBeenCalledWith(
@@ -1680,6 +1722,7 @@ describe("CanvasPage", () => {
       await screen.findByText("Selected objects: image-1"),
     ).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("tab", { name: "Layers" }));
     fireEvent.click(screen.getByRole("button", { name: "Lock Layer" }));
 
     expect(

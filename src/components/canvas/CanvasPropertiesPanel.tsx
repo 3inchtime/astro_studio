@@ -13,7 +13,7 @@ export default function CanvasPropertiesPanel({
   const first = objects[0];
   const all = (key: string) => objects.every((o) => key in o);
   return (
-    <section className="rounded-xl border border-border-subtle bg-surface p-4 shadow-card">
+    <section className="bg-surface p-4">
       <h3 className="mb-3 text-[14px] font-semibold">
         {t("canvas.propertiesTitle")}
       </h3>

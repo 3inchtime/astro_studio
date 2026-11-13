@@ -52,6 +52,7 @@ import type {
 } from "../../types";
 
 interface CanvasStageProps extends CanvasActionProps {
+  shortcutsDisabled?: boolean;
   onAddObject?: (object: CanvasObject) => void;
   onUpdateText?: (
     id: string,
@@ -99,6 +100,7 @@ const ZERO_SELECTION_DELTA = { dx: 0, dy: 0 };
 
 export default function CanvasStage({
   content,
+  shortcutsDisabled = false,
   activeLayerId,
   activeTool,
   selectedObjectIds,
@@ -696,6 +698,10 @@ export default function CanvasStage({
   }, [activeTool, cancelActiveGestures]);
 
   useEffect(() => {
+    if (shortcutsDisabled) {
+      spacePanActiveRef.current = false;
+      cancelActiveGestures();
+    }
     function isTypingTarget(target: EventTarget | null) {
       if (!(target instanceof HTMLElement)) return false;
       const tagName = target.tagName.toLowerCase();
@@ -708,6 +714,7 @@ export default function CanvasStage({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (shortcutsDisabled) return;
       if (event.key === "Escape") {
         cancelActiveGestures();
         return;
@@ -739,7 +746,7 @@ export default function CanvasStage({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [cancelActiveGestures]);
+  }, [cancelActiveGestures, shortcutsDisabled]);
 
   function commitText() {
     const editor = textEditorRef.current;

@@ -869,6 +869,25 @@ describe("CanvasStage", () => {
     expect(callbacks.onAddStroke).not.toHaveBeenCalled();
   });
 
+  it("leaves Space available to an open inspector drawer", () => {
+    renderStage({ shortcutsDisabled: true });
+    expect(dispatchSpace(window).defaultPrevented).toBe(false);
+  });
+
+  it("clears a held Space gesture when a drawer opens", () => {
+    const props = baseProps();
+    const view = render(<CanvasStage {...props} />);
+    act(() => dispatchSpace(window));
+    view.rerender(<CanvasStage {...props} shortcutsDisabled />);
+    view.rerender(<CanvasStage {...props} />);
+    act(() => {
+      pointerDown(450, 450);
+      pointerMove(470, 470);
+      pointerUp();
+    });
+    expect(callbacks.onViewportChange).not.toHaveBeenCalled();
+  });
+
   it("gates temporary Space pan for typing targets and resets it on keyup and blur", () => {
     renderStage({
       content: createContent({ viewport: { x: 10, y: 20, scale: 1 } }),

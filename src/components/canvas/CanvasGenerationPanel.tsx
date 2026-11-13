@@ -49,7 +49,7 @@ export default function CanvasGenerationPanel({
   const { t } = useTranslation();
 
   return (
-    <section className="rounded-xl border border-border-subtle bg-surface shadow-card">
+    <section className="bg-surface">
       <div className="border-b border-border-subtle px-3 py-3">
         <div className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
           <PanelRight size={14} strokeWidth={1.8} />

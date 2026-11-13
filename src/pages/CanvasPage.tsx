@@ -91,37 +91,43 @@ export default function CanvasPage() {
   >(null);
   const documentsToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
-  const [isCompact, setIsCompact] = useState(
-    () => !window.matchMedia("(min-width: 1100px)").matches,
-  );
+  const [dockLayout, setDockLayout] = useState(() => ({
+    documents: window.matchMedia("(min-width: 1440px)").matches,
+    inspector: window.matchMedia("(min-width: 1200px)").matches,
+  }));
+  const [inspectorTab, setInspectorTab] = useState<"properties" | "layers" | "generation">("properties");
   const previousCompactPanel = useRef(compactPanel);
+  const drawerOpen = Boolean(compactPanel && !dockLayout[compactPanel]);
   const documentsPanelRef = useDialogFocus({
-    open: isCompact && compactPanel === "documents",
+    open: !dockLayout.documents && compactPanel === "documents",
     onClose: () => setCompactPanel(null),
   });
   const inspectorPanelRef = useDialogFocus({
-    open: isCompact && compactPanel === "inspector",
+    open: !dockLayout.inspector && compactPanel === "inspector",
     onClose: () => setCompactPanel(null),
   });
   useEffect(() => {
-    const media = window.matchMedia("(min-width: 1100px)");
+    const documents = window.matchMedia("(min-width: 1440px)");
+    const inspector = window.matchMedia("(min-width: 1200px)");
     const update = () => {
-      setIsCompact(!media.matches);
-      if (media.matches) setCompactPanel(null);
+      const next = { documents: documents.matches, inspector: inspector.matches };
+      setDockLayout(next);
+      setCompactPanel((current) => current && next[current] ? null : current);
     };
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    documents.addEventListener("change", update);
+    inspector.addEventListener("change", update);
+    return () => {
+      documents.removeEventListener("change", update);
+      inspector.removeEventListener("change", update);
+    };
   }, []);
   useEffect(() => {
     const previous = previousCompactPanel.current;
     previousCompactPanel.current = compactPanel;
-    if (isCompact && previous && !compactPanel) {
-      (previous === "documents"
-        ? documentsToggleRef
-        : inspectorToggleRef
-      ).current?.focus();
+    if (previous && !compactPanel && !dockLayout[previous]) {
+      (previous === "documents" ? documentsToggleRef : inspectorToggleRef).current?.focus();
     }
-  }, [compactPanel, isCompact]);
+  }, [compactPanel, dockLayout]);
   const { activeProjectId } = useLayoutContext();
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     null,
@@ -1127,7 +1133,7 @@ export default function CanvasPage() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (isCompact && compactPanel) return;
+      if (drawerOpen) return;
       const target = event.target;
       if (
         target instanceof HTMLInputElement ||
@@ -1257,7 +1263,7 @@ export default function CanvasPage() {
   }, [
     activeLayer?.id,
     compactPanel,
-    isCompact,
+    drawerOpen,
     clipboard,
     content,
     history.future.length,
@@ -1269,7 +1275,7 @@ export default function CanvasPage() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3 min-[1100px]:hidden">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3 min-[1440px]:hidden">
         <button
           ref={documentsToggleRef}
           type="button"
@@ -1291,7 +1297,7 @@ export default function CanvasPage() {
           onClick={() =>
             setCompactPanel(compactPanel === "inspector" ? null : "inspector")
           }
-          className="focus-ring flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-foreground hover:bg-subtle"
+          className="focus-ring ml-auto flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-foreground hover:bg-subtle min-[1200px]:hidden"
         >
           <PanelRight size={16} />
           {t("studio.canvas.inspector", { defaultValue: "Inspector" })}
@@ -1299,32 +1305,33 @@ export default function CanvasPage() {
       </div>
       <div
         aria-label={t("canvas.workspaceLabel")}
-        className="relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] bg-background min-[1100px]:grid-cols-[220px_minmax(0,1fr)_300px]"
+        className="relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] bg-background min-[1200px]:grid-cols-[minmax(0,1fr)_300px] min-[1440px]:grid-cols-[220px_minmax(0,1fr)_300px]"
       >
-        {compactPanel ? (
+        {drawerOpen ? (
           <button
             type="button"
             aria-label={t("studio.canvas.closePanel", {
               defaultValue: "Close panel",
             })}
             onClick={() => setCompactPanel(null)}
-            className="absolute inset-0 z-30 bg-background/40 min-[1100px]:hidden"
+            className="absolute inset-0 z-30 bg-background/40"
           />
         ) : null}
         <div
           ref={documentsPanelRef}
           tabIndex={-1}
           role={
-            isCompact && compactPanel === "documents" ? "dialog" : undefined
+            !dockLayout.documents && compactPanel === "documents" ? "dialog" : undefined
           }
           aria-modal={
-            isCompact && compactPanel === "documents" ? true : undefined
+            !dockLayout.documents && compactPanel === "documents" ? true : undefined
           }
           aria-label={t("studio.canvas.documents", {
             defaultValue: "Documents",
           })}
+          data-layout={dockLayout.documents ? "docked" : "drawer"}
           id="canvas-documents"
-          className={`${compactPanel === "documents" ? "block" : "hidden"} absolute inset-y-0 left-0 z-40 w-[220px] max-w-full bg-surface shadow-float min-[1100px]:static min-[1100px]:block min-[1100px]:min-h-0 min-[1100px]:shadow-none`}
+          className={`${compactPanel === "documents" ? "block" : "hidden"} absolute inset-y-0 left-0 z-40 w-[220px] max-w-full bg-surface shadow-float min-[1440px]:static min-[1440px]:block min-[1440px]:min-h-0 min-[1440px]:shadow-none`}
         >
           <CanvasAssetSidebar
             documents={documents}
@@ -1336,12 +1343,13 @@ export default function CanvasPage() {
             onCreateDocument={() => void handleCreateDocument()}
           />
         </div>
-        <section className="min-h-0 min-w-0 bg-background">
+        <section className="min-h-0 min-w-0 bg-canvas">
           {selectedDocumentId ? (
             isEditorReady ? (
               <div className="relative h-full min-h-0 overflow-hidden border-x border-border-subtle bg-canvas">
                 <CanvasStage
                   content={content}
+                  shortcutsDisabled={drawerOpen}
                   activeLayerId={activeLayerId}
                   activeTool={activeTool}
                   selectedObjectIds={selectedObjectIds}
@@ -1389,7 +1397,7 @@ export default function CanvasPage() {
                 </div>
                 <div
                   data-testid="canvas-floating-toolbar"
-                  className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3"
+                  className="pointer-events-none absolute inset-0 z-20"
                 >
                   <CanvasToolbar
                     activeTool={activeTool}
@@ -1517,16 +1525,47 @@ export default function CanvasPage() {
           ref={inspectorPanelRef}
           tabIndex={-1}
           role={
-            isCompact && compactPanel === "inspector" ? "dialog" : undefined
+            !dockLayout.inspector && compactPanel === "inspector" ? "dialog" : undefined
           }
           aria-modal={
-            isCompact && compactPanel === "inspector" ? true : undefined
+            !dockLayout.inspector && compactPanel === "inspector" ? true : undefined
           }
+          data-layout={dockLayout.inspector ? "docked" : "drawer"}
           id="canvas-inspector"
           aria-label={t("canvas.inspectorLabel")}
-          className={`${compactPanel === "inspector" ? "block" : "hidden"} absolute inset-y-0 right-0 z-40 w-[300px] max-w-full min-h-0 overflow-y-auto border-l border-border-subtle bg-surface p-3 shadow-float min-[1100px]:static min-[1100px]:block min-[1100px]:shadow-none`}
+          className={`${compactPanel === "inspector" ? "flex" : "hidden"} absolute inset-y-0 right-0 z-40 w-[300px] max-w-full min-h-0 flex-col border-l border-border-subtle bg-surface shadow-float min-[1200px]:static min-[1200px]:flex min-[1200px]:shadow-none`}
         >
-          <div className="flex min-h-full flex-col gap-3">
+          <div role="tablist" aria-label={t("studio.canvas.inspector", { defaultValue: "Inspector" })} className="flex shrink-0 border-b border-border-subtle px-2 pt-2">
+            {(["properties", "layers", "generation"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                id={`canvas-tab-${tab}`}
+                aria-controls={`canvas-panel-${tab}`}
+                aria-selected={inspectorTab === tab}
+                tabIndex={inspectorTab === tab ? 0 : -1}
+                onClick={() => setInspectorTab(tab)}
+                onKeyDown={(event) => {
+                  const tabs = ["properties", "layers", "generation"] as const;
+                  let next = tabs.indexOf(tab);
+                  if (event.key === "ArrowRight") next = (next + 1) % tabs.length;
+                  else if (event.key === "ArrowLeft") next = (next + tabs.length - 1) % tabs.length;
+                  else if (event.key === "Home") next = 0;
+                  else if (event.key === "End") next = tabs.length - 1;
+                  else return;
+                  event.preventDefault();
+                  setInspectorTab(tabs[next]);
+                  document.getElementById(`canvas-tab-${tabs[next]}`)?.focus();
+                }}
+                className={`focus-ring flex min-h-10 flex-1 items-center justify-center border-b-2 px-2 text-[12px] font-medium transition-colors duration-[var(--motion-feedback)] ${inspectorTab === tab ? "border-primary text-primary" : "border-transparent text-muted hover:bg-subtle hover:text-foreground"}`}
+              >
+                {t(tab === "properties" ? "canvas.propertiesTitle" : tab === "layers" ? "canvas.layersTitle" : "canvas.generationTitle")}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div id="canvas-panel-generation" role="tabpanel" aria-labelledby="canvas-tab-generation" hidden={inspectorTab !== "generation"}>
             <CanvasGenerationPanel
               prompt={prompt}
               imageModel={imageModel}
@@ -1583,19 +1622,27 @@ export default function CanvasPage() {
               onGenerate={() => void handleGenerate()}
             />
 
+            </div>
             {importError ? (
               <p role="alert" className="text-sm text-red-600">
                 {importError}
               </p>
             ) : null}
-            {isEditorReady ? (
+            <div id="canvas-panel-properties" role="tabpanel" aria-labelledby="canvas-tab-properties" hidden={inspectorTab !== "properties"}>
+            {isEditorReady && selectedObjectIds.length ? (
               <CanvasPropertiesPanel
                 objects={getSelectableCanvasObjects(content)
                   .filter((e) => selectedObjectIds.includes(e.object.id))
                   .map((e) => e.object)}
                 onChange={handleStyle}
               />
-            ) : null}
+            ) : (
+              <div className="px-5 py-6 text-[13px] leading-6 text-muted">
+                {t("studio.canvas.selectObjectHint", { defaultValue: "Select an object to adjust its appearance." })}
+              </div>
+            )}
+            </div>
+            <div id="canvas-panel-layers" role="tabpanel" aria-labelledby="canvas-tab-layers" hidden={inspectorTab !== "layers"}>
             {selectedDocumentId && isEditorReady ? (
               <CanvasLayersPanel
                 layers={content.layers}
@@ -1606,6 +1653,7 @@ export default function CanvasPage() {
                 onToggleLayerLock={handleToggleLayerLock}
               />
             ) : null}
+            </div>
           </div>
         </aside>
       </div>

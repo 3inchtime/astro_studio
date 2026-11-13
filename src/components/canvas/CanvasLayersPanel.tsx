@@ -22,7 +22,7 @@ export default function CanvasLayersPanel({
   const { t } = useTranslation();
 
   return (
-    <section className="rounded-xl border border-border-subtle bg-surface shadow-card">
+    <section className="bg-surface">
       <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
         <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
           <Layers3 size={14} strokeWidth={1.8} />
@@ -45,7 +45,7 @@ export default function CanvasLayersPanel({
           return (
             <div
               key={layer.id}
-              className={`rounded-lg border px-3 py-2 transition-colors ${
+              className={`rounded-lg border px-3 py-2 transition-colors duration-[var(--motion-feedback)] ${
                 selected
                   ? "border-primary/25 bg-primary/8"
                   : "border-transparent bg-surface-muted"
