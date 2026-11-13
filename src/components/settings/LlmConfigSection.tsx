@@ -201,11 +201,9 @@ export function LlmConfigSection() {
   useEffect(() => {
     if (serverConfigs) {
       setConfigs(serverConfigs);
-      if (!editingId && serverConfigs[0]) {
-        setEditingId(serverConfigs[0].id);
-      }
+      setEditingId((current) => current ?? serverConfigs[0]?.id ?? null);
     }
-  }, [editingId, serverConfigs]);
+  }, [serverConfigs]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
