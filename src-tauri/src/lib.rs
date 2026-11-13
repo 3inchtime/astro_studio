@@ -193,7 +193,7 @@ fn cleanup_stale_legacy_generation_recoveries(conn: &Connection) -> Result<usize
              SELECT g.id
              FROM generations g
              WHERE g.status != 'processing'
-               AND NOT (g.status = 'failed' AND generation_recoveries.request_state = 'response_ready')
+               AND NOT (g.status = 'failed' AND generation_recoveries.request_state IN ('response_ready', 'requesting'))
                AND NOT EXISTS (
                    SELECT 1
                    FROM generation_jobs j
@@ -454,7 +454,7 @@ pub(crate) async fn recover_legacy_generation(
         let conn = db.conn.lock().map_err(|_| AppError::Validation {
             message: "Library unavailable.".into(),
         })?;
-        set_generation_failed(&conn, generation_id, INTERRUPTED_GENERATION_MESSAGE, true)?;
+        set_generation_failed(&conn, generation_id, INTERRUPTED_GENERATION_MESSAGE, false)?;
         return Ok(());
     }
     let images = recover_legacy_payload(db, engine, &recovery).await?;
@@ -1126,6 +1126,33 @@ mod legacy_recovery_guard_tests {
             let pending = load_pending_legacy_generation_recoveries(&conn).unwrap();
             assert_eq!(pending.len(), 1);
             assert_eq!(pending[0].generation_id, "legacy-failed");
+        }
+        drop(db);
+        remove_temp_test_db(path);
+    }
+
+    #[test]
+    fn legacy_unknown_request_survives_cleanup_without_becoming_recoverable() {
+        let (db, path) = temp_test_db("legacy-unknown");
+        {
+            let conn = db.conn.lock().unwrap();
+            insert_generation(&conn, "legacy-unknown", "processing");
+            insert_recovery(&conn, "legacy-unknown");
+            set_generation_failed(
+                &conn,
+                "legacy-unknown",
+                INTERRUPTED_GENERATION_MESSAGE,
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                cleanup_stale_legacy_generation_recoveries(&conn).unwrap(),
+                0
+            );
+            assert!(recovery_exists(&conn, "legacy-unknown"));
+            assert!(load_pending_legacy_generation_recoveries(&conn)
+                .unwrap()
+                .is_empty());
         }
         drop(db);
         remove_temp_test_db(path);

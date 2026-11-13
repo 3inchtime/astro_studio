@@ -275,6 +275,7 @@ pub async fn run_provider_smoke_test(
     fingerprint: String,
     client_request_id: String,
 ) -> Result<GenerateResult, AppError> {
+    let _write = crate::storage::write_operation::<AppError>()?;
     let plan = get_provider_smoke_plan(db.clone(), model, provider_id)?;
     if fingerprint != plan.fingerprint {
         return Err(validation(

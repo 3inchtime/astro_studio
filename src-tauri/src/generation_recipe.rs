@@ -148,6 +148,11 @@ pub(crate) fn load_recipe(
         }
         Ok(None) => {
             recipe.warnings.push("legacy_incomplete".into());
+            let unknown: bool = db.conn.lock().map_err(|_| invalid("Cannot read saved generation"))?
+                .query_row("SELECT EXISTS(SELECT 1 FROM generations g LEFT JOIN generation_recoveries r ON r.generation_id=g.id WHERE g.id=?1 AND g.status='failed' AND COALESCE(r.request_state!='response_ready',1) AND (r.request_state='requesting' OR g.error_message=?2))", rusqlite::params![generation_id, crate::INTERRUPTED_GENERATION_MESSAGE], |row| row.get(0))?;
+            if unknown {
+                recipe.warnings.push("provider_outcome_unknown".into());
+            }
             if let Some(metadata) = generation
                 .request_metadata
                 .as_ref()
@@ -261,6 +266,45 @@ pub(crate) fn get_generation_recipe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_unknown_recipe_requires_charge_acknowledgement() {
+        let dir = std::env::temp_dir().join(format!("recipe-unknown-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::open(&dir.join("test.db")).unwrap();
+        db.run_migrations().unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            for (id, error) in [
+                ("requesting", None),
+                ("old", Some(crate::INTERRUPTED_GENERATION_MESSAGE)),
+                ("ordinary", Some("Provider rejected request")),
+                ("ready", None),
+            ] {
+                conn.execute("INSERT INTO generations(id,prompt,status,error_message) VALUES(?1,'fixture','failed',?2)", rusqlite::params![id,error]).unwrap();
+            }
+            for (id, state) in [("requesting", "requesting"), ("ready", "response_ready")] {
+                conn.execute("INSERT INTO generation_recoveries(generation_id,request_kind,request_state,output_format,created_at,updated_at) VALUES(?1,'generate',?2,'png','2026-11-13','2026-11-13')",rusqlite::params![id,state]).unwrap();
+            }
+        }
+        for (id, expected) in [
+            ("requesting", true),
+            ("old", true),
+            ("ordinary", false),
+            ("ready", false),
+        ] {
+            assert_eq!(
+                load_recipe(&db, id)
+                    .unwrap()
+                    .warnings
+                    .contains(&"provider_outcome_unknown".into()),
+                expected,
+                "{id}"
+            );
+        }
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn legacy_recipe_reports_missing_authority_and_preserves_basic_parameters() {
         let dir = std::env::temp_dir().join(format!("recipe-test-{}", uuid::Uuid::new_v4()));

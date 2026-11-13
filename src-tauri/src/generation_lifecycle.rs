@@ -2980,14 +2980,13 @@ fn prepare_compatibility_job(
             uuid::Uuid::from_bytes(bytes).to_string()
         })
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    if let (Some(source), Some(profile_id)) =
-        (&request.source_generation_id, &request.provider_profile_id)
-    {
+    if let Some(source) = &request.source_generation_id {
         let recipe = crate::generation_recipe::load_recipe(db, source)?;
         let value =
             serde_json::to_value(recipe).map_err(|_| AppError::GenerationJobInvalidSnapshot)?;
         if !request.provider_override_confirmed
-            && value["provider_profile_id"].as_str() == Some(profile_id)
+            && request.provider_profile_id.is_some()
+            && value["provider_profile_id"].as_str() == request.provider_profile_id.as_deref()
             && value["warnings"].as_array().is_some_and(|warnings| {
                 warnings.iter().any(|warning| {
                     matches!(
@@ -3125,6 +3124,10 @@ fn prepare_compatibility_job(
                         }
                 })
         });
+    let mut source_ref = serde_json::json!({ "id": client_request_id });
+    if let Some(source_generation_id) = &request.source_generation_id {
+        source_ref["source_generation_id"] = serde_json::json!(source_generation_id);
+    }
     Ok(PreparedGenerationJob {
         job_id,
         client_request_id: client_request_id.clone(),
@@ -3148,7 +3151,7 @@ fn prepare_compatibility_job(
         request_options,
         parent_job_id: retry_parent.as_ref().map(|p| p.id.clone()),
         source_kind: request.kind.as_str().to_string(),
-        source_ref: serde_json::json!({ "id": client_request_id }),
+        source_ref,
         provider_kind,
         provider_profile_id,
         endpoint_snapshot,
@@ -3747,6 +3750,54 @@ mod tests {
             conversation_id: None,
             project_id: Some("default".to_string()),
         }
+    }
+
+    #[test]
+    fn recipe_successful_reuse_persists_source_link_across_restart() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut state =
+            settings::read_model_provider_profiles_state(&fixture.db, ENGINE_GPT_IMAGE_2).unwrap();
+        state.profiles[0].api_key = "test-key".into();
+        fixture.save_profiles(ENGINE_GPT_IMAGE_2, state);
+        fixture.db.conn.lock().unwrap().execute("INSERT INTO generations(id,prompt,status) VALUES('original-success','saved prompt','completed')", []).unwrap();
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.client_request_id = Some("fresh-reuse-request".into());
+        request.source_generation_id = Some("original-success".into());
+        let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
+        assert!(prepared.parent_job_id.is_none());
+        let result = enqueue_job(&mut fixture.db.conn.lock().unwrap(), &prepared).unwrap();
+        let reopened = Database::open(&fixture.root.join("astro_studio.db")).unwrap();
+        let persisted = get_job(&reopened.conn.lock().unwrap(), &result.job_id).unwrap();
+        assert_eq!(
+            persisted.source_ref["source_generation_id"],
+            "original-success"
+        );
+        assert_eq!(persisted.source_ref["id"], "fresh-reuse-request");
+        assert!(persisted.parent_job_id.is_none());
+        assert_ne!(persisted.generation_id, "original-success");
+        let mut invalid = prepared;
+        invalid.client_request_id = "invalid-link-request".into();
+        invalid.job_id = uuid::Uuid::new_v4().to_string();
+        invalid.generation_id = uuid::Uuid::new_v4().to_string();
+        invalid.source_ref["source_generation_id"] = serde_json::json!("invalid\n");
+        assert!(matches!(
+            enqueue_job(&mut fixture.db.conn.lock().unwrap(), &invalid),
+            Err(AppError::GenerationJobInvalidSnapshot)
+        ));
+        drop(reopened);
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn recipe_reuse_rejects_missing_and_deleted_source_without_provider_override() {
+        let fixture = CompatibilityPreparationFixture::new();
+        let mut request = compatibility_request(ENGINE_GPT_IMAGE_2);
+        request.source_generation_id = Some("missing-origin".into());
+        assert!(prepare_compatibility_job(&fixture.db, &request).is_err());
+        fixture.db.conn.lock().unwrap().execute("INSERT INTO generations(id,prompt,status,deleted_at) VALUES('deleted-origin','saved prompt','completed','2026-11-13')", []).unwrap();
+        request.source_generation_id = Some("deleted-origin".into());
+        assert!(prepare_compatibility_job(&fixture.db, &request).is_err());
+        fixture.cleanup();
     }
 
     #[test]

@@ -478,14 +478,16 @@ fn recovery_summary(db: &Database) -> Result<RecoverySummary, AppError> {
          AND (j.error_code IN ('app_interrupted','provider_outcome_unknown') OR EXISTS(SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND r.request_state='response_ready'))
          AND NOT EXISTS(SELECT 1 FROM generation_jobs child WHERE child.parent_job_id=j.id)
          UNION ALL
-         SELECT g.id, COALESCE(g.conversation_id,''), substr(g.prompt,1,180), g.status, 1, 0, g.created_at
-         FROM generations g JOIN generation_recoveries r ON r.generation_id=g.id
-         WHERE g.status='failed' AND g.deleted_at IS NULL AND r.request_state='response_ready'
+         SELECT g.id, COALESCE(g.conversation_id,''), substr(g.prompt,1,180), g.status,
+            COALESCE(r.request_state='response_ready',0), COALESCE(r.request_state!='response_ready',1), g.created_at
+         FROM generations g LEFT JOIN generation_recoveries r ON r.generation_id=g.id
+         WHERE g.status='failed' AND g.deleted_at IS NULL
+         AND (r.request_state IN ('response_ready','requesting') OR g.error_message=?1)
          AND NOT EXISTS(SELECT 1 FROM generation_jobs j WHERE j.generation_id=g.id)
          ) ORDER BY sort_time DESC LIMIT 20"
     )?;
     let entries = statement
-        .query_map([], |r| {
+        .query_map([crate::INTERRUPTED_GENERATION_MESSAGE], |r| {
             Ok(RecoveryEntry {
                 generation_id: r.get(0)?,
                 conversation_id: r.get(1)?,
@@ -1041,6 +1043,26 @@ mod tests {
             1
         );
         assert_eq!(fixture.status(), "completed");
+    }
+
+    #[test]
+    fn legacy_unknown_summary_retains_requesting_and_old_interrupted_failures() {
+        let fixture = Fixture::new();
+        {
+            let conn = fixture.db.conn.lock().unwrap();
+            for id in ["legacy-requesting", "legacy-old", "ordinary-failure"] {
+                conn.execute("INSERT INTO generations(id,prompt,status,error_message) VALUES(?1,'fixture','failed',?2)", rusqlite::params![id, if id == "ordinary-failure" { "Provider rejected request" } else { crate::INTERRUPTED_GENERATION_MESSAGE }]).unwrap();
+            }
+            conn.execute("INSERT INTO generation_recoveries(generation_id,request_kind,request_state,output_format,created_at,updated_at) VALUES('legacy-requesting','generate','requesting','png','2026-11-13','2026-11-13')",[]).unwrap();
+        }
+        let summary = recovery_summary(&fixture.db).unwrap();
+        assert_eq!(summary.entries.len(), 2);
+        assert!(summary
+            .entries
+            .iter()
+            .all(|entry| entry.result_unknown && !entry.can_recover));
+        assert_eq!(summary.pending, 0);
+        assert!(!legacy_recovery_ready(&fixture.db, "legacy-requesting").unwrap());
     }
 
     #[test]

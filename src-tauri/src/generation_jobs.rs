@@ -325,6 +325,8 @@ struct GenerateEditSourceRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    source_generation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     conversation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_id: Option<String>,
@@ -1972,6 +1974,7 @@ impl GenerationJobSourceRef {
         let ids_valid = match &source_ref {
             Self::GenerateEdit(source_ref) => source_reference_ids_valid([
                 &source_ref.id,
+                &source_ref.source_generation_id,
                 &source_ref.conversation_id,
                 &source_ref.project_id,
             ]),
