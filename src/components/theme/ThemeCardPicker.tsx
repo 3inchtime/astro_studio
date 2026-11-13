@@ -57,18 +57,18 @@ export function ThemeCardPicker({
                 ))}
               </div>
               {active && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                   <Check size={11} strokeWidth={2.5} />
                   {activeLabel}
                 </span>
               )}
             </div>
             <div className={compact ? "mt-2.5" : "mt-3"}>
-              <div className="text-[12px] font-semibold text-foreground">
+              <div className="text-xs font-semibold text-foreground">
                 {name}
               </div>
               <p className={cn(
-                "mt-1 text-[12px] leading-relaxed text-muted",
+                "mt-1 text-xs leading-relaxed text-muted",
               )}
               >
                 {description}

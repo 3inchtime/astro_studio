@@ -58,12 +58,12 @@ export default function MessageBubble({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           data-message-role="user"
-          className="flex justify-end"
+          className="flex justify-start"
         >
           <div className="max-w-[68%] rounded-xl border border-border-subtle bg-surface px-5 py-2.5 text-foreground shadow-card">
-            <p className="text-[14px] leading-[1.65] text-foreground whitespace-pre-wrap">
+            <p className="text-sm leading-[1.65] text-foreground whitespace-pre-wrap">
               {agentMessage.content}
             </p>
           </div>
@@ -75,7 +75,7 @@ export default function MessageBubble({
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
         data-message-role="assistant"
         className="flex items-start justify-start gap-3"
       >
@@ -83,35 +83,35 @@ export default function MessageBubble({
           <Sparkles size={14} className="text-primary" strokeWidth={2.5} />
         </div>
         <div className="studio-card max-w-[min(78vw,760px)] rounded-xl  px-5 py-3.5">
-          <p className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground/86">
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
             {agentMessage.content}
           </p>
           {agentMessage.draft_prompt && agentMessage.ready_to_generate && (
             <div className="mt-3 rounded-md border border-border/70 bg-surface/80 p-3">
-              <p className="text-[12px] font-semibold uppercase text-muted/70">
+              <p className="text-xs font-semibold uppercase text-muted">
                 {t("generate.agent.finalPrompt")}
               </p>
-              <p className="mt-2 whitespace-pre-wrap text-[14px] leading-relaxed text-foreground">
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                 {agentMessage.draft_prompt}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-md bg-primary px-3 py-1.5 text-[12px] font-semibold text-primary-foreground"
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
                   onClick={() => onAcceptAgentDraft?.(agentMessage)}
                 >
                   {t("generate.agent.acceptAndGenerate")}
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border border-border/70 px-3 py-1.5 text-[12px] font-medium text-foreground"
+                  className="rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground"
                   onClick={() => onContinueAgentDraft?.(agentMessage)}
                 >
                   {t("generate.agent.continueRefining")}
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border border-border/70 px-3 py-1.5 text-[12px] font-medium text-foreground"
+                  className="rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground"
                   onClick={() => onEditAgentDraft?.(agentMessage)}
                 >
                   {t("generate.agent.editManually")}
@@ -131,17 +131,17 @@ export default function MessageBubble({
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
         data-message-role="user"
-        className="flex justify-end"
+        className="flex justify-start"
       >
-        <div className="group flex w-full max-w-[760px] items-start gap-2">
-          <div className="min-w-0 flex-1 rounded-xl border border-border-subtle bg-surface px-4 py-3 text-foreground selection:bg-primary/15">
-            <p className="mb-1.5 text-[12px] font-medium text-muted">
+        <div className="group flex w-full max-w-full items-start gap-2">
+          <div className="min-w-0 flex-1 bg-transparent px-1 py-1 text-foreground selection:bg-primary/15">
+            <p className="mb-1.5 text-xs font-medium text-muted">
               {t("studio.prompt", { defaultValue: "Prompt" })}
             </p>
             <p
-              className={`${promptIsLong && !promptExpanded ? "line-clamp-3" : ""} break-words text-[14px] leading-relaxed text-foreground whitespace-pre-wrap`}
+              className={`${promptIsLong && !promptExpanded ? "line-clamp-3" : ""} break-words text-sm leading-relaxed text-foreground whitespace-pre-wrap`}
             >
               {message.content}
             </p>
@@ -150,7 +150,7 @@ export default function MessageBubble({
                 type="button"
                 aria-expanded={promptExpanded}
                 onClick={() => setPromptExpanded(!promptExpanded)}
-                className="focus-ring mt-2 rounded-lg text-[12px] font-medium text-primary"
+                className="focus-ring mt-2 rounded-lg text-xs font-medium text-primary"
               >
                 {promptExpanded
                   ? t("studio.collapsePrompt", { defaultValue: "Show less" })
@@ -193,7 +193,7 @@ export default function MessageBubble({
                   className={`focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border bg-surface shadow-sm transition-all ${
                     isPromptFavorited
                       ? "border-primary/18 text-primary hover:bg-primary/6"
-                      : "border-primary/14 text-primary/70 hover:bg-primary/6 hover:text-primary"
+                      : "border-primary/14 text-primary hover:bg-primary/6 hover:text-primary"
                   }`}
                   aria-label={
                     isPromptFavorited
@@ -216,7 +216,7 @@ export default function MessageBubble({
               {onEditPrompt && (
                 <button
                   onClick={() => onEditPrompt(message)}
-                  className="focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-primary/14 bg-surface text-primary/70 shadow-sm transition-all hover:bg-primary/6 hover:text-primary"
+                  className="focus-ring flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-primary/14 bg-surface text-primary shadow-sm transition-all hover:bg-primary/6 hover:text-primary"
                   aria-label={t("generate.editPrompt")}
                   title={t("generate.editPrompt")}
                 >
@@ -235,22 +235,22 @@ export default function MessageBubble({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       data-message-role="assistant"
       className="flex items-start justify-start gap-3"
     >
       <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-primary">
         <Sparkles size={14} className="text-primary" strokeWidth={2.5} />
       </div>
-      <div className="min-w-0 max-w-[min(78vw,760px)]">
-        <AnimatePresence mode="wait">
+      <div className="min-w-0 w-full">
+        <AnimatePresence initial={false}>
           {message.status === "processing" && (
             <motion.div
               key="loading"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0, scale: 1.03, filter: "blur(6px)" }}
-              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               className="overflow-hidden rounded-xl "
             >
               {message.partialPreview ? (
@@ -273,7 +273,7 @@ export default function MessageBubble({
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                className="inline-block overflow-hidden rounded-xl border border-border-subtle bg-surface"
+                className="inline-block max-w-full overflow-hidden rounded-lg bg-canvas"
               >
                 <ImageGrid
                   images={message.images.map((image) => ({
@@ -318,15 +318,15 @@ export default function MessageBubble({
               <motion.div
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className="whitespace-pre-wrap break-words text-[14px] text-error"
+                transition={{ duration: 0.18 }}
+                className="whitespace-pre-wrap break-words text-sm text-error"
               >
                 {message.error || t("generate.generationFailed")}
               </motion.div>
               {message.retryRequest && onRetry && (
                 <button
                   onClick={() => onRetry(message)}
-                  className="studio-control focus-ring mt-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium hover:studio-control-hover"
+                  className="studio-control focus-ring mt-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium hover:studio-control-hover"
                 >
                   <RotateCcw size={13} />
                   {t("generate.retry")}

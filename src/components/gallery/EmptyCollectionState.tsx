@@ -18,8 +18,8 @@ export default function EmptyCollectionState({ title, subtitle }: EmptyCollectio
         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-[12px] border border-border-subtle bg-subtle">
           <ImageIcon size={24} className="text-muted" strokeWidth={1.4} />
         </div>
-        <p className="text-[14px] font-medium text-foreground tracking-tight">{title}</p>
-        <p className="mt-1 text-[12px] text-muted">{subtitle}</p>
+        <p className="text-sm font-medium text-foreground tracking-tight">{title}</p>
+        <p className="mt-1 text-xs text-muted">{subtitle}</p>
       </motion.div>
     </div>
   );

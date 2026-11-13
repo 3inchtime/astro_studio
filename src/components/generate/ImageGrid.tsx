@@ -72,9 +72,9 @@ export default function ImageGrid({
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
+      initial={{ opacity: 0 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       className={
         isMultiImage
           ? "grid grid-cols-2 gap-3"
@@ -83,18 +83,19 @@ export default function ImageGrid({
     >
       {images.map((img, i) => (
         <div key={img.path} className={isMultiImage ? "min-w-0" : "w-fit"}>
-          <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
+          <div className="overflow-hidden rounded-lg bg-canvas">
             <button
               type="button"
               aria-label={t("studio.openImage", {
                 defaultValue: "Open image {{number}}",
                 number: i + 1,
               })}
+              data-preview-image-id={img.imageId}
               onClick={() => onImageClick(images, i)}
-              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden bg-background ${
+              className={`focus-ring relative flex cursor-pointer items-center justify-center overflow-hidden bg-canvas ${
                 isMultiImage
                   ? "h-60 w-full"
-                  : "inline-block h-72 w-fit max-w-[min(76vw,36rem)]"
+                  : "inline-block h-[min(52cqh,520px)] w-fit max-w-full"
               }`}
             >
               <ImagePreview image={img} isMultiImage={isMultiImage} />

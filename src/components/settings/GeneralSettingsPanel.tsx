@@ -69,8 +69,8 @@ export function GeneralSettingsPanel({
               <SlidersHorizontal size={14} className="text-primary" strokeWidth={2} />
             </div>
             <div>
-              <h3 className="text-[14px] font-semibold text-foreground">{t("settings.general")}</h3>
-              <p className="mt-0.5 text-[12px] text-muted">{t("settings.generalDesc")}</p>
+              <h3 className="text-sm font-semibold text-foreground">{t("settings.general")}</h3>
+              <p className="mt-0.5 text-xs text-muted">{t("settings.generalDesc")}</p>
             </div>
           </div>
           <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible" className="border-b border-border-subtle">
@@ -80,15 +80,15 @@ export function GeneralSettingsPanel({
                   <Languages size={14} className="text-primary" strokeWidth={2} />
                 </div>
                 <div>
-                  <h4 className="text-[14px] font-semibold text-foreground">{t("settings.language")}</h4>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.languageDesc")}</p>
+                  <h4 className="text-sm font-semibold text-foreground">{t("settings.language")}</h4>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.languageDesc")}</p>
                 </div>
               </div>
               <select
                 aria-label={t("settings.language")}
                 value={language}
                 onChange={(e) => onLanguageChange(normalizeLanguage(e.target.value))}
-                className="select-control studio-input focus-ring h-9 w-full rounded-lg px-3 pr-8 text-[14px]"
+                className="select-control studio-input focus-ring h-9 w-full rounded-lg px-3 pr-8 text-sm"
               >
                 {LANGUAGE_OPTIONS.map((option) => (
                   <option key={option.code} value={option.code}>
@@ -105,8 +105,8 @@ export function GeneralSettingsPanel({
                   <Palette size={14} className="text-primary" strokeWidth={2} />
                 </div>
                 <div>
-                  <h4 className="text-[14px] font-semibold text-foreground">{t("settings.theme")}</h4>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.themeDesc")}</p>
+                  <h4 className="text-sm font-semibold text-foreground">{t("settings.theme")}</h4>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.themeDesc")}</p>
                 </div>
               </div>
               <div className="space-y-3">
@@ -118,8 +118,8 @@ export function GeneralSettingsPanel({
                   onSelect={(themeId, event) => onThemeChange(themeId, event)}
                 />
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-subtle/20 px-3 py-2.5">
-                  <p className="text-[12px] text-muted">{t("settings.themePreview")}</p>
-                  <span className="text-[12px] font-medium text-primary/80">
+                  <p className="text-xs text-muted">{t("settings.themePreview")}</p>
+                  <span className="text-xs font-medium text-primary">
                     {t("theme.active")}
                   </span>
                 </div>
@@ -130,11 +130,11 @@ export function GeneralSettingsPanel({
             <div className="grid gap-4 py-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-center lg:gap-6">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-error/10 bg-error/5">
-                  <Trash2 size={14} className="text-error/70" strokeWidth={2} />
+                  <Trash2 size={14} className="text-error" strokeWidth={2} />
                 </div>
                 <div>
-                  <h4 className="text-[14px] font-semibold text-foreground">{t("settings.trashRetention")}</h4>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.trashRetentionDesc")}</p>
+                  <h4 className="text-sm font-semibold text-foreground">{t("settings.trashRetention")}</h4>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.trashRetentionDesc")}</p>
                 </div>
               </div>
               <div className="flex min-w-0 flex-col gap-2 lg:flex-row">
@@ -149,13 +149,13 @@ export function GeneralSettingsPanel({
                       ...trashSettings,
                       retention_days: Math.min(365, Math.max(1, Number(e.target.value) || 1)),
                     })}
-                    className="h-9 min-w-0 flex-1 bg-transparent text-[14px] text-foreground focus:outline-none"
+                    className="h-9 min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
                   />
-                  <span className="text-[12px] text-muted">{t("settings.days")}</span>
+                  <span className="text-xs text-muted">{t("settings.days")}</span>
                 </div>
                 <button
                   onClick={onSaveTrashRetention}
-                  className="studio-control-primary focus-ring inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg px-4 text-[14px] font-medium"
+                  className="studio-control-primary focus-ring inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium"
                 >
                   {trashSaved && <Check size={13} strokeWidth={2.5} />}
                   {trashSaved ? t("settings.saved") : t("settings.saveTrashRetention")}
@@ -163,7 +163,7 @@ export function GeneralSettingsPanel({
                 <button
                   type="button"
                   onClick={onOpenTrash}
-                  className="studio-control focus-ring inline-flex h-9 shrink-0 items-center justify-center rounded-lg px-4 text-[14px] font-medium hover:studio-control-hover"
+                  className="studio-control focus-ring inline-flex h-9 shrink-0 items-center justify-center rounded-lg px-4 text-sm font-medium hover:studio-control-hover"
                 >
                   {t("settings.openTrash")}
                 </button>
@@ -177,8 +177,8 @@ export function GeneralSettingsPanel({
                   <Type size={14} className="text-primary" strokeWidth={2} />
                 </div>
                 <div>
-                  <h4 className="text-[14px] font-semibold text-foreground">{t("settings.fontSize")}</h4>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.fontSizeDesc")}</p>
+                  <h4 className="text-sm font-semibold text-foreground">{t("settings.fontSize")}</h4>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.fontSizeDesc")}</p>
                 </div>
               </div>
               <div className="space-y-3">
@@ -198,10 +198,10 @@ export function GeneralSettingsPanel({
                         }`}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-[12px] font-medium text-foreground">{t(fontSizeLabelKeys[option])}</span>
+                          <span className="text-xs font-medium text-foreground">{t(fontSizeLabelKeys[option])}</span>
                           {active && <Check size={13} className="text-primary" strokeWidth={2.5} />}
                         </div>
-                        <p className={`mt-2 text-foreground ${option === "small" ? "text-[12px]" : option === "medium" ? "text-[12px]" : "text-[14px]"}`}>
+                        <p className={`mt-2 text-foreground ${option === "small" ? "text-xs" : option === "medium" ? "text-xs" : "text-sm"}`}>
                           Aa Astro Studio
                         </p>
                       </button>
@@ -209,8 +209,8 @@ export function GeneralSettingsPanel({
                   })}
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-subtle/20 px-3 py-2.5">
-                  <p className="text-[12px] text-muted">{t("settings.fontSizePreview")}</p>
-                  <span className="text-[12px] font-medium text-primary/80">
+                  <p className="text-xs text-muted">{t("settings.fontSizePreview")}</p>
+                  <span className="text-xs font-medium text-primary">
                     {fontSizeSaved ? t("settings.saved") : t(fontSizeLabelKeys[fontSize])}
                   </span>
                 </div>
@@ -224,21 +224,21 @@ export function GeneralSettingsPanel({
                   <Download size={14} className="text-primary" strokeWidth={2} />
                 </div>
                 <div>
-                  <h4 className="text-[14px] font-semibold text-foreground">{t("settings.about")}</h4>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.aboutDesc")}</p>
+                  <h4 className="text-sm font-semibold text-foreground">{t("settings.about")}</h4>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.aboutDesc")}</p>
                 </div>
               </div>
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between rounded-lg border border-border-subtle bg-subtle/20 px-3 py-2.5">
-                  <span className="text-[12px] text-foreground">{t("settings.currentVersion")}</span>
-                  <span className="text-[12px] font-medium text-muted">v{appVersion}</span>
+                  <span className="text-xs text-foreground">{t("settings.currentVersion")}</span>
+                  <span className="text-xs font-medium text-muted">v{appVersion}</span>
                 </div>
                 {updateSupported && (
                   <button
                     type="button"
                     onClick={onCheckUpdate}
                     disabled={updateChecking}
-                    className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-4 text-[14px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                    className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {updateChecking ? (
                       <>

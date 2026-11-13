@@ -52,7 +52,7 @@ export default function ProjectsSidebar({
     <div className="flex h-full flex-col">
       <div className="border-b border-border-subtle px-4 py-4">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <FolderKanban size={13} strokeWidth={1.8} />
             <span>{t("projects.directory")}</span>
           </div>

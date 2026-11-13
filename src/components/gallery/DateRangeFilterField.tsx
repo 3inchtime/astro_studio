@@ -107,7 +107,7 @@ export default function DateRangeFilterField({
         </span>
 
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12px] font-medium text-foreground">
+          <span className="block truncate text-xs font-medium text-foreground">
             {displayValue}
           </span>
         </span>
@@ -138,7 +138,7 @@ export default function DateRangeFilterField({
                 type="button"
                 onClick={() => onChange(buildPresetRange(presetId))}
                 aria-label={presetLabels[presetId]}
-                className="focus-ring min-w-0 rounded-[8px] border border-border bg-subtle px-2 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-surface"
+                className="focus-ring min-w-0 rounded-[8px] border border-border bg-subtle px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-surface"
               >
                 {presetLabels[presetId]}
               </button>
@@ -165,10 +165,10 @@ export default function DateRangeFilterField({
 
           <div className="mt-2 flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-[12px] font-medium text-foreground">
+              <p className="truncate text-xs font-medium text-foreground">
                 {displayValue}
               </p>
-              <p className="text-[12px] text-muted">
+              <p className="text-xs text-muted">
                 {value.from && value.to
                   ? `${value.from} → ${value.to}`
                   : label}
@@ -179,14 +179,14 @@ export default function DateRangeFilterField({
               <button
                 type="button"
                 onClick={() => onChange({ from: "", to: "" })}
-                className="studio-control focus-ring rounded-[8px] px-2 py-1 text-[12px] font-medium hover:studio-control-hover"
+                className="studio-control focus-ring rounded-[8px] px-2 py-1 text-xs font-medium hover:studio-control-hover"
               >
                 {presets.clear}
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="studio-control-primary focus-ring rounded-[8px] px-2.5 py-1 text-[12px] font-semibold"
+                className="studio-control-primary focus-ring rounded-[8px] px-2.5 py-1 text-xs font-semibold"
               >
                 {presets.done}
               </button>

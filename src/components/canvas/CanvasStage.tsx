@@ -808,7 +808,7 @@ export default function CanvasStage({
     >
       <div className="absolute inset-0 bg-canvas" />
       {content.layers.every((layer) => layer.objects.length === 0) && (
-        <div className="pointer-events-none absolute left-20 top-4 z-10 max-w-[calc(100%-240px)] line-clamp-2 text-[12px] text-muted">
+        <div className="pointer-events-none absolute left-20 top-4 z-10 max-w-[calc(100%-240px)] line-clamp-2 text-xs text-muted">
           {t("canvas.emptyStateHint")}
         </div>
       )}
@@ -1147,7 +1147,7 @@ export default function CanvasStage({
         <button
           type="button"
           onClick={() => onResetImageAspect(selectedImageObject.id)}
-          className="focus-ring absolute z-20 rounded-[10px] border border-border-subtle bg-surface/95 px-3 py-2 text-[12px] font-medium text-foreground shadow-card transition-colors hover:bg-subtle"
+          className="focus-ring absolute z-20 rounded-[10px] border border-border-subtle bg-surface/95 px-3 py-2 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-subtle"
           style={{
             left: Math.min(
               stageSize.width - 132,

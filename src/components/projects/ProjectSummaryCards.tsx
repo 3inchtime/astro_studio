@@ -11,7 +11,7 @@ export default function ProjectSummaryCards({
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <div className="rounded-[12px] border border-border-subtle bg-surface p-4">
-        <div className="text-[12px] uppercase tracking-[0.08em] text-muted">
+        <div className="text-xs uppercase tracking-[0.08em] text-muted">
           {t("projects.conversationCount")}
         </div>
         <div className="mt-2 text-[24px] font-semibold text-foreground">
@@ -19,7 +19,7 @@ export default function ProjectSummaryCards({
         </div>
       </div>
       <div className="rounded-[12px] border border-border-subtle bg-surface p-4">
-        <div className="text-[12px] uppercase tracking-[0.08em] text-muted">
+        <div className="text-xs uppercase tracking-[0.08em] text-muted">
           {t("projects.imageCount")}
         </div>
         <div className="mt-2 text-[24px] font-semibold text-foreground">

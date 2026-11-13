@@ -58,7 +58,7 @@ interface CanvasToolbarProps extends CanvasActionProps {
 }
 
 const TOOL_BUTTON_CLASS =
-  "studio-control focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground/75 transition-colors duration-[var(--motion-feedback)] hover:bg-subtle disabled:opacity-30";
+  "studio-control focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors duration-[var(--motion-feedback)] hover:bg-subtle disabled:opacity-30";
 export default function CanvasToolbar(props: CanvasToolbarProps) {
   const { t } = useTranslation();
   const [actions, setActions] = useState(false);
@@ -212,7 +212,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           title={t("canvas.properties")}
           aria-expanded={properties}
           onClick={() => setProperties(!properties)}
-          className={`${TOOL_BUTTON_CLASS} text-[12px] tabular-nums`}
+          className={`${TOOL_BUTTON_CLASS} text-xs tabular-nums`}
         >
           {props.strokeSize}px
         </button>
@@ -277,7 +277,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
         </div>
         {button("canvas.tool.zoomIn", props.onZoomIn, Plus)}
         {button("canvas.fitFrame", props.onFitFrame, Maximize2)}
-        <span className="mx-2 hidden text-[12px] text-muted sm:inline">
+        <span className="mx-2 hidden text-xs text-muted sm:inline">
           {t("canvas.selectionCount", { count: props.selectedObjectCount })}
         </span>
       </div>

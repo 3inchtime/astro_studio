@@ -455,7 +455,7 @@ export default function ProjectHomePage() {
                         setRenameDialogOpen(true);
                       }}
                       disabled={projectActionPending}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                     >
                       <Pencil size={13} />
                       <span>{t("sidebar.rename")}</span>
@@ -464,7 +464,7 @@ export default function ProjectHomePage() {
                       <button
                         onClick={() => void handleUnpinProject()}
                         disabled={projectActionPending}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                       >
                         <PinOff size={13} />
                         <span>{t("projects.unpin")}</span>
@@ -473,7 +473,7 @@ export default function ProjectHomePage() {
                       <button
                         onClick={() => void handlePinProject()}
                         disabled={projectActionPending}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                       >
                         <Pin size={13} />
                         <span>{t("projects.pin")}</span>
@@ -482,7 +482,7 @@ export default function ProjectHomePage() {
                     <button
                       onClick={() => void handleArchiveProject()}
                       disabled={projectActionPending}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground hover:bg-subtle hover:text-foreground transition-colors disabled:opacity-50"
                     >
                       <Archive size={13} />
                       <span>{t("sidebar.archive")}</span>

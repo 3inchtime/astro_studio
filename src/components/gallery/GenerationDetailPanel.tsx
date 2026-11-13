@@ -86,7 +86,7 @@ export default function GenerationDetailPanel({
     >
       <div className="p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h3 id={titleId} className="text-[14px] font-semibold text-foreground tracking-tight">
+          <h3 id={titleId} className="text-sm font-semibold text-foreground tracking-tight">
             {title}
           </h3>
           <button
@@ -157,10 +157,10 @@ export default function GenerationDetailPanel({
 
         <div className="space-y-3">
           <div>
-            <span className="text-[12px] font-medium uppercase tracking-wider text-muted">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted">
               {t("gallery.prompt")}
             </span>
-            <p className="mt-1 text-[14px] leading-relaxed text-foreground">
+            <p className="mt-1 text-sm leading-relaxed text-foreground">
               {generation.prompt}
             </p>
           </div>
@@ -216,14 +216,14 @@ export default function GenerationDetailPanel({
           </div>
           <div className="flex items-center gap-1.5">
             <Calendar size={11} className="text-muted" />
-            <span className="text-[12px] text-muted">
+            <span className="text-xs text-muted">
               {formatLocalDateTime(generation.created_at)}
             </span>
           </div>
           {generation.deleted_at && (
             <div className="flex items-center gap-1.5">
               <Trash2 size={11} className="text-muted" />
-              <span className="text-[12px] text-muted">
+              <span className="text-xs text-muted">
                 {deletedAtLabel || t("trash.deletedAt")}:{" "}
                 {formatLocalDateTime(generation.deleted_at)}
               </span>
@@ -231,14 +231,14 @@ export default function GenerationDetailPanel({
           )}
           {generation.source_image_paths.length > 0 && (
             <div className="rounded-[12px] border border-border-subtle bg-subtle/25 p-3">
-              <span className="text-[12px] font-medium uppercase tracking-wider text-muted">
+              <span className="text-xs font-medium uppercase tracking-wider text-muted">
                 {t("gallery.sourceImages")}
               </span>
               <div className="mt-2 space-y-1.5">
                 {generation.source_image_paths.map((path) => (
                   <p
                     key={path}
-                    className="truncate text-[12px] text-foreground/70"
+                    className="truncate text-xs text-muted"
                     title={path}
                   >
                     {path}
@@ -255,7 +255,7 @@ export default function GenerationDetailPanel({
               onClick={() =>
                 onEditImage(image.file_path, image.id, generation.id)
               }
-              className="focus-ring flex w-full cursor-pointer items-center justify-center gap-2 rounded-[8px] border border-primary/20 py-2.5 text-[12px] font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
+              className="focus-ring flex w-full cursor-pointer items-center justify-center gap-2 rounded-[8px] border border-primary/20 py-2.5 text-xs font-medium text-primary transition-all hover:border-primary/30 hover:bg-primary/6"
             >
               <Wand2 size={13} />
               {t("gallery.editImage")}
@@ -264,7 +264,7 @@ export default function GenerationDetailPanel({
           {showManageFolders && image && (
             <button
               onClick={() => onManageFolders?.(image.id)}
-              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-xs font-medium hover:studio-control-hover"
             >
               {t("favorites.manageFolders")}
             </button>
@@ -272,7 +272,7 @@ export default function GenerationDetailPanel({
           {showSaveButton && image && (
             <button
               onClick={() => void saveImageToFile(image.file_path)}
-              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-xs font-medium hover:studio-control-hover"
             >
               <Download size={13} />
               {t("gallery.saveImage")}
@@ -282,7 +282,7 @@ export default function GenerationDetailPanel({
             <button
               disabled={busy}
               onClick={() => onRestore(generation.id)}
-              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium hover:studio-control-hover"
+              className="studio-control focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-xs font-medium hover:studio-control-hover"
             >
               <RotateCcw size={13} />
               {restoreLabel || t("trash.restore")}
@@ -291,7 +291,7 @@ export default function GenerationDetailPanel({
           <button
             disabled={busy}
             onClick={() => onDelete(generation.id)}
-            className="studio-control-danger focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-[12px] font-medium"
+            className="studio-control-danger focus-ring flex w-full items-center justify-center gap-2 rounded-[8px] py-2.5 text-xs font-medium"
           >
             <Trash2 size={13} />
             {deleteLabel || t("gallery.delete")}
@@ -306,10 +306,10 @@ export default function GenerationDetailPanel({
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] border border-border-subtle bg-subtle/20 px-3 py-2">
-      <span className="text-[12px] font-medium uppercase tracking-wider text-muted">
+      <span className="text-xs font-medium uppercase tracking-wider text-muted">
         {label}
       </span>
-      <p className="mt-0.5 truncate text-[12px] text-foreground">{value}</p>
+      <p className="mt-0.5 truncate text-xs text-foreground">{value}</p>
     </div>
   );
 }

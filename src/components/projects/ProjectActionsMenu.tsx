@@ -29,9 +29,9 @@ export default function ProjectActionsMenu({
   }
 
   const actionClass =
-    "flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-subtle";
+    "flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-subtle";
   const dangerClass =
-    "flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-medium text-error transition-colors hover:bg-error/8";
+    "flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-error transition-colors hover:bg-error/8";
 
   return (
     <div className="absolute right-0 top-[44px] z-10 w-44 overflow-hidden rounded-[8px] border border-border-subtle bg-surface py-1 shadow-card">

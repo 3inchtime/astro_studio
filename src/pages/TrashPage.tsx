@@ -127,7 +127,7 @@ export default function TrashPage() {
               {t("trash.title")}
             </h2>
             {total > 0 && (
-              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium text-muted tabular-nums">
+              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-xs font-medium text-muted tabular-nums">
                 {total}
               </span>
             )}
@@ -145,7 +145,7 @@ export default function TrashPage() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               placeholder={t("trash.search")}
-              className="studio-input focus-ring h-9 w-full sm:w-52 rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full sm:w-52 rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted"
             />
           </div>
         </div>
@@ -156,10 +156,10 @@ export default function TrashPage() {
               <Trash2 size={14} className="text-muted" />
             </div>
             <div>
-              <p className="text-[12px] font-medium text-foreground">
+              <p className="text-xs font-medium text-foreground">
                 {t("trash.autoDeleteNotice", { days: retentionDays })}
               </p>
-              <p className="mt-1 text-[12px] leading-relaxed text-muted">
+              <p className="mt-1 text-xs leading-relaxed text-muted">
                 {t("trash.settingsHint")}
               </p>
             </div>

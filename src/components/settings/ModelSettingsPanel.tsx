@@ -108,7 +108,7 @@ export function ModelSettingsPanel({
               <motion.button
                 type="button"
                 onClick={onSaveModel}
-                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-sm font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
               >
                 {modelSaved ? (
                   <>
@@ -139,7 +139,7 @@ export function ModelSettingsPanel({
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold text-surface ${
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-surface ${
                         entry.provider === "openai"
                           ? "bg-foreground"
                           : "bg-accent"
@@ -147,7 +147,7 @@ export function ModelSettingsPanel({
                         {formatProviderName(entry.provider).charAt(0)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-semibold text-foreground">{entry.label}</span>
+                        <span className="block truncate text-sm font-semibold text-foreground">{entry.label}</span>
                       </span>
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                         active
@@ -165,8 +165,8 @@ export function ModelSettingsPanel({
                 <div className="space-y-3 border-border-subtle xl:border-r xl:pr-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-[14px] font-semibold text-foreground">{t("settings.providers")}</h4>
-                      <p className="mt-1 text-[12px] leading-relaxed text-muted">{t("settings.providersDesc")}</p>
+                      <h4 className="text-sm font-semibold text-foreground">{t("settings.providers")}</h4>
+                      <p className="mt-1 text-xs leading-relaxed text-muted">{t("settings.providersDesc")}</p>
                     </div>
                     <button
                       type="button"
@@ -180,11 +180,11 @@ export function ModelSettingsPanel({
                 </div>
 
                 <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[12px] border border-dashed border-border-subtle bg-surface text-center">
-                  <p className="text-[12px] text-muted">{t("settings.providersDesc")}</p>
+                  <p className="text-xs text-muted">{t("settings.providersDesc")}</p>
                   <motion.button
                     type="button"
                     onClick={onCreateProvider}
-                            className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                            className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
                   >
                     <Plus size={13} />
                     {t("settings.newProvider")}
@@ -244,7 +244,7 @@ export function ModelSettingsPanel({
             <motion.button
               type="button"
               onClick={onSaveModel}
-                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-sm font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
             >
               {modelSaved ? (
                 <>
@@ -275,7 +275,7 @@ export function ModelSettingsPanel({
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold text-surface ${
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-surface ${
                         entry.provider === "openai"
                           ? "bg-foreground"
                           : "bg-accent"
@@ -283,7 +283,7 @@ export function ModelSettingsPanel({
                         {formatProviderName(entry.provider).charAt(0)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-semibold text-foreground">{entry.label}</span>
+                        <span className="block truncate text-sm font-semibold text-foreground">{entry.label}</span>
                       </span>
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                         active
@@ -301,8 +301,8 @@ export function ModelSettingsPanel({
               <div className="space-y-3 border-border-subtle xl:border-r xl:pr-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h4 className="text-[14px] font-semibold text-foreground">{t("settings.providers")}</h4>
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted">{t("settings.providersDesc")}</p>
+                    <h4 className="text-sm font-semibold text-foreground">{t("settings.providers")}</h4>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">{t("settings.providersDesc")}</p>
                   </div>
                   <button
                     type="button"
@@ -340,8 +340,8 @@ export function ModelSettingsPanel({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="truncate text-[12px] font-semibold text-foreground">{provider.name}</p>
-                            <p className="mt-1 truncate font-mono text-[12px] text-muted">
+                            <p className="truncate text-xs font-semibold text-foreground">{provider.name}</p>
+                            <p className="mt-1 truncate font-mono text-xs text-muted">
                               {provider.api_key ? maskKey(provider.api_key) : t("settings.noApiKey")}
                             </p>
                           </div>
@@ -352,7 +352,7 @@ export function ModelSettingsPanel({
                               </span>
                             )}
                             {active && (
-                              <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[12px] font-medium text-primary">
+                              <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-xs font-medium text-primary">
                                 {t("settings.activeProvider")}
                               </span>
                             )}
@@ -366,15 +366,15 @@ export function ModelSettingsPanel({
 
             <div className="min-w-0 space-y-4">
               <div>
-                <h4 className="text-[14px] font-semibold text-foreground">{selectedProvider.name}</h4>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("settings.endpointDesc")}</p>
+                <h4 className="text-sm font-semibold text-foreground">{selectedProvider.name}</h4>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.endpointDesc")}</p>
               </div>
 
               <div className="min-w-0 space-y-3">
                 <div className="grid gap-3 border-b border-border-subtle pb-4">
                   <div className="grid gap-2 sm:grid-cols-2">
                   <label className="grid gap-1.5">
-                    <span className="text-[12px] font-medium text-muted">{t("settings.providerName")}</span>
+                    <span className="text-xs font-medium text-muted">{t("settings.providerName")}</span>
                     <input
                       type="text"
                       value={selectedProvider.name}
@@ -382,12 +382,12 @@ export function ModelSettingsPanel({
                       aria-describedby={invalidName ? "provider-name-error" : undefined}
                       onChange={(e) => onProviderNameChange(e.target.value)}
                       placeholder={t("settings.providerNamePlaceholder")}
-                      className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+                      className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
                     />
                     {invalidName && <span id="provider-name-error" className="text-xs text-error">{t("studio.settings.nameRequired", { defaultValue: "Enter a provider name." })}</span>}
                   </label>
                   <label className="grid gap-1.5">
-                    <span className="text-[12px] font-medium text-muted">{t("settings.apiKey")}</span>
+                    <span className="text-xs font-medium text-muted">{t("settings.apiKey")}</span>
                     <div className="relative min-w-0">
                       <input
                         type={showKey ? "text" : "password"}
@@ -395,7 +395,7 @@ export function ModelSettingsPanel({
                         onChange={(e) => onProviderApiKeyChange(e.target.value)}
                         onFocus={() => { if (!showKey) onShowKeyChange(true); }}
                         placeholder={t("settings.apiKeyPlaceholder")}
-                        className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-[14px] placeholder:text-muted"
+                        className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-sm placeholder:text-muted"
                       />
                       <button
                         type="button"
@@ -413,8 +413,8 @@ export function ModelSettingsPanel({
 
                 <div className="grid gap-3 border-b border-border-subtle pb-4">
                   <div>
-                    <h5 className="text-[12px] font-semibold text-foreground">{t("settings.endpoint")}</h5>
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                    <h5 className="text-xs font-semibold text-foreground">{t("settings.endpoint")}</h5>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
                       {t("settings.endpointModeHint")}
                       {" "}{t("studio.settings.connectionHint", { defaultValue: "Saving stores these settings locally. It does not test the connection." })}
                     </p>
@@ -426,7 +426,7 @@ export function ModelSettingsPanel({
                         key={mode}
                         type="button"
                         onClick={() => onProviderEndpointModeChange(mode)}
-                        className={`h-9 rounded-[8px] px-3 text-[12px] font-medium transition-colors ${
+                        className={`h-9 rounded-[8px] px-3 text-xs font-medium transition-colors ${
                           endpointSettings.mode === mode
                             ? "bg-subtle text-foreground "
                             : "text-muted hover:text-foreground"
@@ -439,7 +439,7 @@ export function ModelSettingsPanel({
 
                   {endpointSettings.mode === "base_url" ? (
                     <label className="grid gap-1.5">
-                      <span className="text-[12px] font-medium text-muted">{t("settings.endpoint")}</span>
+                      <span className="text-xs font-medium text-muted">{t("settings.endpoint")}</span>
                       <input
                         type="text"
                         value={endpointSettings.base_url}
@@ -448,14 +448,14 @@ export function ModelSettingsPanel({
                         aria-describedby={invalidBaseUrl ? "provider-base-url-error" : undefined}
                         onChange={(e) => onProviderBaseUrlChange(e.target.value)}
                         placeholder={defaultBaseUrlForModel(imageModel)}
-                        className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+                        className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
                       />
                       {invalidBaseUrl && <span id="provider-base-url-error" className="text-xs text-error">{t("studio.settings.invalidEndpoint", { defaultValue: "Enter an HTTP or HTTPS URL." })}</span>}
                     </label>
                   ) : (
                     <div className="grid gap-2">
                       <label className="grid gap-1.5">
-                        <span className="text-[12px] font-medium text-muted">{t("settings.generationUrl")}</span>
+                        <span className="text-xs font-medium text-muted">{t("settings.generationUrl")}</span>
                         <input
                           type="text"
                           value={endpointSettings.generation_url}
@@ -463,13 +463,13 @@ export function ModelSettingsPanel({
                         aria-describedby={invalidGenerationUrl ? "provider-generation-url-error" : undefined}
                           onChange={(e) => onProviderGenerationUrlChange(e.target.value)}
                           placeholder={defaultGenerationUrlForModel(imageModel)}
-                          className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+                          className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
                         />
                       {invalidGenerationUrl && <span id="provider-generation-url-error" className="text-xs text-error">{t("studio.settings.invalidEndpoint", { defaultValue: "Enter an HTTP or HTTPS URL." })}</span>}
                       </label>
                       {modelSupportsEdit(imageModel) && !usesSharedEditEndpoint(imageModel) && (
                         <label className="grid gap-1.5">
-                          <span className="text-[12px] font-medium text-muted">{t("settings.editUrl")}</span>
+                          <span className="text-xs font-medium text-muted">{t("settings.editUrl")}</span>
                           <input
                             type="text"
                             value={endpointSettings.edit_url}
@@ -477,7 +477,7 @@ export function ModelSettingsPanel({
                         aria-describedby={invalidEditUrl ? "provider-edit-url-error" : undefined}
                             onChange={(e) => onProviderEditUrlChange(e.target.value)}
                             placeholder={defaultEditUrlForModel(imageModel)}
-                            className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+                            className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
                           />
                       {invalidEditUrl && <span id="provider-edit-url-error" className="text-xs text-error">{t("studio.settings.invalidEndpoint", { defaultValue: "Enter an HTTP or HTTPS URL." })}</span>}
                         </label>
@@ -487,7 +487,7 @@ export function ModelSettingsPanel({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
-                  <p className="text-[12px] text-muted">
+                  <p className="text-xs text-muted">
                     {selectedProviderIsActive
                       ? `${selectedProvider.name} · ${t("settings.activeProvider")}`
                       : `${selectedProvider.name} · ${t("settings.providers")}`}
@@ -497,7 +497,7 @@ export function ModelSettingsPanel({
                       <motion.button
                         type="button"
                         onClick={() => onSetActiveProvider(selectedProvider.id)}
-                                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                       >
                         <Check size={13} />
                         {t("settings.activateProvider")}
@@ -507,7 +507,7 @@ export function ModelSettingsPanel({
                       type="button"
                       onClick={onSaveProvider}
                       disabled={invalidProvider}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-[14px] disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
                     >
                       {providerSaved ? (
                         <>
@@ -521,7 +521,7 @@ export function ModelSettingsPanel({
                     <motion.button
                       type="button"
                       onClick={onCancelProviderEdit}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-sm font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
                     >
                       <X size={13} />
                       {t("settings.cancelEdit")}
@@ -529,7 +529,7 @@ export function ModelSettingsPanel({
                     <motion.button
                       type="button"
                       onClick={() => onDeleteProvider(selectedProvider.id)}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-sm font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
                     >
                       <Trash2 size={13} />
                       {t("settings.deleteProvider")}

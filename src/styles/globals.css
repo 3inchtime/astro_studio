@@ -66,6 +66,18 @@
   --ease-expo: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.0, 0, 0.2, 1);
 
+  --text-xs: max(12px, calc(12px * var(--app-font-scale)));
+  --text-body-sm: max(12px, calc(13px * var(--app-font-scale)));
+  --text-sm: max(12px, calc(14px * var(--app-font-scale)));
+  --text-body-lg: max(12px, calc(15px * var(--app-font-scale)));
+  --text-base: max(12px, calc(16px * var(--app-font-scale)));
+  --control-height: 36px;
+  --control-primary-height: 40px;
+  --motion-feedback: 140ms;
+  --motion-panel: 180ms;
+  --motion-preview: 200ms;
+  --default-transition-duration: 140ms;
+
   /* Spacing */
   --spacing-unit: 4px;
 }
@@ -132,6 +144,8 @@
 
   body {
     font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    caret-color: var(--color-primary);
     background-color: var(--color-background);
     color: var(--color-foreground);
     -webkit-font-smoothing: antialiased;
@@ -160,37 +174,7 @@
     color: white;
   }
 
-  [class~="text-[9px]"] {
-    font-size: calc(12px * var(--app-font-scale)) !important;
-  }
 
-  [class~="text-[10px]"] {
-    font-size: calc(12px * var(--app-font-scale)) !important;
-  }
-
-  [class~="text-[11px]"] {
-    font-size: calc(12px * var(--app-font-scale)) !important;
-  }
-
-  [class~="text-[12px]"] {
-    font-size: calc(12px * var(--app-font-scale)) !important;
-  }
-
-  [class~="text-[13px]"] {
-    font-size: calc(13px * var(--app-font-scale)) !important;
-  }
-
-  [class~="text-[14px]"] {
-    font-size: calc(14px * var(--app-font-scale)) !important;
-  }
-
-  [class~="text-[15px]"] {
-    font-size: calc(15px * var(--app-font-scale)) !important;
-  }
-
-  [class~="text-[16px]"] {
-    font-size: calc(16px * var(--app-font-scale)) !important;
-  }
 }
 
 @layer components {
@@ -264,7 +248,7 @@
   min-width: 0;
   padding: 0 24px 4px;
   color: var(--color-foreground);
-  font-size: calc(12px * var(--app-font-scale));
+  font-size: max(12px, calc(12px * var(--app-font-scale)));
   font-weight: 600;
 }
 
@@ -277,7 +261,7 @@
 
 .astro-day-picker .rdp-weekday {
   color: var(--color-muted);
-  font-size: calc(12px * var(--app-font-scale));
+  font-size: max(12px, calc(12px * var(--app-font-scale)));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -316,7 +300,7 @@
 .astro-day-picker .rdp-day_button {
   border-radius: 6px;
   border: 1px solid transparent;
-  font-size: calc(12px * var(--app-font-scale));
+  font-size: max(12px, calc(12px * var(--app-font-scale)));
   font-weight: 500;
   color: var(--color-foreground);
   transition:
@@ -407,10 +391,10 @@
 @utility focus-ring {
   outline: none;
   transition:
-    border-color 0.18s var(--ease-out),
-    box-shadow 0.18s var(--ease-out),
-    background-color 0.18s var(--ease-out),
-    color 0.18s var(--ease-out);
+    border-color var(--motion-feedback) var(--ease-out),
+    box-shadow var(--motion-feedback) var(--ease-out),
+    background-color var(--motion-feedback) var(--ease-out),
+    color var(--motion-feedback) var(--ease-out);
 }
 
 @utility focus-ring-visible {
@@ -425,7 +409,7 @@
 
 @utility studio-app-shell {
   background: var(--color-canvas);
-  font-size: calc(14px * var(--app-font-scale));
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -469,16 +453,16 @@
 @utility studio-card {
   border: 1px solid var(--color-border-subtle);
   background-color: var(--color-surface);
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
   transition:
-    border-color 0.18s var(--ease-out),
-    box-shadow 0.18s var(--ease-out),
-    background-color 0.18s var(--ease-out);
+    border-color var(--motion-feedback) var(--ease-out),
+    box-shadow var(--motion-feedback) var(--ease-out),
+    background-color var(--motion-feedback) var(--ease-out);
 }
 
 @utility studio-card-hover {
   border-color: var(--color-border);
-  box-shadow: var(--shadow-float);
+  box-shadow: none;
 }
 
 @utility studio-control {
@@ -488,10 +472,10 @@
   color: var(--color-foreground);
   box-shadow: none;
   transition:
-    border-color 0.18s var(--ease-out),
-    background-color 0.18s var(--ease-out),
-    color 0.18s var(--ease-out),
-    box-shadow 0.18s var(--ease-out);
+    border-color var(--motion-feedback) var(--ease-out),
+    background-color var(--motion-feedback) var(--ease-out),
+    color var(--motion-feedback) var(--ease-out),
+    box-shadow var(--motion-feedback) var(--ease-out);
 }
 
 @utility studio-control-hover {
@@ -505,7 +489,7 @@
   border: 1px solid var(--color-primary);
   background: var(--color-primary);
   color: var(--color-primary-foreground);
-  transition: filter 150ms ease-out, opacity 150ms ease-out;
+  transition: filter var(--motion-feedback) ease-out, opacity var(--motion-feedback) ease-out;
   &:hover:not(:disabled) { filter: brightness(.94); }
 }
 
@@ -515,9 +499,9 @@
   background-color: transparent;
   color: var(--color-muted);
   transition:
-    background-color 0.18s var(--ease-out),
-    color 0.18s var(--ease-out),
-    border-color 0.18s var(--ease-out);
+    background-color var(--motion-feedback) var(--ease-out),
+    color var(--motion-feedback) var(--ease-out),
+    border-color var(--motion-feedback) var(--ease-out);
 }
 
 @utility studio-control-danger {
@@ -526,9 +510,9 @@
   background-color: rgba(209, 69, 69, 0.06);
   color: var(--color-error);
   transition:
-    background-color 0.18s var(--ease-out),
-    border-color 0.18s var(--ease-out),
-    color 0.18s var(--ease-out);
+    background-color var(--motion-feedback) var(--ease-out),
+    border-color var(--motion-feedback) var(--ease-out),
+    color var(--motion-feedback) var(--ease-out);
 }
 
 @utility studio-input {
@@ -536,9 +520,9 @@
   background-color: var(--color-surface);
   color: var(--color-foreground);
   transition:
-    border-color 0.18s var(--ease-out),
-    background-color 0.18s var(--ease-out),
-    box-shadow 0.18s var(--ease-out);
+    border-color var(--motion-feedback) var(--ease-out),
+    background-color var(--motion-feedback) var(--ease-out),
+    box-shadow var(--motion-feedback) var(--ease-out);
 }
 
 @utility studio-empty {
@@ -764,7 +748,7 @@ button:disabled,
 @utility studio-button {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 36px; padding: 6px 12px; border-radius: 8px;
-  font-size: calc(14px * var(--app-font-scale)); font-weight: 500;
+  font-size: var(--text-sm); font-weight: 500;
 }
 @utility studio-field {
   min-height: 36px; border-radius: 8px; padding: 6px 10px;
@@ -779,12 +763,12 @@ button:disabled,
   &[aria-current="page"] { background: var(--color-surface); color: var(--color-primary); box-shadow: var(--shadow-card); }
 }
 @layer components {
-  .studio-nav-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .studio-nav-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
   .studio-context-panel { width: var(--sidebar-width); background: var(--color-surface); }
   .studio-context-toggle { display: none; }
   .studio-context-panel[data-collapsed="true"] { display: none; }
   .studio-context-toggle[data-collapsed="true"] { display: flex; }
-  @media (max-width: 1099px) {
+  @media (max-width: 1439px) {
     .studio-context-toggle { display: flex; }
     .studio-context-panel { position: absolute; left: 80px; top: 48px; bottom: 0; z-index: 40; width: min(320px, calc(100vw - 96px)); box-shadow: var(--shadow-float); }
     .studio-context-panel[data-open="false"] { display: none; }
@@ -794,7 +778,17 @@ button:disabled,
 
 /* Visibility must win over Tailwind display utilities on the same element. */
 .studio-context-panel[data-collapsed="true"] { display: none; }
-@media (max-width: 1099px) {
+@media (max-width: 1439px) {
   .studio-context-panel[data-open="false"] { display: none; }
 }
 .studio-nav-item { min-height: 48px; padding: 4px 2px; gap: 2px; }
+
+/* The command dock scrolls its content independently of the submit row. */
+.generation-workbench { container-type: size; }
+.generation-composer { max-height: 35cqh; min-height: 152px; }
+.generation-composer > div, .generation-composer [data-testid="generation-command-surface"] { min-height: 0; max-height: calc(35cqh - 24px); }
+.generation-prompt { field-sizing: content; overflow-y: auto; max-height: 120px; margin-top: 8px; }
+.generation-composer-scroll { flex: 1 1 auto; }
+
+@keyframes studio-panel-enter { from { opacity: .85; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+#generation-parameters[role="dialog"] { animation: studio-panel-enter var(--motion-panel) var(--ease-out); }

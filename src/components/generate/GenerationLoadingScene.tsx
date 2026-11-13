@@ -16,12 +16,12 @@ export default function GenerationLoadingScene() {
         aria-hidden="true"
       />
       <div>
-        <p className="text-[14px] font-medium text-foreground">
+        <p className="text-sm font-medium text-foreground">
           {t("studio.generationWaiting", {
             defaultValue: "Waiting for image provider",
           })}
         </p>
-        <p className="mt-1 text-[12px] leading-relaxed text-muted">
+        <p className="mt-1 text-xs leading-relaxed text-muted">
           {t("studio.generationWaitingHint", {
             defaultValue:
               "Your request is processing. Images will appear when ready.",

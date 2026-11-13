@@ -368,19 +368,19 @@ export default function ProjectsPage() {
       {!loading && !loadError && projects.length > 0 && (
         <div className="studio-status-bar flex shrink-0 items-center gap-5 px-6 py-2 text-xs">
           <span>
-            <span className="font-semibold text-foreground/70 tabular-nums font-[family-name:var(--font-mono)]">
+            <span className="font-semibold text-muted tabular-nums font-[family-name:var(--font-mono)]">
               {stats.totalProjects}
             </span>{" "}
             {t("projects.stats.projects")}
           </span>
           <span>
-            <span className="font-semibold text-foreground/70 tabular-nums font-[family-name:var(--font-mono)]">
+            <span className="font-semibold text-muted tabular-nums font-[family-name:var(--font-mono)]">
               {stats.totalImages}
             </span>{" "}
             {t("projects.stats.images")}
           </span>
           <span>
-            <span className="font-semibold text-foreground/70 tabular-nums font-[family-name:var(--font-mono)]">
+            <span className="font-semibold text-muted tabular-nums font-[family-name:var(--font-mono)]">
               {stats.totalChats}
             </span>{" "}
             {t("projects.stats.conversations")}
@@ -522,7 +522,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("rename");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-subtle hover:text-foreground"
               >
                 <Pencil size={13} />
                 <span>{t("sidebar.rename")}</span>
@@ -533,7 +533,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("pin");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-subtle hover:text-foreground"
               >
                 {project.pinned_at ? <PinOff size={13} /> : <Pin size={13} />}
                 <span>
@@ -546,7 +546,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("archive");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-subtle hover:text-foreground"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-subtle hover:text-foreground"
               >
                 <Archive size={13} />
                 <span>{t("sidebar.archive")}</span>

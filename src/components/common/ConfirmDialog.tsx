@@ -55,7 +55,7 @@ export default function ConfirmDialog({
             <div className="flex items-start justify-between gap-3">
               <h2
                 id={titleId}
-                className="text-[15px] font-semibold tracking-tight text-foreground"
+                className="text-body-lg font-semibold tracking-tight text-foreground"
               >
                 {title}
               </h2>
@@ -74,7 +74,7 @@ export default function ConfirmDialog({
             {error ? (
               <div
                 role="alert"
-                className="mt-4 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-[12px] text-error"
+                className="mt-4 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-xs text-error"
               >
                 {error}
               </div>
@@ -85,7 +85,7 @@ export default function ConfirmDialog({
                 type="button"
                 onClick={onCancel}
                 disabled={loading}
-                className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground/75 transition-colors hover:border-border hover:bg-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[10px] border border-border-subtle px-4 py-2 text-body-sm font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {cancelLabel}
               </button>
@@ -93,7 +93,7 @@ export default function ConfirmDialog({
                 type="button"
                 onClick={onConfirm}
                 disabled={loading}
-                className="rounded-[10px] border border-error/15 bg-error/8 px-4 py-2 text-[13px] font-medium text-error transition-colors hover:border-error/25 hover:bg-error/12 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[10px] border border-error/15 bg-error/8 px-4 py-2 text-body-sm font-medium text-error transition-colors hover:border-error/25 hover:bg-error/12 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {confirmLabel}
               </button>

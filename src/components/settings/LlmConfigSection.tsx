@@ -65,7 +65,7 @@ function ConfigForm({
       <div className="grid gap-3">
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formName")}
             </span>
             <input
@@ -73,12 +73,12 @@ function ConfigForm({
               value={config.name}
               onChange={(e) => onChange({ ...config, name: e.target.value })}
               placeholder="e.g. GPT-4o"
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formProtocol")}
             </span>
             <select
@@ -91,7 +91,7 @@ function ConfigForm({
                   base_url: defaultBaseUrlForProtocol(next),
                 });
               }}
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px]"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm"
             >
               <option value="openai">{t("settings.llm.protocolOpenai")}</option>
               <option value="anthropic">
@@ -101,7 +101,7 @@ function ConfigForm({
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formModel")}
             </span>
             <input
@@ -111,12 +111,12 @@ function ConfigForm({
               placeholder={
                 config.protocol === "anthropic" ? "claude-opus-4-7" : "gpt-4o"
               }
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formApiKey")}
             </span>
             <div className="relative min-w-0">
@@ -133,7 +133,7 @@ function ConfigForm({
                   if (showKey) onToggleShowKey();
                 }}
                 placeholder="sk-..."
-                className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-[14px] placeholder:text-muted"
+                className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-sm placeholder:text-muted"
               />
               <button
                 type="button"
@@ -156,7 +156,7 @@ function ConfigForm({
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formBaseUrl")}
             </span>
             <input
@@ -166,12 +166,12 @@ function ConfigForm({
                 onChange({ ...config, base_url: e.target.value })
               }
               placeholder={defaultBaseUrlForProtocol(config.protocol)}
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formCapability")}
             </span>
             <select
@@ -182,7 +182,7 @@ function ConfigForm({
                   capability: e.target.value as LlmConfig["capability"],
                 })
               }
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px]"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm"
             >
               <option value="text">{t("settings.llm.capabilityText")}</option>
               <option value="multimodal">
@@ -390,7 +390,7 @@ export function LlmConfigSection() {
           onClick={handleAdd}
           disabled={saveMutation.isPending}
           aria-label={t("settings.addOptimizationService")}
-          className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-[14px] font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+          className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-sm font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
         >
           <Plus size={13} />
           {t("settings.addOptimizationService")}
@@ -405,7 +405,7 @@ export function LlmConfigSection() {
       {saveError && (
         <div
           role="alert"
-          className="mb-4 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-[12px] text-error"
+          className="mb-4 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-xs text-error"
         >
           {saveError}
         </div>
@@ -419,22 +419,22 @@ export function LlmConfigSection() {
         <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-stretch">
           <section className="space-y-3 xl:border-r xl:border-border-subtle xl:pr-4">
             <div>
-              <h4 className="text-[14px] font-semibold text-foreground">
+              <h4 className="text-sm font-semibold text-foreground">
                 {t("settings.optimizationService")}
               </h4>
-              <p className="mt-1 text-[12px] leading-relaxed text-muted">
+              <p className="mt-1 text-xs leading-relaxed text-muted">
                 {t("settings.optimizationServiceDesc")}
               </p>
             </div>
 
             {isLoading && (
-              <div className="rounded-lg border border-border-subtle bg-surface px-3 py-6 text-center text-[12px] text-muted">
+              <div className="rounded-lg border border-border-subtle bg-surface px-3 py-6 text-center text-xs text-muted">
                 {t("settings.llm.loading")}
               </div>
             )}
 
             {isError && (
-              <div className="rounded-lg border border-error/20 bg-error/5 px-3 py-3 text-[12px] text-error">
+              <div className="rounded-lg border border-error/20 bg-error/5 px-3 py-3 text-xs text-error">
                 {t("settings.llm.loadError")}
               </div>
             )}
@@ -446,7 +446,7 @@ export function LlmConfigSection() {
                   className="mx-auto text-muted"
                   strokeWidth={1.5}
                 />
-                <p className="mt-2 text-[12px] text-muted">
+                <p className="mt-2 text-xs text-muted">
                   {t("settings.llm.emptyTitle")}
                 </p>
               </div>
@@ -471,16 +471,16 @@ export function LlmConfigSection() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-[12px] font-semibold text-foreground">
+                      <p className="truncate text-xs font-semibold text-foreground">
                         {config.name || t("settings.llm.untitled")}
                       </p>
-                      <p className="mt-1 truncate text-[12px] text-muted">
+                      <p className="mt-1 truncate text-xs text-muted">
                         {protocolLabel(config.protocol)} ·{" "}
                         {config.model || t("settings.llm.noModel")}
                       </p>
                     </div>
                     <span
-                      className={`shrink-0 rounded-[6px] px-1.5 py-0.5 text-[12px] font-medium ${
+                      className={`shrink-0 rounded-[6px] px-1.5 py-0.5 text-xs font-medium ${
                         config.enabled
                           ? "bg-success/10 text-success"
                           : "bg-subtle text-muted"
@@ -507,10 +507,10 @@ export function LlmConfigSection() {
             ) : selectedConfig ? (
               <div className="space-y-3">
                 <div>
-                  <h4 className="text-[14px] font-semibold text-foreground">
+                  <h4 className="text-sm font-semibold text-foreground">
                     {selectedConfig.name || t("settings.llm.untitled")}
                   </h4>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted">
                     {t("settings.promptOptimizationEditorDesc")}
                   </p>
                 </div>
@@ -523,7 +523,7 @@ export function LlmConfigSection() {
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
-                  <p className="text-[12px] text-muted">
+                  <p className="text-xs text-muted">
                     {selectedConfig.name || t("settings.llm.untitled")} ·{" "}
                     {protocolLabel(selectedConfig.protocol)}
                   </p>
@@ -531,7 +531,7 @@ export function LlmConfigSection() {
                     <motion.button
                       type="button"
                       onClick={() => handleToggleEnable(selectedConfig.id)}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-[14px] font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-sm font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
                     >
                       <Check size={13} />
                       {selectedConfig.enabled
@@ -541,14 +541,14 @@ export function LlmConfigSection() {
                     <motion.button
                       type="button"
                       onClick={() => handleSaveEdit(selectedConfig)}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-[14px] font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-4 text-sm font-medium text-accent transition-colors hover:border-accent/35 hover:bg-accent/15 lg:min-w-[104px]"
                     >
                       {t("settings.llm.saveConfig")}
                     </motion.button>
                     <motion.button
                       type="button"
                       onClick={handleCancelEdit}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-4 text-sm font-medium text-muted transition-colors hover:border-border hover:text-foreground lg:min-w-[104px]"
                     >
                       <X size={13} />
                       {t("settings.cancelEdit")}
@@ -556,7 +556,7 @@ export function LlmConfigSection() {
                     <motion.button
                       type="button"
                       onClick={() => handleDelete(selectedConfig.id)}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-[14px] font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-sm font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
                     >
                       <Trash2 size={13} />
                       {t("settings.llm.deleteTitle")}
@@ -566,24 +566,24 @@ export function LlmConfigSection() {
 
                 <div className="grid gap-3 border-t border-border-subtle pt-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-dashed border-border-subtle bg-surface p-3">
-                    <p className="text-[12px] text-muted">
+                    <p className="text-xs text-muted">
                       {t("settings.promptOptimizationUsageLabel")}
                     </p>
-                    <p className="mt-1 text-[14px] font-semibold text-foreground">
+                    <p className="mt-1 text-sm font-semibold text-foreground">
                       {t("settings.promptOptimizationUsageTitle")}
                     </p>
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
                       {t("settings.promptOptimizationUsageHint")}
                     </p>
                   </div>
                   <div className="rounded-lg border border-dashed border-border-subtle bg-surface p-3">
-                    <p className="text-[12px] text-muted">
+                    <p className="text-xs text-muted">
                       {t("settings.promptOptimizationProtocolLabel")}
                     </p>
-                    <p className="mt-1 text-[14px] font-semibold text-foreground">
+                    <p className="mt-1 text-sm font-semibold text-foreground">
                       {protocolLabel(selectedConfig.protocol)}
                     </p>
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
                       {capabilityLabel(selectedConfig.capability, t)}
                     </p>
                   </div>
@@ -592,7 +592,7 @@ export function LlmConfigSection() {
             ) : (
               <div className="flex h-full min-h-[220px] flex-col items-center justify-center rounded-[12px] border border-dashed border-border-subtle bg-surface text-center">
                 <Sparkles size={22} className="text-muted" strokeWidth={1.5} />
-                <p className="mt-3 text-[12px] text-muted">
+                <p className="mt-3 text-xs text-muted">
                   {t("settings.llm.emptyHint")}
                 </p>
               </div>
@@ -652,17 +652,17 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
     >
       <div className="rounded-[12px] border border-primary/20 bg-primary/3 p-4">
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-[12px] font-semibold text-foreground">
+          <span className="text-xs font-semibold text-foreground">
             {t("settings.llm.newTitle")}
           </span>
-          <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[12px] font-medium text-primary">
+          <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-xs font-medium text-primary">
             {t("settings.llm.newBadge")}
           </span>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formName")}
             </span>
             <input
@@ -670,12 +670,12 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               value={config.name}
               onChange={(e) => setConfig({ ...config, name: e.target.value })}
               placeholder="e.g. GPT-4o"
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formProtocol")}
             </span>
             <select
@@ -688,7 +688,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                   base_url: defaultBaseUrlForProtocol(next),
                 });
               }}
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px]"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm"
             >
               <option value="openai">{t("settings.llm.protocolOpenai")}</option>
               <option value="anthropic">
@@ -698,7 +698,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formModel")}
             </span>
             <input
@@ -708,12 +708,12 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               placeholder={
                 config.protocol === "anthropic" ? "claude-opus-4-7" : "gpt-4o"
               }
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formApiKey")}
             </span>
             <div className="relative min-w-0">
@@ -730,7 +730,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                   if (showKey) setShowKey(false);
                 }}
                 placeholder="sk-..."
-                className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-[14px] placeholder:text-muted"
+                className="studio-input focus-ring h-9 w-full rounded-lg px-3 pr-9 text-sm placeholder:text-muted"
               />
               <button
                 type="button"
@@ -753,7 +753,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formBaseUrl")}
             </span>
             <input
@@ -763,12 +763,12 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                 setConfig({ ...config, base_url: e.target.value })
               }
               placeholder={defaultBaseUrlForProtocol(config.protocol)}
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-[12px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               {t("settings.llm.formCapability")}
             </span>
             <select
@@ -779,7 +779,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
                   capability: e.target.value as LlmConfig["capability"],
                 })
               }
-              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-[14px]"
+              className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm"
             >
               <option value="text">{t("settings.llm.capabilityText")}</option>
               <option value="multimodal">
@@ -794,7 +794,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           <motion.button
             type="button"
             onClick={onCancel}
-            className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-3 text-[14px] font-medium text-muted transition-colors hover:border-border hover:text-foreground"
+            className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-muted transition-colors hover:border-border hover:text-foreground"
           >
             <X size={13} />
             {t("settings.llm.cancel")}
@@ -802,7 +802,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
           <motion.button
             type="button"
             onClick={() => onSave(config)}
-            className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-3 text-[14px] font-medium text-accent transition-colors hover:border-accent/40 hover:bg-accent/15"
+            className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-3 text-sm font-medium text-accent transition-colors hover:border-accent/40 hover:bg-accent/15"
           >
             <Check size={13} />
             {t("settings.llm.create")}

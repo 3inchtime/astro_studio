@@ -48,6 +48,10 @@ import {
 } from "../../app/routes/contracts";
 
 interface LayoutContextType {
+  toggleContextSidebar?: () => void;
+  contextSidebarCollapsed?: boolean;
+  activeWorkspaceDrawer?: "context" | "parameters" | null;
+  setWorkspaceDrawer?: (drawer: "context" | "parameters" | null) => void;
   activeProjectId: string | null;
   setActiveProjectId: (id: string | null) => void;
   activeConversationId: string | null;
@@ -99,13 +103,17 @@ export default function AppLayout() {
   const { theme, themeMeta, setThemeWithEvent } = useTheme();
   const { t } = useTranslation();
   const { widths, onHandleDown, setPanelWidth } = useResizable(PANEL_CONFIGS);
-  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 1099px)").matches);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 1439px)").matches);
+  const [activeWorkspaceDrawer, setWorkspaceDrawer] = useState<"context" | "parameters" | null>(null);
+  const sidebarOpen = activeWorkspaceDrawer === "context";
+  const setSidebarOpen = (value: boolean | ((open: boolean) => boolean)) => {
+    setWorkspaceDrawer(current => (typeof value === "function" ? value(current === "context") : value) ? "context" : null);
+  };
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem("astro-sidebar-collapsed-v1") === "true"; } catch { return false; }
   });
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 1099px)");
+    const media = window.matchMedia("(max-width: 1439px)");
     const update = () => { setCompact(media.matches); setSidebarOpen(false); };
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
@@ -383,6 +391,10 @@ export default function AppLayout() {
   return (
     <LayoutContext.Provider
       value={{
+        toggleContextSidebar: toggleSidebar,
+        contextSidebarCollapsed: sidebarCollapsed,
+        activeWorkspaceDrawer,
+        setWorkspaceDrawer,
         activeProjectId,
         setActiveProjectId,
         activeConversationId,
@@ -497,22 +509,19 @@ export default function AppLayout() {
           id="main-content" tabIndex={-1}
           className="studio-main-canvas relative flex min-w-0 flex-1 flex-col overflow-hidden"
         >
-          {!shouldHideSidebar && <div data-collapsed={sidebarCollapsed} className="studio-context-toggle h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4">
+          {!shouldHideSidebar && !["generate", "chat"].includes(routeContext.kind) && <div data-collapsed={sidebarCollapsed} className="studio-context-toggle h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4">
             <button type="button" onClick={toggleSidebar} className="studio-control-subtle focus-ring rounded-lg p-2" aria-controls="workspace-sidebar" aria-expanded={compact ? sidebarOpen : !sidebarCollapsed} aria-label={t("studio.openSidebar", { defaultValue: "Open sidebar" })}><PanelLeftOpen size={18} /></button>
             <span className="text-sm font-medium">{t(isProjectListRoute || isProjectHomeRoute ? "nav.projects" : "nav.generate")}</span>
           </div>}
-          <AnimatePresence mode="wait">
-            <motion.div
+          <motion.div
               key={routeContext.pathname}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={{ duration: 0.18 }}
               className="min-h-0 flex-1"
             >
               <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          </motion.div>
         </main>
 
         <AnimatePresence>
@@ -531,10 +540,10 @@ export default function AppLayout() {
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-[14px] font-semibold text-foreground">
+                  <h2 className="text-sm font-semibold text-foreground">
                     {t("theme.title")}
                   </h2>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                  <p className="mt-1 text-xs leading-relaxed text-muted">
                     {getThemeName(themeMeta, t)} · {t("settings.themeDesc")}
                   </p>
                 </div>

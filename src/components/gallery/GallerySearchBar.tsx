@@ -32,7 +32,7 @@ export default function GallerySearchBar({
             {config.title}
           </h2>
           {total > 0 && (
-            <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium tabular-nums text-muted">
+            <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-xs font-medium tabular-nums text-muted">
               {total}
             </span>
           )}
@@ -59,7 +59,7 @@ export default function GallerySearchBar({
                 }
               }}
               placeholder={config.searchPlaceholder}
-              className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted"
+              className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted"
             />
           </label>
 
@@ -100,7 +100,7 @@ export default function GallerySearchBar({
                     value={field.value}
                     aria-label={field.label}
                     onChange={(event) => field.onChange(event.target.value)}
-                    className="select-control studio-input focus-ring h-9 w-full min-w-0 rounded-[8px] pl-7 pr-8 text-[12px]"
+                    className="select-control studio-input focus-ring h-9 w-full min-w-0 rounded-[8px] pl-7 pr-8 text-xs"
                   >
                     {field.options.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -120,7 +120,7 @@ export default function GallerySearchBar({
             <button
               type="button"
               onClick={onSearch}
-              className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-[12px] font-medium"
+              className="studio-control-primary focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-xs font-medium"
             >
               <Filter size={13} />
               {config.applyFilters}
@@ -129,7 +129,7 @@ export default function GallerySearchBar({
               type="button"
               onClick={onReset}
               disabled={!hasActiveFilters}
-              className="studio-control focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-[12px] font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
+              className="studio-control focus-ring inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] px-4 text-xs font-medium hover:studio-control-hover disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RotateCcw size={13} />
               {config.resetFilters}

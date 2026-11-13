@@ -108,12 +108,12 @@ describe("MessageBubble", () => {
       screen
         .getByText("A cinematic portrait of a fox astronaut")
         .closest("[data-message-role='user']"),
-    ).toHaveClass("justify-end");
+    ).toHaveClass("justify-start");
     expect(
       screen
         .getByText("A cinematic portrait of a fox astronaut")
         .closest("div"),
-    ).toHaveClass("rounded-xl", "bg-surface");
+    ).toHaveClass("bg-transparent");
   });
 
   it("shows a retry button for failed messages with retry data", () => {
@@ -184,8 +184,8 @@ describe("MessageBubble", () => {
         .closest("[data-message-role='assistant']"),
     ).toHaveClass("justify-start");
     expect(screen.getByTestId("image-grid").parentElement).toHaveClass(
-      "rounded-xl",
-      "border-border-subtle",
+      "rounded-lg",
+      "bg-canvas",
     );
   });
 

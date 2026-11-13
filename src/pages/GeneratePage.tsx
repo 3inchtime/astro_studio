@@ -50,9 +50,10 @@ import {
   useSendPromptAgentMessageMutation,
   useStartPromptAgentSessionMutation,
 } from "../lib/queries/promptAgent";
-import { useUIStore } from "../lib/store";
+import { capturePreviewSource, useUIStore } from "../lib/store";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import ConfirmDialog from "../components/common/ConfirmDialog";
+import GenerationWorkbench from "../components/generate/GenerationWorkbench";
 import GenerationComposer from "../components/generate/GenerationComposer";
 import GenerationFeed from "../components/generate/GenerationFeed";
 import Lightbox from "../components/lightbox/Lightbox";
@@ -788,7 +789,9 @@ export default function GeneratePage() {
 
   const handleImageClick = useCallback(
     (images: MessageImage[], index: number) => {
-      openLightbox(images, index);
+      const image = images[index];
+      const origin = image && [...document.querySelectorAll<HTMLElement>("[data-preview-image-id]")].find(node => node.dataset.previewImageId === image.imageId);
+      openLightbox(images, index, origin ? capturePreviewSource(origin, image.imageId) : undefined);
     },
     [openLightbox],
   );
@@ -898,7 +901,7 @@ export default function GeneratePage() {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <GenerationWorkbench>{(parametersTarget, drawerOpen) => <>
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -930,6 +933,8 @@ export default function GeneratePage() {
       </div>
 
       <GenerationComposer
+        parametersTarget={parametersTarget}
+        interactionDisabled={drawerOpen}
         advancedOptions={advancedOptions}
         onAdvancedOptionsChange={(value) => {
           markComposerDraftStarted();
@@ -1012,6 +1017,7 @@ export default function GeneratePage() {
         {lightbox && (
           <Lightbox
             images={lightbox.images}
+            source={lightbox.source}
             initialIndex={lightbox.index}
             onClose={closeLightbox}
             onEditImage={(image) => {
@@ -1039,6 +1045,6 @@ export default function GeneratePage() {
         onCancel={handleCancelDeleteGeneration}
         loading={isDeletingGeneration}
       />
-    </div>
+    </>}</GenerationWorkbench>
   );
 }

@@ -292,7 +292,7 @@ export default function FavoritesPage() {
               {t("favorites.title")}
             </h2>
             {activeTotal > 0 && (
-              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-[12px] font-medium text-muted tabular-nums">
+              <span className="rounded-[6px] bg-subtle px-2 py-0.5 text-xs font-medium text-muted tabular-nums">
                 {activeTotal}
               </span>
             )}
@@ -300,7 +300,7 @@ export default function FavoritesPage() {
               <button
                 aria-pressed={activeKind === "images"}
                 onClick={() => { setSelectedImage(null); setActiveKind("images"); }}
-                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
+                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium transition-colors ${
                   activeKind === "images"
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -312,7 +312,7 @@ export default function FavoritesPage() {
               <button
                 aria-pressed={activeKind === "prompts"}
                 onClick={() => { setSelectedImage(null); setActiveKind("prompts"); }}
-                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition-colors ${
+                className={`focus-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium transition-colors ${
                   activeKind === "prompts"
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -337,7 +337,7 @@ export default function FavoritesPage() {
                 size={13}
                 className={cn(
                   "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 transition-colors",
-                  activeFolderId ? "text-primary/80" : "text-muted",
+                  activeFolderId ? "text-primary" : "text-muted",
                 )}
                 strokeWidth={2}
               />
@@ -347,7 +347,7 @@ export default function FavoritesPage() {
                   handleFolderFilterChange(event.target.value)
                 }
                 className={cn(
-                  "select-control studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-8 text-[12px] font-medium xl:w-44",
+                  "select-control studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-8 text-xs font-medium xl:w-44",
                   activeFolderId
                     ? "border-primary/20 bg-surface text-foreground shadow-[0_10px_24px_rgba(79,106,255,0.08)]"
                     : "border-border-subtle bg-subtle/55 text-muted hover:border-border hover:bg-surface/92 hover:text-foreground",
@@ -392,7 +392,7 @@ export default function FavoritesPage() {
                     ? t("favorites.search")
                     : t("favorites.searchPrompts")
                 }
-                className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-[14px] placeholder:text-muted xl:w-52"
+                className="studio-input focus-ring h-9 w-full rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted xl:w-52"
               />
             </div>
           </div>
@@ -528,19 +528,19 @@ function PromptFavoritesList({
     <div className="grid gap-3 xl:grid-cols-2">
       {favorites.map((favorite) => (
         <article key={favorite.id} className="studio-card rounded-[12px] p-5">
-          <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-[14px] leading-relaxed text-foreground/85">
+          <p className="max-h-36 overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
             {favorite.prompt}
           </p>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-[12px] text-muted">
+            <span className="min-w-0 truncate text-xs text-muted">
               {formatLocalDateTime(favorite.updated_at)}
             </span>
 
             <div className="flex shrink-0 items-center gap-1">
               <button
                 onClick={() => onCopy(favorite)}
-                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
+                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium hover:bg-subtle hover:text-foreground"
               >
                 <Copy size={13} />
                 {copiedPromptId === favorite.id
@@ -549,7 +549,7 @@ function PromptFavoritesList({
               </button>
               <button
                 onClick={() => onManageFolders(favorite.id)}
-                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium hover:bg-subtle hover:text-foreground"
+                className="studio-control-subtle focus-ring flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium hover:bg-subtle hover:text-foreground"
               >
                 <Folder size={13} />
                 {t("favorites.manageFolders")}

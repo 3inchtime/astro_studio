@@ -147,7 +147,7 @@ describe("ImageGrid", () => {
     expect(root).toHaveClass("inline-flex", "flex-col", "items-start");
     expect(item).toHaveClass("w-fit");
     expect(controls).toHaveClass("mx-auto", "w-fit");
-    expect(imageFrame).toHaveClass("h-72");
+    expect(imageFrame).toHaveClass("h-[min(52cqh,520px)]");
   });
 
   it("keeps image actions visible below the preview", () => {

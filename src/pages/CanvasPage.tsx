@@ -1382,7 +1382,7 @@ export default function CanvasPage() {
                 />
                 <div
                   role={hasSaveError ? "alert" : undefined}
-                  className="absolute right-5 top-5 z-10 flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface/88 px-3 py-2 text-[12px] font-medium text-muted shadow-card backdrop-blur-xl"
+                  className="absolute right-5 top-5 z-10 flex items-center gap-2 rounded-[10px] border border-border-subtle bg-surface/88 px-3 py-2 text-xs font-medium text-muted shadow-card backdrop-blur-xl"
                 >
                   <span>{saveStatusLabel}</span>
                   {hasSaveError ? (
@@ -1482,12 +1482,12 @@ export default function CanvasPage() {
                   role="alert"
                   className="rounded-[14px] border border-border-subtle bg-surface/92 px-6 py-5 text-center shadow-card"
                 >
-                  <p className="text-[13px] font-medium text-foreground">
+                  <p className="text-body-sm font-medium text-foreground">
                     {t("canvas.loadError")}
                   </p>
                   <button
                     type="button"
-                    className="studio-control-primary focus-ring mt-3 cursor-pointer rounded-[9px] px-3 py-2 text-[12px] font-semibold"
+                    className="studio-control-primary focus-ring mt-3 cursor-pointer rounded-[9px] px-3 py-2 text-xs font-semibold"
                     onClick={handleRetryLoad}
                   >
                     {t("canvas.retryLoad")}
@@ -1498,7 +1498,7 @@ export default function CanvasPage() {
               <div className="flex h-full min-h-0 items-center justify-center border-x border-border-subtle px-6">
                 <div
                   role="status"
-                  className="text-[13px] font-medium text-muted"
+                  className="text-body-sm font-medium text-muted"
                 >
                   {t("canvas.loading")}
                 </div>
@@ -1513,7 +1513,7 @@ export default function CanvasPage() {
                 <h1 className="text-[22px] font-semibold text-foreground">
                   {t("canvas.title")}
                 </h1>
-                <p className="mt-3 text-[14px] leading-6 text-muted">
+                <p className="mt-3 text-sm leading-6 text-muted">
                   {t("canvas.noDocumentSelected")}
                 </p>
               </div>
@@ -1558,7 +1558,7 @@ export default function CanvasPage() {
                   setInspectorTab(tabs[next]);
                   document.getElementById(`canvas-tab-${tabs[next]}`)?.focus();
                 }}
-                className={`focus-ring flex min-h-10 flex-1 items-center justify-center border-b-2 px-2 text-[12px] font-medium transition-colors duration-[var(--motion-feedback)] ${inspectorTab === tab ? "border-primary text-primary" : "border-transparent text-muted hover:bg-subtle hover:text-foreground"}`}
+                className={`focus-ring flex min-h-10 flex-1 items-center justify-center border-b-2 px-2 text-xs font-medium transition-colors duration-[var(--motion-feedback)] ${inspectorTab === tab ? "border-primary text-primary" : "border-transparent text-muted hover:bg-subtle hover:text-foreground"}`}
               >
                 {t(tab === "properties" ? "canvas.propertiesTitle" : tab === "layers" ? "canvas.layersTitle" : "canvas.generationTitle")}
               </button>
@@ -1637,7 +1637,7 @@ export default function CanvasPage() {
                 onChange={handleStyle}
               />
             ) : (
-              <div className="px-5 py-6 text-[13px] leading-6 text-muted">
+              <div className="px-5 py-6 text-body-sm leading-6 text-muted">
                 {t("studio.canvas.selectObjectHint", { defaultValue: "Select an object to adjust its appearance." })}
               </div>
             )}

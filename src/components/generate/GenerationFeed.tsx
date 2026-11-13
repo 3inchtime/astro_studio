@@ -62,8 +62,8 @@ export default function GenerationFeed({
   }
 
   return (
-    <div className="space-y-7 relative min-h-full w-full bg-background px-6 py-6">
-      <div className="relative mx-auto flex min-h-full w-full max-w-[980px] flex-col gap-6">
+    <div data-testid="generation-feed" className="relative min-h-full w-full bg-canvas px-4 py-4">
+      <div className="relative mx-auto flex min-h-full w-full max-w-[1200px] flex-col gap-4">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
             <MessageBubble
@@ -113,7 +113,7 @@ function EmptyState() {
         <p className="text-[20px] font-semibold text-foreground tracking-tight">
           {t("generate.emptyTitle")}
         </p>
-        <p className="mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted">
+        <p className="mt-2 max-w-[360px] text-sm leading-relaxed text-muted">
           {t("generate.emptySubtitle")}
         </p>
       </motion.div>

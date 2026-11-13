@@ -108,11 +108,11 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
               <div>
                 <h2
                   id="update-dialog-title"
-                  className="text-[16px] font-semibold tracking-tight text-foreground"
+                  className="text-base font-semibold tracking-tight text-foreground"
                 >
                   {t("update.title")}
                 </h2>
-                <p className="mt-1 text-[13px] text-muted">
+                <p className="mt-1 text-body-sm text-muted">
                   {t("update.available", { version: update.version })}
                 </p>
               </div>
@@ -129,7 +129,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
 
             {update.body && (
               <div className="mt-4 max-h-[200px] overflow-y-auto rounded-[10px] border border-border-subtle bg-subtle/30 p-3">
-                <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground">
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">
                   {update.body}
                 </p>
               </div>
@@ -137,7 +137,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
 
             {status === "downloading" && (
               <div className="mt-5">
-                <div className="flex items-center justify-between text-[12px] text-muted">
+                <div className="flex items-center justify-between text-xs text-muted">
                   <span>{t("update.downloading")}</span>
                   <span>
                     {progress.total > 0
@@ -154,7 +154,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                   />
                 </div>
                 {progress.total > 0 && (
-                  <p className="mt-1 text-center text-[11px] text-muted">
+                  <p className="mt-1 text-center text-xs text-muted">
                     {progressPercent}%
                   </p>
                 )}
@@ -164,7 +164,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
             {status === "finished" && (
               <div className="mt-4 flex items-center gap-2 rounded-[10px] border border-success/15 bg-success/8 px-3 py-2">
                 <CheckCircle size={16} className="text-success" />
-                <p className="text-[12px] text-success">
+                <p className="text-xs text-success">
                   {t("update.downloadComplete")}
                 </p>
               </div>
@@ -173,7 +173,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
             {status === "error" && error && (
               <div className="mt-4 flex items-start gap-2 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2">
                 <AlertCircle size={16} className="mt-0.5 shrink-0 text-error" />
-                <p className="text-[12px] text-error">{error}</p>
+                <p className="text-xs text-error">{error}</p>
               </div>
             )}
 
@@ -182,13 +182,13 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                 <>
                   <button
                     onClick={handleClose}
-                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
+                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-body-sm font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
                   >
                     {t("update.later")}
                   </button>
                   <button
                     onClick={handleDownload}
-                    className="flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+                    className="flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-body-sm font-medium text-white transition-opacity hover:opacity-90"
                   >
                     <Download size={14} />
                     {t("update.download")}
@@ -199,7 +199,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
               {status === "downloading" && (
                 <button
                   disabled
-                  className="cursor-not-allowed rounded-[10px] gradient-primary px-4 py-2 text-[13px] font-medium text-white opacity-70"
+                  className="cursor-not-allowed rounded-[10px] gradient-primary px-4 py-2 text-body-sm font-medium text-white opacity-70"
                 >
                   {t("update.downloading")}
                 </button>
@@ -208,7 +208,7 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
               {status === "finished" && (
                 <button
                   onClick={handleRelaunch}
-                  className="flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+                  className="flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-body-sm font-medium text-white transition-opacity hover:opacity-90"
                 >
                   <CheckCircle size={14} />
                   {t("update.relaunch")}
@@ -219,13 +219,13 @@ export default function UpdateDialog({ open, update, onClose }: UpdateDialogProp
                 <>
                   <button
                     onClick={handleClose}
-                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-[13px] font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
+                    className="rounded-[10px] border border-border-subtle px-4 py-2 text-body-sm font-medium text-foreground transition-colors hover:border-border hover:bg-subtle hover:text-foreground"
                   >
                     {t("update.close")}
                   </button>
                   <button
                     onClick={handleDownload}
-                    className="flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+                    className="flex items-center gap-2 rounded-[10px] gradient-primary px-4 py-2 text-body-sm font-medium text-white transition-opacity hover:opacity-90"
                   >
                     <Download size={14} />
                     {t("update.retry")}

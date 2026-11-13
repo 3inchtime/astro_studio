@@ -59,7 +59,7 @@ export default function OptimizePromptModal({
             <div className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-primary/10 bg-primary/5">
               <Sparkles size={14} className="text-primary" strokeWidth={2} />
             </div>
-            <h2 className="text-[14px] font-semibold text-foreground">
+            <h2 className="text-sm font-semibold text-foreground">
               {t("generate.llm.modalTitle")}
             </h2>
           </div>
@@ -76,7 +76,7 @@ export default function OptimizePromptModal({
         <div className="grid grid-cols-2 gap-4 p-5">
           {/* Original */}
           <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+            <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted">
               {t("generate.llm.original")}
             </span>
             <textarea
@@ -84,13 +84,13 @@ export default function OptimizePromptModal({
               readOnly
               value={originalPrompt}
               rows={6}
-              className="w-full resize-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3.5 py-3 text-[13px] leading-[1.6] text-foreground placeholder:text-muted focus:outline-none"
+              className="w-full resize-none rounded-[10px] border border-border-subtle bg-subtle/30 px-3.5 py-3 text-body-sm leading-[1.6] text-foreground placeholder:text-muted focus:outline-none"
             />
           </div>
 
           {/* Optimized */}
           <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-primary/80">
+            <span className="text-xs font-semibold uppercase tracking-[0.06em] text-primary">
               {t("generate.llm.optimized")}
             </span>
             <textarea
@@ -98,7 +98,7 @@ export default function OptimizePromptModal({
               value={optimizedPrompt}
               onChange={(e) => onOptimizedChange(e.target.value)}
               rows={6}
-              className="w-full resize-none rounded-[10px] border border-primary/25 bg-surface px-3.5 py-3 text-[13px] leading-[1.6] text-foreground placeholder:text-muted transition-all duration-200 focus:border-primary/40 focus:shadow-[0_0_0_3px_rgba(79,106,255,0.08)] focus:outline-none"
+              className="w-full resize-none rounded-[10px] border border-primary/25 bg-surface px-3.5 py-3 text-body-sm leading-[1.6] text-foreground placeholder:text-muted transition-all duration-200 focus:border-primary/40 focus:shadow-[0_0_0_3px_rgba(79,106,255,0.08)] focus:outline-none"
             />
           </div>
         </div>
@@ -108,14 +108,14 @@ export default function OptimizePromptModal({
           <motion.button
             onClick={onKeepOriginal}
             whileTap={{ scale: 0.97 }}
-            className="flex h-[34px] items-center justify-center gap-1.5 rounded-[9px] border border-border-subtle bg-surface px-4 text-[12px] font-medium text-muted transition-all hover:border-border hover:text-foreground"
+            className="flex h-[34px] items-center justify-center gap-1.5 rounded-[9px] border border-border-subtle bg-surface px-4 text-xs font-medium text-muted transition-all hover:border-border hover:text-foreground"
           >
             {t("generate.llm.keepOriginal")}
           </motion.button>
           <motion.button
             onClick={onUseOptimized}
             whileTap={{ scale: 0.97 }}
-            className="flex h-[34px] items-center justify-center gap-1.5 rounded-[9px] gradient-primary px-4 text-[12px] font-semibold text-white shadow-[0_2px_8px_rgba(79,106,255,0.25)] transition-shadow hover:shadow-[0_4px_12px_rgba(79,106,255,0.35)]"
+            className="flex h-[34px] items-center justify-center gap-1.5 rounded-[9px] gradient-primary px-4 text-xs font-semibold text-white shadow-[0_2px_8px_rgba(79,106,255,0.25)] transition-shadow hover:shadow-[0_4px_12px_rgba(79,106,255,0.35)]"
           >
             <Sparkles size={13} />
             {t("generate.llm.useOptimized")}

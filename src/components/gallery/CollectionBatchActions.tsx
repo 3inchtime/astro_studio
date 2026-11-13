@@ -60,11 +60,11 @@ export default function CollectionBatchActions({ rows, selectedIds, onSelectLoad
     if (!outcome.failed.length) setAction(null);
   }
 
-  const buttonClass = "studio-control focus-ring min-h-9 rounded-lg px-3 text-[12px] font-medium disabled:opacity-40";
+  const buttonClass = "studio-control focus-ring min-h-9 rounded-lg px-3 text-xs font-medium disabled:opacity-40";
   return <>
     <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-5 py-2">
       <button type="button" disabled={!rows.length} onClick={onSelectLoaded} className={buttonClass}>{t("studio.collection.selectLoaded", { defaultValue: "Select all loaded" })}</button>
-      <span aria-live="polite" className="text-[12px] text-muted">{t("studio.collection.selectedCount", { count: selectedIds.size, defaultValue: "{{count}} generation record(s) selected" })}</span>
+      <span aria-live="polite" className="text-xs text-muted">{t("studio.collection.selectedCount", { count: selectedIds.size, defaultValue: "{{count}} generation record(s) selected" })}</span>
       {selectedIds.size > 0 && <>
         <button type="button" onClick={() => begin("favorite")} className={buttonClass}>{t("studio.collection.bulkFavorite", { defaultValue: "Add to folders" })}</button>
         <button type="button" onClick={() => begin("delete")} className={`${buttonClass} text-error`}>{t("studio.collection.bulkDelete", { defaultValue: "Move to trash" })}</button>
@@ -73,8 +73,8 @@ export default function CollectionBatchActions({ rows, selectedIds, onSelectLoad
     </div>
     {action && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={action === "delete" ? t("studio.collection.bulkDelete", { defaultValue: "Move to trash" }) : t("studio.collection.bulkFavorite", { defaultValue: "Add to folders" })} aria-busy={busy} tabIndex={-1} className="studio-floating-panel flex max-h-[calc(100dvh-32px)] w-full max-w-sm flex-col rounded-xl p-5 outline-none">
-        <h2 className="text-[16px] font-semibold text-foreground">{t("studio.collection.batchCount", { count: targets.length, defaultValue: "{{count}} generation record(s)" })}</h2>
-        <p className="mt-2 text-[14px] text-muted">{action === "delete" ? t("studio.collection.deleteAllImages", { defaultValue: "All images in these generation records will move to trash." }) : t("studio.collection.favoriteAllImages", { defaultValue: "Add every image in these generation records to the selected folders." })}</p>
+        <h2 className="text-base font-semibold text-foreground">{t("studio.collection.batchCount", { count: targets.length, defaultValue: "{{count}} generation record(s)" })}</h2>
+        <p className="mt-2 text-sm text-muted">{action === "delete" ? t("studio.collection.deleteAllImages", { defaultValue: "All images in these generation records will move to trash." }) : t("studio.collection.favoriteAllImages", { defaultValue: "Add every image in these generation records to the selected folders." })}</p>
         {action === "favorite" && <div className="mt-4 min-h-0 overflow-y-auto">
           {loadingFolders && <p role="status" className="text-sm text-muted">{t("studio.folder.loading", { defaultValue: "Loading folders…" })}</p>}
           {folderError && <div role="alert"><p className="text-sm text-error">{t("studio.folder.loadFailed", { defaultValue: "Could not load folders. Retry to make changes." })}</p><button className={buttonClass} onClick={() => void loadFolders()}>{t("studio.folder.retry", { defaultValue: "Retry" })}</button></div>}

@@ -203,7 +203,7 @@ export default function ConversationList({
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <MessageSquare size={13} className="text-muted" strokeWidth={1.8} />
-            <span className="text-[14px] font-semibold text-foreground tracking-tight">
+            <span className="text-sm font-semibold text-foreground tracking-tight">
               {activeProjectId && selectedProject
                 ? selectedProject.name
                 : t("sidebar.conversations")}
@@ -213,7 +213,7 @@ export default function ConversationList({
             <button
               type="button"
               onClick={() => navigate(ROUTES.projects)}
-              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1.5 text-[12px] font-medium text-foreground shadow-card transition-colors hover:bg-subtle hover:text-foreground"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-subtle hover:text-foreground"
               aria-label={t("projects.backToList")}
             >
               <ArrowLeft size={12} strokeWidth={1.9} />
@@ -232,7 +232,7 @@ export default function ConversationList({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("sidebar.search")}
-            className="h-8 w-full rounded-full border border-border-subtle bg-surface/72 pl-7 pr-2 text-[12px] text-foreground shadow-inset placeholder:text-muted transition-colors focus:border-primary/24 focus:bg-surface focus:outline-none"
+            className="h-8 w-full rounded-full border border-border-subtle bg-surface/72 pl-7 pr-2 text-xs text-foreground shadow-inset placeholder:text-muted transition-colors focus:border-primary/24 focus:bg-surface focus:outline-none"
           />
         </div>
       </div>
@@ -246,11 +246,11 @@ export default function ConversationList({
             <Plus size={14} className="text-primary" strokeWidth={2} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[14px] leading-snug text-foreground">
+            <p className="truncate text-sm leading-snug text-foreground">
               {t("sidebar.newConversation")}
             </p>
             <div className="mt-0.5 flex items-center gap-1.5">
-              <span className="truncate text-[12px] text-muted">
+              <span className="truncate text-xs text-muted">
                 {activeProjectId
                   ? t("sidebar.conversations")
                   : (selectedProject?.name ?? t("sidebar.conversations"))}
@@ -261,7 +261,7 @@ export default function ConversationList({
 
         {conversations.length === 0 ? (
           <div className="px-2 pt-6 text-center">
-            <p className="text-[12px] text-muted">
+            <p className="text-xs text-muted">
               {query ? t("sidebar.noResults") : t("sidebar.noConversations")}
             </p>
           </div>
@@ -372,7 +372,7 @@ function ConversationRow({
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
-              <ImageIcon size={14} className="text-muted/30" />
+              <ImageIcon size={14} className="text-muted" />
             </div>
           )}
         </div>
@@ -382,28 +382,28 @@ function ConversationRow({
               <Pin size={10} className="shrink-0 text-primary" />
             )}
             <p
-              className={`truncate text-[14px] leading-snug transition-colors ${
+              className={`truncate text-sm leading-snug transition-colors ${
                 active
                   ? "font-semibold text-foreground"
-                  : "text-foreground/78 group-hover:text-foreground"
+                  : "text-foreground group-hover:text-foreground"
               }`}
             >
               {conversation.title}
             </p>
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="text-[12px] text-muted">
+            <span className="text-xs text-muted">
               {formatConversationTime(
                 conversation.latest_generation_at ?? conversation.updated_at,
               )}
             </span>
             {conversation.generation_count > 1 && (
-              <span className="rounded-[5px] bg-primary/8 px-1.5 text-[9px] font-medium text-primary">
+              <span className="rounded-[5px] bg-primary/8 px-1.5 text-xs font-medium text-primary">
                 {conversation.generation_count}
               </span>
             )}
             {conversation.archived_at && (
-              <span className="rounded-[4px] bg-muted/10 px-1 text-[9px] font-medium text-muted">
+              <span className="rounded-[4px] bg-muted/10 px-1 text-xs font-medium text-muted">
                 {t("sidebar.archived")}
               </span>
             )}
@@ -467,7 +467,7 @@ function ConversationRow({
             .length > 0 && (
             <>
               <div className="my-1 border-t border-border-subtle" />
-              <p className="px-3 py-1 text-[12px] font-medium uppercase tracking-wider text-muted">
+              <p className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted">
                 {t("sidebar.moveToProject")}
               </p>
               {projects
@@ -511,10 +511,10 @@ function ActionButton({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors ${
+      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
         danger
           ? "text-error hover:bg-error/8"
-          : "text-foreground/75 hover:bg-subtle hover:text-foreground"
+          : "text-foreground hover:bg-subtle hover:text-foreground"
       }`}
     >
       {icon}

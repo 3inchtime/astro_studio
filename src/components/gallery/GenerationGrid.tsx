@@ -72,7 +72,7 @@ export default function GenerationGrid({
                   loading="lazy"
                 />
                 {result.images.length > 1 && (
-                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-[12px] font-medium text-white backdrop-blur-sm">
+                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
                     {result.images.length}
                   </div>
                 )}
@@ -83,10 +83,10 @@ export default function GenerationGrid({
                 onClick={() => onSelect(result)}
                 className="focus-ring min-w-0 rounded-[8px] py-1 text-left"
               >
-                <p className="line-clamp-2 text-[14px] font-medium leading-snug text-foreground/88 transition-colors group-hover:text-foreground">
+                <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground transition-colors group-hover:text-foreground">
                   {result.generation.prompt}
                 </p>
-                <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] text-muted">
+                <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
                   <span className="rounded-[6px] bg-subtle px-2 py-0.5">
                     {result.generation.engine}
                   </span>
@@ -173,7 +173,7 @@ export default function GenerationGrid({
                   loading="lazy"
                 />
                 {result.images.length > 1 && (
-                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-[12px] font-medium text-white backdrop-blur-sm">
+                  <div className="absolute left-2 top-2 rounded-[6px] bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
                     {result.images.length}
                   </div>
                 )}
@@ -212,7 +212,7 @@ export default function GenerationGrid({
               </div>
             </div>
             <div className="px-3 py-2.5">
-              <p className="line-clamp-1 text-[12px] leading-snug text-foreground transition-colors group-hover:text-foreground/70">
+              <p className="line-clamp-1 text-xs leading-snug text-foreground transition-colors group-hover:text-muted">
                 {result.generation.prompt}
               </p>
             </div>

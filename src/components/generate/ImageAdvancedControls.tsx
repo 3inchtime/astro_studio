@@ -36,7 +36,7 @@ export default function ImageAdvancedControls({
     onChange({ ...value, ...patch });
   const raster = format !== "gif" && format !== "svg";
   const field =
-    "studio-input focus-ring mt-1 w-full rounded-lg px-3 py-2 text-[14px]";
+    "studio-input focus-ring mt-1 w-full rounded-lg px-3 py-2 text-sm";
   const label = "text-xs text-muted";
   const chooseOverlay = async (kind: "markupPath" | "maskPath") => {
     try {

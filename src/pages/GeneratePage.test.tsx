@@ -1123,7 +1123,7 @@ describe("GeneratePage", () => {
     expect(screen.getByTestId("generation-parameter-row")).toHaveClass(
       "grid",
       "min-w-0",
-      "grid-cols-2",
+      "grid-cols-1",
     );
     expect(screen.getByTestId("generation-parameter-row")).not.toHaveClass(
       "w-max",
@@ -1148,7 +1148,7 @@ describe("GeneratePage", () => {
     );
 
     expect(toolbar).toHaveClass("studio-toolbar");
-    expect(commandSurface).toHaveClass("studio-panel-strong");
+    expect(commandSurface).not.toContainElement(screen.getByLabelText("Model"));
     expect(promptInput).toHaveClass("studio-input");
   });
 
@@ -1167,7 +1167,7 @@ describe("GeneratePage", () => {
       .closest("[data-testid='generation-command-surface']");
 
     expect(toolbar).toHaveAttribute("data-variant", "parameter-rail");
-    expect(commandSurface).toHaveClass("rounded-xl");
+    expect(document.getElementById("generation-parameters")).toContainElement(toolbar);
   });
 
   it("lets the generate surface stretch across the available main panel", async () => {
@@ -1182,7 +1182,7 @@ describe("GeneratePage", () => {
     });
     const feedSurface = screen
       .getByRole("button", { name: "Edit prompt" })
-      .closest(".space-y-7");
+      .closest("[data-testid='generation-feed']");
     const composerSurface = screen.getByPlaceholderText(
       "Describe the image you want to generate...",
     ).parentElement?.parentElement;
@@ -1204,7 +1204,7 @@ describe("GeneratePage", () => {
 
     const feedSurface = screen
       .getByRole("button", { name: "Edit prompt" })
-      .closest(".space-y-7");
+      .closest("[data-testid='generation-feed']");
     const scrollContainer = feedSurface?.parentElement;
 
     expect(scrollContainer).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
