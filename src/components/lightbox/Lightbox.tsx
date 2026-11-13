@@ -233,7 +233,7 @@ export default function Lightbox({
         >
           <X size={18} />
         </button>
-        <span className="text-[13px] text-white/80">
+        <span className="text-body-sm text-white/80">
           {index + 1} / {images.length}
         </span>
         <div className="w-8" />
@@ -268,7 +268,9 @@ export default function Lightbox({
               aria-hidden="true"
               src={toAssetUrl(currentImage.thumbnailPath)}
               alt=""
-              className="pointer-events-none absolute max-h-full max-w-full object-contain"
+              className="absolute max-h-full max-w-full object-contain"
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={toggleZoom}
               style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
             />}
             <img
