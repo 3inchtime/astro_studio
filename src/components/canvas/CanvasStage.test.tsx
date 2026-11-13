@@ -869,6 +869,11 @@ describe("CanvasStage", () => {
     expect(callbacks.onAddStroke).not.toHaveBeenCalled();
   });
 
+  it("keeps onboarding guidance clear of a populated composition", () => {
+    renderStage();
+    expect(screen.queryByText("Use the toolbar to draw and select.")).not.toBeInTheDocument();
+  });
+
   it("leaves Space available to an open inspector drawer", () => {
     renderStage({ shortcutsDisabled: true });
     expect(dispatchSpace(window).defaultPrevented).toBe(false);

@@ -807,9 +807,11 @@ export default function CanvasStage({
       }}
     >
       <div className="absolute inset-0 bg-canvas" />
-      <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-[calc(100%-180px)] line-clamp-2 text-[12px] text-muted">
-        {t("canvas.emptyStateHint")}
-      </div>
+      {content.layers.every((layer) => layer.objects.length === 0) && (
+        <div className="pointer-events-none absolute left-20 top-4 z-10 max-w-[calc(100%-240px)] line-clamp-2 text-[12px] text-muted">
+          {t("canvas.emptyStateHint")}
+        </div>
+      )}
 
       <Stage
         ref={stageRef}

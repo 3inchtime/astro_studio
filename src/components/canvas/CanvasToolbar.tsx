@@ -168,7 +168,7 @@ export default function CanvasToolbar(props: CanvasToolbarProps) {
           )}
         </div>
       )}
-      <div role="toolbar" aria-orientation="vertical" aria-label={t("studio.canvas.drawingTools", { defaultValue: "Drawing tools" })} className="pointer-events-auto absolute bottom-20 left-3 top-3 flex w-[52px] flex-col items-center gap-1 overflow-y-auto rounded-xl bg-surface p-1.5 shadow-float">
+      <div role="toolbar" aria-orientation="vertical" aria-label={t("studio.canvas.drawingTools", { defaultValue: "Drawing tools" })} className="pointer-events-auto absolute left-3 top-3 flex max-h-[calc(100%-92px)] w-[52px] flex-col items-center gap-1 overflow-y-auto rounded-xl bg-surface p-1.5 shadow-float">
         <div className="flex flex-col items-center gap-0.5">
           {tools.map(([tool, Icon, shortcut]) => (
             <button
