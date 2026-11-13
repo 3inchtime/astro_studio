@@ -37,6 +37,8 @@ pub struct PromptAgentMessage {
     pub selected_skill_ids: Vec<String>,
     pub suggested_params: PromptAgentSuggestedParams,
     pub ready_to_generate: bool,
+    #[serde(default)]
+    pub visual_context: Option<super::vision::VisualContext>,
     pub created_at: String,
 }
 
@@ -47,6 +49,10 @@ pub struct StartPromptAgentSessionRequest {
     pub conversation_id: Option<String>,
     pub project_id: Option<String>,
     pub source_image_paths: Vec<String>,
+    #[serde(default)]
+    pub visual_source_image_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub text_only: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,6 +61,10 @@ pub struct SendPromptAgentMessageRequest {
     pub message: String,
     pub config_id: String,
     pub source_image_paths: Vec<String>,
+    #[serde(default)]
+    pub visual_source_image_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub text_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,4 +113,5 @@ pub struct PromptAgentRunInput {
     pub conversation_summary: String,
     pub previous_draft_prompt: Option<String>,
     pub source_image_count: usize,
+    pub visual_context: Option<super::vision::VisualContext>,
 }

@@ -773,7 +773,7 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
     if manifest.version != 1 {
         return Err("Unsupported backup format version".into());
     }
-    if manifest.schema_version > 19 {
+    if manifest.schema_version > 20 {
         return Err("Backup was created by a newer application".into());
     }
     if manifest.files.len() + 1 != names.len() || !names.contains("library.db") {

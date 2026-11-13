@@ -2462,6 +2462,14 @@ impl Database {
         ",
         )?;
 
+        apply_migration(
+            &conn,
+            20,
+            "prompt agent visual context",
+            "
+            ALTER TABLE prompt_agent_messages ADD COLUMN visual_context_json TEXT;
+        ",
+        )?;
 
         ensure_migration_compatibility(&conn)?;
 
