@@ -7,6 +7,13 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, opti
 vi.mock("../../lib/api", () => ({ deleteGeneration: vi.fn(), addImageToFolders: vi.fn(), getFolders: vi.fn().mockResolvedValue([]) }));
 const rows = ["a", "b"].map((id) => ({ generation: { id }, images: [{ id: `${id}1` }, { id: `${id}2` }] })) as GenerationResult[];
 describe("CollectionBatchActions", () => {
+  it("keeps bulk controls absent until selection begins", () => {
+    render(<CollectionBatchActions rows={rows} selectedIds={new Set()} onSelectLoaded={vi.fn()} onClear={vi.fn()} onSucceeded={vi.fn()} />);
+    expect(screen.queryByText(/generation record.*selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select all visible" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select all loaded" })).not.toBeInTheDocument();
+  });
+
   it("confirms deleting all images and retains only failed generations for retry", async () => {
     vi.mocked(deleteGeneration).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("locked")).mockResolvedValueOnce(undefined);
     const removed = vi.fn();

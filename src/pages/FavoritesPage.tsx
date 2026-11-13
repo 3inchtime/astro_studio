@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -29,6 +29,7 @@ import ConfirmDialog from "../components/common/ConfirmDialog";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
+import CollectionSelectionButton from "../components/gallery/CollectionSelectionButton";
 import CollectionBatchActions from "../components/gallery/CollectionBatchActions";
 import GenerationDeleteDialog from "../components/gallery/GenerationDeleteDialog";
 import { useCollectionSelection } from "../components/gallery/useCollectionSelection";
@@ -52,7 +53,14 @@ export default function FavoritesPage() {
   const [activeKind, setActiveKind] = useState<FavoriteKind>("images");
 
   const [imageResults, setImageResults] = useState<GenerationResult[]>([]);
-  const selection = useCollectionSelection(imageResults.map((row) => row.generation.id));
+  const displayedResults = useMemo(() => imageResults.filter((row) => row.images.length > 0), [imageResults]);
+  const selection = useCollectionSelection(displayedResults.map((row) => row.generation.id));
+  const [selectionMode, setSelectionMode] = useState(false);
+  const selecting = selectionMode || selection.selectedIds.size > 0;
+  function clearSelection() {
+    selection.clear();
+    setSelectionMode(false);
+  }
   const [deleteImageTarget, setDeleteImageTarget] = useState<string | null>(null);
   const [imageQuery, setImageQuery] = useState("");
   const [selectedImageFolderId, setSelectedImageFolderId] = useState("");
@@ -161,7 +169,7 @@ export default function FavoritesPage() {
   }, []);
 
   function handleSearch() {
-    selection.clear();
+    clearSelection();
     if (activeKind === "images") {
       loadImageFavorites(1, imageQuery, selectedImageFolderId).catch(() => {});
       return;
@@ -170,7 +178,7 @@ export default function FavoritesPage() {
   }
 
   function handleFolderFilterChange(folderId: string) {
-    selection.clear();
+    clearSelection();
     if (activeKind === "images") {
       setSelectedImageFolderId(folderId);
       setSelectedImage(null);
@@ -325,6 +333,11 @@ export default function FavoritesPage() {
           </div>
 
           <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto">
+            {activeKind === "images" && <CollectionSelectionButton
+              active={selecting}
+              disabled={!displayedResults.length}
+              onClick={() => selecting ? clearSelection() : setSelectionMode(true)}
+            />}
             {activeKind === "images" && (
               <ViewModeToggle
                 value={imageViewMode}
@@ -398,7 +411,7 @@ export default function FavoritesPage() {
           </div>
         </div>
 
-        {activeKind === "images" && <CollectionBatchActions rows={imageResults} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={selection.clear} onSucceeded={(ids, kind) => {
+        {activeKind === "images" && <CollectionBatchActions selectionMode={selectionMode} rows={displayedResults} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={clearSelection} onSucceeded={(ids, kind) => {
           selection.remove(ids);
           if (kind === "delete") ids.forEach(handleDeletedImage);
           else void reloadFolders();
@@ -412,15 +425,16 @@ export default function FavoritesPage() {
           />
           {activeKind === "images" ? (
             <>
-              {imageResults.length === 0 ? (!isLoadingImages && !imageLoadError && (
+              {displayedResults.length === 0 ? (!isLoadingImages && !imageLoadError && (
                 <EmptyCollectionState
                   title={t("favorites.noImages")}
                   subtitle={t("favorites.emptyHint")}
                 />
               )) : (
                 <GenerationGrid
-                  results={imageResults}
+                  results={displayedResults}
                   selectedIds={selection.selectedIds}
+                  selectionMode={selecting}
                   onToggleSelection={selection.toggle}
                   viewMode={imageViewMode}
                   onSelect={setSelectedImage}

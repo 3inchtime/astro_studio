@@ -25,7 +25,7 @@ export default function GallerySearchBar({
   actions,
 }: GallerySearchBarProps) {
   return (
-    <div className="studio-toolbar px-6 py-4">
+    <div className="studio-toolbar px-5 py-4">
       <div className="flex flex-col gap-4">
         <div className="flex shrink-0 items-center gap-3 pb-0.5">
           <h2 className="text-[20px] font-semibold tracking-tight text-foreground">
@@ -36,6 +36,7 @@ export default function GallerySearchBar({
               {total}
             </span>
           )}
+          {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
         </div>
 
         <div
@@ -134,7 +135,6 @@ export default function GallerySearchBar({
               <RotateCcw size={13} />
               {config.resetFilters}
             </button>
-            {actions}
           </div>
         </div>
       </div>

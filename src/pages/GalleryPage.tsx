@@ -11,6 +11,7 @@ import FolderSelector from "../components/favorites/FolderSelector";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
+import CollectionSelectionButton from "../components/gallery/CollectionSelectionButton";
 import CollectionBatchActions from "../components/gallery/CollectionBatchActions";
 import GenerationDeleteDialog from "../components/gallery/GenerationDeleteDialog";
 import { useCollectionSelection } from "../components/gallery/useCollectionSelection";
@@ -42,7 +43,14 @@ export default function GalleryPage() {
     closeFolderSelector,
   } = useUIStore();
   const [results, setResults] = useState<GenerationResult[]>([]);
-  const selection = useCollectionSelection(results.map((row) => row.generation.id));
+  const displayedResults = useMemo(() => results.filter((row) => row.images.length > 0), [results]);
+  const selection = useCollectionSelection(displayedResults.map((row) => row.generation.id));
+  const [selectionMode, setSelectionMode] = useState(false);
+  const selecting = selectionMode || selection.selectedIds.size > 0;
+  function clearSelection() {
+    selection.clear();
+    setSelectionMode(false);
+  }
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<GenerationSearchFilters>({});
@@ -132,7 +140,7 @@ export default function GalleryPage() {
   }, [performSearch]);
 
   async function handleSearch() {
-    selection.clear();
+    clearSelection();
     await performSearch(1, query, filters);
   }
 
@@ -158,7 +166,7 @@ export default function GalleryPage() {
   );
 
   function resetFilters() {
-    selection.clear();
+    clearSelection();
     setQuery("");
     setFilters({});
     void performSearch(1, "", {});
@@ -200,24 +208,32 @@ export default function GalleryPage() {
           onQueryChange={setQuery}
           onSearch={() => void handleSearch()}
           onReset={resetFilters}
-          actions={<ViewModeToggle value={viewMode} onChange={setViewMode} />}
+          actions={<>
+            <CollectionSelectionButton
+              active={selecting}
+              disabled={!displayedResults.length}
+              onClick={() => selecting ? clearSelection() : setSelectionMode(true)}
+            />
+            <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          </>}
         />
 
-        <CollectionBatchActions rows={results} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={selection.clear} onSucceeded={(ids, kind) => {
+        <CollectionBatchActions selectionMode={selectionMode} rows={displayedResults} selectedIds={selection.selectedIds} onSelectLoaded={selection.selectLoaded} onClear={clearSelection} onSucceeded={(ids, kind) => {
           selection.remove(ids);
           if (kind === "delete") ids.forEach(handleDeleted);
         }} />
         <div className="flex-1 overflow-y-auto p-5">
           <CollectionStatus loading={isLoading} error={loadError} onRetry={() => void handleSearch()} />
-          {results.length === 0 ? (!isLoading && !loadError && (
+          {displayedResults.length === 0 ? (!isLoading && !loadError && (
             <EmptyCollectionState
               title={t("gallery.noImages")}
               subtitle={t("gallery.emptyHint")}
             />
           )) : (
             <GenerationGrid
-              results={results}
+              results={displayedResults}
               selectedIds={selection.selectedIds}
+              selectionMode={selecting}
               onToggleSelection={selection.toggle}
               viewMode={viewMode}
               favoriteMode="manage"

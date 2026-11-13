@@ -519,12 +519,26 @@ describe("GalleryPage", () => {
     searchGenerations.mockResolvedValueOnce({ generations: [buildResult("1"), buildResult("2")], total: 20, page: 1, page_size: 20 });
     render(<GalleryPage />);
     await screen.findByTestId("grid");
-    fireEvent.click(screen.getByRole("button", { name: "studio.collection.selectLoaded" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.select" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.selectVisible" }));
     expect(screen.getByTestId("grid")).toHaveAttribute("data-selected", "generation-1,generation-2");
     fireEvent.click(screen.getByRole("button", { name: "Open detail generation-1" }));
     fireEvent.click(screen.getByRole("button", { name: "Open preview generation-2" }));
     expect(screen.getByTestId("grid")).toHaveAttribute("data-selected", "generation-1,generation-2");
     expect(searchGenerations).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects only displayed records when the backend includes failed generations without images", async () => {
+    const failed = { ...buildResult("failed"), images: [], generation: { ...buildResult("failed").generation, status: "failed" as const } };
+    searchGenerations.mockResolvedValueOnce({ generations: [failed, buildResult("visible")], total: 2, page: 1, page_size: 20 });
+    render(<GalleryPage />);
+    await screen.findByTestId("grid");
+    expect(screen.queryByRole("button", { name: "studio.collection.selectVisible" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.select" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.selectVisible" }));
+    expect(screen.getByTestId("grid")).toHaveAttribute("data-selected", "generation-visible");
+    expect(screen.queryByRole("button", { name: "Open preview generation-failed" })).not.toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
   });
 
   it("refills the loaded boundary after deleting a record without duplicating rows", async () => {
