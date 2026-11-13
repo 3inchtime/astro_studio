@@ -27,7 +27,7 @@ import {
   completeCanvasGeneration,
   failCanvasGeneration,
 } from "../lib/canvas/generation";
-import { queueCanvasSave, waitForCanvasSaves, registerCanvasDraftFlusher, acknowledgeCanvasSaveRecovery } from "../lib/canvas/persistence";
+import { queueCanvasSave, waitForCanvasSaves, registerCanvasDraftFlusher, acknowledgeCanvasSaveRecovery, getConflictedCanvasDraft } from "../lib/canvas/persistence";
 import { useCanvasGenerationRecovery } from "../lib/canvas/useCanvasGenerationRecovery";
 import {
   alignCanvasObjects,
@@ -307,7 +307,21 @@ export default function CanvasPage() {
       setHasSaveError(false);
       setHasLoadError(false);
     })().catch(() => {
-      if (isCurrentLoad()) setHasLoadError(true);
+      if (!isCurrentLoad()) return;
+      const recovered = getConflictedCanvasDraft(requestedDocumentId);
+      if (!recovered) { setHasLoadError(true); return; }
+      // A late conflict must remain editable after navigating away and back.
+      const nextContent = sanitizeCanvasDocumentContent(recovered.content);
+      revisionsRef.current.set(requestedDocumentId, recovered.revision);
+      historyPresentRef.current = nextContent;
+      loadedDocumentIdRef.current = requestedDocumentId;
+      setHistory(createHistory(nextContent));
+      setActiveLayerId(nextContent.layers[0]?.id ?? null);
+      setLoadedDocumentId(requestedDocumentId);
+      setDirtyState(true);
+      setHasSaveError(true);
+      setHasSaveConflict(true);
+      setHasLoadError(false);
     });
     return () => {
       disposed = true;
@@ -318,7 +332,7 @@ export default function CanvasPage() {
     if (
       !selectedDocumentId ||
       loadedDocumentId !== selectedDocumentId ||
-      !isDirty
+      !isDirty || hasSaveConflict
     ) {
       return;
     }
@@ -340,7 +354,7 @@ export default function CanvasPage() {
     }, 500);
 
     return clearSaveTimer;
-  }, [history.present, isDirty, loadedDocumentId, selectedDocumentId]);
+  }, [history.present, isDirty, hasSaveConflict, loadedDocumentId, selectedDocumentId]);
 
   const content = history.present;
   useEffect(() => {
@@ -677,7 +691,7 @@ export default function CanvasPage() {
             object.type !== "image" || !missing.some((asset) => asset.object_id === object.id && asset.image_path === object.image_path)
           ) })),
         } : snapshot;
-        const previewPngBase64 = await exportCanvasFrame(previewContent);
+        const previewPngBase64 = await exportCanvasFrame(previewContent).catch(() => null);
         const saved = await saveCanvasDocument(
           documentId, snapshot, previewPngBase64,
           revisionsRef.current.get(documentId) ?? 0,
@@ -685,6 +699,7 @@ export default function CanvasPage() {
         revisionsRef.current.set(documentId, saved.revision);
       },
       saveQueueRef.current,
+      snapshot,
     ).promise;
     const promise = (async () => {
       try {

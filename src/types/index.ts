@@ -288,7 +288,21 @@ export interface PromptAgentSession {
   updated_at: string;
 }
 
+export interface PromptAgentVisualContext {
+  source_image_indices?: number[];
+  version: number;
+  analysis_model: string;
+  analysis_protocol: string;
+  image_hashes: string[];
+  observations: string[];
+  preserve: string[];
+  changes: string[];
+  user_request: string;
+  text_only: boolean;
+}
+
 export interface PromptAgentMessage {
+  visual_context?: PromptAgentVisualContext | null;
   id: string;
   session_id: string;
   role: "user" | "assistant" | "tool";

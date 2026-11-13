@@ -13,6 +13,8 @@ export interface ProviderSettingsDraft {
   promptAgentSessionId: string | null;
   promptAgentMessages: PromptAgentMessage[];
   selectedPromptAgentConfigId: string;
+  agentTextOnly?: boolean;
+  agentVisualSelection?: string[] | null;
 }
 export function saveProviderSettingsDraft(draft: ProviderSettingsDraft) {
   sessionStorage.setItem(KEY, JSON.stringify(draft));

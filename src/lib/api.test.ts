@@ -12,6 +12,7 @@ import {
   createPromptFolder,
   createPromptFavorite,
   deleteCanvasDocument,
+  permanentlyDeleteGeneration,
   deleteConversation,
   deleteModelProviderProfile,
   deletePromptFolder,
@@ -347,7 +348,9 @@ describe("api prompt agent commands", () => {
       configId: "llm-a",
       conversationId: "conv-a",
       projectId: "project-a",
-      sourceImagePaths: ["/tmp/ref.png"],
+      sourceImagePaths: ["/tmp/ref.png", "/tmp/other.png"],
+      visualSourceImagePaths: ["/tmp/ref.png"],
+      textOnly: false,
     });
 
     expect(tauriApi.invoke).toHaveBeenCalledWith("start_prompt_agent_session", {
@@ -356,7 +359,9 @@ describe("api prompt agent commands", () => {
         config_id: "llm-a",
         conversation_id: "conv-a",
         project_id: "project-a",
-        source_image_paths: ["/tmp/ref.png"],
+        source_image_paths: ["/tmp/ref.png", "/tmp/other.png"],
+        visual_source_image_paths: ["/tmp/ref.png"],
+        text_only: false,
       },
     });
   });
@@ -368,7 +373,9 @@ describe("api prompt agent commands", () => {
       sessionId: "session-a",
       message: "Make it dusk",
       configId: "llm-a",
-      sourceImagePaths: [],
+      sourceImagePaths: ["/tmp/ref.png"],
+      visualSourceImagePaths: [],
+      textOnly: true,
     });
     await acceptPromptAgentDraft("session-a", "Final prompt");
     await cancelPromptAgentSession("session-a");
@@ -382,7 +389,9 @@ describe("api prompt agent commands", () => {
           session_id: "session-a",
           message: "Make it dusk",
           config_id: "llm-a",
-          source_image_paths: [],
+          source_image_paths: ["/tmp/ref.png"],
+          visual_source_image_paths: [],
+          text_only: true,
         },
       },
     );
@@ -693,5 +702,28 @@ describe("canvas generation recovery API", () => {
       "get_canvas_generation_status",
       { documentId: "document-id", requestId: "request-id" },
     );
+  });
+});
+
+describe("deletion waits for canvas references", () => {
+  it("waits for a pending canvas preview and save before deleting", async () => {
+    const { queueCanvasSave } = await import("./canvas/persistence");
+    let resolve!:()=>void;
+    queueCanvasSave("delete-pending",()=>new Promise<void>(yes=>{resolve=yes;}));
+    tauriApi.invoke.mockClear();
+    const deletion=permanentlyDeleteGeneration("generation-1");
+    await vi.waitFor(()=>expect(resolve).toBeTypeOf("function"));
+    expect(tauriApi.invoke).not.toHaveBeenCalledWith("permanently_delete_generation",expect.anything());
+    resolve();await deletion;
+    expect(tauriApi.invoke).toHaveBeenCalledWith("permanently_delete_generation",{id:"generation-1"});
+  });
+  it("blocks deletion when a canvas save failed", async () => {
+    const { queueCanvasSave, waitForCanvasSaves } = await import("./canvas/persistence");
+    const write=vi.fn().mockRejectedValueOnce(new Error("disk full")).mockResolvedValue(undefined);
+    await expect(queueCanvasSave("delete-failed",write).promise).rejects.toThrow("disk full");
+    tauriApi.invoke.mockClear();
+    await expect(permanentlyDeleteGeneration("generation-2")).rejects.toThrow("disk full");
+    expect(tauriApi.invoke).not.toHaveBeenCalledWith("permanently_delete_generation",expect.anything());
+    await waitForCanvasSaves("delete-failed",true,()=>true);
   });
 });

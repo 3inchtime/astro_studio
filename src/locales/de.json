@@ -861,5 +861,21 @@
   "canvas.saveConflict": "Dieser Canvas wurde an anderer Stelle geändert. Deine Änderungen bleiben hier erhalten. Speichere eine Kopie, um beide Versionen zu behalten.",
   "canvas.saveCopy": "Kopie speichern",
   "canvas.recoveredCanvas": "Wiederhergestellter Canvas",
-  "trash.assetInUse": "Diese Bilder werden an den folgenden Stellen verwendet. Entferne die Verweise oder stelle diese Generierung wieder her."
+  "trash.assetInUse": "Diese Bilder werden an den folgenden Stellen verwendet. Entferne die Verweise oder stelle diese Generierung wieder her.",
+  "promptVision.selectedCount": "Analyse: {{count}} / 3 · {{total}} angehängt",
+  "promptVision.textOnly": "Nur Text",
+  "promptVision.textOnlyHint": "Der Assistent nutzt nur deine Beschreibung. Alle angehängten Bilder bleiben für die Bildbearbeitung verfügbar.",
+  "promptVision.editReferencesKept": "Wähle 1–3 Bilder zur Analyse. Alle angehängten Bilder bleiben für die Bildbearbeitung verfügbar.",
+  "promptVision.selectReference": "{{name}} analysieren",
+  "promptVision.retry": "Erneut versuchen",
+  "promptVision.selectUpToThree": "Wähle 1–3 Referenzbilder oder wechsle zu „Nur Text“.",
+  "promptVision.invalidSelection": "Die Bildauswahl hat sich geändert. Wähle die Referenzen erneut aus.",
+  "promptVision.multimodalRequired": "Wähle ein aktiviertes Bildanalysemodell oder wechsle zu „Nur Text“.",
+  "promptVision.imageUnavailable": "Ein ausgewähltes Bild ist nicht verfügbar. Füge es erneut hinzu oder wähle ein anderes.",
+  "promptVision.analysisFailed": "Der Assistent konnte diese Anfrage nicht abschließen. Entwurf und Referenzen bleiben erhalten. Versuche es erneut.",
+  "promptVision.summary": "Bildanalyse · {{count}}",
+  "promptVision.observations": "Beobachtungen",
+  "promptVision.preserve": "Beibehalten",
+  "promptVision.changes": "Ändern",
+  "promptVision.sourcePositions": "Analysierte Bearbeitungsreferenzen: {{positions}}"
 }

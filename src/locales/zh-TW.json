@@ -861,5 +861,21 @@
   "canvas.saveConflict": "此畫布已在其他位置變更。你的編輯仍保留在此，可儲存副本以保留兩個版本。",
   "canvas.saveCopy": "儲存副本",
   "canvas.recoveredCanvas": "恢復的畫布",
-  "trash.assetInUse": "這些圖片仍被以下位置引用。請先移除引用，或還原此生成記錄。"
+  "trash.assetInUse": "這些圖片仍被以下位置引用。請先移除引用，或還原此生成記錄。",
+  "promptVision.selectedCount": "分析 {{count}} / 3 張 · 已附加 {{total}} 張",
+  "promptVision.textOnly": "純文字",
+  "promptVision.textOnlyHint": "助手只使用文字要求，所有附加圖片仍保留用於圖像編輯。",
+  "promptVision.editReferencesKept": "選擇 1–3 張圖片供分析，所有附加圖片仍保留用於圖像編輯。",
+  "promptVision.selectReference": "分析 {{name}}",
+  "promptVision.retry": "重試",
+  "promptVision.selectUpToThree": "請選擇 1–3 張參考圖，或切換為純文字。",
+  "promptVision.invalidSelection": "圖片選擇已變更，請重新選擇參考圖。",
+  "promptVision.multimodalRequired": "請選擇已啟用的視覺模型，或切換為純文字。",
+  "promptVision.imageUnavailable": "所選圖片無法存取，請重新附加圖片或選擇其他參考圖。",
+  "promptVision.analysisFailed": "助手無法完成本輪處理。草稿和參考圖已保留，請重試。",
+  "promptVision.summary": "圖片分析 · {{count}} 張",
+  "promptVision.observations": "觀察結果",
+  "promptVision.preserve": "保留",
+  "promptVision.changes": "修改",
+  "promptVision.sourcePositions": "已分析的編輯參考圖序號：{{positions}}"
 }

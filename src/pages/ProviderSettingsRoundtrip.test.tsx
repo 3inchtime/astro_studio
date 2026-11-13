@@ -52,7 +52,7 @@ it("restores a provider-settings draft into its original real-layout conversatio
   await waitFor(() => expect(screen.getByTestId("active-conversation")).toHaveTextContent("original-conversation"));
   fireEvent.change(screen.getByLabelText("Draft prompt"), { target: { value: "Continue the original conversation" } });
   fireEvent.click(await screen.findByRole("button", { name: /configure provider/i }));
-  api.getModelProviderProfiles.mockResolvedValue({ active_provider_id: "profile", profiles: [{ id: "profile", name: "Configured", api_key: "fixture", endpoint_settings: { mode: "base_url", base_url: "https://example.test/v1", generation_url: "", edit_url: "" } }] });
+  api.getModelProviderProfiles.mockResolvedValue({ active_provider_id: "profile", profiles: [{ id: "profile", name: "Configured", api_key: "", api_key_configured: true, api_key_masked: "••••ture", endpoint_settings: { mode: "base_url", base_url: "https://example.test/v1", generation_url: "", edit_url: "" } }] });
   fireEvent.click(await screen.findByRole("link", { name: "Return to draft" }));
   await waitFor(() => expect(screen.getByTestId("active-conversation")).toHaveTextContent("original-conversation"));
   expect(screen.getByLabelText("Draft prompt")).toHaveValue("Continue the original conversation");

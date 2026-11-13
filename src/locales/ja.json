@@ -861,5 +861,21 @@
   "canvas.saveConflict": "このキャンバスは別の場所で変更されました。編集内容はここに保持されています。コピーを保存して両方の版を残せます。",
   "canvas.saveCopy": "コピーを保存",
   "canvas.recoveredCanvas": "復元したキャンバス",
-  "trash.assetInUse": "これらの画像は以下の場所で使用されています。参照を削除するか、この生成結果を復元してください。"
+  "trash.assetInUse": "これらの画像は以下の場所で使用されています。参照を削除するか、この生成結果を復元してください。",
+  "promptVision.selectedCount": "分析 {{count}} / 3 枚 · 添付 {{total}} 枚",
+  "promptVision.textOnly": "テキストのみ",
+  "promptVision.textOnlyHint": "アシスタントは文章のみを使用します。添付画像はすべて画像編集用に保持されます。",
+  "promptVision.editReferencesKept": "分析する画像を1〜3枚選択してください。添付画像はすべて画像編集用に保持されます。",
+  "promptVision.selectReference": "{{name}} を分析",
+  "promptVision.retry": "再試行",
+  "promptVision.selectUpToThree": "参考画像を1〜3枚選択するか、テキストのみに切り替えてください。",
+  "promptVision.invalidSelection": "画像の選択が変更されました。参考画像を選び直してください。",
+  "promptVision.multimodalRequired": "有効な画像認識モデルを選択するか、テキストのみに切り替えてください。",
+  "promptVision.imageUnavailable": "選択した画像にアクセスできません。再添付するか、別の参考画像を選択してください。",
+  "promptVision.analysisFailed": "この処理を完了できませんでした。下書きと参考画像は保持されています。再試行してください。",
+  "promptVision.summary": "画像分析 · {{count}} 枚",
+  "promptVision.observations": "観察内容",
+  "promptVision.preserve": "保持する内容",
+  "promptVision.changes": "変更する内容",
+  "promptVision.sourcePositions": "分析した編集用参考画像：{{positions}}"
 }

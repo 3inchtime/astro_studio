@@ -471,6 +471,7 @@ export async function restoreGeneration(id: string): Promise<void> {
 }
 
 export async function permanentlyDeleteGeneration(id: string): Promise<void> {
+  await flushCanvasSaves();
   await invoke("permanently_delete_generation", { id });
 }
 
@@ -932,6 +933,8 @@ export async function startPromptAgentSession(params: {
   conversationId?: string | null;
   projectId?: string | null;
   sourceImagePaths?: string[];
+  visualSourceImagePaths?: string[];
+  textOnly?: boolean;
 }): Promise<PromptAgentTurnResponse> {
   return invoke("start_prompt_agent_session", {
     request: {
@@ -940,6 +943,8 @@ export async function startPromptAgentSession(params: {
       conversation_id: params.conversationId ?? null,
       project_id: params.projectId ?? null,
       source_image_paths: params.sourceImagePaths ?? [],
+      ...(params.visualSourceImagePaths !== undefined ? { visual_source_image_paths: params.visualSourceImagePaths } : {}),
+      text_only: params.textOnly ?? false,
     },
   });
 }
@@ -949,6 +954,8 @@ export async function sendPromptAgentMessage(params: {
   message: string;
   configId: string;
   sourceImagePaths?: string[];
+  visualSourceImagePaths?: string[];
+  textOnly?: boolean;
 }): Promise<PromptAgentTurnResponse> {
   return invoke("send_prompt_agent_message", {
     request: {
@@ -956,6 +963,8 @@ export async function sendPromptAgentMessage(params: {
       message: params.message,
       config_id: params.configId,
       source_image_paths: params.sourceImagePaths ?? [],
+      ...(params.visualSourceImagePaths !== undefined ? { visual_source_image_paths: params.visualSourceImagePaths } : {}),
+      text_only: params.textOnly ?? false,
     },
   });
 }

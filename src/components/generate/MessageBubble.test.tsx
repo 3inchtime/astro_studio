@@ -238,3 +238,13 @@ it("offers full parameter reuse and regeneration on completed history", () => {
   fireEvent.click(screen.getByRole("button", { name: "recipe.regenerate" }));
   expect(reuse).toHaveBeenCalledWith("saved", "generate");
 });
+
+it("shows persisted visual observations in an optional user-message disclosure", () => {
+ render(<MessageBubble agentMessage={{id:"visual",session_id:"s",role:"user",content:"Keep the composition",selected_skill_ids:[],suggested_params:{},ready_to_generate:false,created_at:"2026-11-13",visual_context:{version:1,analysis_model:"vision-model",analysis_protocol:"openai",image_hashes:["private-hash"],observations:["A red vase on a stone table"],preserve:["Vase placement"],changes:["Warm afternoon light"],user_request:"Keep the composition",text_only:false}}}/>);
+ const disclosure=screen.getByText("promptVision.summary").closest("details");
+ expect(disclosure).not.toHaveAttribute("open");
+ fireEvent.click(screen.getByText("promptVision.summary"));
+ expect(screen.getByText("A red vase on a stone table")).toBeInTheDocument();
+ expect(screen.getByText("Vase placement")).toBeInTheDocument();
+ expect(screen.queryByText("private-hash")).not.toBeInTheDocument();
+});

@@ -1720,13 +1720,12 @@ describe("CanvasPage", () => {
   it("blocks reopening after an earlier mount's save fails and retries that exact save before reading", async () => {
     const document = canvasDocumentWithImage();
     let disk: CanvasDocumentContent = structuredClone(document.content);
-    const oldPreview = createDeferred<string>();
+    const oldSave = createDeferred<typeof document>();
     getCanvasDocument.mockImplementation(async () => ({
       ...document,
       content: structuredClone(disk),
     }));
-    exportCanvasFrame.mockImplementationOnce(() => oldPreview.promise);
-    saveCanvasDocument.mockImplementation(
+    saveCanvasDocument.mockImplementationOnce(() => oldSave.promise).mockImplementation(
       async (_id: string, snapshot: CanvasDocumentContent) => {
         disk = structuredClone(snapshot);
         return document;
@@ -1742,7 +1741,7 @@ describe("CanvasPage", () => {
     vi.useRealTimers();
     render(<CanvasPage />, { wrapper: TestWrapper });
     await flushAsyncWork();
-    await act(async () => oldPreview.reject(new Error("preview unavailable")));
+    await act(async () => oldSave.reject(new Error("disk unavailable")));
     expect(
       await screen.findByText("Couldn't load this canvas."),
     ).toBeInTheDocument();
@@ -1906,6 +1905,49 @@ it("flushes a dirty mounted canvas while its autosave timer is pending", async (
     expect(copy?.[3]).toBe(0);
     expect(saveCanvasDocument.mock.calls.filter((call) => call[0] === "canvas-1")).toHaveLength(1);
     await act(async () => { await flushCanvasSaves(); });
+  });
+
+  it("persists the latest canvas body when thumbnail rendering fails", async () => {
+    getCanvasDocument.mockResolvedValue(canvasDocumentWithImage());
+    exportCanvasFrame.mockRejectedValueOnce(new Error("Preview renderer unavailable"));
+    render(<CanvasPage/>, {wrapper:TestWrapper});
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("button", {name:"select image"}));
+    fireEvent.click(screen.getByRole("button", {name:"move selection"}));
+    await act(async()=>{await flushCanvasSaves();});
+    expect(saveCanvasDocument).toHaveBeenCalledWith("canvas-1",expect.objectContaining({layers:[expect.objectContaining({objects:[expect.objectContaining({x:112,y:58})]})]}),null,0);
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
+  it("restores an unmounted conflicted draft so it can be saved as a copy", async () => {
+    const document = canvasDocumentWithImage();
+    const pending = createDeferred<typeof document>();
+    getCanvasDocument.mockResolvedValue(document);
+    saveCanvasDocument.mockReturnValueOnce(pending.promise);
+    const old = render(<CanvasPage/>, {wrapper:TestWrapper});
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("button", {name:"select image"}));
+    fireEvent.click(screen.getByRole("button", {name:"move selection"}));
+    old.unmount();
+    await waitFor(()=>expect(saveCanvasDocument).toHaveBeenCalledTimes(1));
+    await act(async()=>pending.reject({kind:"CanvasRevisionConflict",detail:{expected_revision:0,actual_revision:4}} as unknown as Error));
+    render(<CanvasPage/>, {wrapper:TestWrapper});
+    fireEvent.click(await screen.findByRole("button", {name:"canvas.saveCopy"}));
+    await waitFor(()=>expect(saveCanvasDocument.mock.calls.some(call=>call[0]==="canvas-2")).toBe(true));
+    expect(saveCanvasDocument.mock.calls.find(call=>call[0]==="canvas-2")?.[1].layers[0].objects[0]).toMatchObject({x:112,y:58});
+    expect(saveCanvasDocument.mock.calls.filter(call=>call[0]==="canvas-1")).toHaveLength(1);
+    await act(async()=>{await flushCanvasSaves();});
+  });
+  it("flushes an edit made in the same React batch before a render commits", async () => {
+    getCanvasDocument.mockResolvedValue(canvasDocumentWithImage());
+    render(<CanvasPage/>, {wrapper:TestWrapper});
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("button", {name:"select image"}));
+    await act(async()=>{
+      fireEvent.click(screen.getByRole("button", {name:"move selection"}));
+      await flushCanvasSaves();
+    });
+    expect(saveCanvasDocument.mock.calls[0][1].layers[0].objects[0]).toMatchObject({x:112,y:58});
   });
 
 });

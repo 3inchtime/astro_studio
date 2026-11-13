@@ -861,5 +861,21 @@
   "canvas.saveConflict": "이 캔버스가 다른 곳에서 변경되었습니다. 편집 내용은 여기에 유지됩니다. 사본을 저장하여 두 버전을 보관하세요.",
   "canvas.saveCopy": "사본 저장",
   "canvas.recoveredCanvas": "복구한 캔버스",
-  "trash.assetInUse": "이 이미지는 아래 위치에서 사용 중입니다. 참조를 제거하거나 이 생성 결과를 복원하세요."
+  "trash.assetInUse": "이 이미지는 아래 위치에서 사용 중입니다. 참조를 제거하거나 이 생성 결과를 복원하세요.",
+  "promptVision.selectedCount": "분석 {{count}} / 3장 · 첨부 {{total}}장",
+  "promptVision.textOnly": "텍스트만",
+  "promptVision.textOnlyHint": "어시스턴트는 텍스트 요청만 사용합니다. 첨부한 모든 이미지는 이미지 편집용으로 유지됩니다.",
+  "promptVision.editReferencesKept": "분석할 이미지를 1~3장 선택하세요. 첨부한 모든 이미지는 이미지 편집용으로 유지됩니다.",
+  "promptVision.selectReference": "{{name}} 분석",
+  "promptVision.retry": "다시 시도",
+  "promptVision.selectUpToThree": "참조 이미지를 1~3장 선택하거나 텍스트만 사용으로 전환하세요.",
+  "promptVision.invalidSelection": "이미지 선택이 변경되었습니다. 참조 이미지를 다시 선택하세요.",
+  "promptVision.multimodalRequired": "활성화된 비전 모델을 선택하거나 텍스트만 사용으로 전환하세요.",
+  "promptVision.imageUnavailable": "선택한 이미지에 접근할 수 없습니다. 다시 첨부하거나 다른 참조 이미지를 선택하세요.",
+  "promptVision.analysisFailed": "이번 요청을 완료하지 못했습니다. 초안과 참조 이미지는 유지됩니다. 다시 시도하세요.",
+  "promptVision.summary": "이미지 분석 · {{count}}장",
+  "promptVision.observations": "관찰 내용",
+  "promptVision.preserve": "유지할 내용",
+  "promptVision.changes": "변경할 내용",
+  "promptVision.sourcePositions": "분석한 편집 참조 이미지: {{positions}}"
 }
