@@ -1,3 +1,4 @@
+import LibraryBackupPanel from "./LibraryBackupPanel";
 import { motion } from "framer-motion";
 import { Check, Download } from "lucide-react";
 import type { TFunction } from "i18next";
@@ -100,6 +101,7 @@ export function GeneralSettingsPanel({
         />
       </section>
 
+      <LibraryBackupPanel />
       <section className="border-t border-border-subtle pt-5">
         <div className="mb-3">
           <h2 className="text-base font-semibold text-foreground">{t("settings.trashRetention")}</h2>
