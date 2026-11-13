@@ -26,6 +26,7 @@ import {
 } from "../lib/api";
 import type { Project } from "../types";
 import CollectionStatus from "../components/gallery/CollectionStatus";
+import ProjectContextToggle from "../components/projects/ProjectContextToggle";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import { formatConversationTime } from "../lib/utils";
@@ -257,8 +258,11 @@ export default function ProjectsPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex items-center justify-between px-6 pt-6 pb-4">
-        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">{t("studio.project.title", { defaultValue: "Projects" })}</h1>
-        <p className="mt-1 text-sm text-muted">{t("studio.project.subtitle", { defaultValue: "Keep your conversations and images together." })}</p></div>
+        <div className="flex min-w-0 items-center gap-2">
+          <ProjectContextToggle />
+          <div><h1 className="text-xl font-semibold tracking-tight text-foreground">{t("studio.project.title", { defaultValue: "Projects" })}</h1>
+          <p className="mt-1 text-sm text-muted">{t("studio.project.subtitle", { defaultValue: "Keep your conversations and images together." })}</p></div>
+        </div>
       </div>
       {/* Filter bar */}
       <div className="studio-toolbar flex shrink-0 flex-wrap items-center gap-2 px-6 py-2.5">
@@ -269,7 +273,7 @@ export default function ProjectsPage() {
             onClick={() => setFilter(f)}
             className={`focus-ring cursor-pointer rounded-[8px] border px-3 py-2 text-xs font-medium transition-colors ${
               filter === f
-                ? "border-primary/14 bg-primary/10 text-primary"
+                ? "border-border bg-surface text-foreground"
                 : "border-transparent text-muted hover:border-border-subtle hover:bg-surface/70 hover:text-foreground"
             }`}
           >
@@ -303,7 +307,7 @@ export default function ProjectsPage() {
         </button>
       </div>
 
-      {actionError && <p role="alert" className="mx-6 mt-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-sm text-error">{t("studio.project.actionFailed", { defaultValue: "Could not update this project. Try the action again." })}</p>}
+      {actionError && <p role="alert" className="mx-6 mt-3 rounded-lg border border-error/20 bg-surface px-3 py-2 text-sm text-error">{t("studio.project.actionFailed", { defaultValue: "Could not update this project. Try the action again." })}</p>}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -311,7 +315,7 @@ export default function ProjectsPage() {
           <CollectionStatus errorTitle={t("projects.loadError")} loading={loading} error={loadError} onRetry={() => setReloadVersion((value) => value + 1)} />
         ) : filteredProjects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-[12px] bg-primary/8">
+            <div className="flex h-14 w-14 items-center justify-center rounded-[12px] bg-subtle">
               <ImageIcon size={24} className="text-primary" />
             </div>
             <div className="text-[20px] font-semibold text-foreground">
@@ -498,7 +502,7 @@ function ProjectCard({
         </div>
         <div className="space-y-2 px-4 pt-4">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">{project.name}</h2>
+            <span className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">{project.name}</span>
             {project.pinned_at && <span className="inline-flex shrink-0 items-center gap-1 text-xs text-primary"><Pin size={12} />{t("projects.pinned")}</span>}
           </div>
           <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
@@ -557,7 +561,7 @@ function ProjectCard({
                   setShowActions(false);
                   onAction("delete");
                 }}
-                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error transition-colors hover:bg-error/8"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error transition-colors hover:bg-surface"
               >
                 <Trash2 size={13} />
                 <span>{t("sidebar.delete")}</span>

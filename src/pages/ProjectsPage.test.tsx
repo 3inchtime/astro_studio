@@ -15,12 +15,17 @@ const createProject = vi.fn();
 const searchGenerations = vi.fn();
 const pinProject = vi.fn();
 const navigate = vi.fn();
+const toggleContextSidebar = vi.fn();
 
 vi.mock("react-i18next", () => {
   return {
     useTranslation: () => ({ t: (key: string) => key }),
   };
 });
+
+vi.mock("../components/layout/AppLayout", () => ({
+  useLayoutContext: () => ({ toggleContextSidebar, contextSidebarCollapsed: true, activeWorkspaceDrawer: null }),
+}));
 
 vi.mock("../lib/api", () => {
   return {
@@ -107,6 +112,15 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByText("Brand Storyboards")).toBeInTheDocument();
     expect(screen.queryByText("Default Project")).not.toBeInTheDocument();
+  });
+
+  it("opens project navigation directly from the page title", async () => {
+    render(<MemoryRouter><ProjectsPage /></MemoryRouter>);
+    await screen.findByText("Brand Storyboards");
+    const toggle = screen.getByRole("button", { name: "studio.openSidebar" });
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-sidebar");
+    fireEvent.click(toggle);
+    expect(toggleContextSidebar).toHaveBeenCalledTimes(1);
   });
 
   it("offers a keyboard reachable project cover button", async () => {

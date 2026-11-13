@@ -142,7 +142,7 @@ export default function ProjectConversationPanel({
           </div>
           <button
             onClick={handleCreate}
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-primary/8 text-primary transition-colors duration-[140ms] hover:bg-primary/14"
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-surface text-primary transition-colors duration-[140ms] hover:bg-subtle"
             aria-label={t("projects.newConversation")}
             title={t("projects.newConversation")}
           >
@@ -209,7 +209,7 @@ export default function ProjectConversationPanel({
                         )}
                       </span>
                       {conv.generation_count > 0 && (
-                        <span className="rounded-[4px] bg-primary/6 px-1.5 py-px text-xs font-medium text-primary">
+                        <span className="rounded-[4px] bg-surface px-1.5 py-px text-xs font-medium text-primary">
                           {conv.generation_count}
                         </span>
                       )}
@@ -258,7 +258,7 @@ export default function ProjectConversationPanel({
                         setOpenMenuId(null);
                         setDeleteTarget(conv);
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error hover:bg-error/8 transition-colors"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error hover:bg-surface transition-colors"
                     >
                       <Trash2 size={13} />
                       <span>{t("sidebar.delete")}</span>

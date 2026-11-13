@@ -26,54 +26,38 @@ export function ThemeCardPicker({
   onSelect,
 }: ThemeCardPickerProps) {
   return (
-    <div className={cn("grid gap-3", gridClassName)}>
+    <div className={cn("grid gap-2", gridClassName)}>
       {THEME_CATALOG.map((theme) => {
         const active = theme.id === selectedThemeId;
         const name = getThemeName(theme, t);
         const description = getThemeDescription(theme, t);
-
         return (
           <button
             key={theme.id}
             type="button"
             aria-label={t("theme.select", { name })}
+            aria-description={description}
             aria-pressed={active}
+            title={`${name}\n${description}`}
             onClick={(event) => onSelect(theme.id, event)}
             className={cn(
-              "rounded-[12px] border p-3 text-left transition-all",
+              "focus-ring flex min-w-0 items-center gap-2.5 rounded-lg border px-3 text-left transition-colors duration-[140ms]",
+              compact ? "min-h-10 py-2" : "min-h-14 py-3",
               active
-                ? "border-primary/35 bg-primary/8 shadow-card"
-                : "border-border-subtle bg-subtle/20 hover:border-border hover:bg-subtle/45",
+                ? "border-primary bg-surface"
+                : "border-border-subtle bg-background hover:border-border hover:bg-surface",
             )}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-1.5">
-                {theme.swatches.map((swatch) => (
-                  <span
-                    key={`${theme.id}-${swatch}`}
-                    className="h-3.5 w-3.5 rounded-full border border-black/5"
-                    style={{ backgroundColor: swatch }}
-                  />
-                ))}
-              </div>
-              {active && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                  <Check size={11} strokeWidth={2.5} />
-                  {activeLabel}
-                </span>
-              )}
-            </div>
-            <div className={compact ? "mt-2.5" : "mt-3"}>
-              <div className="text-xs font-semibold text-foreground">
-                {name}
-              </div>
-              <p className={cn(
-                "mt-1 text-xs leading-relaxed text-muted",
-              )}
-              >
-                {description}
-              </p>
-            </div>
+            <span aria-hidden="true" className="grid shrink-0 grid-cols-2 gap-0.5">
+              {theme.swatches.map((swatch, index) => (
+                <span key={index} className="h-1.5 w-1.5 rounded-[2px]" style={{ backgroundColor: swatch }} />
+              ))}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium text-foreground">{name}</span>
+              {!compact && <span className="mt-1 block text-xs leading-relaxed text-muted">{description}</span>}
+            </span>
+            {active && <><Check size={14} aria-hidden="true" className="shrink-0 text-primary" /><span className="sr-only">{activeLabel}</span></>}
           </button>
         );
       })}

@@ -26,6 +26,7 @@ import type {
 } from "../types";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import ProjectImagePanel from "../components/projects/ProjectImagePanel";
+import ProjectContextToggle from "../components/projects/ProjectContextToggle";
 import ProjectNameDialog from "../components/projects/ProjectNameDialog";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
@@ -391,17 +392,18 @@ export default function ProjectHomePage() {
         <div className="shrink-0 border-b border-border-subtle bg-surface/40 px-6 py-4">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="mb-1 flex items-center gap-2">
+              {project.pinned_at && <div className="mb-1 flex items-center gap-2">
                 {project.pinned_at && (
-                  <span className="inline-flex items-center gap-1 rounded-[5px] bg-primary/8 px-1.5 py-px text-xs font-medium text-primary">
+                  <span className="inline-flex items-center gap-1 rounded-[5px] bg-surface px-1.5 py-px text-xs font-medium text-primary">
                     <Pin size={9} />
                     {t("projects.pinned")}
                   </span>
                 )}
+              </div>}
+              <div className="flex min-w-0 items-center gap-2">
+                <ProjectContextToggle />
+                <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">{project.name}</h1>
               </div>
-              <h1 className="text-[20px] font-semibold text-foreground tracking-tight truncate">
-                {project.name}
-              </h1>
               <p className="mt-1 text-xs text-muted">
                 <span>
                   {t("projects.imageCountValue", {
@@ -494,7 +496,7 @@ export default function ProjectHomePage() {
                         setDeleteDialogOpen(true);
                       }}
                       disabled={projectActionPending}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error hover:bg-error/8 transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-error hover:bg-surface transition-colors disabled:opacity-50"
                     >
                       <Trash2 size={13} />
                       <span>{t("sidebar.delete")}</span>
@@ -508,7 +510,7 @@ export default function ProjectHomePage() {
           {projectActionError ? (
             <div
               role="alert"
-              className="mt-3 rounded-[8px] border border-error/15 bg-error/8 px-3 py-2 text-xs text-error"
+              className="mt-3 rounded-[8px] border border-error/15 bg-surface px-3 py-2 text-xs text-error"
             >
               {projectActionError}
             </div>

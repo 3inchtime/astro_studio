@@ -631,7 +631,8 @@ describe("SettingsPage logs", () => {
   it("validates endpoint fields locally before allowing a provider save", async () => {
     renderSettingsPage();
     fireEvent.click(screen.getByRole("button", { name: "settings.modelConfig" }));
-    const endpoint = await screen.findByDisplayValue("https://api.openai.com/v1");
+    await screen.findByDisplayValue("OpenAI Official");
+    const endpoint = screen.getByDisplayValue("https://api.openai.com/v1");
     fireEvent.change(endpoint, { target: { value: "file:///bad-endpoint" } });
     expect(screen.getByLabelText("settings.endpoint")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("studio.settings.invalidEndpoint")).toBeInTheDocument();

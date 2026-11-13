@@ -13,10 +13,10 @@ const LOG_TYPES = ["", "api_request", "api_response", "generation", "system"] as
 const LOG_LEVELS = ["", "debug", "info", "warn", "error"] as const;
 
 const levelColors: Record<string, string> = {
-  debug: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-  info: "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
-  warn: "bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400",
-  error: "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400",
+  debug: "bg-surface text-muted",
+  info: "bg-surface text-primary",
+  warn: "bg-surface text-warning",
+  error: "bg-surface text-error",
 };
 
 const typeLabels: Record<string, string> = {
@@ -99,9 +99,9 @@ export function LogsPanel({
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border-subtle px-4 py-3">
             <div>
               <div className="flex items-center gap-2">
-                <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]" />
-                <h3 className="text-sm font-semibold text-foreground">{t("log.liveTitle")}</h3>
-                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-xs font-medium text-emerald-600">
+                <span className="inline-flex h-2.5 w-2.5 rounded-full bg-success" />
+                <h3 className="text-base font-semibold text-foreground">{t("log.liveTitle")}</h3>
+                <span className="rounded-full border border-border-subtle bg-surface px-2 py-0.5 text-xs font-medium text-success">
                   {t("log.liveConnected")}
                 </span>
               </div>
@@ -139,25 +139,25 @@ export function LogsPanel({
 
           <div
             ref={runtimeLogsRef}
-            className="h-[320px] overflow-y-auto bg-[#171412] px-4 py-3 font-mono text-xs leading-5 text-stone-200"
+            className="h-[320px] overflow-y-auto bg-subtle px-4 py-3 font-mono text-xs leading-5 text-foreground"
           >
             {runtimeLogs.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center text-center text-stone-400/80">
+              <div className="flex h-full flex-col items-center justify-center text-center text-muted">
                 <p className="text-xs font-medium">{t("log.liveEmpty")}</p>
                 <p className="mt-1 max-w-md text-xs">{t("log.liveHint")}</p>
               </div>
             ) : (
               <div className="space-y-1.5">
                 {runtimeLogs.map((log) => (
-                  <div key={log.sequence} className="rounded-[8px] border border-white/5 bg-white/[0.03] px-3 py-2">
+                  <div key={log.sequence} className="rounded-[8px] border border-border-subtle bg-surface px-3 py-2">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="text-stone-500">{log.timestamp}</span>
-                      <span className={`rounded-[4px] px-1.5 py-0.5 text-xs font-semibold uppercase ${levelColors[log.level] || "bg-stone-700 text-stone-100"}`}>
+                      <span className="text-muted">{log.timestamp}</span>
+                      <span className={`rounded-[4px] px-1.5 py-0.5 text-xs font-semibold uppercase ${levelColors[log.level] || "bg-surface text-foreground"}`}>
                         {log.level}
                       </span>
-                      <span className="text-stone-400">{log.target}</span>
+                      <span className="text-muted">{log.target}</span>
                     </div>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-stone-100">{log.message}</p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-foreground">{log.message}</p>
                   </div>
                 ))}
               </div>
@@ -211,9 +211,9 @@ export function LogsPanel({
           <button
             type="button"
             onClick={onOpenClearLogs}
-            className="studio-control-danger focus-ring ml-auto flex h-9 items-center gap-1.5 rounded-[8px] px-3 text-sm"
+            className="studio-control focus-ring ml-auto flex h-9 items-center gap-1.5 rounded-[8px] px-3 text-sm"
           >
-            <Trash2 size={12} />
+            <Trash2 size={12} className="text-error" />
             {t("log.clearLogs")}
           </button>
         </div>
@@ -239,7 +239,7 @@ export function LogsPanel({
                     key={log.id}
                     onClick={() => onSelectLog(log)}
                     className={`focus-ring grid w-full grid-cols-[140px_100px_70px_1fr] gap-2 border-b border-border-subtle/50 px-4 py-2.5 text-left text-xs transition-colors hover:bg-subtle/30 ${
-                      selectedLog?.id === log.id ? "bg-primary/5" : ""
+                      selectedLog?.id === log.id ? "bg-surface" : ""
                     }`}
                   >
                     <span className="text-muted font-mono text-xs">{log.timestamp}</span>

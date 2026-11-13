@@ -55,6 +55,7 @@ export default function ProjectImagePanel({
   return (
     <div className="flex h-full flex-col">
         <GallerySearchBar
+          headingLevel="section"
           config={config}
           total={total}
           query={query}

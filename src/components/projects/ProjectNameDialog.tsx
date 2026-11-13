@@ -125,7 +125,7 @@ export default function ProjectNameDialog({
               {visibleError ? (
                 <div
                   role="alert"
-                  className="mt-3 rounded-[10px] border border-error/15 bg-error/8 px-3 py-2 text-xs text-error"
+                  className="mt-3 rounded-[10px] border border-error/15 bg-surface px-3 py-2 text-xs text-error"
                 >
                   {visibleError}
                 </div>
@@ -143,7 +143,7 @@ export default function ProjectNameDialog({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="rounded-[10px] bg-primary px-4 py-2 text-body-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-[10px] bg-primary px-4 py-2 text-body-sm font-medium text-primary-foreground transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitLabel}
                 </button>

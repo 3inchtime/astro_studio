@@ -21,6 +21,7 @@ const deleteProject = vi.fn();
 const setActiveConversationId = vi.fn();
 const setActiveProjectId = vi.fn();
 const navigate = vi.fn();
+const toggleContextSidebar = vi.fn();
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -58,6 +59,9 @@ vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({
     setActiveConversationId,
     setActiveProjectId,
+    toggleContextSidebar,
+    contextSidebarCollapsed: true,
+    activeWorkspaceDrawer: null,
   }),
 }));
 
@@ -137,6 +141,18 @@ describe("ProjectHomePage", () => {
 
   afterEach(() => {
     promptSpy.mockRestore();
+  });
+
+  it("opens project navigation from beside the project title", async () => {
+    render(
+      <MemoryRouter initialEntries={[ROUTES.projectHome("project-1")]}>
+        <Routes><Route path={ROUTE_PATHS.projectHome} element={<ProjectHomePage />} /></Routes>
+      </MemoryRouter>,
+    );
+    const toggle = await screen.findByRole("button", { name: "studio.openSidebar" });
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-sidebar");
+    fireEvent.click(toggle);
+    expect(toggleContextSidebar).toHaveBeenCalledTimes(1);
   });
 
   it("offers a direct way to continue creating inside the project", async () => {

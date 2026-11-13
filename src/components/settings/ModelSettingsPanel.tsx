@@ -42,10 +42,6 @@ interface ModelSettingsPanelProps {
   onCancelProviderEdit: () => void;
 }
 
-function formatProviderName(provider: string): string {
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
 function maskKey(key: string): string {
   if (key.length <= 8) return "sk-****";
   return key.slice(0, 3) + "..." + key.slice(-4);
@@ -102,13 +98,13 @@ export function ModelSettingsPanel({
             className="border-b border-border-subtle pb-6"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-[20px] font-semibold leading-tight text-foreground">
+              <h3 className="text-base font-semibold leading-tight text-foreground">
                 {t("settings.imageGenerationConfig")}
               </h3>
               <motion.button
                 type="button"
                 onClick={onSaveModel}
-                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-sm font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-surface px-3 text-sm font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-subtle"
               >
                 {modelSaved ? (
                   <>
@@ -122,7 +118,7 @@ export function ModelSettingsPanel({
             </div>
 
             <div className="grid gap-4">
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-3">
                 {IMAGE_MODEL_CATALOG.map((entry) => {
                   const active = imageModel === entry.id;
 
@@ -132,26 +128,20 @@ export function ModelSettingsPanel({
                       type="button"
                       aria-pressed={active}
                       aria-label={`Select ${entry.label} model`}
+                      title={entry.label}
                       onClick={() => onSelectImageModel(entry.id)}
-                      className={`group flex min-h-[52px] items-center gap-3 rounded-[12px] border p-3 text-left transition-colors ${
+                      className={`group flex min-h-9 min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
                         active
-                          ? "border-primary/35 bg-primary/6 "
+                          ? "border-primary bg-surface"
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-surface ${
-                        entry.provider === "openai"
-                          ? "bg-foreground"
-                          : "bg-accent"
-                      }`}>
-                        {formatProviderName(entry.provider).charAt(0)}
-                      </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-foreground">{entry.label}</span>
+                        <span className="block truncate text-xs font-medium text-foreground">{entry.label}</span>
                       </span>
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                         active
-                          ? "border-primary bg-primary text-white"
+                          ? "border-transparent bg-transparent text-primary"
                           : "border-border-subtle text-transparent group-hover:border-border"
                       }`}>
                         <Check size={12} strokeWidth={3} />
@@ -184,7 +174,7 @@ export function ModelSettingsPanel({
                   <motion.button
                     type="button"
                     onClick={onCreateProvider}
-                            className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                            className="mt-3 flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-surface px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-subtle"
                   >
                     <Plus size={13} />
                     {t("settings.newProvider")}
@@ -238,13 +228,13 @@ export function ModelSettingsPanel({
           className="border-b border-border-subtle pb-6"
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-[20px] font-semibold leading-tight text-foreground">
+            <h3 className="text-base font-semibold leading-tight text-foreground">
               {t("settings.imageGenerationConfig")}
             </h3>
             <motion.button
               type="button"
               onClick={onSaveModel}
-                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-sm font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-surface px-3 text-sm font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-subtle"
             >
               {modelSaved ? (
                 <>
@@ -258,7 +248,7 @@ export function ModelSettingsPanel({
           </div>
 
           <div className="grid gap-4">
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
                 {IMAGE_MODEL_CATALOG.map((entry) => {
                   const active = imageModel === entry.id;
 
@@ -268,26 +258,20 @@ export function ModelSettingsPanel({
                       type="button"
                       aria-pressed={active}
                       aria-label={`Select ${entry.label} model`}
+                      title={entry.label}
                       onClick={() => onSelectImageModel(entry.id)}
-                      className={`group flex min-h-[52px] items-center gap-3 rounded-[12px] border p-3 text-left transition-colors ${
+                      className={`group flex min-h-9 min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
                         active
-                          ? "border-primary/35 bg-primary/6 "
+                          ? "border-primary bg-surface"
                           : "border-border-subtle bg-subtle/15 hover:border-border hover:bg-subtle/35"
                       }`}
                     >
-                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-surface ${
-                        entry.provider === "openai"
-                          ? "bg-foreground"
-                          : "bg-accent"
-                      }`}>
-                        {formatProviderName(entry.provider).charAt(0)}
-                      </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-foreground">{entry.label}</span>
+                        <span className="block truncate text-xs font-medium text-foreground">{entry.label}</span>
                       </span>
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                         active
-                          ? "border-primary bg-primary text-white"
+                          ? "border-transparent bg-transparent text-primary"
                           : "border-border-subtle text-transparent group-hover:border-border"
                       }`}>
                         <Check size={12} strokeWidth={3} />
@@ -332,9 +316,9 @@ export function ModelSettingsPanel({
                             onSelectProvider(provider.id);
                           }
                         }}
-                        className={`rounded-lg border p-3 text-left transition-colors ${
+                        className={`rounded-lg border p-2.5 text-left transition-colors ${
                           selected
-                            ? "border-primary/35 bg-primary/6 "
+                            ? "border-primary bg-surface"
                             : "border-border-subtle bg-surface hover:border-border hover:bg-subtle/25"
                         }`}
                       >
@@ -347,12 +331,12 @@ export function ModelSettingsPanel({
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
                             {selected && (
-                              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-primary bg-primary text-white">
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-transparent bg-transparent text-primary">
                                 <Check size={12} strokeWidth={3} />
                               </span>
                             )}
                             {active && (
-                              <span className="rounded-[6px] border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-xs font-medium text-primary">
+                              <span className="rounded-[6px] border border-transparent bg-surface px-1.5 py-0.5 text-xs font-medium text-primary">
                                 {t("settings.activeProvider")}
                               </span>
                             )}
@@ -365,11 +349,6 @@ export function ModelSettingsPanel({
               </div>
 
             <div className="min-w-0 space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold text-foreground">{selectedProvider.name}</h4>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted">{t("settings.endpointDesc")}</p>
-              </div>
-
               <div className="min-w-0 space-y-3">
                 <div className="grid gap-3 border-b border-border-subtle pb-4">
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -497,7 +476,7 @@ export function ModelSettingsPanel({
                       <motion.button
                         type="button"
                         onClick={() => onSetActiveProvider(selectedProvider.id)}
-                                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                                    className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-surface px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-subtle lg:min-w-[104px]"
                       >
                         <Check size={13} />
                         {t("settings.activateProvider")}
@@ -507,7 +486,7 @@ export function ModelSettingsPanel({
                       type="button"
                       onClick={onSaveProvider}
                       disabled={invalidProvider}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-primary transition-colors hover:border-primary/35 hover:bg-primary/15 lg:min-w-[104px]"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-surface px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50 font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-subtle lg:min-w-[104px]"
                     >
                       {providerSaved ? (
                         <>
@@ -529,7 +508,7 @@ export function ModelSettingsPanel({
                     <motion.button
                       type="button"
                       onClick={() => onDeleteProvider(selectedProvider.id)}
-                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-error/5 px-4 text-sm font-medium text-error transition-colors hover:border-error/30 hover:bg-error/10"
+                                className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error/20 bg-surface px-4 text-sm font-medium text-error transition-colors hover:border-error/30 hover:bg-subtle"
                     >
                       <Trash2 size={13} />
                       {t("settings.deleteProvider")}
