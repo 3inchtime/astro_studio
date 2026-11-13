@@ -235,6 +235,7 @@ fn transform_database_paths(
 ) -> Result<()> {
     for (table, column) in [
         ("images", "file_path"),
+        ("canvas_assets", "file_path"),
         ("images", "thumbnail_path"),
         ("canvas_documents", "document_path"),
         ("canvas_documents", "preview_path"),
@@ -761,7 +762,7 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
     if manifest.version != 1 {
         return Err("Unsupported backup format version".into());
     }
-    if manifest.schema_version > 18 {
+    if manifest.schema_version > 19 {
         return Err("Backup was created by a newer application".into());
     }
     if manifest.files.len() + 1 != names.len() || !names.contains("library.db") {

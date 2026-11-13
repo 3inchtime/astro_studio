@@ -54,6 +54,7 @@ fn resolve_project_id(
 
 fn row_to_canvas_document(row: &rusqlite::Row) -> rusqlite::Result<CanvasDocument> {
     Ok(CanvasDocument {
+        revision: row.get("revision")?,
         id: row.get("id")?,
         project_id: row.get("project_id")?,
         name: row.get("name")?,
@@ -123,7 +124,7 @@ fn write_json_file(path: &Path, content: &CanvasDocumentContent) -> Result<(), A
     let bytes = serde_json::to_vec_pretty(content).map_err(|e| AppError::Database {
         message: format!("Serialize canvas document failed: {}", e),
     })?;
-    fs::write(path, bytes).map_err(|e| AppError::FileSystem {
+    crate::canvas_assets::write_new_file(path, &bytes).map_err(|e| AppError::FileSystem {
         message: format!("Write canvas document failed: {}", e),
     })?;
     Ok(())
@@ -153,7 +154,7 @@ fn validate_canvas_document_id_component(document_id: &str) -> Result<String, Ap
 
 fn read_canvas_document(conn: &rusqlite::Connection, id: &str) -> Result<CanvasDocument, AppError> {
     conn.query_row(
-        "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at
+        "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at, revision
          FROM canvas_documents WHERE id = ?1 AND deleted_at IS NULL",
         params![id],
         row_to_canvas_document,
@@ -223,7 +224,7 @@ pub(crate) fn list_canvas_documents(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at
+            "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at, revision
              FROM canvas_documents
              WHERE project_id = ?1 AND deleted_at IS NULL
              ORDER BY updated_at DESC, created_at DESC",
@@ -245,6 +246,7 @@ pub(crate) fn list_canvas_documents(
 
 #[tauri::command]
 pub(crate) fn get_canvas_document(
+    app: tauri::AppHandle,
     db: State<'_, Database>,
     id: String,
 ) -> Result<CanvasDocumentWithContent, AppError> {
@@ -252,75 +254,183 @@ pub(crate) fn get_canvas_document(
     let conn = db.conn.lock().map_err(|e| AppError::Database {
         message: format!("Lock failed: {}", e),
     })?;
-    let document = read_canvas_document(&conn, &id)?;
+    let mut document = read_canvas_document(&conn, &id)?;
     let raw = fs::read_to_string(&document.document_path).map_err(|e| AppError::FileSystem {
         message: format!("Read canvas document file failed: {}", e),
     })?;
-    let content =
+    let mut content =
         serde_json::from_str::<CanvasDocumentContent>(&raw).map_err(|e| AppError::Database {
             message: format!("Parse canvas document file failed: {}", e),
         })?;
 
-    Ok(CanvasDocumentWithContent { document, content })
+    let before = serde_json::to_vec(&content)?;
+    let root = crate::storage::asset_root(&app).map_err(|e| AppError::FileSystem {
+        message: e.to_string(),
+    })?;
+    let missing_assets =
+        crate::canvas_assets::normalize_content_assets(&conn, &root, &mut content, &|_| Ok(true))?;
+    if serde_json::to_vec(&content)? != before {
+        document = save_revision(&conn, &id, &content, None, document.revision)?;
+    }
+    Ok(CanvasDocumentWithContent {
+        document,
+        content,
+        missing_assets,
+    })
 }
 
 #[tauri::command]
 pub(crate) fn save_canvas_document(
+    app: tauri::AppHandle,
+    selected_images: State<'_, crate::commands::generation::SelectedImageRegistry>,
     db: State<'_, Database>,
     id: String,
-    content: CanvasDocumentContent,
+    mut content: CanvasDocumentContent,
     preview_png_base64: Option<String>,
+    expected_revision: i64,
 ) -> Result<CanvasDocument, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
-    let timestamp = current_timestamp();
     let conn = db.conn.lock().map_err(|e| AppError::Database {
-        message: format!("Lock failed: {}", e),
+        message: e.to_string(),
     })?;
     let existing = read_canvas_document(&conn, &id)?;
-
-    write_json_file(Path::new(&existing.document_path), &content)?;
-
-    let preview_path = if let Some(preview_png_base64) = preview_png_base64 {
-        let bytes = decode_base64_bytes(&preview_png_base64)?;
-        let preview_path = existing.preview_path.clone().unwrap_or_else(|| {
-            let preview_file = Path::new(&existing.document_path)
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("canvas-preview");
-            Path::new(&existing.document_path)
-                .parent()
-                .and_then(|parent| parent.parent())
-                .unwrap_or_else(|| Path::new(""))
-                .join("previews")
-                .join(format!("{preview_file}.png"))
-                .to_string_lossy()
-                .to_string()
+    if existing.revision != expected_revision {
+        return Err(AppError::CanvasRevisionConflict {
+            expected_revision,
+            actual_revision: existing.revision,
         });
-        fs::write(&preview_path, bytes).map_err(|e| AppError::FileSystem {
-            message: format!("Write canvas preview failed: {}", e),
-        })?;
-        Some(preview_path)
-    } else {
-        existing.preview_path.clone()
-    };
-
-    conn.execute(
-        "UPDATE canvas_documents
-         SET preview_path = ?1, width = ?2, height = ?3, updated_at = ?4
-         WHERE id = ?5 AND deleted_at IS NULL",
-        params![
-            preview_path,
-            content.frame.width.round() as i32,
-            content.frame.height.round() as i32,
-            timestamp,
-            id
-        ],
-    )
-    .map_err(|e| AppError::Database {
-        message: format!("Update canvas document failed: {}", e),
+    }
+    let root = crate::storage::asset_root(&app).map_err(|e| AppError::FileSystem {
+        message: e.to_string(),
     })?;
+    crate::canvas_assets::normalize_content_assets(&conn, &root, &mut content, &|path| {
+        selected_images.contains_path(path)
+    })?;
+    save_revision(
+        &conn,
+        &id,
+        &content,
+        preview_png_base64.as_deref(),
+        expected_revision,
+    )
+}
 
-    read_canvas_document(&conn, &id)
+#[tauri::command]
+pub(crate) fn import_canvas_asset(
+    app: tauri::AppHandle,
+    db: State<'_, Database>,
+    selected_images: State<'_, crate::commands::generation::SelectedImageRegistry>,
+    path: String,
+) -> Result<crate::canvas_assets::CanvasAsset, AppError> {
+    let _operation = crate::storage::write_operation::<AppError>()?;
+    if !selected_images.contains_path(Path::new(&path))? {
+        return Err(AppError::Validation {
+            message: "Image file was not selected from Astro Studio".into(),
+        });
+    }
+    let root = crate::storage::asset_root(&app).map_err(|e| AppError::FileSystem {
+        message: e.to_string(),
+    })?;
+    let conn = db.conn.lock().map_err(|e| AppError::Database {
+        message: e.to_string(),
+    })?;
+    let asset = crate::canvas_assets::import_asset(&conn, &root, Path::new(&path))?;
+    selected_images.register_paths(&[PathBuf::from(&asset.file_path)])?;
+    Ok(asset)
+}
+
+/// Files are immutable. SQLite only points to a fully written, synced revision;
+/// a failed write/commit or interrupted process leaves the prior revision intact.
+fn save_revision(
+    conn: &rusqlite::Connection,
+    id: &str,
+    content: &CanvasDocumentContent,
+    preview: Option<&str>,
+    expected_revision: i64,
+) -> Result<CanvasDocument, AppError> {
+    let tx = conn.unchecked_transaction()?;
+    let existing = read_canvas_document(&tx, id)?;
+    if existing.revision != expected_revision {
+        return Err(AppError::CanvasRevisionConflict {
+            expected_revision,
+            actual_revision: existing.revision,
+        });
+    }
+    let revision = existing
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| AppError::Validation {
+            message: "Canvas revision limit reached".into(),
+        })?;
+    let parent =
+        Path::new(&existing.document_path)
+            .parent()
+            .ok_or_else(|| AppError::Validation {
+                message: "Canvas document has no directory".into(),
+            })?;
+    let path = parent.join(format!("{}-r{revision}-{}.json", id, uuid::Uuid::new_v4()));
+    write_json_file(&path, content)?;
+    let result = (|| -> Result<(), AppError> {
+        tx.execute("UPDATE canvas_documents SET document_path=?1,revision=?2,width=?3,height=?4,updated_at=?5 WHERE id=?6 AND revision=?7", params![path.to_string_lossy(),revision,content.frame.width.round() as i32,content.frame.height.round() as i32,current_timestamp(),id,expected_revision])?;
+        tx.execute("DELETE FROM canvas_asset_refs WHERE document_id=?1", [id])?;
+        for layer in &content.layers {
+            for object in &layer.objects {
+                if let Some(asset_id) = &object.asset_id {
+                    tx.execute("INSERT INTO canvas_asset_refs(document_id,object_id,asset_id) VALUES (?1,?2,?3)",params![id,object.id,asset_id])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+    }
+    result?;
+    // The durable SQLite pointer is now authoritative. Cleanup is best effort;
+    // it must never turn a committed save into an error or grow one file per autosave.
+    if conn
+        .query_row(
+            "SELECT COUNT(*) FROM canvas_documents WHERE document_path=?1",
+            [&existing.document_path],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok()
+        == Some(0)
+    {
+        let _ = fs::remove_file(&existing.document_path);
+    }
+    // Preview is derived data. Publishing it can never turn a committed save
+    // into an error (which would invite a duplicate stale-revision retry).
+    if let Some(preview) = preview {
+        if let Ok(bytes) = decode_base64_bytes(preview) {
+            let preview_path = parent.join(format!("{}-preview-{}.png", id, uuid::Uuid::new_v4()));
+            if crate::canvas_assets::write_new_file(&preview_path, &bytes).is_ok() {
+                if conn
+                    .execute(
+                        "UPDATE canvas_documents SET preview_path=?1 WHERE id=?2 AND revision=?3",
+                        params![preview_path.to_string_lossy(), id, revision],
+                    )
+                    .is_err()
+                {
+                    let _ = fs::remove_file(preview_path);
+                } else if let Some(old) = &existing.preview_path {
+                    if conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM canvas_documents WHERE preview_path=?1",
+                            [old],
+                            |row| row.get::<_, i64>(0),
+                        )
+                        .ok()
+                        == Some(0)
+                    {
+                        let _ = fs::remove_file(old);
+                    }
+                }
+            }
+        }
+    }
+    read_canvas_document(conn, id)
 }
 
 #[tauri::command]
@@ -552,6 +662,121 @@ mod tests {
         let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
     }
 
+    #[test]
+    fn canvas_revision_schema_starts_at_zero_and_tracks_managed_assets() {
+        let (db, path, document) = status_fixture();
+        let conn = db.conn.lock().unwrap();
+        let revision: i64 = conn
+            .query_row(
+                "SELECT revision FROM canvas_documents WHERE id='status-canvas'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("canvas revision migration");
+        assert_eq!(revision, 0);
+        conn.execute(
+            "INSERT INTO canvas_assets(id,file_path) VALUES ('asset','/managed/image.png')",
+            [],
+        )
+        .expect("managed asset registry");
+        drop(conn);
+        drop(db);
+        remove_temp_test_db(path);
+        fs::remove_file(document).unwrap();
+    }
+
+    #[test]
+    fn revision_save_rejects_stale_writer_and_retires_previous_snapshot() {
+        let (db, db_path, old_path) = status_fixture();
+        let conn = db.conn.lock().unwrap();
+        let mut next = default_canvas_content();
+        next.frame.width = 777.0;
+        let saved = save_revision(&conn, "status-canvas", &next, None, 0).unwrap();
+        assert_eq!(saved.revision, 1);
+        assert_ne!(saved.document_path, old_path.to_string_lossy());
+        assert!(
+            !old_path.exists(),
+            "committed autosaves retire the previous snapshot"
+        );
+        next.frame.width = 888.0;
+        assert!(matches!(
+            save_revision(&conn, "status-canvas", &next, None, 0),
+            Err(AppError::CanvasRevisionConflict {
+                actual_revision: 1,
+                ..
+            })
+        ));
+        let current: CanvasDocumentContent =
+            serde_json::from_slice(&fs::read(&saved.document_path).unwrap()).unwrap();
+        assert_eq!(current.frame.width, 777.0);
+        fs::remove_file(saved.document_path).unwrap();
+        drop(conn);
+        drop(db);
+        remove_temp_test_db(db_path);
+        let _ = fs::remove_file(old_path);
+    }
+
+    #[test]
+    fn revision_save_database_failure_leaves_previous_document_readable() {
+        let (db, db_path, old_path) = status_fixture();
+        let conn = db.conn.lock().unwrap();
+        let old_bytes = fs::read(&old_path).unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_canvas_save BEFORE UPDATE ON canvas_documents BEGIN SELECT RAISE(ABORT,'disk failure'); END;").unwrap();
+        assert!(save_revision(&conn, "status-canvas", &default_canvas_content(), None, 0).is_err());
+        assert_eq!(
+            read_canvas_document(&conn, "status-canvas")
+                .unwrap()
+                .revision,
+            0
+        );
+        assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
+        drop(conn);
+        drop(db);
+        remove_temp_test_db(db_path);
+        let _ = fs::remove_file(old_path);
+    }
+
+    #[test]
+    fn revision_write_failure_keeps_previous_content_and_revision() {
+        let (db, db_path, old_path) = status_fixture();
+        let conn = db.conn.lock().unwrap();
+        let old_bytes = fs::read(&old_path).unwrap();
+        let id = "x".repeat(300); // Real filesystem ENAMETOOLONG, before publishing any revision.
+        conn.execute(
+            "UPDATE canvas_documents SET id=?1 WHERE id='status-canvas'",
+            [&id],
+        )
+        .unwrap();
+        assert!(matches!(
+            save_revision(&conn, &id, &default_canvas_content(), None, 0),
+            Err(AppError::FileSystem { .. })
+        ));
+        assert_eq!(read_canvas_document(&conn, &id).unwrap().revision, 0);
+        assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
+        drop(conn);
+        drop(db);
+        remove_temp_test_db(db_path);
+        fs::remove_file(old_path).unwrap();
+    }
+
+    #[test]
+    fn revision_save_preview_failure_does_not_reject_body() {
+        let (db, db_path, old_path) = status_fixture();
+        let conn = db.conn.lock().unwrap();
+        let mut next = default_canvas_content();
+        next.frame.width = 444.0;
+        let saved =
+            save_revision(&conn, "status-canvas", &next, Some("invalid base64"), 0).unwrap();
+        assert_eq!(saved.revision, 1);
+        assert_eq!(saved.width, 444);
+        assert!(saved.preview_path.is_none());
+        fs::remove_file(saved.document_path).unwrap();
+        drop(conn);
+        drop(db);
+        remove_temp_test_db(db_path);
+        let _ = fs::remove_file(old_path);
+    }
+
     fn status_fixture() -> (Database, PathBuf, PathBuf) {
         let (db, db_path) = temp_test_db("astro-canvas-status");
         let document_path = db_path.with_extension("json");
@@ -711,7 +936,7 @@ mod tests {
         let rows: Vec<CanvasDocument> = {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at
+                    "SELECT id, project_id, name, document_path, preview_path, width, height, created_at, updated_at, deleted_at, revision
                      FROM canvas_documents WHERE project_id = ?1 AND deleted_at IS NULL",
                 )
                 .unwrap();
@@ -733,7 +958,7 @@ mod tests {
     #[test]
     fn save_canvas_document_updates_json_and_preview() {
         let (db, db_path) = temp_test_db("astro-studio-canvas-save-test");
-        let parent_dir = db_path.parent().unwrap().join("canvas-documents");
+        let parent_dir = db_path.with_extension("canvas-documents");
         std::fs::create_dir_all(&parent_dir).unwrap();
         let document_path = parent_dir.join("canvas-save.json");
         write_json_file(&document_path, &default_canvas_content()).unwrap();
@@ -775,6 +1000,7 @@ mod tests {
                 visible: true,
                 locked: false,
                 objects: vec![CanvasObject {
+                    asset_id: None,
                     object_type: "stroke".to_string(),
                     id: "stroke-1".to_string(),
                     tool: Some("brush".to_string()),
@@ -798,15 +1024,17 @@ mod tests {
             }],
         };
 
-        write_json_file(&document_path, &content).unwrap();
-        let saved = fs::read_to_string(&document_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let document = save_revision(&conn, "canvas-save", &content, None, 0).unwrap();
+        drop(conn);
+        let saved = fs::read_to_string(&document.document_path).unwrap();
         let parsed = serde_json::from_str::<CanvasDocumentContent>(&saved).unwrap();
 
         assert_eq!(parsed.frame.aspect, "3:2");
         assert_eq!(parsed.layers[0].objects[0].object_type, "stroke");
 
         drop(db);
-        let _ = std::fs::remove_dir_all(parent_dir.parent().unwrap());
+        let _ = std::fs::remove_dir_all(parent_dir);
         remove_temp_test_db(db_path);
     }
 

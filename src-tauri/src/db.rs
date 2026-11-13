@@ -490,6 +490,52 @@ mod tests {
                 );",
             )
             .expect("create recorded v16 queue schema");
+            // The fixture records v14/v15 too; include their tables so later
+            // migrations exercise a valid historical schema rather than a partial DB.
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS canvas_documents (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                document_path TEXT NOT NULL,
+                preview_path TEXT,
+                width INTEGER NOT NULL DEFAULT 0,
+                height INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                deleted_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_canvas_documents_project_id ON canvas_documents(project_id);
+            CREATE INDEX IF NOT EXISTS idx_canvas_documents_updated_at ON canvas_documents(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_canvas_documents_deleted_at ON canvas_documents(deleted_at);
+CREATE TABLE IF NOT EXISTS prompt_agent_sessions (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+                project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                original_prompt TEXT NOT NULL,
+                draft_prompt TEXT,
+                accepted_prompt TEXT,
+                selected_skill_ids TEXT NOT NULL DEFAULT '[]',
+                suggested_params TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            );
+            CREATE TABLE IF NOT EXISTS prompt_agent_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES prompt_agent_sessions(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                draft_prompt TEXT,
+                selected_skill_ids TEXT NOT NULL DEFAULT '[]',
+                suggested_params TEXT NOT NULL DEFAULT '{}',
+                ready_to_generate INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_prompt_agent_sessions_conversation_id ON prompt_agent_sessions(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_prompt_agent_sessions_project_id ON prompt_agent_sessions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_prompt_agent_sessions_updated_at ON prompt_agent_sessions(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_prompt_agent_messages_session_id ON prompt_agent_messages(session_id);
+            CREATE INDEX IF NOT EXISTS idx_prompt_agent_messages_created_at ON prompt_agent_messages(created_at);").expect("create recorded v14/v15 content tables");
             for version in 1..=16 {
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
@@ -2387,6 +2433,17 @@ impl Database {
                  SELECT RAISE(ABORT, 'invalid generation worker lease transition');
              END;",
         )?;
+
+        apply_migration(&conn, 19, "canvas revisions and managed assets", "
+            ALTER TABLE canvas_documents ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+            CREATE TABLE canvas_assets (id TEXT PRIMARY KEY, file_path TEXT NOT NULL UNIQUE);
+            CREATE TABLE canvas_asset_refs (
+                document_id TEXT NOT NULL REFERENCES canvas_documents(id) ON DELETE CASCADE,
+                object_id TEXT NOT NULL, asset_id TEXT NOT NULL,
+                PRIMARY KEY(document_id,object_id)
+            );
+            CREATE INDEX idx_canvas_asset_refs_asset ON canvas_asset_refs(asset_id);
+        ")?;
 
         ensure_migration_compatibility(&conn)?;
 

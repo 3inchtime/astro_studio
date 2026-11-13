@@ -6,6 +6,8 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    CloseGuard(String),
     #[error(transparent)]
     Updater(#[from] tauri_plugin_updater::Error),
     #[error(transparent)]
@@ -172,7 +174,12 @@ pub async fn install_update(
 
 #[tauri::command]
 pub async fn relaunch_app(app: AppHandle) -> Result<()> {
-    app.restart();
+    if crate::canvas_close::guarded(&app) {
+        crate::canvas_close::request(&app, "restart", None).map_err(Error::CloseGuard)?;
+        Ok(())
+    } else {
+        app.restart();
+    }
 }
 
 #[cfg(test)]

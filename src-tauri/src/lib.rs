@@ -14,6 +14,8 @@ mod generation_lifecycle;
 // Lease primitives belong to the deferred worker runtime and have no caller
 // while compatibility execution remains the supported production path.
 mod atomic_files;
+mod canvas_assets;
+mod canvas_close;
 mod batch_export;
 mod generation_recipe;
 mod generation_recovery;
@@ -554,6 +556,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .manage(canvas_close::CanvasCloseState::default())
         .manage(app_config)
         .manage(engine)
         .manage(operations::Operations::default())
@@ -614,10 +617,14 @@ pub fn run() {
             commands::projects::pin_project,
             commands::projects::unpin_project,
             commands::projects::delete_project,
+            canvas_close::enable_canvas_close_guard,
+            canvas_close::finish_canvas_close,
+            canvas_close::cancel_canvas_close,
             commands::canvas::create_canvas_document,
             commands::canvas::list_canvas_documents,
             commands::canvas::get_canvas_document,
             commands::canvas::save_canvas_document,
+            commands::canvas::import_canvas_asset,
             commands::canvas::rename_canvas_document,
             commands::canvas::delete_canvas_document,
             commands::canvas::save_canvas_export,
@@ -809,7 +816,19 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_, _event| {
+        .run(|app, _event| {
+            match &_event {
+                tauri::RunEvent::WindowEvent {label,event:tauri::WindowEvent::CloseRequested{api,..},..} if canvas_close::guarded(app) => {
+                    api.prevent_close();
+                    if let Err(error)=canvas_close::request(app,"close",Some(label.clone())) {log::error!("Canvas close guard: {error}");}
+                }
+                tauri::RunEvent::ExitRequested {api,code,..} if canvas_close::guarded(app) && *code!=Some(tauri::RESTART_EXIT_CODE) => {
+                    api.prevent_exit();
+                    if let Err(error)=canvas_close::request(app,"exit",None) {log::error!("Canvas exit guard: {error}");}
+                }
+                _=>{}
+            }
+
             #[cfg(all(debug_assertions, target_os = "macos"))]
             if matches!(_event, tauri::RunEvent::Ready) {
                 set_macos_development_app_icon();
