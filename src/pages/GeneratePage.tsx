@@ -1,4 +1,10 @@
 import {
+  getGenerationRecipe,
+  recipeToRequest,
+  listRecipeProviders,
+} from "../lib/recipeApi";
+import type { GenerationRecipe } from "../types/recipe";
+import {
   useState,
   useCallback,
   useRef,
@@ -121,8 +127,55 @@ export default function GeneratePage() {
   );
   const [imageModel, setImageModel] = useState<ImageModel>(DEFAULT_IMAGE_MODEL);
   const [editSources, setEditSources] = useState<EditSourceImage[]>([]);
+  const hydratedSourcePath = useRef<{ path: string | undefined } | null>(null);
+  const [recipeIdentity, setRecipeIdentity] = useState<{
+    providerProfileId?: string;
+    providerOverrideConfirmed?: boolean;
+    sourceGenerationId?: string;
+  }>({});
+  const [recipeWarnings, setRecipeWarnings] = useState<string[]>([]);
+  const [recipeProviders, setRecipeProviders] = useState<
+    { id: string; name: string }[]
+  >([]);
+  const [chosenRecipeProvider, setChosenRecipeProvider] = useState("");
+  const providerNeedsReview = recipeWarnings.some((w) =>
+    [
+      "legacy_incomplete",
+      "provider_missing",
+      "endpoint_changed",
+      "provider_unconfigured",
+    ].includes(w),
+  );
+  useEffect(() => {
+    if (!providerNeedsReview) return;
+    let cancelled = false;
+    setRecipeProviders([]);
+    setChosenRecipeProvider("");
+    listRecipeProviders(imageModel)
+      .then((providers) => {
+        if (!cancelled) {
+          setRecipeProviders(providers);
+          setChosenRecipeProvider(providers[0]?.id ?? "");
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [providerNeedsReview, imageModel]);
+  const [pendingRecipe, setPendingRecipe] = useState<GenerationRecipe | null>(
+    null,
+  );
+  const [recipeError, setRecipeError] = useState<string | null>(null);
+  const recipeLoadToken = useRef(0);
+  const recipeLoadPending = useRef(false);
   const firstSourcePath = editSources[0]?.path;
   useEffect(() => {
+    if (hydratedSourcePath.current?.path === firstSourcePath) {
+      hydratedSourcePath.current = null;
+      return;
+    }
+    hydratedSourcePath.current = null;
     setAdvancedOptions((current) => {
       if (!current.markupPath && !current.maskPath) return current;
       return { ...current, markupPath: undefined, maskPath: undefined };
@@ -511,6 +564,8 @@ export default function GeneratePage() {
       markComposerDraftStarted();
       setActiveImageModel(model);
       applyModelDefaults(model);
+      setRecipeIdentity({});
+      setRecipeWarnings([]);
       saveImageModel(model).catch(() => {});
     },
     [applyModelDefaults, markComposerDraftStarted, setActiveImageModel],
@@ -616,14 +671,102 @@ export default function GeneratePage() {
     [refreshConversations, setActiveConversationId, t],
   );
 
+  const hydrateRecipe = useCallback(
+    (recipe: GenerationRecipe) => {
+      const request = recipeToRequest(recipe);
+      didUserSelectModelRef.current = true;
+      hasComposerDraftRef.current = true;
+      hydratedSourcePath.current = { path: request.editSources[0]?.path };
+      setActiveImageModel(request.model);
+      setPrompt(request.prompt);
+      setSize(request.size);
+      setQuality(request.quality);
+      setBackground(request.background);
+      setOutputFormat(request.outputFormat);
+      setModeration(request.moderation);
+      setInputFidelity(request.inputFidelity);
+      setImageCount(request.imageCount);
+      setAspectRatio(request.aspectRatio);
+      setResolution(request.resolution);
+      setAdvancedOptions(request.advancedOptions ?? {});
+      setOutputCompression(request.outputCompression ?? 100);
+      setEditSources(request.editSources);
+      setRecipeIdentity({
+        providerProfileId: request.providerProfileId,
+        sourceGenerationId: request.sourceGenerationId,
+      });
+      setRecipeWarnings(recipe.warnings);
+      setComposerMode("direct");
+      setEditingPromptMessageId(null);
+      setPendingRecipe(null);
+      textareaRef.current?.focus();
+    },
+    [setActiveImageModel],
+  );
+
+  const handleReuseRecipe = useCallback(
+    async (generationId: string, mode: "edit" | "generate") => {
+      if (recipeLoadPending.current) return;
+      recipeLoadPending.current = true;
+      const token = ++recipeLoadToken.current;
+      setRecipeError(null);
+      try {
+        const recipe = await getGenerationRecipe(generationId);
+        if (token !== recipeLoadToken.current) return;
+        if (mode === "generate" && recipe.warnings.length === 0) {
+          await submitGenerationRequest({
+            ...recipeToRequest(recipe),
+            conversationId: activeConversationId,
+            projectId: activeProjectId,
+          });
+        } else if (hasComposerDraftRef.current || recipe.warnings.length > 0) {
+          setPendingRecipe(recipe);
+        } else {
+          hydrateRecipe(recipe);
+        }
+      } catch {
+        if (token === recipeLoadToken.current)
+          setRecipeError(t("recipe.loadFailed"));
+      } finally {
+        recipeLoadPending.current = false;
+      }
+    },
+    [
+      activeConversationId,
+      activeProjectId,
+      hydrateRecipe,
+      submitGenerationRequest,
+      t,
+    ],
+  );
+  const navigationRecipeHandled = useRef<unknown>(null);
+  useEffect(() => {
+    const state = location.state as {
+      recipeGenerationId?: string;
+      recipeMode?: "edit" | "generate";
+    } | null;
+    if (
+      state?.recipeGenerationId &&
+      navigationRecipeHandled.current !== state
+    ) {
+      navigationRecipeHandled.current = state;
+      void handleReuseRecipe(
+        state.recipeGenerationId,
+        state.recipeMode ?? "edit",
+      );
+    }
+  }, [location.state, handleReuseRecipe]);
+
   async function handleGenerate() {
     const promptText = prompt.trim();
-    if (!promptText) return;
+    if (!promptText || recipeWarnings.length > 0) return;
 
     setPrompt("");
+    hasComposerDraftRef.current = false;
     setEditSources([]);
     setEditingPromptMessageId(null);
     await submitGenerationRequest({
+      ...recipeIdentity,
       prompt: promptText,
       advancedOptions,
       outputCompression,
@@ -852,10 +995,19 @@ export default function GeneratePage() {
 
   const handleRetryMessage = useCallback(
     async (message: Message) => {
+      if (
+        message.generationId &&
+        !message.id.startsWith(
+          "assistant-" + message.retryRequest?.clientRequestId,
+        )
+      ) {
+        await handleReuseRecipe(message.generationId, "generate");
+        return;
+      }
       if (!message.retryRequest) return;
       await submitGenerationRequest(message.retryRequest);
     },
-    [submitGenerationRequest],
+    [submitGenerationRequest, handleReuseRecipe],
   );
 
   const handleEditPrompt = useCallback(
@@ -939,6 +1091,7 @@ export default function GeneratePage() {
               }
               onFavoriteClick={openFolderSelector}
               onRetry={(message) => void handleRetryMessage(message)}
+              onReuseRecipe={(id, mode) => void handleReuseRecipe(id, mode)}
               agentMessages={promptAgentMessages}
               isPromptAgentRunning={
                 startPromptAgentSessionMutation.isPending ||
@@ -952,6 +1105,144 @@ export default function GeneratePage() {
             />
           </div>
 
+          {recipeError && (
+            <p role="alert" className="px-5 py-2 text-sm text-error">
+              {recipeError}
+            </p>
+          )}
+          {recipeWarnings.length > 0 && (
+            <div
+              role="status"
+              className="border-t border-border-subtle bg-surface px-5 py-3 text-sm"
+            >
+              <p>{t("recipe.reviewRequired")}</p>
+              <ul className="my-2 list-inside list-disc text-muted">
+                {recipeWarnings.map((w) => (
+                  <li key={w}>{t(`recipe.warnings.${w}`)}</li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                {providerNeedsReview && (
+                  <div className="grid w-full gap-2 sm:flex sm:items-end">
+                    <label className="grid gap-1 text-xs">
+                      {t("recipe.providerLabel")}
+                      <select
+                        className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                        value={chosenRecipeProvider}
+                        onChange={(event) =>
+                          setChosenRecipeProvider(event.target.value)
+                        }
+                      >
+                        <option value="" disabled>
+                          {t("recipe.providerLabel")}
+                        </option>
+                        {recipeProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!chosenRecipeProvider}
+                      className="studio-control focus-ring min-h-9 rounded-lg px-3 disabled:opacity-50"
+                      onClick={() => {
+                        setRecipeIdentity((current) => ({
+                          ...current,
+                          providerProfileId: chosenRecipeProvider,
+                          providerOverrideConfirmed: true,
+                        }));
+                        setRecipeWarnings((current) =>
+                          current.filter(
+                            (w) =>
+                              ![
+                                "legacy_incomplete",
+                                "provider_missing",
+                                "endpoint_changed",
+                                "provider_unconfigured",
+                              ].includes(w),
+                          ),
+                        );
+                      }}
+                    >
+                      {t("recipe.confirmProvider")}
+                    </button>
+                    {recipeProviders.length === 0 && (
+                      <p className="text-xs text-muted">
+                        {t("recipe.noProviders")}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {recipeWarnings.some((w) =>
+                  [
+                    "source_missing",
+                    "sources_require_selection",
+                    "invalid_job",
+                  ].includes(w),
+                ) && (
+                  <button
+                    type="button"
+                    className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                    onClick={() => {
+                      setEditSources([]);
+                      setAdvancedOptions((current) => ({
+                        ...current,
+                        markupPath: undefined,
+                        maskPath: undefined,
+                      }));
+                      setRecipeIdentity((current) => ({
+                        ...current,
+                        sourceGenerationId: undefined,
+                      }));
+                      setRecipeWarnings((current) =>
+                        current.filter(
+                          (w) =>
+                            ![
+                              "source_missing",
+                              "sources_require_selection",
+                              "invalid_job",
+                            ].includes(w),
+                        ),
+                      );
+                    }}
+                  >
+                    {t("recipe.removeSources")}
+                  </button>
+                )}
+                {recipeWarnings.includes("provider_outcome_unknown") && (
+                  <button
+                    type="button"
+                    className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                    onClick={() =>
+                      setRecipeWarnings((current) =>
+                        current.filter((w) => w !== "provider_outcome_unknown"),
+                      )
+                    }
+                  >
+                    {t("recipe.acknowledgeNewCharge")}
+                  </button>
+                )}
+                {recipeWarnings.includes("invalid_parameters") && (
+                  <button
+                    type="button"
+                    className="studio-control focus-ring min-h-9 rounded-lg px-3"
+                    onClick={() => {
+                      applyModelDefaults(imageModel);
+
+                      setRecipeWarnings((current) =>
+                        current.filter((w) => w !== "invalid_parameters"),
+                      );
+                    }}
+                  >
+                    {t("recipe.resetParameters")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <GenerationComposer
             parametersTarget={parametersTarget}
             interactionDisabled={drawerOpen}
@@ -1030,7 +1321,7 @@ export default function GeneratePage() {
               startPromptAgentSessionMutation.isPending ||
               sendPromptAgentMessageMutation.isPending
             }
-            isGenerating={isGenerating}
+            isGenerating={isGenerating || recipeWarnings.length > 0}
           />
 
           <AnimatePresence>
@@ -1056,6 +1347,46 @@ export default function GeneratePage() {
             />
           )}
 
+          <ConfirmDialog
+            open={pendingRecipe !== null}
+            title={t("recipe.replaceDraft")}
+            description={
+              pendingRecipe?.warnings.length
+                ? pendingRecipe.warnings
+                    .map((w) => t(`recipe.warnings.${w}`))
+                    .join(" · ")
+                : t("recipe.replaceDraftDescription")
+            }
+            confirmLabel={t(
+              pendingRecipe?.warnings.includes("unknown_model")
+                ? "recipe.useCurrentModel"
+                : "recipe.reviewParameters",
+            )}
+            cancelLabel={t("favorites.cancel")}
+            onConfirm={() => {
+              if (pendingRecipe) {
+                try {
+                  hydrateRecipe(
+                    pendingRecipe.warnings.includes("unknown_model")
+                      ? {
+                          ...pendingRecipe,
+                          model: imageModel,
+                          options: {},
+                          provider_profile_id: undefined,
+                          warnings: pendingRecipe.warnings.filter(
+                            (w) => w !== "unknown_model",
+                          ),
+                        }
+                      : pendingRecipe,
+                  );
+                } catch {
+                  setRecipeError(t("recipe.loadFailed"));
+                  setPendingRecipe(null);
+                }
+              }
+            }}
+            onCancel={() => setPendingRecipe(null)}
+          />
           <ConfirmDialog
             open={pendingDeleteGenerationId !== null}
             title={t("lightbox.deleteConfirm")}

@@ -1,3 +1,4 @@
+import { useInRouterContext, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useEffect, useId, useRef, useState } from "react";
 import { Calendar, Download, RotateCcw, Trash2, Wand2, X } from "lucide-react";
@@ -86,6 +87,7 @@ export default function GenerationDetailPanel({
   }
 
   const generation = result.generation;
+  const inRouter = useInRouterContext();
   let dimensions: { aspect_ratio?: string; resolution?: string } = {};
   try {
     dimensions = JSON.parse(generation.request_metadata ?? "{}") ?? {};
@@ -299,6 +301,12 @@ export default function GenerationDetailPanel({
           </div>
 
           <div className="mt-6 space-y-2">
+            {inRouter && !generation.deleted_at && (
+              <RecipeNavigation
+                generationId={generation.id}
+                onClose={onClose}
+              />
+            )}
             {image && onEditImage && (
               <button
                 onClick={() =>
@@ -366,6 +374,36 @@ function MetaRow({ label, value }: { label: string; value: string }) {
         {label}
       </span>
       <p className="mt-0.5 truncate text-xs text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function RecipeNavigation({
+  generationId,
+  onClose,
+}: {
+  generationId: string;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  return (
+    <div className="grid gap-2">
+      {(["edit", "generate"] as const).map((mode) => (
+        <button
+          type="button"
+          key={mode}
+          className="studio-control focus-ring min-h-9 rounded-lg px-3 py-2 text-xs"
+          onClick={() => {
+            onClose();
+            navigate("/generate", {
+              state: { recipeGenerationId: generationId, recipeMode: mode },
+            });
+          }}
+        >
+          {t(mode === "edit" ? "recipe.useParameters" : "recipe.regenerate")}
+        </button>
+      ))}
     </div>
   );
 }
