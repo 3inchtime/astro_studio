@@ -1,0 +1,77 @@
+name: Publish Validated Release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing draft tag, e.g. v0.0.35"
+        type: string
+        required: true
+      installer_sha256:
+        description: "SHA-256 of the installer that passed Windows native acceptance"
+        type: string
+        required: true
+      evidence_url:
+        description: "HTTPS link to Windows install, upgrade, backup/restore and restart evidence"
+        type: string
+        required: true
+      native_acceptance_passed:
+        description: "All Windows native scenarios passed on this exact installer"
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: build-desktop-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  resolve:
+    if: inputs.native_acceptance_passed
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: ref
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || exit 1
+          echo "ref=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")" >> "$GITHUB_OUTPUT"
+  quality:
+    needs: resolve
+    uses: ./.github/workflows/quality.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+  publish:
+    needs: [resolve, quality]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      EVIDENCE_URL: ${{ inputs.evidence_url }}
+      TESTED_HASH: ${{ inputs.installer_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require an existing draft
+        shell: bash
+        run: test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+      - name: Revalidate installer, signature, manifest and native evidence
+        shell: bash
+        run: |
+          gh release download "$RELEASE_TAG" --dir release-check
+          node scripts/verify-release.mjs release-check "$RELEASE_TAG" "$GITHUB_REPOSITORY" src-tauri/tauri.conf.json "$EVIDENCE_URL" "$TESTED_HASH" > verified.json
+      - name: Publish validated draft
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json body --jq .body > release-body.md
+          printf '\nWindows native acceptance: %s\nInstaller SHA-256: `%s`\n' "$EVIDENCE_URL" "$TESTED_HASH" >> release-body.md
+          gh release edit "$RELEASE_TAG" --notes-file release-body.md --draft=false
