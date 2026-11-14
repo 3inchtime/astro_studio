@@ -4203,9 +4203,11 @@ mod tests {
         let fixture = CompatibilityPreparationFixture::new();
         let mut request = compatibility_request(ENGINE_GPT_IMAGE_26_FLARE);
         request.kind = GenerationLifecycleKind::Edit;
-        request.source_image_paths = vec!["/saved/source.png".into()];
+        let local_path = |name: &str| fixture.root.join(name).to_string_lossy().into_owned();
+        request.source_image_paths = vec![local_path("source.png")];
         request.advanced_options = Some(
-            serde_json::from_value(serde_json::json!({"markupPath":"/saved/overlay.png"})).unwrap(),
+            serde_json::from_value(serde_json::json!({"markupPath":local_path("overlay.png")}))
+                .unwrap(),
         );
         let prepared = prepare_compatibility_job(&fixture.db, &request).unwrap();
         assert_eq!(prepared.status, GenerationJobStatus::Failed);
@@ -4227,15 +4229,15 @@ mod tests {
             request.advanced_options.as_ref()
         ));
         assert!(!allowed(
-            &["/other/source.png".into()],
+            &[local_path("other-source.png")],
             request.advanced_options.as_ref()
         ));
         let mut other = request.advanced_options.clone().unwrap();
-        other.markup_path = Some("/other/overlay.png".into());
+        other.markup_path = Some(local_path("other-overlay.png"));
         assert!(!allowed(&request.source_image_paths, Some(&other)));
         {
             let conn = fixture.db.conn.lock().unwrap();
-            conn.execute("UPDATE generations SET request_metadata=json_set(request_metadata,'$.advanced_options.markupPath','/changed/overlay.png') WHERE id=?1",params![prepared.generation_id]).unwrap();
+            conn.execute("UPDATE generations SET request_metadata=json_set(request_metadata,'$.advanced_options.markupPath',?2) WHERE id=?1",params![prepared.generation_id, local_path("changed-overlay.png")]).unwrap();
         }
         assert!(!allowed(
             &request.source_image_paths,
