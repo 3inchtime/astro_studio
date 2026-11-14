@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import CanvasTextControls from "./CanvasTextControls";
 import type { CanvasObject } from "../../types";
 import type { CanvasObjectStyle } from "../../lib/canvas/editor";
 export default function CanvasPropertiesPanel({
@@ -18,6 +19,9 @@ export default function CanvasPropertiesPanel({
         {t("canvas.propertiesTitle")}
       </h3>
       <div className="flex flex-col gap-3 text-xs">
+        {objects.every((object) => object.type === "text") ? (
+          <CanvasTextControls objects={objects} onChange={onChange} />
+        ) : null}
         {all("color") && "color" in first ? (
           <label className="flex min-h-9 items-center justify-between gap-3 text-muted">
             {t("canvas.strokeColor")}

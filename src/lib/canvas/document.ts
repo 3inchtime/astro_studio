@@ -9,6 +9,7 @@ import type {
   CanvasTool,
   CanvasViewport,
 } from "../../types";
+import { normalizeTextStyle } from "./text";
 
 export const DEFAULT_CANVAS_SIZE = 1024;
 export const DEFAULT_BRUSH_COLOR = "#1f2937";
@@ -187,6 +188,7 @@ function sanitizeCanvasObject(object: CanvasObject): CanvasObject {
   }
   if (object.type === "text") {
     return {
+      ...normalizeTextStyle(object),
       type: object.type,
       id: object.id,
       x: object.x ?? 0,

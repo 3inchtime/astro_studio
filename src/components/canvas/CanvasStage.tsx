@@ -1,8 +1,11 @@
+import CanvasTextRotationHandle from "./CanvasTextRotationHandle";
+import { drawCanvasText, fitCanvasText, layoutCanvasText, normalizeTextStyle } from "../../lib/canvas/text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CanvasActionMenu, { type CanvasActionProps } from "./CanvasActionMenu";
 import CanvasResizeOverlay from "./CanvasResizeOverlay";
 import {
   scaleCanvasObjects,
+  updateCanvasObjectStyle,
   snapCanvasSelection,
   type CanvasSnapGuide,
 } from "../../lib/canvas/editor";
@@ -44,6 +47,7 @@ import {
 import type {
   CanvasFrame,
   CanvasTextObject,
+  CanvasTextStyle,
   CanvasDocumentContent,
   CanvasObject,
   CanvasStrokeObject,
@@ -61,6 +65,8 @@ interface CanvasStageProps extends CanvasActionProps {
     height: number,
   ) => void;
   onTransformSelection?: (bounds: CanvasRect) => void;
+  onRotateText?: (id: string, angle: number) => void;
+  textStyle?: Partial<CanvasTextStyle> & { rotation?: number };
   onFrameChange?: (frame: CanvasFrame) => void;
   frameEditing?: boolean;
   fillColor?: string;
@@ -117,6 +123,8 @@ export default function CanvasStage({
   onAddObject,
   onUpdateText,
   onTransformSelection,
+  onRotateText,
+  textStyle,
   onFrameChange,
   frameEditing = false,
   fillColor = "transparent",
@@ -141,6 +149,7 @@ export default function CanvasStage({
     x: number;
     y: number;
   } | null>(null);
+  const [rotationPreview, setRotationPreview] = useState<number | null>(null);
   const [resizePreview, setResizePreview] = useState<CanvasRect | null>(null);
   const [framePreview, setFramePreview] = useState<CanvasRect | null>(null);
   const [snapGuides, setSnapGuides] = useState<CanvasSnapGuide[]>([]);
@@ -191,6 +200,7 @@ export default function CanvasStage({
   const cancelActiveGestures = useCallback(() => {
     setContextMenu(null);
     setResizePreview(null);
+    setRotationPreview(null);
     setFramePreview(null);
     setSnapGuides([]);
     draftObjectRef.current = null;
@@ -266,7 +276,7 @@ export default function CanvasStage({
   );
   const previewContent = resizePreview
     ? scaleCanvasObjects(content, selectedObjectIds, resizePreview)
-    : content;
+    : rotationPreview !== null ? updateCanvasObjectStyle(content, selectedObjectIds, { rotation: rotationPreview }) : content;
   const renderedLayers = useMemo(
     () => getCanvasLayersBackToFront(previewContent.layers),
     [previewContent.layers],
@@ -311,8 +321,9 @@ export default function CanvasStage({
         content.viewport,
       )
     : null;
+  const selectedTextObject = effectiveSelectedObjectIds.length === 1 ? content.layers.flatMap((layer) => layer.objects).find((object): object is CanvasTextObject => object.id === effectiveSelectedObjectIds[0] && object.type === "text") : undefined;
   const combinedSelectionBounds = getCombinedCanvasBounds(
-    content,
+    rotationPreview !== null ? previewContent : content,
     effectiveSelectedObjectIds,
   );
   const combinedSelectionRect = combinedSelectionBounds
@@ -423,12 +434,13 @@ export default function CanvasStage({
       draftContentRef.current = content;
       if (point)
         setTextEditor({
+          ...normalizeTextStyle(textStyle ?? {}),
           type: "text",
           id: crypto.randomUUID(),
           ...point,
           width: 240,
           height: fontSize * 1.2,
-          rotation: 0,
+          rotation: textStyle?.rotation ?? 0,
           text: "",
           fontSize,
           color: strokeColor,
@@ -754,30 +766,12 @@ export default function CanvasStage({
     textEditorRef.current = null;
     draftContentRef.current = null;
     setTextEditor(null);
-    const context = document.createElement("canvas").getContext("2d");
-    if (context) context.font = `${editor.fontSize}px sans-serif`;
-    const width = Math.max(
-      1,
-      Math.ceil(
-        Math.max(
-          ...editor.text
-            .split("\n")
-            .map((line) =>
-              context
-                ? context.measureText(line).width
-                : [...line].length * editor.fontSize,
-            ),
-        ),
-      ),
-    );
-    const height = Math.max(
-      editor.fontSize * 1.2,
-      editor.text.split("\n").length * editor.fontSize * 1.2,
-    );
+    const { width, height } = fitCanvasText(editor);
     if (editor.existing) onUpdateText?.(editor.id, editor.text, width, height);
     else if (editor.text.trim()) onAddObject?.({ ...editor, width, height });
   }
 
+  const textLayout = textEditor ? layoutCanvasText(textEditor) : null;
   return (
     <div
       ref={containerRef}
@@ -1051,7 +1045,7 @@ export default function CanvasStage({
           }
         />
       ) : null}
-      {!frameEditing && combinedSelectionBounds && onTransformSelection ? (
+      {!frameEditing && !textEditor && combinedSelectionBounds && onTransformSelection ? (
         <CanvasResizeOverlay
           key={effectiveSelectionKey}
           kind="selection"
@@ -1078,6 +1072,9 @@ export default function CanvasStage({
           onPreview={setResizePreview}
           onCommit={onTransformSelection}
         />
+      ) : null}
+      {!frameEditing && !textEditor && selectedTextObject && onRotateText ? (
+        <CanvasTextRotationHandle key={selectedTextObject.id} object={selectedTextObject} viewport={content.viewport} identity={content} onPreview={setRotationPreview} onCommit={(angle) => onRotateText(selectedTextObject.id, angle)} />
       ) : null}
       {contextMenu ? (
         <CanvasActionMenu
@@ -1136,12 +1133,19 @@ export default function CanvasStage({
           style={{
             left: textEditor.x * content.viewport.scale + content.viewport.x,
             top: textEditor.y * content.viewport.scale + content.viewport.y,
-            width: Math.max(240, textEditor.width) * content.viewport.scale,
-            minHeight: Math.max(80, textEditor.height) * content.viewport.scale,
-            fontFamily: "sans-serif",
+            width: (textEditor.text ? textLayout!.editor?.width ?? textLayout!.width : 240) * content.viewport.scale,
+            paddingLeft: (textLayout!.editor?.paddingLeft ?? 0) * content.viewport.scale,
+            paddingRight: (textLayout!.editor?.paddingRight ?? 0) * content.viewport.scale,
+            boxSizing: "content-box",
+            height: textLayout!.height * content.viewport.scale,
+            fontFamily: normalizeTextStyle(textEditor).fontFamily,
+            fontWeight: normalizeTextStyle(textEditor).fontWeight,
+            fontStyle: normalizeTextStyle(textEditor).fontStyle,
+            textAlign: normalizeTextStyle(textEditor).textAlign,
+            letterSpacing: normalizeTextStyle(textEditor).letterSpacing * content.viewport.scale,
             fontSize: textEditor.fontSize * content.viewport.scale,
             color: textEditor.color,
-            lineHeight: 1.2,
+            lineHeight: normalizeTextStyle(textEditor).lineHeight,
             transform: `rotate(${textEditor.rotation}deg)`,
             transformOrigin: "top left",
           }}
@@ -1260,23 +1264,7 @@ function renderCanvasObject(
         <Shape
           key={object.id}
           {...common}
-          sceneFunc={(context) => {
-            context.setAttr(
-              "font",
-              `${object.fontSize * viewport.scale}px sans-serif`,
-            );
-            context.setAttr("fillStyle", object.color);
-            context.setAttr("textBaseline", "top");
-            object.text
-              .split("\n")
-              .forEach((line, index) =>
-                context.fillText(
-                  line,
-                  0,
-                  index * object.fontSize * viewport.scale * 1.2,
-                ),
-              );
-          }}
+          sceneFunc={(context) => drawCanvasText(context, object, viewport.scale)}
           hitFunc={(context, shape) => {
             context.beginPath();
             context.rect(0, 0, common.width, common.height);

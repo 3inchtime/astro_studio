@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+afterEach(() => { vi.restoreAllMocks(); });
 import {
   createCanvasDocumentContent,
   sanitizeCanvasDocumentContent,
@@ -422,6 +423,7 @@ it("resizes text proportionally without compressing natural glyph metrics", () =
 });
 
 it("updates text bounds along with font size so selection and framing contain glyphs", () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   const c = content();
   c.layers[0].objects = [
     {

@@ -122,7 +122,16 @@ export interface CanvasLineObject {
   headSize?: number;
 }
 
-export interface CanvasTextObject {
+export interface CanvasTextStyle {
+  fontFamily: string;
+  fontWeight: "normal" | "bold";
+  fontStyle: "normal" | "italic";
+  textAlign: "left" | "center" | "right";
+  letterSpacing: number;
+  lineHeight: number;
+}
+
+export interface CanvasTextObject extends Partial<CanvasTextStyle> {
   type: "text";
   id: string;
   x: number;
