@@ -68,3 +68,9 @@ All communication uses Tauri's IPC via `invoke()` — there is no REST API. The 
 ## Language
 
 README and code comments are primarily Chinese. UI copy supports 8 languages via i18next.
+
+## Superpowers 文件
+
+本项目中，任何层级的 `superpowers/` 和 `.superpowers/` 目录都只供本地使用，包括 `docs/superpowers/` 下的设计和计划。使用 Superpowers 技能时，跳过技能要求暂存或提交这些文件的步骤。禁止用 `git add -f` 将它们加入索引。若已误暂存，先取消这些文件的暂存并保留本地副本，再提交其他改动。
+
+新克隆的仓库可运行 `git config --local core.hooksPath .githooks` 启用提交检查。

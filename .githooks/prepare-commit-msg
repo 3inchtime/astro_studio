@@ -1,0 +1,9 @@
+#!/bin/sh
+# Check the index Git will commit, including during git commit --only.
+# Treat renames as delete/add so moving a file out of these directories is allowed.
+if ! git diff --cached --quiet --no-renames --diff-filter=ACMT -- \
+    ':(top,glob)**/superpowers/**' ':(top,glob)**/.superpowers/**'
+then
+    echo 'Astro Studio: superpowers/ 和 .superpowers/ 仅供本地使用。请取消相关文件的暂存后再提交。' >&2
+    exit 1
+fi
