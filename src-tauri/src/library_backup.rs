@@ -890,10 +890,14 @@ fn restore_archive_manifest(
             if !safe_entry(p) || !p.starts_with("assets/") {
                 return Err("Backup contains an unmanaged file reference".into());
             }
-            if !destination.join(p).is_file() && !optional {
+            // Recovery binds to the exact native path string, including separators.
+            let restored_path = p
+                .split('/')
+                .fold(destination.clone(), |base, part| base.join(part));
+            if !restored_path.is_file() && !optional {
                 return Err(format!("Required backup asset is missing: {p}").into());
             }
-            Ok(destination.join(p).to_string_lossy().into_owned())
+            Ok(restored_path.to_string_lossy().into_owned())
         };
         transform_database_paths(&conn, &mut map, &mut |_, new| {
             docs.push(new.to_owned());
