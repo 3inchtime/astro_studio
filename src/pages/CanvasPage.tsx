@@ -1,3 +1,4 @@
+import { DEFAULT_TEXT_STYLE, normalizeTextStyle } from "../lib/canvas/text";
 import RecoveryNotice from "../components/generate/RecoveryNotice";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeft, PanelRight } from "lucide-react";
@@ -159,6 +160,7 @@ export default function CanvasPage() {
   const [fillColor, setFillColor] = useState("#c7d2fe");
   const [objectOpacity, setObjectOpacity] = useState(1);
   const [fontSize, setFontSize] = useState(32);
+  const [textStyle, setTextStyle] = useState({ ...DEFAULT_TEXT_STYLE, rotation: 0 });
   const [frameEditing, setFrameEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -1128,6 +1130,7 @@ export default function CanvasPage() {
       ),
     });
     setSelectedObjectIds([object.id]);
+    if (object.type === "text") setActiveTool("select");
   }
   function handleUpdateText(
     id: string,
@@ -1361,6 +1364,7 @@ export default function CanvasPage() {
         event.preventDefault();
         setFrameEditing(false);
         setActiveTool(shapeTools[key]);
+        if (shapeTools[key] === "text") setSelectedObjectIds([]);
         return;
       }
       const tool =
@@ -1481,6 +1485,8 @@ export default function CanvasPage() {
                   fillColor={fillColor}
                   objectOpacity={objectOpacity}
                   fontSize={fontSize}
+                  textStyle={textStyle}
+                  onRotateText={(id, angle) => updateContent(updateCanvasObjectStyle(content, [id], { rotation: angle }))}
                   frameEditing={frameEditing}
                   onFrameChange={handleFrameChange}
                   onAddObject={handleAddObject}
@@ -1545,6 +1551,7 @@ export default function CanvasPage() {
                     canPaste={Boolean(clipboard?.entries.length)}
                     onToolChange={(tool) => {
                       setActiveTool(tool);
+                      if (tool === "text") setSelectedObjectIds([]);
                       setFrameEditing(false);
                     }}
                     fillColor={fillColor}
@@ -1770,6 +1777,16 @@ export default function CanvasPage() {
                   .filter((e) => selectedObjectIds.includes(e.object.id))
                   .map((e) => e.object)}
                 onChange={handleStyle}
+              />
+            ) : isEditorReady && activeTool === "text" ? (
+              <CanvasPropertiesPanel
+                objects={[{ type: "text", id: "new-text", text: "", x: 0, y: 0, width: 240, height: 40, ...textStyle, fontSize, color: strokeColor, opacity: objectOpacity }]}
+                onChange={(style) => {
+                  setTextStyle((current) => ({ ...normalizeTextStyle({ ...current, ...style }), rotation: style.rotation ?? current.rotation }));
+                  if (style.fontSize !== undefined) setFontSize(style.fontSize);
+                  if (style.color !== undefined) setStrokeColor(style.color);
+                  if (style.opacity !== undefined) setObjectOpacity(style.opacity);
+                }}
               />
             ) : (
               <div className="px-5 py-6 text-body-sm leading-6 text-muted">

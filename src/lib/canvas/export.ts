@@ -3,6 +3,7 @@ import { isCanvasPathObject } from "./document";
 import type { CanvasDocumentContent, CanvasObject } from "../../types";
 import { getCanvasLayersBackToFront } from "./document";
 import { toAssetUrl } from "../api";
+import { drawCanvasText } from "./text";
 
 export async function exportCanvasFrame(
   content: CanvasDocumentContent,
@@ -73,14 +74,13 @@ async function drawObject(
         return;
       }
       if (o.type === "text") {
-        ctx.fillStyle = o.color;
-        ctx.font = `${o.fontSize}px sans-serif`;
-        ctx.textBaseline = "top";
-        o.text
-          .split("\n")
-          .forEach((line, i) =>
-            ctx.fillText(line, 0, i * o.fontSize * 1.2),
-          );
+        drawCanvasText(
+          {
+            setAttr: (key, value) => Object.assign(ctx, { [key]: value }),
+            fillText: (text, x, y) => ctx.fillText(text, x, y),
+          },
+          o,
+        );
         return;
       }
       ctx.beginPath();

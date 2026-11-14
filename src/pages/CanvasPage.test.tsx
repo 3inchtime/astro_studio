@@ -463,6 +463,16 @@ describe("CanvasPage", () => {
       expect(getCanvasDocument).toHaveBeenCalledWith("canvas-1");
     });
   });
+  it.each(["toolbar", "shortcut"])("opens new text defaults instead of styling the old selection via %s", async (source) => {
+    getCanvasDocument.mockResolvedValueOnce(canvasDocumentWithImage());
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    fireEvent.click(await screen.findByRole("button", { name: "select image" }));
+    expect(screen.getByText("Selected objects: image-1")).toBeInTheDocument();
+    if (source === "toolbar") fireEvent.click(screen.getByRole("button", { name: "canvas.tool.text" }));
+    else fireEvent.keyDown(window, { key: "t" });
+    expect(screen.getByText("Selected objects: none")).toBeInTheDocument();
+    expect(screen.getByLabelText("canvas.fontFamily")).toBeInTheDocument();
+  });
 
   it("creates a new canvas document", async () => {
     render(<CanvasPage />, { wrapper: TestWrapper });

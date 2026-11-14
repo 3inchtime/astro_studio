@@ -8,9 +8,9 @@ describe("macOS source startup script", () => {
   it("is executable and installs dependencies before launching Tauri dev", () => {
     const scriptPath = resolve(repoRoot, "scripts/start-macos-source.sh");
     const script = readFileSync(scriptPath, "utf8");
-    const mode = statSync(scriptPath).mode;
-
-    expect(mode & 0o111).toBeGreaterThan(0);
+    if (process.platform !== "win32") {
+      expect(statSync(scriptPath).mode & 0o111).toBeGreaterThan(0);
+    }
     expect(script).toContain('$(uname -s)');
     expect(script).toContain('"Darwin"');
     expect(script).toContain("install_with_brew_if_missing npm node");

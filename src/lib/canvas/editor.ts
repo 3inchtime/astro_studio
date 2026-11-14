@@ -1,5 +1,10 @@
 import { isCanvasPathObject } from "./document";
-import type { CanvasDocumentContent, CanvasObject } from "../../types";
+import type {
+  CanvasDocumentContent,
+  CanvasObject,
+  CanvasTextStyle,
+} from "../../types";
+import { fitCanvasText, normalizeTextStyle, rotateCanvasText } from "./text";
 import {
   getCanvasObjectBounds,
   getCombinedCanvasBounds,
@@ -11,13 +16,14 @@ import {
 } from "./document";
 import { translateCanvasObjects } from "./transforms";
 import { getSelectableCanvasObjects } from "./selection";
-export type CanvasObjectStyle = {
+export type CanvasObjectStyle = Partial<CanvasTextStyle> & {
   color?: string;
   size?: number;
   opacity?: number;
   fill?: string;
   fontSize?: number;
   text?: string;
+  rotation?: number;
 };
 export type CanvasAlignment =
   "left" | "center" | "right" | "top" | "middle" | "bottom";
@@ -89,7 +95,10 @@ export function scaleCanvasObjects(
       width: Math.max(1, o.width * sx),
       height: Math.max(1, o.height * sy),
       ...(o.type === "text"
-        ? { fontSize: Math.max(1, o.fontSize * Math.min(sx, sy)) }
+        ? {
+            fontSize: Math.max(1, o.fontSize * Math.min(sx, sy)),
+            letterSpacing: (o.letterSpacing ?? 0) * Math.min(sx, sy),
+          }
         : {}),
     };
   });
@@ -100,6 +109,37 @@ export function updateCanvasObjectStyle(
   style: CanvasObjectStyle,
 ): CanvasDocumentContent {
   return mapSelected(content, ids, (o) => {
+    if (o.type === "text") {
+      const next = { ...o, ...normalizeTextStyle(o) };
+      for (const [key, value] of Object.entries(style)) {
+        if (key === "rotation" || value === undefined || !(key in next))
+          continue;
+        if (typeof value === "number" && !Number.isFinite(value)) continue;
+        Object.assign(next, {
+          [key]:
+            key === "fontSize"
+              ? Math.max(1, Number(value))
+              : key === "opacity"
+                ? Math.max(0, Math.min(1, Number(value)))
+                : value,
+        });
+      }
+      const changesMetrics = [
+        "text",
+        "fontFamily",
+        "fontWeight",
+        "fontStyle",
+        "fontSize",
+        "letterSpacing",
+        "lineHeight",
+      ].some((key) => key in style);
+      const result = changesMetrics
+        ? fitCanvasText(next)
+        : { ...next, ...normalizeTextStyle(next) };
+      return style.rotation === undefined
+        ? result
+        : rotateCanvasText(result, style.rotation);
+    }
     const next = { ...o };
     for (const [key, value] of Object.entries(style)) {
       if (key in next && value !== undefined)
@@ -111,15 +151,6 @@ export function updateCanvasObjectStyle(
                 ? Math.max(1, Number(value))
                 : value,
         });
-    }
-    if (
-      o.type === "text" &&
-      next.type === "text" &&
-      next.fontSize !== o.fontSize
-    ) {
-      const factor = next.fontSize / Math.max(1, o.fontSize);
-      next.width = o.width * factor;
-      next.height = o.height * factor;
     }
     return next;
   });

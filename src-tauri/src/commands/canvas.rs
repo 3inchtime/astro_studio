@@ -892,7 +892,7 @@ mod tests {
             "frame": {"x":0,"y":0,"width":100,"height":100,"aspect":"1:1"},
             "layers": [{"id":"l","name":"Layer","visible":true,"locked":false,"objects":[
                 {"type":"rectangle","id":"r","fill":"#f00","color":"#000","x":1,"y":2,"width":20,"height":30,"size":2,"opacity":1,"rotation":0},
-                {"type":"text","id":"t","text":"hello","fontSize":24,"x":1,"y":2,"width":20,"height":30},
+                {"type":"text","id":"t","text":"hello","fontSize":24,"fontFamily":"serif","fontWeight":"bold","fontStyle":"italic","textAlign":"center","letterSpacing":3,"lineHeight":1.8,"rotation":45,"x":1,"y":2,"width":20,"height":30},
                 {"type":"arrow","id":"a","points":[0,0,100,0],"size":1,"headSize":6}
             ]}],
             "generation_requests":[{"request_id":"req","status":"pending","image_ids":[]}]
@@ -902,6 +902,14 @@ mod tests {
         assert_eq!(saved["layers"][0]["objects"][0]["fill"], "#f00");
         assert_eq!(saved["layers"][0]["objects"][1]["text"], "hello");
         assert_eq!(saved["layers"][0]["objects"][1]["fontSize"], 24.0);
+        let text = &saved["layers"][0]["objects"][1];
+        assert_eq!(text["fontFamily"], "serif");
+        assert_eq!(text["fontWeight"], "bold");
+        assert_eq!(text["fontStyle"], "italic");
+        assert_eq!(text["textAlign"], "center");
+        assert_eq!(text["letterSpacing"], 3.0);
+        assert_eq!(text["lineHeight"], 1.8);
+        assert_eq!(text["rotation"], 45.0);
         assert_eq!(saved["generation_requests"][0]["request_id"], "req");
         assert_eq!(saved["layers"][0]["objects"][2]["headSize"], 6.0);
     }
@@ -1019,6 +1027,12 @@ mod tests {
                     fill: None,
                     text: None,
                     font_size: None,
+                    font_family: None,
+                    font_weight: None,
+                    font_style: None,
+                    text_align: None,
+                    letter_spacing: None,
+                    line_height: None,
                     head_size: None,
                 }],
             }],

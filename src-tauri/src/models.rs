@@ -470,6 +470,34 @@ pub struct CanvasObject {
     pub text: Option<String>,
     #[serde(default, rename = "fontSize")]
     pub font_size: Option<f64>,
+    #[serde(
+        default,
+        rename = "fontFamily",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub font_family: Option<String>,
+    #[serde(
+        default,
+        rename = "fontWeight",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub font_weight: Option<String>,
+    #[serde(default, rename = "fontStyle", skip_serializing_if = "Option::is_none")]
+    pub font_style: Option<String>,
+    #[serde(default, rename = "textAlign", skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<String>,
+    #[serde(
+        default,
+        rename = "letterSpacing",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub letter_spacing: Option<f64>,
+    #[serde(
+        default,
+        rename = "lineHeight",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub line_height: Option<f64>,
     #[serde(default, rename = "headSize")]
     pub head_size: Option<f64>,
 }
