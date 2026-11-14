@@ -254,7 +254,7 @@ pub(crate) fn decode_image_for_preview(data: &[u8]) -> Result<DynamicImage, AppE
     );
     // tiny-skia stores premultiplied RGBA; image/clipboard require straight RGBA.
     let mut rgba = pixmap.data().to_vec();
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         let alpha = u32::from(pixel[3]);
         if alpha > 0 && alpha < 255 {
             for channel in &mut pixel[..3] {

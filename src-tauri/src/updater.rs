@@ -114,11 +114,7 @@ async fn manifest_exists(endpoint: &Url) -> Result<bool> {
         .send()
         .await?;
 
-    if is_missing_update_manifest(response.status()) {
-        return Ok(false);
-    }
-
-    Ok(true)
+    Ok(!is_missing_update_manifest(response.status()))
 }
 
 #[tauri::command]
