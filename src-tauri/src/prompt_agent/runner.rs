@@ -67,9 +67,10 @@ async fn run_openai_prompt_agent(
     input: PromptAgentRunInput,
 ) -> Result<PromptAgentDecision, AppError> {
     let mut builder = openai::Client::builder().api_key(&config.api_key);
-    if !config.base_url.trim().is_empty() {
-        builder = builder.base_url(config.base_url.trim_end_matches('/'));
-    }
+    builder = builder.base_url(crate::llm::resolved_base_url(
+        config,
+        crate::llm::protocol_settings(&config.protocol)?,
+    ));
     let client = builder.build().map_err(|_| AppError::Validation {
         message: "prompt_agent_request_failed".into(),
     })?;
@@ -101,9 +102,10 @@ async fn run_anthropic_prompt_agent(
     input: PromptAgentRunInput,
 ) -> Result<PromptAgentDecision, AppError> {
     let mut builder = anthropic::Client::builder().api_key(config.api_key.clone());
-    if !config.base_url.trim().is_empty() {
-        builder = builder.base_url(config.base_url.trim_end_matches('/'));
-    }
+    builder = builder.base_url(crate::llm::resolved_base_url(
+        config,
+        crate::llm::protocol_settings(&config.protocol)?,
+    ));
     let client = builder.build().map_err(|_| AppError::Validation {
         message: "prompt_agent_request_failed".into(),
     })?;
@@ -134,12 +136,10 @@ pub async fn run_prompt_agent(
     config: &LlmConfig,
     input: PromptAgentRunInput,
 ) -> Result<PromptAgentDecision, AppError> {
-    match config.protocol.as_str() {
-        "openai" => run_openai_prompt_agent(config, input).await,
-        "anthropic" => run_anthropic_prompt_agent(config, input).await,
-        other => Err(AppError::Validation {
-            message: format!("Prompt agent does not support LLM protocol '{}'", other),
-        }),
+    use crate::model_catalog::LlmAdapter;
+    match crate::llm::protocol_settings(&config.protocol)?.adapter {
+        LlmAdapter::Openai => run_openai_prompt_agent(config, input).await,
+        LlmAdapter::Anthropic => run_anthropic_prompt_agent(config, input).await,
     }
 }
 

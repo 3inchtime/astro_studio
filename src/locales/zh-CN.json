@@ -1,4 +1,7 @@
 {
+  "generate.cancelTask": "取消生成",
+  "generate.cancelledTask": "已取消生成",
+  "generate.cancelTaskFailed": "取消生成失败，请重试。",
   "nav.generate": "生成",
   "nav.extract": "图片提取提示词",
   "nav.canvas": "画布",
@@ -458,6 +461,9 @@
   "lightbox.preview": "预览",
   "lightbox.generated": "已生成",
   "trash": {
+    "bulkRestore": "恢复所选记录",
+    "bulkPurge": "永久删除所选记录",
+    "bulkRestoreHint": "将这些生成记录及其图片恢复到资料库。",
     "title": "回收站",
     "search": "搜索已删除提示词...",
     "detail": "回收站详情",

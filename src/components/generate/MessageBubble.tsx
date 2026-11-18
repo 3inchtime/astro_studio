@@ -4,6 +4,7 @@ import { Pencil, RotateCcw, Sparkles, Star } from "lucide-react";
 import { formatLocalDateTime } from "../../lib/utils";
 import { toAssetUrl } from "../../lib/api";
 import type { Message, MessageImage, PromptAgentMessage } from "../../types";
+import CancelGenerationButton from "./CancelGenerationButton";
 import ImageGrid from "./ImageGrid";
 import GenerationLoadingScene from "./GenerationLoadingScene";
 import { useTranslation } from "react-i18next";
@@ -305,6 +306,8 @@ export default function MessageBubble({
               ) : (
                 <GenerationLoadingScene />
               )}
+              {message.activeJobId &&
+                <CancelGenerationButton jobId={message.activeJobId} />}
             </motion.div>
           )}
 
@@ -357,6 +360,8 @@ export default function MessageBubble({
                 />
               </motion.div>
             )}
+
+          {message.status === "cancelled" && <p role="status" className="text-sm text-muted">{t("generate.cancelledTask")}</p>}
 
           {message.status === "failed" && (
             <div

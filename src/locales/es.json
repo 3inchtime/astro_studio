@@ -1,5 +1,11 @@
 {
+  "generate.cancelTask": "Cancelar generación",
+  "generate.cancelledTask": "Generación cancelada",
+  "generate.cancelTaskFailed": "No se pudo cancelar la generación. Inténtalo de nuevo.",
   "trash": {
+    "bulkRestore": "Restaurar selección",
+    "bulkPurge": "Eliminar selección definitivamente",
+    "bulkRestoreHint": "Devuelve estos registros y sus imágenes a la biblioteca.",
     "title": "Papelera",
     "search": "Buscar prompts eliminados...",
     "detail": "Detalles de la papelera",

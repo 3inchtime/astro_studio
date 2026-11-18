@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
+import { onOperationProgress } from "../../lib/operationEvents";
 import {
   createBackup,
   inspectBackup,
@@ -11,7 +11,7 @@ import {
   cancelLibraryOperation,
   type BackupInspection,
   type LibraryResult,
-} from "../../lib/libraryApi";
+} from "../../features/library/commands";
 import { relaunchApp } from "../../lib/api";
 import ConfirmDialog from "../common/ConfirmDialog";
 interface BackupState {
@@ -52,16 +52,8 @@ async function runBackupOperation(run: (id: string) => Promise<LibraryResult>) {
   });
   let unlisten: (() => void) | undefined;
   try {
-    unlisten = await listen<{
-      operation_id: string;
-      completed: number;
-      total: number;
-    }>("library:operation-progress", ({ payload }) => {
-      if (payload.operation_id === id)
-        useBackupState.setState({
-          completed: payload.completed,
-          total: payload.total,
-        });
+    unlisten = await onOperationProgress(id, ({ completed, total }) => {
+      useBackupState.setState({ completed, total });
     });
     const result = await run(id);
     useBackupState.setState({ status: result.status });

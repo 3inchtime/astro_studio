@@ -4,7 +4,7 @@ import { toAssetUrl } from "../../lib/api";
 import ImageAdvancedControls from "../generate/ImageAdvancedControls";
 import {
   getImageModelCatalogEntry,
-  isGptImage26,
+  supportsAdvancedImageOptions,
 } from "../../lib/modelCatalog";
 import type { GenerationParams } from "../../types";
 import type { CanvasFrame, ImageModel } from "../../types";
@@ -124,7 +124,7 @@ export default function CanvasGenerationPanel({
             {t("canvas.frameFromSelection")}
           </button>
         ) : null}
-        {isGptImage26(imageModel) && parameters && onParametersChange && (
+        {supportsAdvancedImageOptions(imageModel) && parameters && onParametersChange && (
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <label className="text-xs text-muted">

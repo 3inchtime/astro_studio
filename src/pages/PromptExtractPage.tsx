@@ -13,9 +13,9 @@ import {
 } from "../lib/queries/favorites";
 import {
   useExtractPromptFromImageMutation,
-  useLlmConfigsQuery,
   usePromptExtractionsQuery,
-} from "../lib/queries/llm";
+} from "../features/promptExtraction/queries";
+import { useLlmConfigsQuery } from "../features/llm/queries";
 import { ROUTES } from "../app/routes/contracts";
 
 export default function PromptExtractPage() {

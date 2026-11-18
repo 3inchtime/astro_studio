@@ -279,3 +279,34 @@ fn normalized_backup_restores_to_verified_recoverable_job_without_provider_submi
         );
     }
 }
+
+#[test]
+fn restoring_a_snapshot_requires_a_new_request_for_archived_queue_entries() {
+    let fixture = Fixture::new();
+    fixture.db.conn.lock().unwrap().execute(
+        "UPDATE generation_jobs SET source_ref_json=json_set(source_ref_json,'$.execution_version',1)", []
+    ).unwrap();
+    let paths = StoragePaths::new(
+        fixture.root.join("bootstrap"),
+        fixture.root.join("fixture.db"),
+        fixture.root.clone(),
+    )
+    .unwrap();
+    let operations = Operations::default();
+    let op = operations.begin(&uuid::Uuid::new_v4().to_string()).unwrap();
+    let archive = fixture.root.join("queued.astrobackup");
+    create_archive(&fixture.db, &paths, &archive, &op, &|_, _, _| {}).unwrap();
+    let destination = restore_archive(&paths, &archive, &op, &|_, _, _| {}).unwrap();
+    let restored = Database::open(&destination.join("library.db")).unwrap();
+    let conn = restored.conn.lock().unwrap();
+    let job = crate::generation_jobs::get_job(&conn, &fixture.job_id).unwrap();
+    assert_eq!(job.status, GenerationJobStatus::Interrupted);
+    assert_eq!(job.error_code.as_deref(), Some("provider_outcome_unknown"));
+    assert!(job.retryable);
+    assert_eq!(
+        crate::generation_jobs::get_job(&fixture.db.conn.lock().unwrap(), &fixture.job_id)
+            .unwrap()
+            .status,
+        GenerationJobStatus::Queued
+    );
+}

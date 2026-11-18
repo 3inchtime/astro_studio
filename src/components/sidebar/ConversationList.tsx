@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
@@ -78,13 +78,16 @@ export default function ConversationList({
     setProjects(items);
   }, []);
 
+  const conversationRead = useRef(0);
   const loadConversations = useCallback(
     async (q?: string) => {
+      const version = ++conversationRead.current;
       const items = await getConversations(
         q,
         activeProjectId || "default",
         false,
       );
+      if (version !== conversationRead.current) return;
       setConversations(items);
       if (!q && !activeConversationId && items.length > 0) {
         onInitialConversation(items[0].id);
@@ -101,14 +104,14 @@ export default function ConversationList({
   );
 
   useEffect(() => {
-    if (query) {
-      const timer = setTimeout(() => {
-        loadAll(query).catch(() => {});
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-
-    loadAll().catch(() => {});
+    const timer = query
+      ? setTimeout(() => { void loadAll(query).catch(() => {}); }, 300)
+      : undefined;
+    if (!query) void loadAll().catch(() => {});
+    return () => {
+      conversationRead.current++;
+      clearTimeout(timer);
+    };
   }, [query, refreshKey, loadAll]);
 
   const selectedProject = useMemo(

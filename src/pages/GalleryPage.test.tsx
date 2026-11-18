@@ -557,6 +557,45 @@ describe("GalleryPage", () => {
     expect(screen.getByRole("button", { name: "Open preview generation-4" })).toBeInTheDocument();
   });
 
+  it("keeps a deleted generation out of an overlapping replacement search", async () => {
+    const oldRows = { generations: [buildResult("1"), buildResult("2")], total: 2, page: 1, page_size: 20 };
+    let finishOld!: (value: typeof oldRows) => void;
+    searchGenerations.mockResolvedValueOnce(oldRows)
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+      .mockResolvedValue({ ...oldRows, generations: [buildResult("2")], total: 1 });
+    render(<GalleryPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open detail generation-1" }));
+    fireEvent.change(screen.getByPlaceholderText("gallery.search"), { target: { value: "filtered" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("gallery.search"), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.bulkDelete" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open preview generation-1" })).not.toBeInTheDocument());
+    await act(async () => finishOld(oldRows));
+    expect(screen.queryByRole("button", { name: "Open preview generation-1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open preview generation-2" })).toBeInTheDocument();
+    expect(searchGenerations).toHaveBeenLastCalledWith("filtered", 1, false, {}, undefined);
+  });
+
+  it("resumes from the shifted first page after deleting the only loaded record mid-append", async () => {
+    const initial = { generations: [buildResult("1")], total: 3, page: 1, page_size: 1 };
+    const pending = createDeferred<typeof initial>();
+    searchGenerations.mockResolvedValueOnce(initial)
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce({ ...initial, generations: [buildResult("2")], total: 2 });
+    render(<GalleryPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open detail generation-1" }));
+    await act(async () => triggerIntersection());
+    expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 2, false, {}, undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.bulkDelete" }));
+    await waitFor(() => expect(screen.queryByTestId("grid")).not.toBeInTheDocument());
+    await act(async () => pending.resolve({ ...initial, page: 2, generations: [buildResult("2")] }));
+    await act(async () => triggerIntersection());
+    expect(searchGenerations).toHaveBeenLastCalledWith(undefined, 1, false, {}, undefined);
+    expect(await screen.findByRole("button", { name: "Open preview generation-2" })).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
   it("paginates the submitted search even while a new draft is being typed", async () => {
     searchGenerations.mockResolvedValueOnce({ generations: [buildResult("1")], total: 2, page: 1, page_size: 1 }).mockResolvedValueOnce({ generations: [buildResult("2")], total: 2, page: 2, page_size: 1 });
     render(<GalleryPage />);

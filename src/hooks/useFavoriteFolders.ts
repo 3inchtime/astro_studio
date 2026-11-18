@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { getImageFolders, addImageToFolders, removeImageFromFolders } from "../lib/api";
-import { listen } from "@tauri-apps/api/event";
+import { onFavoritesChanged } from "../features/collections/events";
 
 export function useFavoriteFolders(imageId: string) {
   const [folderIds, setFolderIds] = useState<string[]>([]);
@@ -20,7 +20,7 @@ export function useFavoriteFolders(imageId: string) {
 
   // Listen for global favorites changed event and reload
   useEffect(() => {
-    const unlisten = listen("favorites:changed", () => {
+    const unlisten = onFavoritesChanged(() => {
       load();
     });
     return () => { unlisten.then((fn) => fn()); };

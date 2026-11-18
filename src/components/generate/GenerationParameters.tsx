@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   IMAGE_MODEL_CATALOG,
   getImageModelCatalogEntry,
-  isGptImage26,
+  supportsAdvancedImageOptions,
 } from "../../lib/modelCatalog";
 import { image26ValidationError } from "../../lib/image26Options";
 import type {
@@ -117,7 +117,7 @@ export default function GenerationParameters({
     showOutputFormat ||
     showModeration ||
     showInputFidelity ||
-    isGptImage26(imageModel);
+    supportsAdvancedImageOptions(imageModel);
   const providerLabel =
     (
       {
@@ -323,7 +323,7 @@ export default function GenerationParameters({
                 />
               )}
             </div>
-            {isGptImage26(imageModel) && onAdvancedOptionsChange && (
+            {supportsAdvancedImageOptions(imageModel) && onAdvancedOptionsChange && (
               <ImageAdvancedControls
                 embedded
                 value={advancedOptions}

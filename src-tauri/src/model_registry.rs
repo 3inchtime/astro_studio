@@ -1,74 +1,99 @@
+use crate::model_catalog::{ImageModelSpec, ImageProtocol, CATALOG};
 use crate::models::*;
 
+pub(crate) fn image_model(model: &str) -> Option<ImageModelSpec<'static>> {
+    CATALOG.image_model(model)
+}
+
+pub(crate) fn require_image_model(
+    model: &str,
+) -> Result<ImageModelSpec<'static>, crate::error::AppError> {
+    image_model(model).ok_or_else(|| crate::error::AppError::Validation {
+        message: "Unknown image model.".into(),
+    })
+}
+
 pub(crate) fn normalize_image_model(model: &str) -> &'static str {
-    match model {
-        ENGINE_GPT_IMAGE_26_FLARE => ENGINE_GPT_IMAGE_26_FLARE,
-        ENGINE_GPT_IMAGE_26_SUNBURST => ENGINE_GPT_IMAGE_26_SUNBURST,
-        ENGINE_GPT_IMAGE_2 => ENGINE_GPT_IMAGE_2,
-        ENGINE_GPT_IMAGE_SUNBURST => ENGINE_GPT_IMAGE_SUNBURST,
-        ENGINE_GPT_IMAGE_FLARE => ENGINE_GPT_IMAGE_FLARE,
-        ENGINE_NANO_BANANA_21 => ENGINE_NANO_BANANA_21,
-        ENGINE_GROK => ENGINE_GROK,
-        ENGINE_SEEDREAM_PRO => ENGINE_SEEDREAM_PRO,
-        ENGINE_SEEDREAM_FLASH => ENGINE_SEEDREAM_FLASH,
-        ENGINE_NANO_BANANA | GEMINI_MODEL_NANO_BANANA => ENGINE_NANO_BANANA,
-        ENGINE_NANO_BANANA_2 | GEMINI_MODEL_NANO_BANANA_2 | "gemini-3.1-flash-image-preview" => {
-            ENGINE_NANO_BANANA_2
-        }
-        ENGINE_NANO_BANANA_PRO | GEMINI_MODEL_NANO_BANANA_PRO | "gemini-3-pro-image-preview" => {
-            ENGINE_NANO_BANANA_PRO
-        }
-        _ => DEFAULT_IMAGE_MODEL,
-    }
+    image_model(model).map_or(CATALOG.default_image_model.as_str(), |m| m.id)
+}
+
+pub(crate) fn supports_advanced_options(model: &str) -> bool {
+    image_model(model).is_some_and(|m| m.profile.advanced_options)
+}
+
+pub(crate) fn default_wire_resolution(model: &str) -> Option<String> {
+    let entry = image_model(model)?;
+    // Only these protocols supplied a resolution when older jobs omitted it.
+    matches!(
+        entry.profile.protocol,
+        ImageProtocol::XaiImages | ImageProtocol::SeedreamImages
+    )
+    .then(|| entry.profile.parameter_defaults.resolution.clone())
+    .flatten()
 }
 
 pub(crate) fn is_gemini_model(model: &str) -> bool {
-    matches!(
-        normalize_image_model(model),
-        ENGINE_NANO_BANANA | ENGINE_NANO_BANANA_2 | ENGINE_NANO_BANANA_PRO | ENGINE_NANO_BANANA_21
-    )
-}
-
-fn gemini_provider_model_id(model: &str) -> &'static str {
-    match normalize_image_model(model) {
-        ENGINE_NANO_BANANA_21 => ENGINE_NANO_BANANA_21,
-        ENGINE_NANO_BANANA => GEMINI_MODEL_NANO_BANANA,
-        ENGINE_NANO_BANANA_2 => GEMINI_MODEL_NANO_BANANA_2,
-        ENGINE_NANO_BANANA_PRO => GEMINI_MODEL_NANO_BANANA_PRO,
-        _ => GEMINI_MODEL_NANO_BANANA,
-    }
+    image_model(model).is_some_and(|m| {
+        matches!(
+            m.profile.protocol,
+            ImageProtocol::GeminiInteractions | ImageProtocol::GeminiGenerateContent
+        )
+    })
 }
 
 pub(crate) fn sanitize_request_options_for_model(
     model: &str,
     mut options: GptImageRequestOptions,
 ) -> GptImageRequestOptions {
-    if is_gemini_model(model) {
-        options.quality = DEFAULT_IMAGE_QUALITY.to_string();
-        options.background = DEFAULT_IMAGE_BACKGROUND.to_string();
-        if model != ENGINE_NANO_BANANA_21 {
-            options.output_format = DEFAULT_OUTPUT_FORMAT.to_string();
+    let Some(model) = image_model(model) else {
+        return options;
+    };
+    let caps = &model.profile.parameter_capabilities;
+    let legacy = &model.profile.accepted_request_values;
+    for (values, accepted, field) in [
+        (&caps.qualities, &legacy.qualities, &mut options.quality),
+        (
+            &caps.backgrounds,
+            &legacy.backgrounds,
+            &mut options.background,
+        ),
+        (
+            &caps.moderation_levels,
+            &legacy.moderation_levels,
+            &mut options.moderation,
+        ),
+        (
+            &caps.input_fidelity_options,
+            &legacy.input_fidelity_options,
+            &mut options.input_fidelity,
+        ),
+        (
+            &caps.output_formats,
+            &legacy.output_formats,
+            &mut options.output_format,
+        ),
+    ] {
+        if let [fixed] = values.as_slice() {
+            if !accepted.contains(field) {
+                field.clone_from(fixed);
+            }
         }
+    }
+    if let [fixed] = caps.image_counts.as_slice() {
+        options.image_count = *fixed;
+    }
+    if matches!(
+        model.profile.protocol,
+        ImageProtocol::GeminiInteractions | ImageProtocol::GeminiGenerateContent
+    ) {
         options.output_compression = DEFAULT_OUTPUT_COMPRESSION;
-        options.moderation = DEFAULT_IMAGE_MODERATION.to_string();
-        options.input_fidelity = DEFAULT_INPUT_FIDELITY.to_string();
     }
-
-    if is_gemini_model(model) || is_seedream_model(model) {
-        options.image_count = 1;
-    }
-    if is_seedream_model(model) || model == ENGINE_GROK {
-        options.background = DEFAULT_IMAGE_BACKGROUND.to_string();
-        options.moderation = DEFAULT_IMAGE_MODERATION.to_string();
-        options.input_fidelity = DEFAULT_INPUT_FIDELITY.to_string();
+    if matches!(
+        model.profile.protocol,
+        ImageProtocol::SeedreamImages | ImageProtocol::XaiImages
+    ) {
         options.stream = false;
         options.partial_images = 0;
-    }
-    if model == ENGINE_GROK {
-        options.output_format = "jpeg".to_string();
-    }
-    if is_seedream_model(model) {
-        options.quality = DEFAULT_IMAGE_QUALITY.to_string();
     }
     options
 }
@@ -93,63 +118,34 @@ pub(crate) fn endpoint_value_or_default(value: Option<String>, default_value: &s
         .unwrap_or_else(|| default_value.to_string())
 }
 
-fn build_image_endpoint_url(base_url: &str, kind: ImageEndpointKind) -> String {
-    let path = match kind {
-        ImageEndpointKind::Generate => "images/generations",
-        ImageEndpointKind::Edit => "images/edits",
+fn base_endpoint(model: ImageModelSpec<'_>, base: &str, kind: ImageEndpointKind) -> String {
+    let base = base.trim().trim_end_matches('/');
+    if model.profile.protocol == ImageProtocol::GeminiGenerateContent {
+        if base.ends_with(":generateContent") {
+            return base.to_string();
+        }
+        if base.ends_with(model.provider_model_id) {
+            return format!("{base}:generateContent");
+        }
+    }
+    let template = match kind {
+        ImageEndpointKind::Generate => &model.endpoints.generation_path,
+        ImageEndpointKind::Edit => &model.endpoints.edit_path,
     };
-    format!("{}/{}", base_url.trim_end_matches('/'), path)
+    format!(
+        "{base}/{}",
+        template.replace("{model}", model.provider_model_id)
+    )
 }
 
 pub(crate) fn default_endpoint_settings_for_model(model: &str) -> EndpointSettings {
-    let model = normalize_image_model(model);
-
-    if model == ENGINE_NANO_BANANA_21 {
-        let url = "https://generativelanguage.googleapis.com/v1beta/interactions";
-        return EndpointSettings {
-            mode: ENDPOINT_MODE_BASE_URL.to_string(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
-            generation_url: url.to_string(),
-            edit_url: url.to_string(),
-        };
-    }
-    if model == ENGINE_GROK || is_seedream_model(model) {
-        let base = if model == ENGINE_GROK {
-            "https://api.x.ai/v1"
-        } else {
-            "https://ark.cn-beijing.volces.com/api/v3"
-        };
-        return EndpointSettings {
-            mode: ENDPOINT_MODE_BASE_URL.to_string(),
-            base_url: base.to_string(),
-            generation_url: build_image_endpoint_url(base, ImageEndpointKind::Generate),
-            edit_url: build_image_endpoint_url(
-                base,
-                if is_seedream_model(model) {
-                    ImageEndpointKind::Generate
-                } else {
-                    ImageEndpointKind::Edit
-                },
-            ),
-        };
-    }
-    if is_gemini_model(model) {
-        let provider_model = gemini_provider_model_id(model);
-        let generation_url =
-            format!("{DEFAULT_GEMINI_MODELS_URL}/{provider_model}:generateContent");
-        return EndpointSettings {
-            mode: ENDPOINT_MODE_BASE_URL.to_string(),
-            base_url: DEFAULT_GEMINI_MODELS_URL.to_string(),
-            generation_url: generation_url.clone(),
-            edit_url: generation_url,
-        };
-    }
-
+    let entry = image_model(normalize_image_model(model)).expect("registered default model");
+    let base = &entry.endpoints.base_url;
     EndpointSettings {
-        mode: ENDPOINT_MODE_BASE_URL.to_string(),
-        base_url: DEFAULT_BASE_URL.to_string(),
-        generation_url: DEFAULT_GENERATION_URL.to_string(),
-        edit_url: DEFAULT_EDIT_URL.to_string(),
+        mode: ENDPOINT_MODE_BASE_URL.into(),
+        base_url: base.clone(),
+        generation_url: base_endpoint(entry, base, ImageEndpointKind::Generate),
+        edit_url: base_endpoint(entry, base, ImageEndpointKind::Edit),
     }
 }
 
@@ -157,26 +153,13 @@ pub(crate) fn model_setting_key(model: &str, suffix: &str) -> String {
     format!("model_config::{}::{}", normalize_image_model(model), suffix)
 }
 
-pub(crate) fn legacy_model_setting_ids(model: &str) -> &'static [&'static str] {
-    match normalize_image_model(model) {
-        ENGINE_NANO_BANANA => &[GEMINI_MODEL_NANO_BANANA],
-        ENGINE_NANO_BANANA_2 => &["gemini-3.1-flash-image-preview", GEMINI_MODEL_NANO_BANANA_2],
-        ENGINE_NANO_BANANA_PRO => &["gemini-3-pro-image-preview", GEMINI_MODEL_NANO_BANANA_PRO],
-        _ => &[],
-    }
-}
-
-fn normalize_gemini_endpoint_url(endpoint_url: &str, model: &str) -> String {
-    let endpoint = endpoint_url.trim().trim_end_matches('/');
-    let model = gemini_provider_model_id(model);
-
-    if endpoint.ends_with(":generateContent") {
-        endpoint.to_string()
-    } else if endpoint.ends_with(model) {
-        format!("{endpoint}:generateContent")
-    } else {
-        format!("{endpoint}/{model}:generateContent")
-    }
+pub(crate) fn legacy_model_setting_ids(model: &str) -> impl Iterator<Item = &'static str> {
+    image_model(model).into_iter().flat_map(|m| {
+        m.aliases
+            .iter()
+            .map(String::as_str)
+            .chain((m.id != m.provider_model_id).then_some(m.provider_model_id))
+    })
 }
 
 pub(crate) fn image_endpoint_url_for_model_settings(
@@ -184,68 +167,43 @@ pub(crate) fn image_endpoint_url_for_model_settings(
     settings: &EndpointSettings,
     kind: ImageEndpointKind,
 ) -> String {
-    let model = normalize_image_model(model);
-
-    if model == ENGINE_NANO_BANANA_21 {
-        return if settings.mode == ENDPOINT_MODE_FULL_URL {
-            match kind {
-                ImageEndpointKind::Generate => settings.generation_url.clone(),
-                ImageEndpointKind::Edit => settings.edit_url.clone(),
-            }
-        } else {
-            format!("{}/interactions", settings.base_url.trim_end_matches('/'))
-        };
+    let model = image_model(normalize_image_model(model)).expect("registered default model");
+    if settings.mode != ENDPOINT_MODE_FULL_URL {
+        return base_endpoint(model, &settings.base_url, kind);
     }
-    if is_seedream_model(model) {
-        return if settings.mode == ENDPOINT_MODE_FULL_URL {
-            settings.generation_url.clone()
-        } else {
-            build_image_endpoint_url(&settings.base_url, ImageEndpointKind::Generate)
-        };
-    }
-    if settings.mode == ENDPOINT_MODE_FULL_URL {
-        if is_gemini_model(model) {
-            let endpoint = match kind {
-                ImageEndpointKind::Generate => settings.generation_url.clone(),
-                ImageEndpointKind::Edit => {
-                    if settings.edit_url.trim().is_empty() {
-                        settings.generation_url.clone()
-                    } else {
-                        settings.edit_url.clone()
-                    }
-                }
-            };
-            return endpoint;
+    match kind {
+        ImageEndpointKind::Generate => &settings.generation_url,
+        ImageEndpointKind::Edit
+            if model.profile.protocol == ImageProtocol::SeedreamImages
+                || (model.profile.protocol == ImageProtocol::GeminiGenerateContent
+                    && settings.edit_url.trim().is_empty()) =>
+        {
+            &settings.generation_url
         }
-
-        return match kind {
-            ImageEndpointKind::Generate => settings.generation_url.clone(),
-            ImageEndpointKind::Edit => settings.edit_url.clone(),
-        };
+        ImageEndpointKind::Edit => &settings.edit_url,
     }
-
-    if is_gemini_model(model) {
-        return normalize_gemini_endpoint_url(&settings.base_url, model);
-    }
-
-    build_image_endpoint_url(&settings.base_url, kind)
+    .clone()
 }
 
 pub(crate) fn is_seedream_model(model: &str) -> bool {
-    matches!(model, ENGINE_SEEDREAM_PRO | ENGINE_SEEDREAM_FLASH)
+    image_model(model).is_some_and(|m| m.profile.protocol == ImageProtocol::SeedreamImages)
 }
 
 pub(crate) fn migrate_official_gemini_url(url: &str) -> String {
-    for (old, new) in [
-        ("gemini-3.1-flash-image-preview", GEMINI_MODEL_NANO_BANANA_2),
-        ("gemini-3-pro-image-preview", GEMINI_MODEL_NANO_BANANA_PRO),
-    ] {
-        let old_url = format!("{DEFAULT_GEMINI_MODELS_URL}/{old}:generateContent");
-        if url == old_url {
-            return format!("{DEFAULT_GEMINI_MODELS_URL}/{new}:generateContent");
+    if let Some((base, name)) = url
+        .strip_suffix(":generateContent")
+        .and_then(|url| url.rsplit_once('/'))
+    {
+        if let Some(m) = image_model(name) {
+            if m.profile.protocol == ImageProtocol::GeminiGenerateContent
+                && base == m.endpoints.base_url
+                && m.aliases.iter().any(|a| a == name)
+            {
+                return base_endpoint(m, base, ImageEndpointKind::Generate);
+            }
         }
     }
-    url.to_string()
+    url.to_owned()
 }
 
 pub(crate) fn validate_request_options(
@@ -253,49 +211,36 @@ pub(crate) fn validate_request_options(
     options: &GptImageRequestOptions,
     source_count: usize,
 ) -> Result<(), crate::error::AppError> {
-    use crate::image_engines::{provider_for_model, ImageProvider};
+    let model = require_image_model(model)?;
+    validate_model_options(model, options, source_count)
+}
+
+pub(crate) fn validate_model_options(
+    model: ImageModelSpec<'_>,
+    options: &GptImageRequestOptions,
+    source_count: usize,
+) -> Result<(), crate::error::AppError> {
     let invalid = || crate::error::AppError::Validation {
         message: "Unsupported image parameters for the selected model.".to_string(),
     };
-    let provider = provider_for_model(model);
-    let max_sources = match provider {
-        ImageProvider::Xai => 5,
-        ImageProvider::Seedream => 10,
-        ImageProvider::Gemini => 14,
-        ImageProvider::OpenAi => 16,
-        ImageProvider::Unknown => return Err(invalid()),
+    let profile = model.profile;
+    let caps = &profile.parameter_capabilities;
+    let legacy = &profile.accepted_request_values;
+    let max_sources = if profile.supports_edit {
+        profile.max_reference_images
+    } else {
+        0
     };
     if source_count > max_sources {
         return Err(crate::error::AppError::Validation {
             message: format!("This model supports at most {max_sources} reference images."),
         });
     }
-    let quality_ok = match provider {
-        ImageProvider::OpenAi
-            if matches!(
-                model,
-                ENGINE_GPT_IMAGE_FLARE
-                    | ENGINE_GPT_IMAGE_SUNBURST
-                    | ENGINE_GPT_IMAGE_26_FLARE
-                    | ENGINE_GPT_IMAGE_26_SUNBURST
-            ) =>
-        {
-            ["auto", "low", "medium", "high", "xhigh", "max"].contains(&options.quality.as_str())
-        }
-        ImageProvider::OpenAi => {
-            ["auto", "low", "medium", "high"].contains(&options.quality.as_str())
-        }
-        ImageProvider::Xai => ["auto", "low", "medium"].contains(&options.quality.as_str()),
-        _ => options.quality == "auto",
-    };
-    let image26 = matches!(
-        model,
-        ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST
-    );
+    let image26 = profile.advanced_options;
     let extended_format = image26 && ["gif", "svg"].contains(&options.output_format.as_str());
-    if !(1..=10).contains(&options.image_count)
+    if !(caps.image_counts.contains(&options.image_count)
+        || legacy.image_counts.contains(&options.image_count))
         || options.output_compression > 100
-        || !["auto", "low"].contains(&options.moderation.as_str())
         || options.partial_images > 3
         || (options.partial_images > 0 && !options.stream)
         || (extended_format
@@ -330,46 +275,49 @@ pub(crate) fn validate_request_options(
             return Err(invalid());
         }
     }
-    if !quality_ok
-        || !["auto", "opaque", "transparent"].contains(&options.background.as_str())
-        || (!extended_format && !["png", "jpeg", "webp"].contains(&options.output_format.as_str()))
-        || (options.background == "transparent"
-            && ["jpeg", "gif"].contains(&options.output_format.as_str()))
-        || (provider == ImageProvider::Seedream && options.output_format == "webp")
+    for (value, presets, accepted) in [
+        (Some(&options.quality), &caps.qualities, &legacy.qualities),
+        (
+            Some(&options.background),
+            &caps.backgrounds,
+            &legacy.backgrounds,
+        ),
+        (
+            Some(&options.output_format),
+            &caps.output_formats,
+            &legacy.output_formats,
+        ),
+        (
+            Some(&options.input_fidelity),
+            &caps.input_fidelity_options,
+            &legacy.input_fidelity_options,
+        ),
+        (
+            Some(&options.moderation),
+            &caps.moderation_levels,
+            &legacy.moderation_levels,
+        ),
+        (
+            options.aspect_ratio.as_ref(),
+            &caps.aspect_ratios,
+            &legacy.aspect_ratios,
+        ),
+        (
+            options.resolution.as_ref(),
+            &caps.resolutions,
+            &legacy.resolutions,
+        ),
+    ] {
+        if value.is_some_and(|v| !presets.contains(v) && !accepted.contains(v)) {
+            return Err(invalid());
+        }
+    }
+    if options.background == "transparent"
+        && ["jpeg", "gif"].contains(&options.output_format.as_str())
     {
         return Err(invalid());
     }
-    if let Some(ratio) = &options.aspect_ratio {
-        let supported = [
-            "19.5:9", "9:19.5", "20:9", "9:20", "1:1", "1:4", "4:1", "1:8", "8:1", "1:2", "2:1",
-            "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
-        ];
-        if !supported.contains(&ratio.as_str())
-            || provider == ImageProvider::OpenAi
-            || provider == ImageProvider::Seedream
-            || (model != ENGINE_NANO_BANANA_21
-                && ["1:4", "4:1", "1:8", "8:1"].contains(&ratio.as_str()))
-            || (provider == ImageProvider::Xai && ["4:5", "5:4", "21:9"].contains(&ratio.as_str()))
-            || (provider == ImageProvider::Gemini
-                && ["19.5:9", "9:19.5", "20:9", "9:20"].contains(&ratio.as_str()))
-        {
-            return Err(invalid());
-        }
-    }
-    if let Some(resolution) = &options.resolution {
-        let allowed: &[&str] = match provider {
-            ImageProvider::Xai => &["1K", "2K"],
-            ImageProvider::Seedream => &["auto", "1K", "1.5K", "2K"],
-            ImageProvider::Gemini if model == ENGINE_NANO_BANANA => &["1K"],
-            ImageProvider::Gemini if model == ENGINE_NANO_BANANA_2 => &["512", "1K", "2K", "4K"],
-            ImageProvider::Gemini => &["1K", "2K", "4K"],
-            _ => &[],
-        };
-        if !allowed.contains(&resolution.as_str()) {
-            return Err(invalid());
-        }
-    }
-    if provider == ImageProvider::OpenAi && options.size != "auto" {
+    if profile.protocol == ImageProtocol::OpenaiImages && options.size != "auto" {
         let (w, h) = options
             .size
             .split_once('x')
@@ -403,11 +351,19 @@ mod tests {
     #[test]
     fn base_url_mode_builds_image_endpoint_paths() {
         assert_eq!(
-            build_image_endpoint_url("https://api.example.test/v1/", ImageEndpointKind::Generate),
+            base_endpoint(
+                image_model(ENGINE_GPT_IMAGE_2).unwrap(),
+                "https://api.example.test/v1/",
+                ImageEndpointKind::Generate
+            ),
             "https://api.example.test/v1/images/generations"
         );
         assert_eq!(
-            build_image_endpoint_url("https://api.example.test/v1", ImageEndpointKind::Edit),
+            base_endpoint(
+                image_model(ENGINE_GPT_IMAGE_2).unwrap(),
+                "https://api.example.test/v1",
+                ImageEndpointKind::Edit
+            ),
             "https://api.example.test/v1/images/edits"
         );
     }
@@ -622,7 +578,7 @@ mod image26_tests {
                 crate::image_engines::ImageProvider::OpenAi
             );
         }
-        assert_eq!(DEFAULT_IMAGE_MODEL, "gpt-image-2.6-flare");
+        assert_eq!(CATALOG.default_image_model, "gpt-image-2.6-flare");
     }
     #[test]
     fn advanced_options_survive_job_serialization() {

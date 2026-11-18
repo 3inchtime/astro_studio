@@ -1,3 +1,4 @@
+use crate::model_catalog::ImageProtocol;
 use crate::{db::Database, error::AppError, model_registry::*, models::*};
 use reqwest::{Method, Url};
 use serde::{Deserialize, Serialize};
@@ -27,14 +28,10 @@ fn validation(message: &str) -> AppError {
     }
 }
 fn saved_profile(db: &Database, model: &str, id: &str) -> Result<ModelProviderProfile, AppError> {
-    if normalize_image_model(model) != model {
-        return Err(validation("Unknown image model."));
-    }
-    crate::commands::settings::read_model_provider_profiles_state(db, model)?
-        .profiles
-        .into_iter()
-        .find(|p| p.id == id)
-        .ok_or_else(|| validation("Saved provider no longer exists."))
+    crate::providers::resolve_profile(db, model, Some(id)).map_err(|error| match error {
+        AppError::ProviderProfileNotFound { .. } => validation("Saved provider no longer exists."),
+        other => other,
+    })
 }
 fn validated_url(value: &str) -> Result<Url, AppError> {
     let url = Url::parse(value).map_err(|_| validation("Invalid provider URL."))?;
@@ -61,10 +58,15 @@ fn probe_target(model: &str, profile: &ModelProviderProfile) -> Result<(Method, 
     if settings.mode == ENDPOINT_MODE_FULL_URL || is_seedream_model(model) {
         return Ok((Method::HEAD, validated_url(&generation)?));
     }
-    let url = if is_gemini_model(model) && model != ENGINE_NANO_BANANA_21 {
+    let entry = require_image_model(model)?;
+    let url = if entry.profile.protocol == ImageProtocol::GeminiGenerateContent {
         generation.trim_end_matches(":generateContent").to_string()
     } else {
-        format!("{}/models/{model}", settings.base_url.trim_end_matches('/'))
+        format!(
+            "{}/models/{}",
+            settings.base_url.trim_end_matches('/'),
+            entry.provider_model_id
+        )
     };
     Ok((Method::GET, validated_url(&url)?))
 }
@@ -205,6 +207,14 @@ pub struct ProviderSmokePlan {
     pub aspect_ratio: Option<String>,
     pub output_format: String,
 }
+pub(crate) fn profile_fingerprint(
+    model: &str,
+    profile: &ModelProviderProfile,
+) -> Result<String, AppError> {
+    let bytes = serde_json::to_vec(&(normalize_image_model(model), profile))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
 fn smoke_plan(model: &str, profile: &ModelProviderProfile) -> Result<ProviderSmokePlan, AppError> {
     probe_target(model, profile)?;
     let endpoint = validated_url(&image_endpoint_url_for_model_settings(
@@ -212,49 +222,29 @@ fn smoke_plan(model: &str, profile: &ModelProviderProfile) -> Result<ProviderSmo
         &profile.endpoint_settings,
         ImageEndpointKind::Generate,
     ))?;
-    let native = is_gemini_model(model) || is_seedream_model(model) || model == ENGINE_GROK;
+    let entry = require_image_model(model)?;
+    let caps = &entry.profile.parameter_capabilities;
     Ok(ProviderSmokePlan {
         model: model.into(),
         provider_id: profile.id.clone(),
         provider_name: profile.name.clone(),
         endpoint_host: endpoint.host_str().unwrap_or("").into(),
-        fingerprint: format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&(model, profile))
-                    .map_err(|_| validation("Cannot prepare test."))?
-            )
-        ),
+        fingerprint: profile_fingerprint(model, profile)?,
         prompt: "A small blue circle on a plain white background.".into(),
         image_count: 1,
-        size: if native {
-            None
-        } else {
-            Some("1024x1024".into())
-        },
-        quality: if native && model != ENGINE_GROK {
-            None
-        } else {
-            Some("low".into())
-        },
-        resolution: if native {
-            Some(
-                if model == ENGINE_NANO_BANANA_2 {
-                    "512"
-                } else {
-                    "1K"
-                }
-                .into(),
-            )
-        } else {
-            None
-        },
-        aspect_ratio: if native && !is_seedream_model(model) {
-            Some("1:1".into())
-        } else {
-            None
-        },
-        output_format: if model == ENGINE_GROK { "jpeg" } else { "png" }.into(),
+        size: (entry.profile.protocol == ImageProtocol::OpenaiImages).then(|| "1024x1024".into()),
+        quality: caps.qualities.iter().find(|value| *value == "low").cloned(),
+        resolution: ["512", "1K"]
+            .into_iter()
+            .find(|value| caps.resolutions.iter().any(|r| r == value))
+            .map(str::to_owned)
+            .or_else(|| entry.profile.parameter_defaults.resolution.clone()),
+        aspect_ratio: caps
+            .aspect_ratios
+            .iter()
+            .find(|value| *value == "1:1")
+            .cloned(),
+        output_format: entry.profile.parameter_defaults.output_format.clone(),
     })
 }
 #[tauri::command]
@@ -283,7 +273,6 @@ impl From<AppError> for ProviderSmokeError {
 pub async fn run_provider_smoke_test(
     app: tauri::AppHandle,
     db: State<'_, Database>,
-    engine: State<'_, crate::api_gateway::GptImageEngine>,
     model: String,
     provider_id: String,
     fingerprint: String,
@@ -296,24 +285,19 @@ pub async fn run_provider_smoke_test(
             validation("Provider changed. Review a new test plan before generating.").into(),
         );
     }
-    let conversation = crate::commands::conversations::create_conversation(
-        db.clone(),
-        Some(format!("Connection test · {}", plan.provider_name)),
-        None,
-    )?;
-    crate::generation_execution::submit_generation_request(
+    let title = format!("Connection test · {}", plan.provider_name);
+    let initial_title =
+        crate::projects::conversations::conversation_title_from_prompt(&plan.prompt);
+    let ack = crate::generation_execution::enqueue_request(
         &app,
         db.inner(),
-        engine.inner(),
         crate::generation_execution::GenerationExecutionRequest {
+            confirmed_profile_fingerprint: Some(plan.fingerprint),
             prompt: plan.prompt,
             model: Some(plan.model.clone()),
             provider_profile_id: Some(plan.provider_id),
             client_request_id: Some(client_request_id),
-            advanced_options: if matches!(
-                plan.model.as_str(),
-                ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST
-            ) {
+            advanced_options: if crate::model_registry::supports_advanced_options(&plan.model) {
                 Some(ImageAdvancedOptions {
                     stream: Some(false),
                     partial_images: Some(0),
@@ -328,15 +312,28 @@ pub async fn run_provider_smoke_test(
             aspect_ratio: plan.aspect_ratio,
             output_format: Some(plan.output_format),
             image_count: Some(1),
-            conversation_id: Some(conversation.id.clone()),
             ..Default::default()
         },
-    )
-    .await
-    .map_err(|error| ProviderSmokeError {
-        code: error.stable_code(),
-        conversation_id: Some(conversation.id),
-    })
+        |_| Ok(()),
+    )?;
+    {
+        let conn = db
+            .conn
+            .lock()
+            .map_err(|_| validation("Generation database unavailable."))?;
+        // A replay must preserve a title the user has already changed.
+        conn.execute(
+            "UPDATE conversations SET title=?1 WHERE id=?2 AND title=?3",
+            rusqlite::params![title, ack.conversation_id, initial_title],
+        )
+        .map_err(AppError::from)?;
+    }
+    crate::generation_execution::await_result(&app, db.inner(), &ack.job_id)
+        .await
+        .map_err(|error| ProviderSmokeError {
+            code: error.stable_code(),
+            conversation_id: Some(ack.conversation_id),
+        })
 }
 
 #[cfg(test)]

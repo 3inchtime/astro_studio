@@ -1,4 +1,7 @@
 {
+  "generate.cancelTask": "Cancel generation",
+  "generate.cancelledTask": "Generation cancelled",
+  "generate.cancelTaskFailed": "Could not cancel generation. Try again.",
   "nav.generate": "Generate",
   "nav.extract": "Image Prompt Extract",
   "nav.canvas": "Canvas",
@@ -460,6 +463,9 @@
   "lightbox.preview": "Preview",
   "lightbox.generated": "Generated",
   "trash": {
+    "bulkRestore": "Restore selected",
+    "bulkPurge": "Permanently delete selected",
+    "bulkRestoreHint": "Return these generation records and their images to the library.",
     "title": "Trash",
     "search": "Search deleted prompts...",
     "detail": "Trash Details",

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MotionConfig } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 import { IMAGE_MODEL_CATALOG } from "../lib/modelCatalog";
-import { getVersion } from "@tauri-apps/api/app";
+import { getDesktopVersion } from "../features/updates/commands";
 import {
   getCredentialStatus,
   getLogs,
@@ -181,7 +181,7 @@ export default function SettingsPage() {
   }, [imageModel]);
 
   useEffect(() => {
-    getVersion()
+    getDesktopVersion()
       .then(setAppVersion)
       .catch(() => setAppVersion(""));
   }, []);

@@ -1,6 +1,7 @@
 use crate::current_timestamp;
 use crate::db::Database;
 use crate::error::AppError;
+use crate::llm::config::{read_llm_configs, resolve_agent_llm_config};
 use crate::models::LlmConfig;
 use crate::prompt_agent::runner::run_prompt_agent;
 use crate::prompt_agent::types::{
@@ -18,30 +19,6 @@ use tauri::State;
 pub(crate) fn get_prompt_agent_health(_db: State<'_, Database>) -> Result<&'static str, AppError> {
     let _library_operation = crate::storage::write_operation::<AppError>()?;
     Ok("ok")
-}
-
-fn read_llm_configs(db: &Database) -> Result<Vec<LlmConfig>, AppError> {
-    crate::commands::llm::read_llm_configs(db)
-}
-
-fn resolve_agent_llm_config<'a>(
-    configs: &'a [LlmConfig],
-    config_id: &str,
-) -> Result<&'a LlmConfig, AppError> {
-    let config = configs
-        .iter()
-        .find(|config| config.id == config_id && config.enabled)
-        .ok_or_else(|| AppError::Validation {
-            message: "Select an enabled LLM config before using deep thinking mode.".to_string(),
-        })?;
-
-    if config.capability != "text" && config.capability != "multimodal" {
-        return Err(AppError::Validation {
-            message: format!("LLM config '{}' cannot run the prompt agent.", config.name),
-        });
-    }
-
-    Ok(config)
 }
 
 fn serialize_skill_ids(skill_ids: &[String]) -> Result<String, AppError> {
@@ -250,7 +227,7 @@ fn summarize_messages(messages: &[PromptAgentMessage]) -> String {
 async fn prepare_visual_context(
     app: &tauri::AppHandle,
     db: &Database,
-    registry: &crate::commands::generation::SelectedImageRegistry,
+    registry: &crate::source_images::SelectedImageRegistry,
     config: &LlmConfig,
     sources: &[String],
     selection: Option<&[String]>,
@@ -278,9 +255,9 @@ async fn prepare_visual_context(
     if config.capability != "multimodal" {
         return Err(vision::vision_error("prompt_vision_multimodal_required"));
     }
-    let images = crate::commands::llm::load_registered_images(app, db, registry, &selected)
+    let images = crate::llm::images::load_registered_images(app, db, registry, &selected)
         .map_err(|_| vision::vision_error("prompt_vision_image_unavailable"))?;
-    let client = crate::commands::llm::create_multimodal_llm_client(config)?;
+    let client = crate::llm::images::create_multimodal_llm_client(config)?;
     vision::analyze(
         client.as_ref(),
         &images,
@@ -383,7 +360,7 @@ async fn run_and_persist_agent_turn(
 #[tauri::command]
 pub(crate) async fn start_prompt_agent_session(
     app: tauri::AppHandle,
-    selected_images: State<'_, crate::commands::generation::SelectedImageRegistry>,
+    selected_images: State<'_, crate::source_images::SelectedImageRegistry>,
     db: State<'_, Database>,
     request: StartPromptAgentSessionRequest,
 ) -> Result<PromptAgentTurnResponse, AppError> {
@@ -455,7 +432,7 @@ pub(crate) async fn start_prompt_agent_session(
 #[tauri::command]
 pub(crate) async fn send_prompt_agent_message(
     app: tauri::AppHandle,
-    selected_images: State<'_, crate::commands::generation::SelectedImageRegistry>,
+    selected_images: State<'_, crate::source_images::SelectedImageRegistry>,
     db: State<'_, Database>,
     request: SendPromptAgentMessageRequest,
 ) -> Result<PromptAgentTurnResponse, AppError> {

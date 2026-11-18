@@ -194,6 +194,41 @@ fn scalar_key(key: &str) -> bool {
 fn collection_key(key: &str) -> bool {
     key == "llm_configs" || key.starts_with("model_provider_profiles::")
 }
+/// Pending vault migration or cleanup must never leave a second plaintext copy.
+pub(crate) fn allows_private_snapshot(conn: &Connection) -> Result<bool> {
+    let settings: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='settings')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !settings {
+        return Ok(true);
+    }
+    for (key, text) in rows(conn)? {
+        if key == PENDING
+            || key == CLEANUP
+            || (scalar_key(&key) && !text.trim().is_empty() && !text.starts_with(REF_PREFIX))
+        {
+            return Ok(false);
+        }
+        if collection_key(&key) {
+            let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&text) else {
+                return Ok(false);
+            };
+            for item in items {
+                if !item.is_object()
+                    || item
+                        .get("api_key")
+                        .is_some_and(|v| v.as_str().is_none_or(|s| !s.trim().is_empty()))
+                {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn rows(conn: &Connection) -> Result<Vec<(String, String)>> {
     Ok(conn
         .prepare("SELECT key,value FROM settings ORDER BY key")?

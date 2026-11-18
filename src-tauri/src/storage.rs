@@ -1,3 +1,6 @@
+pub(crate) mod artifacts;
+pub(crate) mod assets;
+
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -6,6 +9,25 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+
+pub(crate) struct TempDir(pub(crate) PathBuf);
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+pub(crate) fn temporary(parent: &Path, purpose: &str) -> std::io::Result<TempDir> {
+    fs::create_dir_all(parent)?;
+    let p = parent.join(format!(".{purpose}-{}", uuid::Uuid::new_v4()));
+    let mut directory = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory.mode(0o700);
+    }
+    directory.create(&p)?;
+    Ok(TempDir(p))
+}
 
 #[derive(Default)]
 struct GateState {

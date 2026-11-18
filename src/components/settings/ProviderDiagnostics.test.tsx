@@ -12,8 +12,8 @@ import {
   diagnoseImageProvider,
   getProviderSmokePlan,
   runProviderSmokeTest,
-} from "../../lib/diagnosticsApi";
-vi.mock("../../lib/diagnosticsApi", () => ({
+} from "../../features/diagnostics/commands";
+vi.mock("../../features/diagnostics/commands", () => ({
   diagnoseImageProvider: vi.fn(),
   getProviderSmokePlan: vi.fn(),
   runProviderSmokeTest: vi.fn(),
@@ -55,6 +55,23 @@ describe("provider diagnostics", () => {
     expect(await screen.findByRole("link", { name: "Open test conversation" })).toHaveAttribute("href", "/projects/default/chat/failed-test-conversation");
     expect(screen.getByText(/charge may still apply/)).toBeInTheDocument();
     expect(runProviderSmokeTest).toHaveBeenCalledTimes(1);
+  });
+  it("reports a local preflight failure when the confirmed settings change", async () => {
+    vi.mocked(getProviderSmokePlan).mockResolvedValue({
+      model: "gpt-image-2", provider_id: "p", provider_name: "Saved provider",
+      endpoint_host: "example.test", fingerprint: "f", prompt: "A circle",
+      image_count: 1, quality: "low", size: "1024x1024", resolution: null,
+      aspect_ratio: null, output_format: "png",
+    });
+    vi.mocked(runProviderSmokeTest).mockRejectedValue({
+      code: "validation_error", conversation_id: null,
+    });
+    render(<ProviderDiagnostics model="gpt-image-2" profile={profile} dirty={false} />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByRole("button", { name: "Test one image…" }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Generate one test image" }));
+    expect(await screen.findByText(/Could not check this saved provider/)).toBeInTheDocument();
+    expect(screen.queryByText(/charge may still apply/)).not.toBeInTheDocument();
   });
   it("requires saved settings and ignores a response after edits", async () => {
     let resolve!: (value: unknown) => void;

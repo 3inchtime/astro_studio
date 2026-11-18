@@ -1,9 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
   getCanvasGenerationStatus,
-  onGenerationComplete,
-  onGenerationFailed,
-  onGenerationProgress,
+  onGenerationJob,
 } from "../api";
 import type { CanvasDocumentContent } from "../../types";
 import { completeCanvasGeneration, failCanvasGeneration } from "./generation";
@@ -64,6 +62,7 @@ export function useCanvasGenerationRecovery(options: {
               result.error ?? "Generation failed",
               result.status === "cancelled" ? "cancelled" : "failed",
               result.generation_id ?? undefined,
+              result.error_code ?? undefined,
             );
           else if (
             !result &&
@@ -83,17 +82,14 @@ export function useCanvasGenerationRecovery(options: {
     }
     void reconcile();
     const timer = window.setInterval(() => void reconcile(), 2000);
-    const subscriptions = [
-      onGenerationComplete,
-      onGenerationFailed,
-      onGenerationProgress,
-    ].map((subscribe) =>
-      subscribe(() => void reconcile()).catch(() => () => {}),
-    );
+    const subscription = onGenerationJob((event) => {
+      const request = latest.current.getContent().generation_requests?.some((entry) => entry.request_id === event.client_request_id);
+      if (event.source_ref.document_id === documentId || request) void reconcile();
+    }).catch(() => () => {});
     return () => {
       disposed = true;
       window.clearInterval(timer);
-      subscriptions.forEach((p) => void p.then((unlisten) => unlisten()));
+      void subscription.then((unlisten) => unlisten());
     };
   }, [options.documentId, options.enabled]);
 }

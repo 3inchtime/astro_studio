@@ -1,42 +1,16 @@
+import ConfirmDialog from "../components/common/ConfirmDialog";
 import { DEFAULT_TEXT_STYLE, normalizeTextStyle } from "../lib/canvas/text";
 import RecoveryNotice from "../components/generate/RecoveryNotice";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useDialogFocus } from "../hooks/useDialogFocus";
-import { image26ValidationError } from "../lib/image26Options";
-import { normalizeAdvancedOptions } from "../lib/generationRequests";
-import { isGptImage26 } from "../lib/modelCatalog";
 import { useTranslation } from "react-i18next";
-import {
-  createCanvasDocument,
-  editImage,
-  getImageModel,
-  getCanvasDocument,
-  importCanvasAsset,
-  getCanvasGenerationStatus,
-  hasTauriRuntime,
-  pickSourceImages,
-  onGenerationPartial,
-  saveCanvasDocument,
-  saveCanvasExport,
-} from "../lib/api";
+import { importCanvasAsset, pickSourceImages } from "../lib/api";
 import { useLayoutContext } from "../components/layout/AppLayout";
 import CanvasAssetSidebar from "../components/canvas/CanvasAssetSidebar";
 import CanvasGenerationPanel from "../components/canvas/CanvasGenerationPanel";
 import CanvasPropertiesPanel from "../components/canvas/CanvasPropertiesPanel";
-import {
-  completeCanvasGeneration,
-  failCanvasGeneration,
-} from "../lib/canvas/generation";
-import { queueCanvasSave, waitForCanvasSaves, registerCanvasDraftFlusher, acknowledgeCanvasSaveRecovery, getConflictedCanvasDraft } from "../lib/canvas/persistence";
-import { useCanvasGenerationRecovery } from "../lib/canvas/useCanvasGenerationRecovery";
-import {
-  alignCanvasObjects,
-  distributeCanvasObjects,
-  scaleCanvasObjects,
-  updateCanvasObjectStyle,
-  type CanvasObjectStyle,
-} from "../lib/canvas/editor";
+import { alignCanvasObjects, distributeCanvasObjects, scaleCanvasObjects, updateCanvasObjectStyle, type CanvasObjectStyle } from "../lib/canvas/editor";
 import type { CanvasRect } from "../lib/canvas/bounds";
 import CanvasLayersPanel from "../components/canvas/CanvasLayersPanel";
 import CanvasStage from "../components/canvas/CanvasStage";
@@ -44,49 +18,17 @@ import CanvasToolbar from "../components/canvas/CanvasToolbar";
 import { copyCanvasObjects, pasteCanvasObjects } from "../lib/canvas/clipboard";
 import type { CanvasClipboard } from "../lib/canvas/clipboard";
 import { getCombinedCanvasBounds } from "../lib/canvas/bounds";
-import {
-  cloneCanvasDocumentContent,
-  createCanvasDocumentContent,
-  createCanvasLayer,
-  createImageObject,
-  getActiveLayer,
-  removeCanvasObjects,
-  resetImageObjectAspect,
-  sanitizeCanvasDocumentContent,
-  updateImageObject,
-} from "../lib/canvas/document";
+import { cloneCanvasDocumentContent, createCanvasLayer, createImageObject, getActiveLayer, removeCanvasObjects, resetImageObjectAspect, updateImageObject } from "../lib/canvas/document";
 import { exportCanvasFrame, readImageSize } from "../lib/canvas/export";
-import {
-  clampZoom,
-  fitViewportToCanvasRect,
-  resizeFrameByAspect,
-} from "../lib/canvas/frame";
-import {
-  createHistory,
-  pushHistory,
-  redoHistory,
-  replaceHistory,
-  undoHistory,
-} from "../lib/canvas/history";
+import { clampZoom, fitViewportToCanvasRect, resizeFrameByAspect } from "../lib/canvas/frame";
 import { reorderCanvasObjects } from "../lib/canvas/ordering";
 import type { CanvasOrderDirection } from "../lib/canvas/ordering";
-import {
-  getSelectableCanvasObjects,
-  reconcileSelectedObjectIds,
-} from "../lib/canvas/selection";
+import { getSelectableCanvasObjects, reconcileSelectedObjectIds } from "../lib/canvas/selection";
 import { translateCanvasObjects } from "../lib/canvas/transforms";
-import { useCanvasDocumentsQuery } from "../lib/queries/canvasDocuments";
-import type {
-  CanvasDocumentContent,
-  CanvasMissingAsset,
-  CanvasFrame,
-  CanvasLayer,
-  CanvasStrokeObject,
-  CanvasObject,
-  CanvasTool,
-  ImageModel,
-  GenerationParams,
-} from "../types";
+import type { CanvasDocumentContent, CanvasMissingAsset, CanvasFrame, CanvasLayer, CanvasStrokeObject, CanvasObject, CanvasTool } from "../types";
+
+import { useCanvasDocumentSession } from "../features/canvas/useCanvasDocumentSession";
+import { useCanvasGeneration } from "../features/canvas/useCanvasGeneration";
 
 export default function CanvasPage() {
   const { t } = useTranslation();
@@ -133,454 +75,69 @@ export default function CanvasPage() {
     }
   }, [compactPanel, dockLayout]);
   const { activeProjectId } = useLayoutContext();
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
-    null,
-  );
-  const [prompt, setPrompt] = useState("");
-  const [imageModel, setImageModel] = useState<ImageModel>(
-    "gpt-image-2.6-flare",
-  );
-  const [partialPreview, setPartialPreview] = useState<{
-    documentId: string;
-    url: string;
-  } | null>(null);
-  const [generationParameters, setGenerationParameters] =
-    useState<GenerationParams>({
-      prompt: "",
-      size: "auto",
-      outputFormat: "png",
-      quality: "auto",
-    });
-  const [submittingDocumentId, setSubmittingDocumentId] = useState<
-    string | null
-  >(null);
-  const liveRequestsRef = useRef(new Set<string>());
-  const mountedRef = useRef(true);
+  const session = useCanvasDocumentSession(activeProjectId);
+  const {
+    selectedDocumentId,
+    loadedDocumentId,
+    documents,
+    history,
+    content,
+    activeLayerId,
+    setActiveLayerId,
+    selectedObjectIds,
+    setSelectedObjectIds,
+    isEditorReady,
+    isDocumentReady,
+    updateContent,
+    persistDocument,
+    mountedRef,
+    loadedDocumentIdRef,
+    historyPresentRef,
+    loadRequestTokenRef,
+    handleUndo,
+    handleRedo,
+    handleSaveCopy,
+    handleCreateDocument,
+    handleRetrySave,
+    handleRetryLoad,
+    handleSelectDocument,
+    saveStatusLabel,
+    hasSaveConflict,
+    hasSaveError,
+    hasLoadError,
+    isTransitioning,
+    missingAssets,
+  } = session;
+  const {
+    prompt,
+    setPrompt,
+    imageModel,
+    partialPreview,
+    generationParameters,
+    setGenerationParameters,
+    isGenerating,
+    latestRequest,
+    retryGeneration, confirmRetry, cancelRetry, showRetryReview,
+    handleGenerate,
+    isDesktopRuntime,
+  } = useCanvasGeneration(session, activeProjectId);
   const [importError, setImportError] = useState<string | null>(null);
   const [fillColor, setFillColor] = useState("#c7d2fe");
   const [objectOpacity, setObjectOpacity] = useState(1);
   const [fontSize, setFontSize] = useState(32);
   const [textStyle, setTextStyle] = useState({ ...DEFAULT_TEXT_STYLE, rotation: 0 });
   const [frameEditing, setFrameEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [hasSaveConflict, setHasSaveConflict] = useState(false);
-  const recoveryCopyRef = useRef<{ sourceId: string; copyId: string } | null>(null);
-  const [hasSaveError, setHasSaveError] = useState(false);
-  const [hasLoadError, setHasLoadError] = useState(false);
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const [activeTool, setActiveTool] = useState<CanvasTool>("brush");
   const [strokeColor, setStrokeColor] = useState("#1f2937");
   const [strokeSize, setStrokeSize] = useState(6);
-  const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
-  const [loadedDocumentId, setLoadedDocumentId] = useState<string | null>(null);
-  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null);
   const [stageSize, setStageSize] = useState({ width: 960, height: 640 });
-  const isDesktopRuntime = hasTauriRuntime();
-  const [history, setHistory] = useState(() =>
-    createHistory<CanvasDocumentContent>(createCanvasDocumentContent()),
-  );
-  const revisionsRef = useRef(new Map<string, number>());
-  const missingAssetsRef = useRef<CanvasMissingAsset[]>([]);
   const [relinkingAsset, setRelinkingAsset] = useState<string | null>(null);
-  const [missingAssets, setMissingAssets] = useState<CanvasMissingAsset[]>([]);
-  const saveTimerRef = useRef<number | null>(null);
-  const loadRequestTokenRef = useRef(0);
-  const retryLoadDocumentIdRef = useRef<string | null>(null);
-  const saveOperationTokenRef = useRef(0);
-  const selectedDocumentIdRef = useRef<string | null>(selectedDocumentId);
-  const loadedDocumentIdRef = useRef<string | null>(loadedDocumentId);
-  const historyPresentRef = useRef(history.present);
-  const isDirtyRef = useRef(isDirty);
-  const isTransitioningRef = useRef(isTransitioning);
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const activeSaveRef = useRef<{
-    documentId: string;
-    snapshot: CanvasDocumentContent;
-    token: number;
-    promise: Promise<void>;
-  } | null>(null);
-  const activeTransitionRef = useRef<{
-    targetDocumentId: string | null;
-    promise: Promise<boolean>;
-  } | null>(null);
-  const { data: documents = [], refetch } =
-    useCanvasDocumentsQuery(activeProjectId);
 
-  selectedDocumentIdRef.current = selectedDocumentId;
-  loadedDocumentIdRef.current = loadedDocumentId;
-  historyPresentRef.current = history.present;
-  isDirtyRef.current = isDirty;
-  isTransitioningRef.current = isTransitioning;
 
-  useEffect(() => {
-    mountedRef.current = true;
-    const unregister = registerCanvasDraftFlusher(async () => {
-      clearSaveTimer();
-      // Repeat if an edit arrived while preview rendering or IPC was pending.
-      while (loadedDocumentIdRef.current && isDirtyRef.current) {
-        const id = loadedDocumentIdRef.current;
-        const snapshot = historyPresentRef.current;
-        await persistDocument(id, snapshot);
-        if (historyPresentRef.current === snapshot) break;
-      }
-    });
-    return () => {
-      unregister();
-      mountedRef.current = false;
-      clearSaveTimer();
-      const documentId = loadedDocumentIdRef.current;
-      if (documentId && isDirtyRef.current) {
-        void persistDocument(documentId, historyPresentRef.current).catch(() => {});
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    getImageModel()
-      .then((model) => setImageModel(model))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const currentDocumentId = selectedDocumentIdRef.current;
-    const nextDocumentId =
-      currentDocumentId &&
-      documents.some((document) => document.id === currentDocumentId)
-        ? currentDocumentId
-        : (documents[0]?.id ?? null);
-
-    if (nextDocumentId !== currentDocumentId) {
-      void transitionToDocument(nextDocumentId).catch(() => {});
-    }
-  }, [documents]);
-
-  useEffect(() => {
-    const requestToken = ++loadRequestTokenRef.current;
-    clearSaveTimer();
-    setSelectedObjectIds((current) => (current.length ? [] : current));
-    loadedDocumentIdRef.current = null;
-    setLoadedDocumentId(null);
-    setActiveLayerId(null);
-    setDirtyState(false);
-    setIsSaving(false);
-    setHasSaveError(false);
-    setHasSaveConflict(false);
-    setHasLoadError(false);
-
-    if (!selectedDocumentId) {
-      return;
-    }
-
-    const requestedDocumentId = selectedDocumentId;
-    const retryFailedSave =
-      retryLoadDocumentIdRef.current === requestedDocumentId;
-    retryLoadDocumentIdRef.current = null;
-    let disposed = false;
-    const isCurrentLoad = () =>
-      !disposed &&
-      mountedRef.current &&
-      loadRequestTokenRef.current === requestToken &&
-      selectedDocumentIdRef.current === requestedDocumentId;
-    void (async () => {
-      await waitForCanvasSaves(
-        requestedDocumentId,
-        retryFailedSave,
-        isCurrentLoad,
-      );
-      if (!isCurrentLoad()) return;
-      const document = await getCanvasDocument(requestedDocumentId);
-      if (!isCurrentLoad()) return;
-      revisionsRef.current.set(requestedDocumentId, document.revision ?? 0);
-      missingAssetsRef.current = document.missing_assets ?? [];
-      setMissingAssets(document.missing_assets ?? []);
-      const nextContent = sanitizeCanvasDocumentContent(document.content);
-      historyPresentRef.current = nextContent;
-      loadedDocumentIdRef.current = requestedDocumentId;
-      isDirtyRef.current = false;
-      setHistory(createHistory(nextContent));
-      setActiveLayerId(nextContent.layers[0]?.id ?? null);
-      setLoadedDocumentId(requestedDocumentId);
-      setSelectedObjectIds([]);
-      setIsDirty(false);
-      setIsSaving(false);
-      setHasSaveError(false);
-      setHasLoadError(false);
-    })().catch(() => {
-      if (!isCurrentLoad()) return;
-      const recovered = getConflictedCanvasDraft(requestedDocumentId);
-      if (!recovered) { setHasLoadError(true); return; }
-      // A late conflict must remain editable after navigating away and back.
-      const nextContent = sanitizeCanvasDocumentContent(recovered.content);
-      revisionsRef.current.set(requestedDocumentId, recovered.revision);
-      historyPresentRef.current = nextContent;
-      loadedDocumentIdRef.current = requestedDocumentId;
-      setHistory(createHistory(nextContent));
-      setActiveLayerId(nextContent.layers[0]?.id ?? null);
-      setLoadedDocumentId(requestedDocumentId);
-      setDirtyState(true);
-      setHasSaveError(true);
-      setHasSaveConflict(true);
-      setHasLoadError(false);
-    });
-    return () => {
-      disposed = true;
-    };
-  }, [loadAttempt, selectedDocumentId]);
-
-  useEffect(() => {
-    if (
-      !selectedDocumentId ||
-      loadedDocumentId !== selectedDocumentId ||
-      !isDirty || hasSaveConflict
-    ) {
-      return;
-    }
-
-    const documentId = loadedDocumentId;
-    const snapshot = history.present;
-    clearSaveTimer();
-
-    saveTimerRef.current = window.setTimeout(() => {
-      saveTimerRef.current = null;
-      if (
-        selectedDocumentIdRef.current === documentId &&
-        loadedDocumentIdRef.current === documentId &&
-        historyPresentRef.current === snapshot &&
-        isDirtyRef.current
-      ) {
-        void persistDocument(documentId, snapshot).catch(() => {});
-      }
-    }, 500);
-
-    return clearSaveTimer;
-  }, [history.present, isDirty, hasSaveConflict, loadedDocumentId, selectedDocumentId]);
-
-  const content = history.present;
-  useEffect(() => {
-    setGenerationParameters((current) =>
-      current.advancedOptions?.markupPath || current.advancedOptions?.maskPath
-        ? {
-            ...current,
-            advancedOptions: {
-              ...current.advancedOptions,
-              markupPath: undefined,
-              maskPath: undefined,
-            },
-          }
-        : current,
-    );
-  }, [selectedDocumentId, content.frame, content.layers]);
-  useEffect(() => {
-    if (!isDesktopRuntime) return;
-    let disposed = false;
-    const subscription = onGenerationPartial((event) => {
-      if (
-        disposed ||
-        !event.client_request_id ||
-        !liveRequestsRef.current.has(event.client_request_id)
-      )
-        return;
-      const documentId = loadedDocumentIdRef.current;
-      if (
-        !documentId ||
-        !historyPresentRef.current.generation_requests?.some(
-          (r) =>
-            r.request_id === event.client_request_id && r.status === "pending",
-        )
-      )
-        return;
-      if (!["png", "jpeg", "webp"].includes(event.output_format ?? "png"))
-        return;
-      setPartialPreview({
-        documentId,
-        url: `data:image/${event.output_format ?? "png"};base64,${event.b64_json}`,
-      });
-    });
-    return () => {
-      disposed = true;
-      void subscription.then((unlisten) => unlisten());
-    };
-  }, [isDesktopRuntime]);
-  const isEditorReady = Boolean(
-    selectedDocumentId &&
-      loadedDocumentId === selectedDocumentId &&
-      !isTransitioning,
-  );
-  const isGenerating =
-    Boolean(
-      submittingDocumentId && submittingDocumentId === loadedDocumentId,
-    ) ||
-    Boolean(content.generation_requests?.some((r) => r.status === "pending"));
-  const latestRequest =
-    content.generation_requests?.[content.generation_requests.length - 1];
   const activeLayer = getActiveLayer(content, activeLayerId);
   const frame = content.frame;
-  useCanvasGenerationRecovery({
-    documentId: loadedDocumentId,
-    enabled: isEditorReady && isDesktopRuntime,
-    getContent: () => historyPresentRef.current,
-    isCurrent: isDocumentReady,
-    liveRequests: liveRequestsRef.current,
-    apply: applyGenerationContent,
-  });
 
-  function applyGenerationContent(
-    documentId: string,
-    next: CanvasDocumentContent,
-  ) {
-    if (!mountedRef.current || !isDocumentReady(documentId)) return;
-    if (updateContent(next, undefined, documentId))
-      void persistDocument(documentId, next).catch(() => {});
-  }
-
-  useEffect(() => {
-    setSelectedObjectIds((current) => {
-      const reconciled = reconcileSelectedObjectIds(content, current);
-      const isUnchanged =
-        reconciled.length === current.length &&
-        reconciled.every((objectId, index) => objectId === current[index]);
-      return isUnchanged ? current : reconciled;
-    });
-  }, [content]);
-
-  const saveStatusLabel = useMemo(() => {
-    if (hasSaveError) {
-      return t("canvas.saveStatus.error");
-    }
-    if (isSaving) {
-      return t("canvas.saveStatus.saving");
-    }
-    if (isDirty) {
-      return t("canvas.saveStatus.dirty");
-    }
-    return t("canvas.saveStatus.saved");
-  }, [hasSaveError, isDirty, isSaving, t]);
-
-  function clearSaveTimer() {
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-  }
-
-  function setDirtyState(nextIsDirty: boolean) {
-    isDirtyRef.current = nextIsDirty;
-    setIsDirty(nextIsDirty);
-  }
-
-  function setTransitionState(nextIsTransitioning: boolean) {
-    isTransitioningRef.current = nextIsTransitioning;
-    setIsTransitioning(nextIsTransitioning);
-  }
-
-  function isDocumentReady(documentId: string | null): documentId is string {
-    return Boolean(
-      documentId &&
-        selectedDocumentIdRef.current === documentId &&
-        loadedDocumentIdRef.current === documentId &&
-        !isTransitioningRef.current,
-    );
-  }
-
-  function transitionToDocument(
-    targetDocumentId: string | null,
-  ): Promise<boolean> {
-    const activeTransition = activeTransitionRef.current;
-    if (activeTransition) {
-      if (activeTransition.targetDocumentId === targetDocumentId) {
-        return activeTransition.promise;
-      }
-
-      return activeTransition.promise.then(
-        (didTransition) =>
-          didTransition ? transitionToDocument(targetDocumentId) : false,
-        () => false,
-      );
-    }
-
-    if (selectedDocumentIdRef.current === targetDocumentId) {
-      return Promise.resolve(true);
-    }
-
-    const promise = performDocumentTransition(targetDocumentId);
-    activeTransitionRef.current = { targetDocumentId, promise };
-    void promise.then(
-      () => {
-        if (activeTransitionRef.current?.promise === promise) {
-          activeTransitionRef.current = null;
-        }
-      },
-      () => {
-        if (activeTransitionRef.current?.promise === promise) {
-          activeTransitionRef.current = null;
-        }
-      },
-    );
-    return promise;
-  }
-
-  async function performDocumentTransition(
-    targetDocumentId: string | null,
-  ): Promise<boolean> {
-    const previousSelectedDocumentId = selectedDocumentIdRef.current;
-    const previousLoadedDocumentId = loadedDocumentIdRef.current;
-    const previousSnapshot = historyPresentRef.current;
-    clearSaveTimer();
-    setTransitionState(true);
-    setSelectedObjectIds([]);
-
-    if (
-      previousLoadedDocumentId &&
-      previousLoadedDocumentId === previousSelectedDocumentId &&
-      isDirtyRef.current
-    ) {
-      try {
-        await persistDocument(previousLoadedDocumentId, previousSnapshot);
-      } catch {
-        setTransitionState(false);
-        return false;
-      }
-    }
-
-    selectedDocumentIdRef.current = targetDocumentId;
-    loadedDocumentIdRef.current = null;
-    setLoadedDocumentId(null);
-    setActiveLayerId(null);
-    setDirtyState(false);
-    setIsSaving(false);
-    setHasSaveError(false);
-    setHasSaveConflict(false);
-    setHasLoadError(false);
-    setSelectedDocumentId(targetDocumentId);
-    setTransitionState(false);
-    return true;
-  }
-
-  function handleSelectDocument(documentId: string) {
-    void transitionToDocument(documentId).catch(() => {});
-  }
-
-  function updateContent(
-    nextContent: CanvasDocumentContent,
-    options?: { replace?: boolean },
-    documentId = selectedDocumentId,
-  ): boolean {
-    if (!isDocumentReady(documentId)) {
-      return false;
-    }
-
-    historyPresentRef.current = nextContent;
-    setHistory((current) =>
-      options?.replace
-        ? replaceHistory(current, nextContent)
-        : pushHistory(current, nextContent),
-    );
-    setDirtyState(true);
-    return true;
-  }
 
   function updateSelection(candidateIds: string[]) {
     if (!isDocumentReady(selectedDocumentId)) {
@@ -657,335 +214,7 @@ export default function CanvasPage() {
     handleViewportChange(fitViewportToCanvasRect(bounds, stageSize));
   }
 
-  function persistDocument(
-    documentId: string,
-    snapshot: CanvasDocumentContent,
-  ): Promise<void> {
-    const activeSave = activeSaveRef.current;
-    if (
-      activeSave?.documentId === documentId &&
-      activeSave.snapshot === snapshot
-    ) {
-      return activeSave.promise;
-    }
 
-    const saveToken = ++saveOperationTokenRef.current;
-    const isCurrentSnapshot = () =>
-      mountedRef.current &&
-      saveOperationTokenRef.current === saveToken &&
-      selectedDocumentIdRef.current === documentId &&
-      loadedDocumentIdRef.current === documentId &&
-      historyPresentRef.current === snapshot;
-
-    if (isCurrentSnapshot()) {
-      setIsSaving(true);
-      setHasSaveError(false);
-    }
-
-    const queuedSave = queueCanvasSave(
-      documentId,
-      async () => {
-        // A legacy missing image must not prevent saving the rest of the draft.
-        const missing = missingAssetsRef.current;
-        const previewContent = missing.length ? {
-          ...snapshot,
-          layers: snapshot.layers.map((layer) => ({ ...layer, objects: layer.objects.filter((object) =>
-            object.type !== "image" || !missing.some((asset) => asset.object_id === object.id && asset.image_path === object.image_path)
-          ) })),
-        } : snapshot;
-        const previewPngBase64 = await exportCanvasFrame(previewContent).catch(() => null);
-        const saved = await saveCanvasDocument(
-          documentId, snapshot, previewPngBase64,
-          revisionsRef.current.get(documentId) ?? 0,
-        );
-        revisionsRef.current.set(documentId, saved.revision);
-      },
-      saveQueueRef.current,
-      snapshot,
-    ).promise;
-    const promise = (async () => {
-      try {
-        await queuedSave;
-        if (mountedRef.current) await refetch();
-        if (isCurrentSnapshot()) {
-          setDirtyState(false);
-          setHasSaveError(false);
-        }
-      } catch (error) {
-        if (isCurrentSnapshot()) {
-          setDirtyState(true);
-          setHasSaveError(true);
-          setHasSaveConflict(Boolean(error && typeof error === "object" && "kind" in error && error.kind === "CanvasRevisionConflict"));
-        }
-        throw error;
-      } finally {
-        if (activeSaveRef.current?.token === saveToken) {
-          activeSaveRef.current = null;
-        }
-        if (isCurrentSnapshot()) {
-          setIsSaving(false);
-        }
-      }
-    })();
-
-    saveQueueRef.current = promise.catch(() => {});
-    activeSaveRef.current = {
-      documentId,
-      snapshot,
-      token: saveToken,
-      promise,
-    };
-    return promise;
-  }
-
-  async function handleSaveCopy() {
-    const sourceId = loadedDocumentIdRef.current;
-    if (!sourceId || !isDocumentReady(sourceId)) return;
-    clearSaveTimer();
-    setTransitionState(true);
-    try {
-      if (recoveryCopyRef.current?.sourceId !== sourceId) {
-        const copy = await createCanvasDocument(activeProjectId, t("canvas.recoveredCanvas"));
-        revisionsRef.current.set(copy.id, copy.revision ?? 0);
-        recoveryCopyRef.current = { sourceId, copyId: copy.id };
-      }
-      const copyId = recoveryCopyRef.current.copyId;
-      await persistDocument(copyId, historyPresentRef.current);
-      acknowledgeCanvasSaveRecovery(sourceId);
-      setDirtyState(false);
-      setHasSaveError(false);
-      setHasSaveConflict(false);
-      setTransitionState(false);
-      await transitionToDocument(copyId);
-      await refetch();
-      recoveryCopyRef.current = null;
-    } catch {
-      setHasSaveError(true);
-    } finally {
-      setTransitionState(false);
-    }
-  }
-
-  function handleRetrySave() {
-    const documentId = loadedDocumentIdRef.current;
-    const snapshot = historyPresentRef.current;
-    if (
-      !documentId ||
-      selectedDocumentIdRef.current !== documentId ||
-      !isDirtyRef.current
-    ) {
-      return;
-    }
-
-    void persistDocument(documentId, snapshot).catch(() => {});
-  }
-
-  function handleRetryLoad() {
-    if (!selectedDocumentIdRef.current) {
-      return;
-    }
-
-    retryLoadDocumentIdRef.current = selectedDocumentIdRef.current;
-    setHasLoadError(false);
-    setLoadAttempt((current) => current + 1);
-  }
-
-  async function handleCreateDocument() {
-    const created = await createCanvasDocument(activeProjectId, null);
-    await refetch();
-    await transitionToDocument(created.id);
-  }
-
-  async function handleGenerate(retryPrompt?: string) {
-    const documentId = selectedDocumentId;
-    const submittedPrompt = (retryPrompt ?? prompt).trim();
-    if (
-      !isDocumentReady(documentId) ||
-      !submittedPrompt ||
-      isGenerating ||
-      !isDesktopRuntime
-    )
-      return;
-    const retrySourcePath = retryPrompt
-      ? latestRequest?.source_image_path
-      : undefined;
-    const parameters =
-      retryPrompt && latestRequest?.parameters
-        ? latestRequest.parameters
-        : { ...generationParameters, model: imageModel };
-    const snapshot = cloneCanvasDocumentContent(historyPresentRef.current);
-    const requestId = crypto.randomUUID();
-    const projectId =
-      documents.find((d) => d.id === documentId)?.project_id ?? activeProjectId;
-    const request = {
-      request_id: requestId,
-      parameters,
-      project_id: projectId,
-      frame: {
-        ...(retrySourcePath && latestRequest
-          ? latestRequest.frame
-          : snapshot.frame),
-      },
-      source_image_path: retrySourcePath,
-      prompt: submittedPrompt,
-      status: "pending" as const,
-      image_ids: [],
-      created_at: new Date().toISOString(),
-    };
-    setPartialPreview(null);
-    liveRequestsRef.current.add(requestId);
-    setSubmittingDocumentId(documentId);
-    const pending = {
-      ...historyPresentRef.current,
-      generation_requests: [
-        ...(historyPresentRef.current.generation_requests ?? []),
-        request,
-      ],
-    };
-    updateContent(pending, { replace: true }, documentId);
-    let submissionStarted = false;
-    try {
-      const invalid = image26ValidationError({
-        model: parameters.model ?? imageModel,
-        format: parameters.outputFormat ?? "png",
-        size: parameters.size ?? "auto",
-        count: parameters.imageCount ?? 1,
-        background: parameters.background ?? "auto",
-        editing: true,
-        options: parameters.advancedOptions ?? {},
-        compression: parameters.outputCompression,
-      });
-      if (invalid) throw new Error(t(`generate.advanced.${invalid}`));
-      await persistDocument(documentId, pending);
-      if (!mountedRef.current || !isDocumentReady(documentId)) return;
-      let exportedPath = retrySourcePath;
-      if (!exportedPath) {
-        const pngBase64 = await exportCanvasFrame(snapshot);
-        if (!mountedRef.current || !isDocumentReady(documentId)) return;
-        exportedPath = await saveCanvasExport(documentId, pngBase64);
-        if (!mountedRef.current || !isDocumentReady(documentId)) return;
-      }
-      const withSource = {
-        ...historyPresentRef.current,
-        generation_requests: historyPresentRef.current.generation_requests?.map(
-          (r) =>
-            r.request_id === requestId
-              ? { ...r, source_image_path: exportedPath }
-              : r,
-        ),
-      };
-      updateContent(withSource, { replace: true }, documentId);
-      await persistDocument(documentId, withSource);
-      if (!mountedRef.current || !isDocumentReady(documentId)) return;
-      submissionStarted = true;
-      const result = await editImage({
-        ...(isGptImage26(parameters.model ?? imageModel)
-          ? {
-              ...parameters,
-              advancedOptions: normalizeAdvancedOptions(
-                parameters.advancedOptions ?? {},
-                parameters.outputFormat ?? "png",
-                true,
-              ),
-              outputCompression: ["jpeg", "webp"].includes(
-                parameters.outputFormat ?? "png",
-              )
-                ? parameters.outputCompression
-                : undefined,
-            }
-          : {}),
-        prompt: submittedPrompt,
-        clientRequestId: requestId,
-        model: parameters.model ?? imageModel,
-        sourceImagePaths: [exportedPath],
-        projectId,
-      });
-      if (mountedRef.current && isDocumentReady(documentId))
-        applyGenerationContent(
-          documentId,
-          completeCanvasGeneration(
-            historyPresentRef.current,
-            requestId,
-            result.generation_id,
-            result.images,
-          ),
-        );
-    } catch (error) {
-      if (!mountedRef.current || !isDocumentReady(documentId)) return;
-      if (!submissionStarted) {
-        applyGenerationContent(
-          documentId,
-          failCanvasGeneration(
-            historyPresentRef.current,
-            requestId,
-            String(error),
-          ),
-        );
-      } else {
-        // A rejected IPC reply does not prove the durable job failed. Preserve
-        // the request identity until its status lookup confirms a terminal state.
-        let status = null;
-        try {
-          status = await getCanvasGenerationStatus(documentId, requestId);
-        } catch {
-          /* recovery will retry the lookup */
-        }
-        if (!mountedRef.current || !isDocumentReady(documentId)) return;
-        const current = historyPresentRef.current;
-        if (status?.status === "completed" || status?.status === "succeeded") {
-          applyGenerationContent(
-            documentId,
-            completeCanvasGeneration(
-              current,
-              requestId,
-              status.generation_id ?? "",
-              status.images,
-              true,
-            ),
-          );
-        } else if (
-          status &&
-          ["failed", "cancelled", "interrupted"].includes(status.status)
-        ) {
-          applyGenerationContent(
-            documentId,
-            failCanvasGeneration(
-              current,
-              requestId,
-              status.error ?? String(error),
-              status.status === "cancelled" ? "cancelled" : "failed",
-              status.generation_id ?? undefined,
-            ),
-          );
-        } else if (
-          current.generation_requests?.some(
-            (r) => r.request_id === requestId && r.status === "pending",
-          )
-        ) {
-          applyGenerationContent(documentId, {
-            ...current,
-            generation_requests: current.generation_requests.map((r) =>
-              r.request_id === requestId
-                ? {
-                    ...r,
-                    error: String(error),
-                    ...(status?.generation_id
-                      ? { generation_id: status.generation_id }
-                      : {}),
-                  }
-                : r,
-            ),
-          });
-        }
-      }
-    } finally {
-      liveRequestsRef.current.delete(requestId);
-      if (mountedRef.current)
-        setSubmittingDocumentId((current) =>
-          current === documentId ? null : current,
-        );
-    }
-  }
 
   function handleViewportChange(viewport: CanvasDocumentContent["viewport"]) {
     updateContent(
@@ -1224,29 +453,6 @@ export default function CanvasPage() {
     });
   }
 
-  function handleUndo() {
-    if (!isDocumentReady(selectedDocumentId)) {
-      return;
-    }
-    setHistory((current) => {
-      const nextHistory = undoHistory(current);
-      historyPresentRef.current = nextHistory.present;
-      return nextHistory;
-    });
-    setDirtyState(true);
-  }
-
-  function handleRedo() {
-    if (!isDocumentReady(selectedDocumentId)) {
-      return;
-    }
-    setHistory((current) => {
-      const nextHistory = redoHistory(current);
-      historyPresentRef.current = nextHistory.present;
-      return nextHistory;
-    });
-    setDirtyState(true);
-  }
 
   function handleZoom(direction: "in" | "out") {
     const factor = direction === "in" ? 1.12 : 0.9;
@@ -1402,6 +608,15 @@ export default function CanvasPage() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       <RecoveryNotice />
+      <ConfirmDialog
+        open={showRetryReview}
+        title={t("generate.unknownRetryTitle")}
+        description={t("generate.unknownRetryDescription")}
+        confirmLabel={t("generate.confirmUnknownRetry")}
+        cancelLabel={t("favorites.cancel")}
+        onCancel={cancelRetry}
+        onConfirm={confirmRetry}
+      />
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-3 min-[1440px]:hidden">
         <button
           ref={documentsToggleRef}
@@ -1753,7 +968,7 @@ export default function CanvasPage() {
                       .map((o) => (o.type === "image" ? o.image_path : ""))
                   : []
               }
-              onRetry={() => void handleGenerate(latestRequest?.prompt)}
+              onRetry={() => void retryGeneration()}
               onFrameAspectChange={(aspect) =>
                 handleFrameChange(resizeFrameByAspect(frame, aspect))
               }

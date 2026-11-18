@@ -7,7 +7,6 @@ import {
   getGenerationRecoverySummary,
   recoverGeneration,
 } from "../../lib/recoveryApi";
-import "../../lib/recoveryI18n";
 
 const buttonClass =
   "focus-ring inline-flex min-h-9 items-center justify-center rounded-lg border border-control-border bg-surface px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-50";

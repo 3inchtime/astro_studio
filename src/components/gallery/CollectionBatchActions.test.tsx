@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import CollectionBatchActions from "./CollectionBatchActions";
 import type { GenerationResult } from "../../types";
-import { deleteGeneration } from "../../lib/api";
+import { deleteGeneration, permanentlyDeleteGeneration, restoreGeneration } from "../../lib/api";
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string; count?: number }) => options?.defaultValue?.replace("{{count}}", String(options.count)) ?? key }) }));
-vi.mock("../../lib/api", () => ({ deleteGeneration: vi.fn(), addImageToFolders: vi.fn(), getFolders: vi.fn().mockResolvedValue([]) }));
+vi.mock("../../lib/api", () => ({ permanentlyDeleteGeneration: vi.fn(), restoreGeneration: vi.fn(), deleteGeneration: vi.fn(), addImageToFolders: vi.fn(), getFolders: vi.fn().mockResolvedValue([]) }));
 const rows = ["a", "b"].map((id) => ({ generation: { id }, images: [{ id: `${id}1` }, { id: `${id}2` }] })) as GenerationResult[];
 describe("CollectionBatchActions", () => {
   it("keeps bulk controls absent until selection begins", () => {
@@ -13,6 +13,19 @@ describe("CollectionBatchActions", () => {
     expect(screen.queryByRole("button", { name: "Select all visible" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Select all loaded" })).not.toBeInTheDocument();
   });
+
+  it.each([["Restore selected", "restore", restoreGeneration], ["Permanently delete selected", "purge", permanentlyDeleteGeneration]] as const)(
+    "confirms %s for the selected trash records", async (label, action, command) => {
+      const completed = vi.fn();
+      render(<CollectionBatchActions scope="trash" rows={rows} selectedIds={new Set(["a"])} onSelectLoaded={vi.fn()} onClear={vi.fn()} onSucceeded={completed} />);
+      expect(screen.queryByRole("button", { name: "Move to trash" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(command).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+      await waitFor(() => expect(completed).toHaveBeenCalledWith(["a"], action));
+      expect(command).toHaveBeenCalledExactlyOnceWith("a");
+    }
+  );
 
   it("confirms deleting all images and retains only failed generations for retry", async () => {
     vi.mocked(deleteGeneration).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("locked")).mockResolvedValueOnce(undefined);

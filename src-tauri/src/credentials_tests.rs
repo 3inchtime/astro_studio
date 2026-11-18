@@ -326,15 +326,14 @@ fn missing_vault_entry_is_unconfigured_and_can_be_kept_replaced_or_cleared() {
         .unwrap();
     let stored = f.db.get_setting(PROFILES).unwrap().unwrap();
     f.vault.0.lock().unwrap().clear();
-    let state = crate::commands::settings::read_model_provider_profiles_state(&f.db, "gpt-image-2")
-        .unwrap();
+    let state = crate::providers::read_model_provider_profiles_state(&f.db, "gpt-image-2").unwrap();
     assert!(state.profiles[0].api_key.is_empty());
     let dto = serde_json::to_value(ProviderProfilesDto::from(state.clone())).unwrap();
     assert_eq!(dto["profiles"][0]["api_key_configured"], false);
     let make = |action: Value| {
         serde_json::from_value::<ProviderProfileWrite>(json!({"id":"one","name":"Updated","endpoint_settings":state.profiles[0].endpoint_settings,"credential_update":action})).unwrap()
     };
-    crate::commands::settings::save_provider_profile_updates(
+    crate::providers::save_provider_profile_updates(
         &f.db,
         "gpt-image-2",
         "one".into(),
@@ -344,7 +343,7 @@ fn missing_vault_entry_is_unconfigured_and_can_be_kept_replaced_or_cleared() {
     let kept: Value = serde_json::from_str(&f.db.get_setting(PROFILES).unwrap().unwrap()).unwrap();
     let original: Value = serde_json::from_str(&stored).unwrap();
     assert_eq!(kept[0]["credential_ref"], original[0]["credential_ref"]);
-    crate::commands::settings::save_provider_profile_updates(
+    crate::providers::save_provider_profile_updates(
         &f.db,
         "gpt-image-2",
         "one".into(),
@@ -358,7 +357,7 @@ fn missing_vault_entry_is_unconfigured_and_can_be_kept_replaced_or_cleared() {
         .unwrap()
         .contains("repaired"));
     f.vault.0.lock().unwrap().clear();
-    crate::commands::settings::save_provider_profile_updates(
+    crate::providers::save_provider_profile_updates(
         &f.db,
         "gpt-image-2",
         "one".into(),
@@ -430,8 +429,7 @@ fn first_profile_save_keeps_the_legacy_scalar_credential() {
         let f = Fixture::new();
         f.db.set_setting(key, "legacy-key-to-keep").unwrap();
         let state =
-            crate::commands::settings::read_model_provider_profiles_state(&f.db, "gpt-image-2")
-                .unwrap();
+            crate::providers::read_model_provider_profiles_state(&f.db, "gpt-image-2").unwrap();
         let previous = &state.profiles[0];
         let update = serde_json::from_value::<ProviderProfileWrite>(json!({
             "id": previous.id,
@@ -440,7 +438,7 @@ fn first_profile_save_keeps_the_legacy_scalar_credential() {
             "credential_update": {"action": "keep"}
         }))
         .unwrap();
-        crate::commands::settings::save_provider_profile_updates(
+        crate::providers::save_provider_profile_updates(
             &f.db,
             "gpt-image-2",
             state.active_provider_id,
@@ -448,7 +446,7 @@ fn first_profile_save_keeps_the_legacy_scalar_credential() {
         )
         .unwrap();
         assert_eq!(
-            crate::commands::settings::read_model_api_key(&f.db, "gpt-image-2")
+            crate::providers::read_model_api_key(&f.db, "gpt-image-2")
                 .unwrap()
                 .as_deref(),
             Some("legacy-key-to-keep"),

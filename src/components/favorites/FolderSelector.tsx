@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
-import { emit } from "@tauri-apps/api/event";
+import { emitFavoritesChanged } from "../../features/collections/events";
 import { useTranslation } from "react-i18next";
 import {
   addImageToFolders,
@@ -12,11 +12,7 @@ import {
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import type { Folder } from "../../types";
 
-const EVENT_NAME = "favorites:changed";
-
-export function emitFavoritesChanged() {
-  void emit(EVENT_NAME, {}).catch(() => {});
-}
+export { emitFavoritesChanged };
 
 export interface FolderDialogService {
   list: () => Promise<Folder[]>;

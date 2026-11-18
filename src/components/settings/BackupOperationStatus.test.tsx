@@ -9,8 +9,8 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import BackupOperationStatus from "./BackupOperationStatus";
 import { runBackupInspection, useBackupState } from "./LibraryBackupPanel";
-import { cancelLibraryOperation, inspectBackup } from "../../lib/libraryApi";
-vi.mock("../../lib/libraryApi", () => ({
+import { cancelLibraryOperation, inspectBackup } from "../../features/library/commands";
+vi.mock("../../features/library/commands", () => ({
   cancelLibraryOperation: vi.fn().mockResolvedValue(undefined),
   createBackup: vi.fn(),
   inspectBackup: vi.fn(),

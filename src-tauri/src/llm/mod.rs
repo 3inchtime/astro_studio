@@ -1,5 +1,8 @@
 pub mod anthropic;
+pub(crate) mod config;
+pub(crate) mod images;
 pub mod openai;
+pub(crate) mod prompts;
 
 use crate::error::AppError;
 use crate::models::LlmConfig;
@@ -73,19 +76,50 @@ pub trait LlmClient: Send + Sync {
     }
 }
 
+pub(crate) fn protocol_settings(
+    name: &str,
+) -> Result<&'static crate::model_catalog::LlmProtocol, AppError> {
+    crate::model_catalog::CATALOG
+        .llm
+        .protocols
+        .get(name)
+        .ok_or_else(|| AppError::Validation {
+            message: format!("Unknown LLM protocol: {name}"),
+        })
+}
+
+pub(crate) fn resolved_base_url<'a>(
+    config: &'a LlmConfig,
+    protocol: &'a crate::model_catalog::LlmProtocol,
+) -> &'a str {
+    if config.base_url.trim().is_empty() {
+        &protocol.base_url
+    } else {
+        config.base_url.trim_end_matches('/')
+    }
+}
+
 pub fn create_llm_client(config: &LlmConfig) -> Result<Box<dyn LlmClient>, AppError> {
-    match config.protocol.as_str() {
-        "openai" => {
-            let client = openai::OpenAiLlmClient::new(config)?;
-            Ok(Box::new(client))
-        }
-        "anthropic" => {
-            let client = anthropic::AnthropicLlmClient::new(config)?;
-            Ok(Box::new(client))
-        }
-        other => Err(AppError::Validation {
-            message: format!("Unknown LLM protocol: {}", other),
-        }),
+    create_client_with_timeout(config, LLM_REQUEST_TIMEOUT_SECS)
+}
+
+pub(crate) fn create_client_with_timeout(
+    config: &LlmConfig,
+    timeout_secs: u64,
+) -> Result<Box<dyn LlmClient>, AppError> {
+    use crate::model_catalog::LlmAdapter;
+    let protocol = protocol_settings(&config.protocol)?;
+    let mut config = config.clone();
+    config.base_url = resolved_base_url(&config, protocol).to_owned();
+    match protocol.adapter {
+        LlmAdapter::Openai => Ok(Box::new(openai::OpenAiLlmClient::with_timeout(
+            &config,
+            timeout_secs,
+        )?)),
+        LlmAdapter::Anthropic => Ok(Box::new(anthropic::AnthropicLlmClient::with_timeout(
+            &config,
+            timeout_secs,
+        )?)),
     }
 }
 

@@ -118,7 +118,10 @@ function generatedImagesToMessageImages(
 
 export function generationsToMessages(
   generations: GenerationResult[],
+  current: Message[] = [],
 ): Message[] {
+  const previews = new Map(current.filter(m => m.status === "processing" && m.partialPreview)
+    .map(m => [m.generationId, m.partialPreview]));
   const messages: Message[] = [];
 
   for (const gr of generations) {
@@ -138,7 +141,12 @@ export function generationsToMessages(
       status: "complete",
       createdAt: gr.generation.created_at,
     });
+    const status = gr.generation.status;
+    const terminal = ["completed", "cancelled", "failed", "interrupted"].includes(status);
+    const preview = terminal ? undefined : previews.get(gr.generation.id);
     messages.push({
+      ...(gr.active_job_id ? { activeJobId: gr.active_job_id } : {}),
+      ...(preview ? { partialPreview: preview } : {}),
       id: `assistant-${gr.generation.id}`,
       role: "assistant",
       content: "",
@@ -149,6 +157,7 @@ export function generationsToMessages(
       status:
         gr.generation.status === "completed"
           ? "complete"
+          : gr.generation.status === "cancelled" ? "cancelled"
           : ["failed", "interrupted"].includes(gr.generation.status)
             ? "failed"
             : "processing",
@@ -185,25 +194,38 @@ export function completeGenerationMessage(
   });
 }
 
+export function generationErrorMessage(error: unknown): string | undefined {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "detail" in error) {
+    const detail = error.detail;
+    if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+      return detail.message;
+    }
+  }
+}
+
 export function failGenerationMessage(
   messages: Message[],
   localGenerationId: string,
   error: unknown,
   retryRequest: Message["retryRequest"],
 ): Message[] {
-  return messages.map((message) =>
-    message.id === `assistant-${localGenerationId}`
-      ? {
-          ...message,
-          status: "failed" as const,
-          error: String(error),
-          retryRequest,
-        }
-      : message,
-  );
+  const cancelled = !!error && typeof error === "object" && "kind" in error && error.kind === "GenerationJobCancelled";
+  return messages.map((message) => message.id === `assistant-${localGenerationId}` ? {
+    ...message,
+    status: cancelled ? "cancelled" : "failed",
+    error: generationErrorMessage(error),
+    retryRequest: cancelled ? undefined : retryRequest,
+    partialPreview: undefined,
+  } : message);
 }
 
 export interface GenerationPartialEvent {
+  job_id?: string;
+  conversation_id?: string;
+  project_id?: string;
+  document_id?: string | null;
   generation_id: string;
   client_request_id?: string | null;
   partial_image_index: number;

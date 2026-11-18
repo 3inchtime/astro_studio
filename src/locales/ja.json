@@ -1,5 +1,11 @@
 {
+  "generate.cancelTask": "生成をキャンセル",
+  "generate.cancelledTask": "生成をキャンセルしました",
+  "generate.cancelTaskFailed": "生成をキャンセルできませんでした。もう一度お試しください。",
   "trash": {
+    "bulkRestore": "選択した履歴を復元",
+    "bulkPurge": "選択した履歴を完全に削除",
+    "bulkRestoreHint": "これらの生成履歴と画像をライブラリに戻します。",
     "title": "ゴミ箱",
     "search": "削除済みプロンプトを検索...",
     "detail": "ゴミ箱の詳細",

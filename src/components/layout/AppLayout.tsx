@@ -326,7 +326,7 @@ export default function AppLayout() {
       if (activeProjectId && activeProjectId !== "default") {
         navigate(ROUTES.projectChat(activeProjectId, id));
       } else {
-        navigate(ROUTES.generate);
+        navigate(ROUTES.generate, { state: { activateConversationId: id } });
       }
     },
     [navigate, activeProjectId],
@@ -351,8 +351,12 @@ export default function AppLayout() {
   );
 
   const selectInitialConversation = useCallback((id: string) => {
+    // A recipe or explicit draft opens its own session; a late sidebar query
+    // must not redirect it into the most recent conversation.
+    const launch = location.state as { recipeGenerationId?: string; pendingPrompt?: string } | null;
+    if (launch?.recipeGenerationId || launch?.pendingPrompt) return;
     setActiveConversationId((current) => current ?? id);
-  }, []);
+  }, [location.state]);
 
   const clearActiveConversation = useCallback(() => {
     setActiveConversationId(null);
@@ -374,7 +378,7 @@ export default function AppLayout() {
             ROUTES.projectChat(conversation.project_id, conversation.id),
           );
         } else {
-          navigate(ROUTES.generate);
+          navigate(ROUTES.generate, { state: { activateConversationId: conversation.id } });
         }
       })
       .catch(() => {

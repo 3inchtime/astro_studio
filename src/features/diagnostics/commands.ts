@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ImageModel, GenerateResponse } from "../types";
+import type { ImageModel, GenerateResponse } from "../../types";
 import type {
   ProviderDiagnosticResult,
   ProviderSmokePlan,
-} from "../types/diagnostics";
+} from "../../types/diagnostics";
 export const diagnoseImageProvider = (model: ImageModel, providerId: string) =>
   invoke<ProviderDiagnosticResult>("diagnose_image_provider", {
     model,

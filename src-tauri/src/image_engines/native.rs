@@ -1,5 +1,6 @@
 //! JSON protocols that resemble Images API responses but have distinct request contracts.
 use crate::api_gateway::PreparedEditImage;
+use crate::model_catalog::{ImageModelSpec, ImageProtocol};
 use crate::models::*;
 use serde_json::{json, Value};
 
@@ -12,12 +13,15 @@ pub(crate) fn data_uri(image: &PreparedEditImage) -> String {
 }
 
 pub(crate) fn build_request(
-    model: &str,
+    model: ImageModelSpec<'_>,
     prompt: &str,
     sources: &[PreparedEditImage],
     options: &GptImageRequestOptions,
 ) -> Value {
-    if model == ENGINE_NANO_BANANA_21 {
+    let protocol = model.profile.protocol;
+    let default_resolution = model.profile.parameter_defaults.resolution.as_deref();
+    let model = model.provider_model_id;
+    if protocol == ImageProtocol::GeminiInteractions {
         let mut input = vec![json!({"type": "text", "text": prompt})];
         input.extend(sources.iter().map(|image| json!({"type":"image", "mime_type": image.mime_type(), "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, image.bytes())})));
         let mut format =
@@ -30,7 +34,7 @@ pub(crate) fn build_request(
         }
         return json!({"model":model, "input":input, "response_format":format, "store":false});
     }
-    if model == ENGINE_GROK {
+    if protocol == ImageProtocol::XaiImages {
         let mut body = json!({"model":model, "prompt":prompt, "n":options.image_count, "quality":options.quality, "response_format":"b64_json"});
         if let Some(ratio) = &options.aspect_ratio {
             body["aspect_ratio"] = json!(ratio);
@@ -50,7 +54,7 @@ pub(crate) fn build_request(
         }
         return body;
     }
-    let mut body = json!({"model":model, "prompt":prompt, "size":options.resolution.as_deref().unwrap_or("2K"), "response_format":"b64_json", "output_format":options.output_format});
+    let mut body = json!({"model":model, "prompt":prompt, "size":options.resolution.as_deref().or(default_resolution), "response_format":"b64_json", "output_format":options.output_format});
     if !sources.is_empty() {
         body["image"] = json!(sources.iter().map(data_uri).collect::<Vec<_>>());
     }

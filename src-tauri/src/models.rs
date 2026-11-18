@@ -6,21 +6,27 @@ pub use crate::prompt_agent::types::{
     SendPromptAgentMessageRequest, StartPromptAgentSessionRequest,
 };
 
-pub const ENGINE_GPT_IMAGE_26_SUNBURST: &str = "gpt-image-2.6-sunburst";
-pub const ENGINE_GPT_IMAGE_26_FLARE: &str = "gpt-image-2.6-flare";
 pub const ENGINE_GPT_IMAGE_2: &str = "gpt-image-2";
-pub const ENGINE_GPT_IMAGE_SUNBURST: &str = "gpt-image-2.5-sunburst";
-pub const ENGINE_GPT_IMAGE_FLARE: &str = "gpt-image-2.5-flare";
-pub const ENGINE_NANO_BANANA_21: &str = "gemini-nano-banana-2.1";
-pub const ENGINE_GROK: &str = "grok-imagine-image-2.0";
-pub const ENGINE_SEEDREAM_PRO: &str = "doubao-seedream-5-0-pro-260628";
-pub const ENGINE_SEEDREAM_FLASH: &str = "doubao-seedream-5-0-flash-260915";
-pub const ENGINE_NANO_BANANA: &str = "nano-banana";
-pub const ENGINE_NANO_BANANA_2: &str = "nano-banana-2";
 pub const ENGINE_NANO_BANANA_PRO: &str = "nano-banana-pro";
-pub const GEMINI_MODEL_NANO_BANANA: &str = "gemini-2.5-flash-image";
-pub const GEMINI_MODEL_NANO_BANANA_2: &str = "gemini-3.1-flash-image";
 pub const GEMINI_MODEL_NANO_BANANA_PRO: &str = "gemini-3-pro-image";
+#[cfg(test)]
+mod test_models {
+    pub const ENGINE_GPT_IMAGE_26_SUNBURST: &str = "gpt-image-2.6-sunburst";
+    pub const ENGINE_GPT_IMAGE_26_FLARE: &str = "gpt-image-2.6-flare";
+    pub const ENGINE_GPT_IMAGE_SUNBURST: &str = "gpt-image-2.5-sunburst";
+    pub const ENGINE_GPT_IMAGE_FLARE: &str = "gpt-image-2.5-flare";
+    pub const ENGINE_NANO_BANANA_21: &str = "gemini-nano-banana-2.1";
+    pub const ENGINE_GROK: &str = "grok-imagine-image-2.0";
+    pub const ENGINE_SEEDREAM_PRO: &str = "doubao-seedream-5-0-pro-260628";
+    pub const ENGINE_SEEDREAM_FLASH: &str = "doubao-seedream-5-0-flash-260915";
+    pub const ENGINE_NANO_BANANA: &str = "nano-banana";
+    pub const ENGINE_NANO_BANANA_2: &str = "nano-banana-2";
+    pub const GEMINI_MODEL_NANO_BANANA: &str = "gemini-2.5-flash-image";
+    pub const GEMINI_MODEL_NANO_BANANA_2: &str = "gemini-3.1-flash-image";
+}
+#[cfg(test)]
+pub use test_models::*;
+
 pub const SETTING_IMAGE_MODEL: &str = "image_model";
 pub const SETTING_API_KEY: &str = "api_key";
 pub const SETTING_BASE_URL: &str = "base_url";
@@ -33,13 +39,11 @@ pub const DEFAULT_PROVIDER_ID: &str = "default";
 pub const DEFAULT_PROVIDER_NAME: &str = "Default";
 #[allow(dead_code)]
 pub const NEW_PROVIDER_NAME: &str = "New Provider";
-pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+#[cfg(test)]
 pub const DEFAULT_GEMINI_MODELS_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models";
 pub const ENDPOINT_MODE_BASE_URL: &str = "base_url";
 pub const ENDPOINT_MODE_FULL_URL: &str = "full_url";
-pub const DEFAULT_GENERATION_URL: &str = "https://api.openai.com/v1/images/generations";
-pub const DEFAULT_EDIT_URL: &str = "https://api.openai.com/v1/images/edits";
 pub const DEFAULT_IMAGE_SIZE: &str = "auto";
 pub const DEFAULT_IMAGE_QUALITY: &str = "auto";
 pub const DEFAULT_IMAGE_BACKGROUND: &str = "auto";
@@ -62,7 +66,6 @@ pub const SETTING_TRASH_RETENTION_DAYS: &str = "trash_retention_days";
 pub const DEFAULT_TRASH_RETENTION_DAYS: u32 = 30;
 pub const SETTING_FONT_SIZE: &str = "font_size";
 pub const DEFAULT_FONT_SIZE: &str = "medium";
-pub const DEFAULT_IMAGE_MODEL: &str = ENGINE_GPT_IMAGE_26_FLARE;
 pub const SETTING_LLM_CONFIGS: &str = "llm_configs";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,10 +165,20 @@ pub struct SvgReasoningOptions {
     pub effort: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct GenerationProgressContext {
+    pub job_id: String,
+    pub generation_id: String,
+    pub client_request_id: String,
+    pub conversation_id: String,
+    pub project_id: String,
+    pub document_id: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct GptImageRequestOptions {
     pub advanced_options: Option<ImageAdvancedOptions>,
-    pub(crate) progress_context: Option<(String, String)>,
+    pub(crate) progress_context: Option<GenerationProgressContext>,
     pub(crate) prepared_overlay: Option<crate::api_gateway::PreparedEditImage>,
     pub(crate) aspect_ratio: Option<String>,
     pub(crate) resolution: Option<String>,
@@ -217,6 +230,8 @@ pub struct GeneratedImage {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GenerationResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_job_id: Option<String>,
     pub generation: Generation,
     pub images: Vec<GeneratedImage>,
 }
@@ -300,6 +315,8 @@ pub struct GenerationJob {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct GenerationJobEvent {
+    pub project_id: String,
+    pub client_request_id: String,
     pub job_id: String,
     pub generation_id: String,
     pub conversation_id: String,
@@ -339,6 +356,9 @@ pub struct EnqueueGenerationResult {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct GenerationJobFilter {
+    pub project_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub document_id: Option<String>,
     pub statuses: Option<Vec<GenerationJobStatus>>,
     pub source_kind: Option<String>,
     pub source_ref_id: Option<String>,
@@ -686,6 +706,8 @@ mod tests {
     #[test]
     fn generation_job_event_serializes_complete_secret_free_shape() {
         let event = GenerationJobEvent {
+            project_id: "project-1".into(),
+            client_request_id: "request-1".into(),
             job_id: "job-1".to_string(),
             generation_id: "generation-1".to_string(),
             conversation_id: "conversation-1".to_string(),
@@ -719,6 +741,8 @@ mod tests {
                 "auto_attempt",
                 "cancel_requested_at",
                 "chain_attempt",
+                "client_request_id",
+                "project_id",
                 "conversation_id",
                 "error_code",
                 "error_message",

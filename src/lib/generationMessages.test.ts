@@ -80,6 +80,27 @@ describe("generationsToMessages", () => {
     ]);
   });
 
+  it("retains the latest streamed preview on history reads until the matching task is terminal", () => {
+    const current: Message[] = [
+      { id: "assistant-local", generationId: "g1", role: "assistant", content: "", status: "processing",
+        partialPreview: "data:image/png;base64,preview", createdAt: "" },
+    ];
+    const rows = [generationResult("g1", "running"), generationResult("g2", "running")];
+    rows[0].active_job_id = "job-1";
+    const refreshed = generationsToMessages(rows, current);
+    expect(refreshed[1].activeJobId).toBe("job-1");
+    expect(refreshed[3].activeJobId).toBeUndefined();
+    expect(refreshed[1].partialPreview).toBe(current[0].partialPreview);
+    expect(refreshed[3].partialPreview).toBeUndefined();
+    expect(generationsToMessages([generationResult("g1", "completed")], refreshed)[1].partialPreview).toBeUndefined();
+  });
+
+  it("treats cancelled work as terminal after a restart", () => {
+    const [, message] = generationsToMessages([generationResult("stopped", "cancelled")]);
+    expect(message.status).toBe("cancelled");
+    expect(message.retryRequest).toBeUndefined();
+  });
+
   it("maps failed generations to failed assistant messages with error text", () => {
     const messages = generationsToMessages([
       generationResult("generation-2", "failed", "API request failed"),

@@ -82,6 +82,7 @@ vi.mock("../components/gallery/GenerationDetailPanel", () => ({
 
 describe("TrashPage", () => {
   beforeEach(() => {
+    permanentlyDeleteGeneration.mockReset();
     restoreGeneration.mockReset();
     searchGenerations.mockReset();
     getTrashSettings.mockReset();
@@ -105,6 +106,24 @@ describe("TrashPage", () => {
       page: 1,
       page_size: 20,
     });
+  });
+
+  it("limits confirmed batch deletion to records visible in the image grid", async () => {
+    permanentlyDeleteGeneration.mockReset().mockResolvedValue(undefined);
+    searchGenerations.mockResolvedValue({
+      generations: [
+        { generation: { id: "visible" }, images: [{ id: "image" }] },
+        { generation: { id: "no-image" }, images: [] },
+      ], page: 1, page_size: 20, total: 2,
+    });
+    render(<TrashPage />);
+    await screen.findByText("Select generation");
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.select" }));
+    fireEvent.click(await screen.findByRole("button", { name: "studio.collection.selectVisible" }));
+    fireEvent.click(screen.getByRole("button", { name: "trash.bulkPurge" }));
+    expect(permanentlyDeleteGeneration).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "studio.collection.confirmBatch" }));
+    await waitFor(() => expect(permanentlyDeleteGeneration.mock.calls).toEqual([["visible"]]));
   });
 
   it("requires confirmation before permanently deleting and prevents duplicate requests", async () => {
@@ -160,6 +179,22 @@ describe("TrashPage", () => {
     fireEvent.change(search, { target: { value: "not submitted" } });
     await act(async () => resolveRestore());
     expect(searchGenerations).toHaveBeenLastCalledWith("latest", 1, true);
+  });
+
+  it("starts a fresh read after restoring while the same search is in flight", async () => {
+    render(<TrashPage />);
+    fireEvent.click(await screen.findByText("Select generation"));
+    let finishOld!: (value: unknown) => void;
+    searchGenerations.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    fireEvent.keyDown(screen.getByPlaceholderText("trash.search"), { key: "Enter" });
+    await waitFor(() => expect(searchGenerations).toHaveBeenCalledTimes(2));
+    searchGenerations.mockResolvedValue({ generations: [], total: 0, page: 1, page_size: 20 });
+    fireEvent.click(screen.getByText("Restore image"));
+    await screen.findByTestId("empty-state");
+    await act(async () => finishOld({
+      generations: [{ generation: { id: "generation-1" }, images: [] }], total: 1, page: 1, page_size: 20,
+    }));
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
   });
 
   it("refreshes the conversation history immediately after restoring", async () => {

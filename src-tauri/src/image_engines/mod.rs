@@ -14,17 +14,15 @@ pub(crate) enum ImageProvider {
 }
 
 pub(crate) fn provider_for_model(model: &str) -> ImageProvider {
-    use crate::models::*;
-    match model {
-        ENGINE_GPT_IMAGE_26_FLARE
-        | ENGINE_GPT_IMAGE_26_SUNBURST
-        | ENGINE_GPT_IMAGE_2
-        | ENGINE_GPT_IMAGE_FLARE
-        | ENGINE_GPT_IMAGE_SUNBURST => ImageProvider::OpenAi,
-        ENGINE_GROK => ImageProvider::Xai,
-        ENGINE_SEEDREAM_PRO | ENGINE_SEEDREAM_FLASH => ImageProvider::Seedream,
-        _ if model_registry::is_gemini_model(model) => ImageProvider::Gemini,
-        _ => ImageProvider::Unknown,
+    use crate::model_catalog::ImageProtocol;
+    match model_registry::image_model(model).map(|m| m.profile.protocol) {
+        Some(ImageProtocol::OpenaiImages) => ImageProvider::OpenAi,
+        Some(ImageProtocol::GeminiGenerateContent | ImageProtocol::GeminiInteractions) => {
+            ImageProvider::Gemini
+        }
+        Some(ImageProtocol::SeedreamImages) => ImageProvider::Seedream,
+        Some(ImageProtocol::XaiImages) => ImageProvider::Xai,
+        None => ImageProvider::Unknown,
     }
 }
 

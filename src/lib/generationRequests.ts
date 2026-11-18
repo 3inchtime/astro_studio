@@ -1,4 +1,4 @@
-import { getImageModelCatalogEntry, isGptImage26 } from "./modelCatalog";
+import { getImageModelCatalogEntry, supportsAdvancedImageOptions } from "./modelCatalog";
 import type {
   GenerationParams,
   ImageAdvancedOptions,
@@ -31,7 +31,7 @@ export function buildGenerationParams(
     ...(request.sourceGenerationId
       ? { sourceGenerationId: request.sourceGenerationId }
       : {}),
-    ...(isGptImage26(request.model) && request.advancedOptions
+    ...(supportsAdvancedImageOptions(request.model) && request.advancedOptions
       ? {
           advancedOptions: normalizeAdvancedOptions(
             request.advancedOptions,
@@ -40,7 +40,7 @@ export function buildGenerationParams(
           ),
         }
       : {}),
-    ...((savedRecipe || isGptImage26(request.model)) &&
+    ...((savedRecipe || supportsAdvancedImageOptions(request.model)) &&
     ["jpeg", "webp"].includes(request.outputFormat) &&
     request.outputCompression !== undefined
       ? { outputCompression: request.outputCompression }
@@ -105,7 +105,7 @@ export function buildEditParams(
   return {
     ...buildGenerationParams(request),
     sourceImagePaths: request.editSources.map((source) => source.path),
-    ...(isGptImage26(request.model) && request.advancedOptions
+    ...(supportsAdvancedImageOptions(request.model) && request.advancedOptions
       ? {
           advancedOptions: normalizeAdvancedOptions(
             request.advancedOptions,

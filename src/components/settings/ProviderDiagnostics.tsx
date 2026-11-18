@@ -11,7 +11,7 @@ import {
   diagnoseImageProvider,
   getProviderSmokePlan,
   runProviderSmokeTest,
-} from "../../lib/diagnosticsApi";
+} from "../../features/diagnostics/commands";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 const buttonClass =
@@ -120,6 +120,11 @@ export function ProviderDiagnostics({
           typeof error.conversation_id === "string"
         )
           setConversationId(error.conversation_id);
+        if (error && typeof error === "object" && "code" in error && error.code === "validation_error"
+          && "conversation_id" in error && error.conversation_id === null) {
+          setNotice(text("requestFailed", "Could not check this saved provider. Check its settings and try again."));
+          return;
+        }
         setNotice(
           text(
             "unknownOutcome",

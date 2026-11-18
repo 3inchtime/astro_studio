@@ -9,20 +9,21 @@ Astro Studio is a cross-platform AI image generation desktop client (跨平台 A
 ## Commands
 
 ```bash
-npm install              # Install frontend dependencies
+npm ci                   # Install the versions in the frontend lockfile
 npm run tauri dev        # Start dev mode (Vite HMR on :1420 + Rust compilation)
 npm run tauri build      # Build production bundle (output: src-tauri/target/release/bundle/)
 npm run build            # Frontend-only build (tsc && vite build)
 npm run dev              # Vite dev server only (no Tauri backend)
 npm test                 # Run all vitest tests (jsdom environment)
 npx vitest               # Run tests in watch mode
+npm run quality:entrypoint # Build, test, check Rust formatting and Clippy, inspect the Tauri toolchain
 ```
 
 ## Architecture
 
 ### Frontend-Backend Communication
 
-All communication uses Tauri's IPC via `invoke()` — there is no REST API. The bridge is defined in `src/lib/api.ts`, which wraps `@tauri-apps/api/core` invoke calls. Backend commands are Rust functions annotated with `#[tauri::command]` organized in `src-tauri/src/commands/`. Event-based communication (generation progress/complete/failed, runtime logs) uses Tauri's `Emitter` on the Rust side and `listen()` on the frontend.
+React calls native commands through the feature adapters in `src/features/*/commands.ts`. `src/lib/api.ts` exposes the shared bridge and the typed generation job API. Rust command handlers in `src-tauri/src/commands/` delegate to domain modules. The desktop event bridge delivers committed job transitions and transient previews. Views also read SQLite-backed history when opening a conversation or canvas and while a task is processing.
 
 ### Frontend (`src/`)
 
@@ -42,14 +43,17 @@ All communication uses Tauri's IPC via `invoke()` — there is no REST API. The 
 - **`lib.rs`**: App entry point (`run()`), image extension repair, generation recovery on restart, window vibrancy setup (Mica on Windows, HudWindow on macOS), Tauri builder setup registering all commands and managed state
 - **`config.rs`**: TOML-based app configuration (`astro_studio.toml`) with sections for logging, API, and storage. Default config is written on first load if missing
 - **`api_gateway.rs`**: Defines `ImageEngine` async trait with `GptImageEngine` as the implementation. Provides `decode_images_from_response` for recovery
-- **`image_engines/`**: Multi-provider routing — `openai.rs` (GPT Image) and `gemini.rs` (Nano Banana models). `ImageProvider` enum dispatches requests to the correct provider based on model
-- **`model_registry.rs`**: Model normalization (aliases to canonical IDs) and classification (OpenAI vs Gemini). Endpoint URL construction for each provider
+- **`image_engines/`, `model_catalog.rs`, `model_registry.rs`**: Protocol adapters dispatch image requests. The versioned capability manifest at `shared/model-catalog.v1.json` supplies canonical IDs, aliases, wire models, parameter profiles and endpoint templates to Rust and TypeScript. Add models on an existing protocol through the manifest and exercise the shared fixture. A new wire protocol also needs a Rust adapter and a local HTTP contract test.
 - **`llm/`**: LLM client for prompt optimization — `LlmClient` async trait with `chat()` and `chat_with_images()` methods. Implementations: `openai.rs` (OpenAI-compatible APIs), `anthropic.rs` (Claude API). Separate from image generation engine
 - **`commands/`**: Tauri command handlers organized by domain — `generation.rs`, `conversations.rs`, `projects.rs`, `prompts.rs`, `settings.rs`, `llm.rs`, `logs.rs`, `mod.rs`
 - **`db.rs`**: SQLite via `rusqlite` with `Mutex<Connection>` pattern (single-writer). WAL mode, foreign keys enabled. Schema includes `generations`, `images`, `settings`, `conversations`, `projects`, `folders`, `prompt_favorites`, `logs`, `generation_recoveries` tables with versioned migration tracking
 - **`file_manager.rs`**: Images organized by date (`YYYY/MM/DD/`), 256px thumbnails generated via `image` crate
 - **`error.rs`**: Typed `AppError` enum using `thiserror` for structured error handling — variants: `ApiKeyNotSet`, `ProviderProfileNotFound`, `Api`, `Network`, `Database`, `FileSystem`, `Validation`
-- **`gallery.rs`**: Gallery search, trash/restore/permanent-delete, folder CRUD, favorite images
+- **`collections/` and `projects/`**: Image and prompt collections, project and conversation queries. The frontend uses `src/features/collections/useCollectionPages.ts` for paginated collection reads.
+- **`db/schema.rs` and `db/migrations/`**: Ordered SQLite migrations. Add a numbered migration and register it in the schema runner. Test both upgrading an existing file and creating an empty library.
+- **`canvas/`**: Document revisions, generation reconciliation and registered exports. The command adapter resolves the active root and permissions before calling these modules.
+- **`storage/assets.rs` and `storage/artifacts.rs`**: Managed asset lookup and portable artifact paths. Use these paths for library reads, backups and deletion checks.
+- **`generation_execution.rs` and `generation_lifecycle.rs`**: Durable queue, single-worker dispatch, persistence and response-file recovery.
 - **`runtime_logs.rs`**: In-memory ring buffer for real-time log streaming to frontend
 - **`models.rs`**: Shared data models, constants (engine names, setting keys, defaults), `LlmConfig` struct
 
@@ -57,13 +61,13 @@ All communication uses Tauri's IPC via `invoke()` — there is no REST API. The 
 
 - Window transparency is enabled (`transparent: true` in tauri.conf.json), requiring platform-specific vibrancy code
 - Database access uses `Mutex<Connection>` — all DB operations lock the mutex, making them inherently single-threaded
-- Image generation is event-driven: the Rust backend emits `generation:progress`, `generation:complete`, `generation:failed`, `runtime-log:new` events that the frontend subscribes to
+- Submit with `enqueue_generation` and a stable client request ID. Use the acknowledged job, generation and conversation IDs to reconnect, cancel or wait. The worker emits `generation:job` for state changes and `generation:partial` for live previews.
 - The `ImageEngine` trait is the extension point for adding new AI engines; `image_engines/` routes requests to provider-specific implementations
 - `convertFileSrc()` is used to convert local file paths to Tauri asset URLs for display in `<img>` tags
 - Managed state: `AppConfig`, `Database`, and `GptImageEngine` are injected via Tauri's `.manage()` and accessed in commands via `app.state::<T>()`
 - Multi-provider profiles: each engine can have multiple named provider profiles (different API keys/endpoints), managed via `model_provider_profiles` commands
 - Generation recovery: interrupted generations (API response received but images not saved) are recovered on next app launch via `generation_recoveries` table
-- Frontend API layer is a thin wrapper — `api.ts` functions map 1:1 to Rust commands. React Query hooks in `queries/` add caching/invalidation on top
+- Generation composer state is scoped by project and conversation. Canvas persistence and generation are coordinated by the hooks in `src/features/canvas/`.
 
 ## Language
 

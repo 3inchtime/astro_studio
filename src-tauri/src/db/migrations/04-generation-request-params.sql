@@ -1,0 +1,10 @@
+ALTER TABLE generations ADD COLUMN request_kind TEXT NOT NULL DEFAULT 'generate';
+ALTER TABLE generations ADD COLUMN background TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE generations ADD COLUMN output_format TEXT NOT NULL DEFAULT 'png';
+ALTER TABLE generations ADD COLUMN output_compression INTEGER NOT NULL DEFAULT 100;
+ALTER TABLE generations ADD COLUMN moderation TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE generations ADD COLUMN input_fidelity TEXT NOT NULL DEFAULT 'high';
+ALTER TABLE generations ADD COLUMN image_count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE generations ADD COLUMN source_image_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE generations ADD COLUMN source_image_paths TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE generations ADD COLUMN request_metadata TEXT;

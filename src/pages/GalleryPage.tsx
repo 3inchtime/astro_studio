@@ -1,7 +1,7 @@
+import { useCollectionPages } from "../features/collections/useCollectionPages";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { searchGenerations } from "../lib/api";
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
 import { useUIStore, type PreviewSource } from "../lib/store";
 import { useLayoutContext } from "../components/layout/AppLayout";
@@ -42,7 +42,7 @@ export default function GalleryPage() {
     openFolderSelector,
     closeFolderSelector,
   } = useUIStore();
-  const [results, setResults] = useState<GenerationResult[]>([]);
+  const { results, total, page, pageSize, loading: isLoading, loadError, loadPage, removeResult } = useCollectionPages();
   const displayedResults = useMemo(() => results.filter((row) => row.images.length > 0), [results]);
   const selection = useCollectionSelection(displayedResults.map((row) => row.generation.id));
   const [selectionMode, setSelectionMode] = useState(false);
@@ -54,13 +54,7 @@ export default function GalleryPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<GenerationSearchFilters>({});
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
-  const searchRequestIdRef = useRef(0);
   const appliedSearch = useRef<{ query: string; filters: GenerationSearchFilters }>({ query: "", filters: {} });
   const [viewMode, setViewMode] = useStoredGalleryViewMode(
     "astro-gallery-view-mode",
@@ -99,44 +93,15 @@ export default function GalleryPage() {
       nextFilters: GenerationSearchFilters,
       mode: "replace" | "append" = "replace",
     ) => {
-      const requestId = ++searchRequestIdRef.current;
       if (mode === "replace") appliedSearch.current = { query: nextQuery, filters: nextFilters };
-      setIsLoading(true);
-      setLoadError(false);
-      try {
-        const result = await searchGenerations(
-          nextQuery.trim() || undefined,
-          pageToLoad,
-          false,
-          compactFilters(nextFilters),
-          undefined,
-        );
-        if (requestId !== searchRequestIdRef.current) return;
-        setResults((current) =>
-          mode === "append"
-            ? [...current, ...result.generations.filter((row) => !current.some((entry) => entry.generation.id === row.generation.id))]
-            : result.generations,
-        );
-        setTotal(result.total);
-        setPage(result.page);
-        setPageSize(result.page_size);
-        if (mode === "replace") {
-          setSelected(null);
-        }
-      } catch {
-        if (requestId === searchRequestIdRef.current) setLoadError(true);
-      } finally {
-        if (requestId === searchRequestIdRef.current) {
-          setIsLoading(false);
-        }
-      }
+      const loaded = await loadPage({ kind: "gallery", query: nextQuery, filters: compactFilters(nextFilters) }, pageToLoad, mode);
+      if (loaded && mode === "replace") setSelected(null);
     },
-    [],
+    [loadPage],
   );
 
   useEffect(() => {
     void performSearch(1, "", {});
-    return () => { searchRequestIdRef.current++; };
   }, [performSearch]);
 
   async function handleSearch() {
@@ -145,8 +110,7 @@ export default function GalleryPage() {
   }
 
   function handleDeleted(id: string) {
-    setResults((current) => current.filter((row) => row.generation.id !== id));
-    setTotal((current) => Math.max(0, current - 1));
+    removeResult(id);
     selection.remove([id]);
     if (selected?.generation.id === id) setSelected(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
@@ -189,7 +153,7 @@ export default function GalleryPage() {
 
   const hasMore = results.length < total;
   const loadMoreRef = useInfiniteScroll({
-    enabled: results.length > 0 && !loadError && !lightbox,
+    enabled: !loadError && !lightbox,
     hasMore,
     isLoading,
     onLoadMore: () => {

@@ -125,9 +125,10 @@ vi.mock("../lib/api", () => ({
   editImage: (...args: unknown[]) => editImage(...args),
   getCanvasGenerationStatus: (...args: unknown[]) =>
     getCanvasGenerationStatus(...args),
-  onGenerationComplete: (handler: () => void) => {
-    generationCompleteListeners.add(handler);
-    return Promise.resolve(() => generationCompleteListeners.delete(handler));
+  onGenerationJob: (handler: (event: unknown) => void) => {
+    const notify = () => handler({ source_ref: {document_id: "canvas-1"}, client_request_id: "recover-request" });
+    generationCompleteListeners.add(notify);
+    return Promise.resolve(() => generationCompleteListeners.delete(notify));
   },
   onGenerationPartial: () => Promise.resolve(() => {}),
   onGenerationFailed: () => Promise.resolve(() => {}),
@@ -550,6 +551,11 @@ describe("CanvasPage", () => {
         }),
       );
     });
+    const persisted = saveCanvasDocument.mock.calls.at(-1)?.[1].generation_requests.at(-1);
+    expect(persisted.parameters).toEqual({
+      model: "gpt-image-2",
+      prompt: "Turn this sketch into a polished cinematic environment",
+    });
 
     resolveEditImage({
       generation_id: "generation-1",
@@ -643,6 +649,61 @@ describe("CanvasPage", () => {
     expect(editImage.mock.calls[0][0].clientRequestId).not.toBe(firstId);
   });
 
+  it("requires confirmation before resubmitting a reopened request with unknown provider outcome", async () => {
+    const document = canvasDocumentWithImage();
+    document.content.generation_requests = [{
+      request_id: "unconfirmed", project_id: "project-1", prompt: "original edit",
+      frame: { ...document.content.frame }, status: "failed", image_ids: [], created_at: "",
+      error: "Provider unavailable", source_image_path: "/tmp/original-export.png",
+    }];
+    getCanvasDocument.mockResolvedValueOnce(document);
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "original", status: "interrupted", error: "Unconfirmed", error_code: "provider_outcome_unknown", images: [],
+    });
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith("canvas-1",
+      expect.objectContaining({ generation_requests: [expect.objectContaining({error_code: "provider_outcome_unknown"})] }),
+      expect.anything(), expect.any(Number)));
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
+    const retry = screen.getByRole("button", { name: "canvas.generationRetry" });
+    fireEvent.click(retry);
+    await screen.findByRole("dialog", { name: "generate.unknownRetryTitle" });
+    expect(editImage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("favorites.cancel"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(editImage).not.toHaveBeenCalled();
+    fireEvent.click(retry);
+    fireEvent.click(await screen.findByRole("button", { name: "generate.confirmUnknownRetry" }));
+    await waitFor(() => expect(editImage).toHaveBeenCalledTimes(1));
+    expect(editImage.mock.calls[0][0].clientRequestId).not.toBe("unconfirmed");
+  });
+
+  it("uses a recovered canvas result when its saved failure is stale at retry time", async () => {
+    const document = canvasDocumentWithImage();
+    document.content.generation_requests = [{
+      request_id: "saved-failure", project_id: "project-1", generation_id: "saved-generation",
+      prompt: "Recovered edit", frame: { ...document.content.frame }, status: "failed",
+      image_ids: [], created_at: "", error: "Could not save image",
+      error_code: "local_processing_failed", source_image_path: "/tmp/original-export.png",
+    }];
+    getCanvasDocument.mockResolvedValueOnce(document);
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "saved-generation", status: "failed", error: "Could not save image",
+      error_code: "local_processing_failed", images: [],
+    });
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await waitFor(() => expect(getCanvasGenerationStatus).toHaveBeenCalledWith("canvas-1", "saved-failure"));
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "saved-generation", status: "completed", error: null, error_code: null,
+      images: [{ id: "recovered", file_path: "/tmp/recovered.png", width: 100, height: 100 }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "canvas.generationRetry" }));
+    await screen.findByText(/canvas-result:saved-failure:recovered/);
+    expect(editImage).not.toHaveBeenCalled();
+  });
+
   it("retries a saved request using its original export instead of the changed canvas", async () => {
     const document = canvasDocumentWithImage();
     document.content.generation_requests = [
@@ -681,6 +742,52 @@ describe("CanvasPage", () => {
       ),
     );
     expect(saveCanvasExport).not.toHaveBeenCalled();
+  });
+
+  it.each(["jpeg", "png"] as const)("retries a saved Grok canvas edit with compatible parameters (%s)", async (format) => {
+    const document = canvasDocumentWithImage();
+    const parameters = {
+      model: "grok-imagine-image-2.0", prompt: "Wide variations", imageCount: 3,
+      aspectRatio: "16:9", resolution: "2K", quality: "medium",
+    } as const;
+    document.content.generation_requests = [{
+      request_id: "grok-edit", project_id: "project-1", prompt: parameters.prompt,
+      frame: document.content.frame, status: "failed", error: "Provider unavailable", image_ids: [], created_at: "",
+      source_image_path: "/tmp/original-export.png", parameters: { ...parameters, outputFormat: format },
+    }];
+    getCanvasDocument.mockResolvedValueOnce(document);
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
+    fireEvent.click(screen.getByRole("button", { name: "canvas.generationRetry" }));
+    await waitFor(() => expect(editImage).toHaveBeenCalledWith(expect.objectContaining({
+      ...parameters, sourceImagePaths: ["/tmp/original-export.png"],
+    })));
+    if (format === "jpeg") {
+      expect(editImage.mock.calls[0][0].outputFormat).toBe("jpeg");
+    } else {
+      expect(editImage.mock.calls[0][0]).not.toHaveProperty("outputFormat");
+    }
+  });
+
+  it("retries historical canvas placeholders with the saved model's defaults", async () => {
+    const document = canvasDocumentWithImage();
+    document.content.generation_requests = [{
+      request_id: "old-grok", project_id: "project-1", prompt: "Retry sketch",
+      frame: document.content.frame, status: "failed", error: "Provider unavailable", image_ids: [], created_at: "",
+      source_image_path: "/tmp/original-export.png",
+      parameters: { model: "grok-imagine-image-2.0", prompt: "", size: "auto", quality: "auto", outputFormat: "png" },
+    }];
+    getCanvasDocument.mockResolvedValueOnce(document);
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
+    fireEvent.click(screen.getByRole("button", { name: "canvas.generationRetry" }));
+    await waitFor(() => expect(editImage).toHaveBeenCalledTimes(1));
+    expect(editImage.mock.calls[0][0]).toMatchObject({ model: "grok-imagine-image-2.0" });
+    for (const field of ["quality", "size", "outputFormat"]) {
+      expect(editImage.mock.calls[0][0]).not.toHaveProperty(field);
+    }
   });
 
   it("merges late results into current edits and keeps completion metadata through undo", async () => {
