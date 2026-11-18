@@ -1,3 +1,4 @@
+import { useCollectionPages } from "../features/collections/useCollectionPages";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -12,7 +13,6 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   deletePromptFavorite,
-  getFavoriteImages,
   getPromptFavorites,
 } from "../lib/api";
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
@@ -52,7 +52,10 @@ export default function FavoritesPage() {
     usePromptFolders();
   const [activeKind, setActiveKind] = useState<FavoriteKind>("images");
 
-  const [imageResults, setImageResults] = useState<GenerationResult[]>([]);
+  const {
+    results: imageResults, total: imageTotal, page: imagePage, pageSize: imagePageSize,
+    loading: isLoadingImages, loadError: imageLoadError, loadPage, removeResult,
+  } = useCollectionPages();
   const displayedResults = useMemo(() => imageResults.filter((row) => row.images.length > 0), [imageResults]);
   const selection = useCollectionSelection(displayedResults.map((row) => row.generation.id));
   const [selectionMode, setSelectionMode] = useState(false);
@@ -64,12 +67,7 @@ export default function FavoritesPage() {
   const [deleteImageTarget, setDeleteImageTarget] = useState<string | null>(null);
   const [imageQuery, setImageQuery] = useState("");
   const [selectedImageFolderId, setSelectedImageFolderId] = useState("");
-  const [imageTotal, setImageTotal] = useState(0);
-  const [imagePage, setImagePage] = useState(1);
-  const [imagePageSize, setImagePageSize] = useState(20);
-  const [isLoadingImages, setIsLoadingImages] = useState(true);
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(true);
-  const [imageLoadError, setImageLoadError] = useState(false);
   const [promptLoadError, setPromptLoadError] = useState(false);
   const [imageViewMode, setImageViewMode] = useStoredGalleryViewMode(
     "astro-favorites-image-view-mode",
@@ -77,7 +75,6 @@ export default function FavoritesPage() {
   const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
     null,
   );
-  const imageFavoritesRequestIdRef = useRef(0);
   const appliedImageSearch = useRef({ query: "", folderId: "" });
   const promptFavoritesRequestIdRef = useRef(0);
   const {
@@ -108,37 +105,11 @@ export default function FavoritesPage() {
       folderId?: string,
       mode: "replace" | "append" = "replace",
     ) => {
-      const requestId = ++imageFavoritesRequestIdRef.current;
-      if (mode === "replace") appliedImageSearch.current = { query: query ?? imageQuery, folderId: folderId ?? selectedImageFolderId };
-      setIsLoadingImages(true);
-      setImageLoadError(false);
-      try {
-        const result = await getFavoriteImages(
-          (folderId ?? selectedImageFolderId) || undefined,
-          (query ?? imageQuery).trim() || undefined,
-          page,
-        );
-        if (requestId !== imageFavoritesRequestIdRef.current) return;
-        setImageResults((current) =>
-          mode === "append"
-            ? [...current, ...result.generations.filter((row) => !current.some((entry) => entry.generation.id === row.generation.id))]
-            : result.generations,
-        );
-        setImageTotal(result.total);
-        setImagePage(result.page);
-        setImagePageSize(result.page_size);
-        if (mode === "replace") {
-          setSelectedImage(null);
-        }
-      } catch {
-        if (requestId === imageFavoritesRequestIdRef.current) setImageLoadError(true);
-      } finally {
-        if (requestId === imageFavoritesRequestIdRef.current) {
-          setIsLoadingImages(false);
-        }
-      }
+      const search = { query: query ?? imageQuery, folderId: folderId ?? selectedImageFolderId };
+      if (mode === "replace") appliedImageSearch.current = search;
+      if (await loadPage({ kind: "favorites", ...search }, page, mode) && mode === "replace") setSelectedImage(null);
     },
-    [imageQuery, selectedImageFolderId],
+    [loadPage, imageQuery, selectedImageFolderId],
   );
 
   const loadPromptFavorites = useCallback(
@@ -165,7 +136,7 @@ export default function FavoritesPage() {
   useEffect(() => {
     loadImageFavorites(1).catch(() => {});
     loadPromptFavorites().catch(() => {});
-    return () => { imageFavoritesRequestIdRef.current++; promptFavoritesRequestIdRef.current++; };
+    return () => { promptFavoritesRequestIdRef.current++; };
   }, []);
 
   function handleSearch() {
@@ -191,8 +162,7 @@ export default function FavoritesPage() {
   }
 
   function handleDeletedImage(id: string) {
-    setImageResults((current) => current.filter((row) => row.generation.id !== id));
-    setImageTotal((current) => Math.max(0, current - 1));
+    removeResult(id);
     selection.remove([id]);
     if (selectedImage?.generation.id === id) setSelectedImage(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {

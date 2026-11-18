@@ -26,6 +26,11 @@ pub enum AppError {
     #[error("Request to {endpoint} failed: {reason}")]
     Network { endpoint: String, reason: String },
 
+    #[error(
+        "Library schema {found} requires a newer Astro Studio (supported schema {supported})."
+    )]
+    UnsupportedSchema { found: i64, supported: i64 },
+
     #[error("Database error: {message}")]
     Database { message: String },
 
@@ -34,6 +39,12 @@ pub enum AppError {
 
     #[error("{message}")]
     Validation { message: String },
+
+    #[error("{message}")]
+    ProviderOutcomeUnknown { message: String },
+
+    #[error("The generation was cancelled")]
+    GenerationJobCancelled,
 
     #[error("Generation job was not found")]
     GenerationJobNotFound,
@@ -69,9 +80,12 @@ impl AppError {
             AppError::ProviderProfileNotFound { .. } => "provider_profile_not_found",
             AppError::Api { .. } => "api_error",
             AppError::Network { .. } => "network_error",
+            AppError::UnsupportedSchema { .. } => "unsupported_schema",
             AppError::Database { .. } => "database_error",
             AppError::FileSystem { .. } => "file_system_error",
             AppError::Validation { .. } => "validation_error",
+            AppError::ProviderOutcomeUnknown { .. } => "provider_outcome_unknown",
+            AppError::GenerationJobCancelled => "cancelled_by_user",
             AppError::GenerationJobNotFound => "generation_job_not_found",
             AppError::GenerationJobInvalidTransition => "generation_job_invalid_transition",
             AppError::GenerationJobNotRetryable => "generation_job_not_retryable",

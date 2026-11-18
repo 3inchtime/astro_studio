@@ -18,7 +18,7 @@ impl Fixture {
         )
         .unwrap();
         let db = Database::open(&paths.database).unwrap();
-        db.run_migrations().unwrap();
+        db.run_library_migrations(Some(&paths.assets)).unwrap();
         Self {
             db,
             paths,
@@ -481,8 +481,20 @@ fn backup_roundtrip_keeps_managed_asset_identity_refs_and_revision() {
     let asset;
     let document = f.paths.assets.join("canvas/revision.json");
     {
+        asset = crate::canvas_assets::import_asset(&f.db, &f.paths.assets, &external).unwrap();
         let conn = f.db.conn.lock().unwrap();
-        asset = crate::canvas_assets::import_asset(&conn, &f.paths.assets, &external).unwrap();
+        let (relative, provenance): (String, String) = conn
+            .query_row(
+                "SELECT managed_path,external_source FROM library_assets WHERE id=?1",
+                [&asset.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(relative.starts_with("canvas/assets/"));
+        assert_eq!(
+            Path::new(&provenance).canonicalize().unwrap(),
+            external.canonicalize().unwrap()
+        );
         conn.execute(
             "INSERT INTO projects(id,name) VALUES('project','Project')",
             [],
@@ -493,6 +505,14 @@ fn backup_roundtrip_keeps_managed_asset_identity_refs_and_revision() {
         conn.execute("INSERT INTO canvas_asset_refs(document_id,object_id,asset_id) VALUES('board','image',?1)",[&asset.id]).unwrap();
     }
     let archive = f.archive();
+    let raw = archive_entries(&archive)
+        .into_iter()
+        .find(|(n, _)| n == "library.db")
+        .unwrap()
+        .1;
+    assert!(!raw
+        .windows(external.to_string_lossy().len())
+        .any(|part| part == external.to_string_lossy().as_bytes()));
     let destination = restore_archive(&f.paths, &archive, &f.operation(), &|_, _, _| {}).unwrap();
     fs::remove_file(&asset.file_path).unwrap();
     fs::remove_file(&external).unwrap();
@@ -503,6 +523,17 @@ fn backup_roundtrip_keeps_managed_asset_identity_refs_and_revision() {
         .unwrap();
     assert!(Path::new(&path).starts_with(&destination));
     assert!(Path::new(&path).is_file());
+    let (relative, source): (String, Option<String>) = conn
+        .query_row(
+            "SELECT managed_path,external_source FROM library_assets WHERE id=?1",
+            [&asset.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(source, None);
+    assert_eq!(destination.join("assets").join(relative), Path::new(&path));
+    assert_eq!(Path::new(&path).canonicalize().unwrap(), Path::new(&path));
+
     assert_eq!(
         conn.query_row(
             "SELECT revision FROM canvas_documents WHERE id='board'",
@@ -555,6 +586,11 @@ fn restore_pre_revision_backup_migrates_canvas_metadata_without_losing_content()
     .unwrap();
     {
         let conn = Connection::open(&db_file).unwrap();
+        conn.execute_batch("DROP VIEW library_relative_paths; DROP VIEW library_assets;
+        DROP TRIGGER images_managed_insert; DROP TRIGGER images_managed_path;
+        DROP TRIGGER canvas_assets_managed_insert; DROP TRIGGER canvas_assets_managed_path;
+        DROP TABLE library_asset_roots; DROP TABLE former_asset_roots; ALTER TABLE images DROP COLUMN managed_path;
+        ALTER TABLE canvas_assets DROP COLUMN managed_path; ALTER TABLE canvas_assets DROP COLUMN external_source; DROP INDEX idx_images_file_path; DROP INDEX idx_images_thumbnail_path;").unwrap();
         // Later schema columns are stripped when present so this remains a real v18 fixture.
         let has_visual_context:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('prompt_agent_messages') WHERE name='visual_context_json')",[],|r|r.get(0)).unwrap();
         if has_visual_context {
@@ -600,6 +636,164 @@ fn restore_pre_revision_backup_migrates_canvas_metadata_without_losing_content()
     );
     assert_eq!(
         conn.query_row("SELECT COUNT(*) FROM canvas_assets", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn restored_managed_edit_source_reopens_at_canonical_root_then_rolls_back() {
+    let f = Fixture::new();
+    let source = f.image("assets/images/replay.png", [42, 19, 28, 255]);
+    f.add_generation("source");
+    f.add_image("asset", "source", &source, Some(&source));
+    f.add_generation("edit");
+    let input = serde_json::json!([source]).to_string();
+    f.db.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE generations SET source_image_paths=?1,source_image_count=1 WHERE id='edit'",
+            [input],
+        )
+        .unwrap();
+    let archive = f.archive();
+    f.db.set_setting("library_marker", "original after export")
+        .unwrap();
+    let bootstrap = f.paths.bootstrap.clone();
+    #[cfg(unix)]
+    let bootstrap = {
+        let alias = f._root.0.join("bootstrap-alias");
+        std::os::unix::fs::symlink(&bootstrap, &alias).unwrap();
+        alias
+    };
+    let reopen = || {
+        StoragePaths::new(
+            bootstrap.clone(),
+            f.paths.database.clone(),
+            f.paths.assets.clone(),
+        )
+        .unwrap()
+    };
+    let paths = reopen();
+    let destination = restore_archive(&paths, &archive, &f.operation(), &|_, _, _| {}).unwrap();
+    paths.activate(&destination).unwrap();
+    {
+        let active = reopen();
+        let restored = Database::open(&active.database).unwrap();
+        restored
+            .run_library_migrations(Some(&active.assets))
+            .unwrap();
+        let conn = restored.connection().unwrap();
+        let value: String = conn
+            .query_row(
+                "SELECT source_image_paths FROM generations WHERE id='edit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let references = serde_json::from_str::<Vec<String>>(&value).unwrap();
+        let saved = Path::new(&references[0]);
+        assert_eq!(saved.canonicalize().unwrap(), saved);
+        let resolved =
+            crate::storage::assets::resolve_document_asset(&conn, "asset", &active.assets, "")
+                .unwrap()
+                .unwrap();
+        assert_eq!(Path::new(&resolved), saved);
+        assert_eq!(
+            std::fs::read(saved).unwrap(),
+            std::fs::read(&source).unwrap()
+        );
+        drop(conn);
+        assert!(restored.get_setting("library_marker").unwrap().is_none());
+        active.rollback().unwrap();
+    }
+    let rolled_back = reopen();
+    assert!(rolled_back.previous.is_none());
+    let db = Database::open(&rolled_back.database).unwrap();
+    db.run_library_migrations(Some(&rolled_back.assets))
+        .unwrap();
+    assert_eq!(
+        db.get_setting("library_marker").unwrap().as_deref(),
+        Some("original after export")
+    );
+}
+
+#[test]
+fn moving_native_assets_rebases_gallery_recipes_and_unopened_canvas_before_export() {
+    let mut f = Fixture::new();
+    let source = f.image("assets/images/moved.png", [5, 11, 21, 255]);
+    f.add_generation("origin");
+    f.add_generation("edit");
+    f.add_image("image", "origin", &source, Some(&source));
+    let doc = f.paths.assets.join("board.json");
+    fs::write(&doc,serde_json::to_vec(&json!({"layers":[{"objects":[{"type":"image","id":"still-closed","image_path":source}]}], "generation_requests":[{"sourceImagePath":source}]})).unwrap()).unwrap();
+    {
+        let conn = f.db.connection().unwrap();
+        conn.execute(
+            "UPDATE generations SET source_image_paths=?1 WHERE id='edit'",
+            [json!([source]).to_string()],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO canvas_documents(id,project_id,name,document_path) VALUES('doc','default','Unopened board',?1)",[doc.to_string_lossy().as_ref()]).unwrap();
+    }
+    let moved = f._root.0.join("relocated");
+    fs::rename(&f.paths.assets, &moved).unwrap();
+    f.paths.assets = moved.clone();
+    f.db.run_library_migrations(Some(&moved)).unwrap();
+    {
+        let conn = f.db.connection().unwrap();
+        let canonical = moved.join("images/moved.png").canonicalize().unwrap();
+        let (file, thumb): (String, String) = conn
+            .query_row(
+                "SELECT file_path,thumbnail_path FROM images WHERE id='image'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(Path::new(&file), canonical);
+        assert_eq!(file, thumb);
+        let inputs: String = conn
+            .query_row(
+                "SELECT source_image_paths FROM generations WHERE id='edit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&inputs).unwrap(),
+            vec![file]
+        );
+        let usages = crate::canvas_assets::generation_usages(&conn, "origin").unwrap();
+        assert!(usages
+            .iter()
+            .any(|u| u.contains("Unopened board") && u.contains("still-closed")));
+    }
+    let archive = f.archive();
+    let root = restore_archive(&f.paths, &archive, &f.operation(), &|_, _, _| {}).unwrap();
+    let restored = Database::open(&root.join("library.db")).unwrap();
+    let conn = restored.connection().unwrap();
+    let doc: String = conn
+        .query_row(
+            "SELECT document_path FROM canvas_documents WHERE id='doc'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let value: Value = serde_json::from_slice(&fs::read(doc).unwrap()).unwrap();
+    assert_eq!(
+        value["generation_requests"][0]["sourceImagePath"],
+        value["layers"][0]["objects"][0]["image_path"]
+    );
+    assert!(Path::new(
+        value["generation_requests"][0]["sourceImagePath"]
+            .as_str()
+            .unwrap()
+    )
+    .is_file());
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM former_asset_roots", [], |r| r
             .get::<_, i64>(0))
             .unwrap(),
         0

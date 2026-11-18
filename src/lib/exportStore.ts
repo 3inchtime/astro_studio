@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
+import { onOperationProgress } from "./operationEvents";
 import {
   cancelExport,
   exportGenerations,
@@ -33,17 +33,7 @@ export const useExportStore = create<ExportState>((set, get) => {
     });
     let unlisten: (() => void) | undefined;
     try {
-      unlisten = await listen<{
-        operation_id: string;
-        completed: number;
-        total: number;
-      }>("library:operation-progress", (event) => {
-        if (event.payload.operation_id === id)
-          set({
-            completed: event.payload.completed,
-            total: event.payload.total,
-          });
-      });
+      unlisten = await onOperationProgress(id, ({ completed, total }) => set({ completed, total }));
       const result = await exportGenerations(
         ids,
         includeRecipe,

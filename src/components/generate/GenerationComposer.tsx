@@ -16,7 +16,7 @@ import { getImageModelCatalogEntry } from "../../lib/modelCatalog";
 import {
   useLlmConfigsQuery,
   useOptimizePromptMutation,
-} from "../../lib/queries/llm";
+} from "../../features/llm/queries";
 import type {
   ComposerMode,
   ImageAdvancedOptions,

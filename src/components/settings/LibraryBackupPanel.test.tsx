@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   canRollbackLibrary: vi.fn(),
   cancelLibraryOperation: vi.fn(),
 }));
-vi.mock("../../lib/libraryApi", () => mocks);
+vi.mock("../../features/library/commands", () => mocks);
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));

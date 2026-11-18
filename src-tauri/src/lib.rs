@@ -1,4 +1,10 @@
 mod api_gateway;
+mod atomic_files;
+mod batch_export;
+mod canvas;
+mod canvas_assets;
+mod canvas_close;
+mod collections;
 mod commands;
 mod config;
 mod credentials;
@@ -7,17 +13,9 @@ mod error;
 mod file_manager;
 mod gallery;
 mod generation_execution;
-// Durable worker persistence is retained for backwards-compatible job records,
-// but its executor is intentionally not part of the compatibility runtime yet.
 #[allow(dead_code)]
 mod generation_jobs;
 mod generation_lifecycle;
-// Lease primitives belong to the deferred worker runtime and have no caller
-// while compatibility execution remains the supported production path.
-mod atomic_files;
-mod batch_export;
-mod canvas_assets;
-mod canvas_close;
 mod generation_recipe;
 mod generation_recovery;
 #[allow(dead_code)]
@@ -26,12 +24,16 @@ mod image_assets;
 mod image_engines;
 mod library_backup;
 mod llm;
+mod model_catalog;
 mod model_registry;
 mod models;
 mod operations;
+mod projects;
 mod prompt_agent;
 mod provider_diagnostics;
+mod providers;
 mod runtime_logs;
+mod source_images;
 mod storage;
 mod updater;
 
@@ -560,10 +562,11 @@ pub fn run() {
         .manage(canvas_close::CanvasCloseState::default())
         .manage(app_config)
         .manage(engine)
+        .manage(generation_execution::GenerationRuntime::default())
         .manage(operations::Operations::default())
         .manage(batch_export::ExportSessions::default())
         .manage(library_backup::BackupInspections::default())
-        .manage(commands::generation::SelectedImageRegistry::default())
+        .manage(source_images::SelectedImageRegistry::default())
         .manage(updater::PendingUpdate(Mutex::new(None)))
         .manage(updater::DownloadedUpdate::default())
         .invoke_handler(tauri::generate_handler![
@@ -600,15 +603,18 @@ pub fn run() {
             commands::settings::save_font_size,
             commands::settings::get_image_model,
             commands::settings::save_image_model,
-            commands::generation::generate_image,
-            commands::generation::edit_image,
+            commands::generation::enqueue_generation,
+            generation_execution::get_generation_job,
+            generation_execution::list_generation_jobs,
+            generation_execution::cancel_generation_job,
+            generation_execution::wait_generation_result,
             commands::prompt_agent::get_prompt_agent_health,
             commands::prompt_agent::start_prompt_agent_session,
             commands::prompt_agent::send_prompt_agent_message,
             commands::prompt_agent::accept_prompt_agent_draft,
             commands::prompt_agent::cancel_prompt_agent_session,
             commands::prompt_agent::get_prompt_agent_session,
-            gallery::search_generations,
+            commands::collections::search_generations,
             gallery::delete_generation,
             gallery::restore_generation,
             gallery::permanently_delete_generation,
@@ -655,14 +661,14 @@ pub fn run() {
             commands::prompts::add_prompt_favorite_to_folders,
             commands::prompts::remove_prompt_favorite_from_folders,
             commands::prompts::get_prompt_favorite_folders,
-            gallery::create_folder,
-            gallery::rename_folder,
-            gallery::delete_folder,
-            gallery::get_folders,
-            gallery::add_image_to_folders,
-            gallery::remove_image_from_folders,
-            gallery::get_image_folders,
-            gallery::get_favorite_images,
+            commands::collections::create_folder,
+            commands::collections::rename_folder,
+            commands::collections::delete_folder,
+            commands::collections::get_folders,
+            commands::collections::add_image_to_folders,
+            commands::collections::remove_image_from_folders,
+            commands::collections::get_image_folders,
+            commands::collections::get_favorite_images,
             commands::logs::get_logs,
             commands::logs::get_runtime_logs,
             commands::logs::get_log_detail,
@@ -708,7 +714,7 @@ pub fn run() {
                     });
                 }
                 let database = Database::open(&paths.database)?;
-                database.run_migrations()?;
+                database.run_library_migrations(Some(&paths.assets))?;
                 let check: String = database
                     .conn
                     .lock()
@@ -725,6 +731,7 @@ pub fn run() {
             };
             let database = match open_library(&paths) {
                 Ok(db) => db,
+                Err(error @ AppError::UnsupportedSchema { .. }) => return Err(Box::new(error)),
                 Err(error) if paths.previous.is_some() => {
                     log::warn!(
                         "Restored library could not open; returning to original library: {error}"
@@ -774,6 +781,8 @@ pub fn run() {
                     engine.inner(),
                 ))?;
             }
+
+            generation_execution::start_worker(app.handle().clone());
 
             // Startup log cleanup
             {

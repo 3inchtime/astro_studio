@@ -1,5 +1,11 @@
 {
+  "generate.cancelTask": "Generierung abbrechen",
+  "generate.cancelledTask": "Generierung abgebrochen",
+  "generate.cancelTaskFailed": "Die Generierung konnte nicht abgebrochen werden. Bitte erneut versuchen.",
   "trash": {
+    "bulkRestore": "Auswahl wiederherstellen",
+    "bulkPurge": "Auswahl endgültig löschen",
+    "bulkRestoreHint": "Diese Einträge und ihre Bilder in der Bibliothek wiederherstellen.",
     "title": "Papierkorb",
     "search": "Gelöschte Prompts suchen...",
     "detail": "Papierkorbdetails",

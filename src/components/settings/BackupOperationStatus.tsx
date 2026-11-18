@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { cancelLibraryOperation } from "../../lib/libraryApi";
+import { cancelLibraryOperation } from "../../features/library/commands";
 import { useBackupState } from "./LibraryBackupPanel";
 
 /** The running operation belongs to the app, not the settings route. */

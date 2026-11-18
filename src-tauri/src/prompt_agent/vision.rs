@@ -194,11 +194,7 @@ mod tests {
                 capability: "multimodal".into(),
                 enabled: true,
             };
-            let client: Box<dyn LlmClient> = if protocol == "openai" {
-                Box::new(crate::llm::openai::OpenAiLlmClient::new(&config).unwrap())
-            } else {
-                Box::new(crate::llm::anthropic::AnthropicLlmClient::new(&config).unwrap())
-            };
+            let client = crate::llm::create_llm_client(&config).unwrap();
             let context = analyze(
                 client.as_ref(),
                 &[ImageData {

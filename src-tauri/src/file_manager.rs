@@ -660,16 +660,20 @@ impl FileManager {
         Ok(thumb_path.to_string_lossy().to_string())
     }
 
-    pub fn delete_image(&self, file_path: &str, thumbnail_path: &str) -> Result<(), String> {
+    pub fn delete_image(
+        &self,
+        file_path: &str,
+        thumbnail_path: Option<&str>,
+    ) -> Result<(), String> {
         let roots = [
             self.base_dir.join("images"),
             self.base_dir.join("thumbnails"),
         ];
-        if let Ok(path) = canonicalize_existing_managed_path(Path::new(file_path), &roots) {
-            let _ = std::fs::remove_file(path);
-        }
-        if let Ok(path) = canonicalize_existing_managed_path(Path::new(thumbnail_path), &roots) {
-            let _ = std::fs::remove_file(path);
+        for recorded in std::iter::once(file_path).chain(thumbnail_path) {
+            if let Ok(path) = canonicalize_existing_managed_path(Path::new(recorded), &roots) {
+                std::fs::remove_file(&path)
+                    .map_err(|error| format!("Remove {}: {error}", path.display()))?;
+            }
         }
         Ok(())
     }

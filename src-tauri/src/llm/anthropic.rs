@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::llm::{api_error, network_error, LlmClient, LLM_REQUEST_TIMEOUT_SECS};
+use crate::llm::{api_error, network_error, LlmClient};
 use crate::models::LlmConfig;
 use async_trait::async_trait;
 use base64::Engine;
@@ -14,17 +14,6 @@ pub struct AnthropicLlmClient {
 }
 
 impl AnthropicLlmClient {
-    pub fn new(config: &LlmConfig) -> Result<Self, AppError> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(LLM_REQUEST_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| network_error("", &e))?;
-        Ok(Self {
-            client,
-            config: config.clone(),
-        })
-    }
-
     pub fn with_timeout(config: &LlmConfig, timeout_secs: u64) -> Result<Self, AppError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))

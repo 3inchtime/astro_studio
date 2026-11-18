@@ -1,5 +1,11 @@
 {
+  "generate.cancelTask": "Annuler la génération",
+  "generate.cancelledTask": "Génération annulée",
+  "generate.cancelTaskFailed": "Impossible d’annuler la génération. Réessayez.",
   "trash": {
+    "bulkRestore": "Restaurer la sélection",
+    "bulkPurge": "Supprimer définitivement la sélection",
+    "bulkRestoreHint": "Restaure ces générations et leurs images dans la bibliothèque.",
     "title": "Corbeille",
     "search": "Rechercher des prompts supprimés...",
     "detail": "Détails de la corbeille",

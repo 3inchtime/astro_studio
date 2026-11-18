@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { IMAGE_MODEL_CATALOG, getImageModelCatalogEntry } from "./modelCatalog";
-import type { ImageModel, RetryGenerationRequest } from "../types";
+import { findImageModel } from "./modelCatalog";
+import type { RetryGenerationRequest } from "../types";
 import type { GenerationRecipe } from "../types/recipe";
 export const getGenerationRecipe = (generationId: string) =>
   invoke<GenerationRecipe>("get_generation_recipe", { generationId });
@@ -9,13 +9,9 @@ export const getGenerationRecipeForRequest = (clientRequestId: string) =>
 export function recipeToRequest(
   recipe: GenerationRecipe,
 ): RetryGenerationRequest {
-  if (
-    recipe.version !== 1 ||
-    !IMAGE_MODEL_CATALOG.some((m) => m.id === recipe.model)
-  )
-    throw new Error("Unsupported generation recipe");
-  const model = recipe.model as ImageModel;
-  const defaults = getImageModelCatalogEntry(model).parameterDefaults;
+  const entry = findImageModel(recipe.model);
+  if (recipe.version !== 1 || !entry) throw new Error("Unsupported generation recipe");
+  const { id: model, parameterDefaults: defaults } = entry;
   const o = recipe.options;
   return {
     prompt: recipe.prompt,

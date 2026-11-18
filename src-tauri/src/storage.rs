@@ -1,3 +1,6 @@
+pub(crate) mod artifacts;
+pub(crate) mod assets;
+
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{

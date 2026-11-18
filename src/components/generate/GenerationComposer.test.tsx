@@ -12,7 +12,7 @@ vi.mock("react-i18next", () => ({
 vi.mock("../../lib/api", () => ({ toAssetUrl: (path: string) => path }));
 const llmState = vi.hoisted(() => ({ optimize: vi.fn(), configs: [] as { id: string; name: string; enabled: boolean; capability: string }[] }));
 beforeEach(() => { llmState.configs = []; llmState.optimize.mockReset().mockResolvedValue("Optimized"); });
-vi.mock("../../lib/queries/llm", () => ({
+vi.mock("../../features/llm/queries", () => ({
   useLlmConfigsQuery: () => ({ data: llmState.configs, isSuccess: true }),
   useOptimizePromptMutation: () => ({ isPending: false, mutateAsync: llmState.optimize }),
 }));

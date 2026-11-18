@@ -6,18 +6,19 @@ import type { LlmConfig } from "../../types";
 import {
   useLlmConfigsQuery,
   useSaveLlmConfigsMutation,
-} from "../../lib/queries/llm";
+} from "../../features/llm/queries";
 import ConfirmDialog from "../common/ConfirmDialog";
 import {
   createDefaultLlmConfig,
+  llmProtocols, llmProtocolIds,
   defaultBaseUrlForProtocol,
 } from "../../lib/llmConfigDefaults";
 import { canEnableLlmConfig } from "../../lib/llmConfigRules";
 
 
 
-function protocolLabel(protocol: string): string {
-  return protocol === "anthropic" ? "Anthropic" : "OpenAI";
+function protocolLabel(protocol: LlmConfig["protocol"]): string {
+  return llmProtocols[protocol].label;
 }
 
 // ── Inline edit / create form ──────────────────────────────────────────────────
@@ -77,10 +78,9 @@ function ConfigForm({
               }}
               className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm"
             >
-              <option value="openai">{t("settings.llm.protocolOpenai")}</option>
-              <option value="anthropic">
-                {t("settings.llm.protocolAnthropic")}
-              </option>
+              {llmProtocolIds.map((protocol) => (
+                <option key={protocol} value={protocol}>{t(llmProtocols[protocol].i18nKey)}</option>
+              ))}
             </select>
           </label>
 
@@ -93,7 +93,7 @@ function ConfigForm({
               value={config.model}
               onChange={(e) => onChange({ ...config, model: e.target.value })}
               placeholder={
-                config.protocol === "anthropic" ? "claude-opus-4-7" : "gpt-4o"
+                llmProtocols[config.protocol].modelPlaceholder
               }
               className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />
@@ -637,10 +637,9 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               }}
               className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm"
             >
-              <option value="openai">{t("settings.llm.protocolOpenai")}</option>
-              <option value="anthropic">
-                {t("settings.llm.protocolAnthropic")}
-              </option>
+              {llmProtocolIds.map((protocol) => (
+                <option key={protocol} value={protocol}>{t(llmProtocols[protocol].i18nKey)}</option>
+              ))}
             </select>
           </label>
 
@@ -653,7 +652,7 @@ function NewConfigForm({ onSave, onCancel }: NewConfigFormProps) {
               value={config.model}
               onChange={(e) => setConfig({ ...config, model: e.target.value })}
               placeholder={
-                config.protocol === "anthropic" ? "claude-opus-4-7" : "gpt-4o"
+                llmProtocols[config.protocol].modelPlaceholder
               }
               className="studio-input focus-ring h-9 w-full rounded-lg px-3 text-sm placeholder:text-muted"
             />

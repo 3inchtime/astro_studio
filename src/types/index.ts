@@ -31,6 +31,7 @@ export interface GeneratedImage {
 }
 
 export interface GenerationResult {
+  active_job_id?: string;
   generation: Generation;
   images: GeneratedImage[];
 }
@@ -175,6 +176,7 @@ export interface CanvasFrame {
 }
 
 export interface CanvasGenerationRequest {
+  error_code?: string;
   source_image_path?: string;
   parameters?: GenerationParams;
   request_id: string;
@@ -251,6 +253,7 @@ export interface ImageAdvancedOptions {
 }
 
 export interface GenerationParams {
+  documentId?: string;
   providerProfileId?: string;
   providerOverrideConfirmed?: boolean;
   sourceGenerationId?: string;
@@ -367,6 +370,7 @@ export interface RetryGenerationRequest {
 }
 
 export interface Message {
+  activeJobId?: string;
   partialPreview?: string;
   id: string;
   role: "user" | "assistant";
@@ -374,7 +378,7 @@ export interface Message {
   generationId?: string;
   images?: MessageImage[];
   sourceImages?: MessageImage[];
-  status: "complete" | "processing" | "failed";
+  status: "complete" | "processing" | "failed" | "cancelled";
   error?: string;
   retryRequest?: RetryGenerationRequest;
   createdAt: string;
@@ -460,19 +464,7 @@ export interface TrashSettings {
 }
 
 export type AppFontSize = "small" | "medium" | "large";
-export type ImageModel =
-  | "gpt-image-2.6-sunburst"
-  | "gpt-image-2.6-flare"
-  | "gpt-image-2.5-sunburst"
-  | "gpt-image-2.5-flare"
-  | "gemini-nano-banana-2.1"
-  | "grok-imagine-image-2.0"
-  | "doubao-seedream-5-0-pro-260628"
-  | "doubao-seedream-5-0-flash-260915"
-  | "gpt-image-2"
-  | "nano-banana"
-  | "nano-banana-2"
-  | "nano-banana-pro";
+export type ImageModel = keyof typeof import("../../shared/model-catalog.v1.json").imageModels;
 export type EndpointMode = "base_url" | "full_url";
 
 export interface EndpointSettings {
@@ -543,6 +535,7 @@ export interface ImageModelCatalogEntry {
     | "gemini-interactions"
     | "xai-images"
     | "seedream-images";
+  advancedOptions: boolean;
   supportsEdit: boolean;
   maxReferenceImages?: number;
   connectionDefaults: ModelConnectionDefaults;
@@ -553,7 +546,7 @@ export interface ImageModelCatalogEntry {
 export interface LlmConfig {
   id: string;
   name: string;
-  protocol: "openai" | "anthropic";
+  protocol: keyof typeof import("../../shared/model-catalog.v1.json").llm.protocols;
   model: string;
   /** Unsaved input only; never returned by the backend. */
   api_key: string;

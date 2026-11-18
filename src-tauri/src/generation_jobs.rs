@@ -1,4 +1,3 @@
-use crate::commands::conversations;
 use crate::error::AppError;
 use crate::generation_lifecycle::{GenerationExecutionContext, GenerationExecutionSnapshot};
 use crate::generation_worker_lease::{
@@ -9,6 +8,7 @@ use crate::models::{
     GenerationJobPage, GenerationJobStage, GenerationJobStatus, GptImageRequestOptions,
     DEFAULT_GENERATION_JOB_PAGE_LIMIT, MAX_GENERATION_JOB_PAGE_LIMIT,
 };
+use crate::projects::conversations;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rusqlite::types::Value as SqlValue;
@@ -322,6 +322,8 @@ struct ResolvedConversationIdentity {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct GenerateEditSourceRef {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_fingerprint: Option<String>,
     /// Version 1 records durable before/after provider milestones.
     #[serde(skip_serializing_if = "Option::is_none")]
     execution_version: Option<u8>,
@@ -338,6 +340,12 @@ struct GenerateEditSourceRef {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct CanvasSourceRef {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_version: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_generation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -862,6 +870,11 @@ pub(crate) fn get_job_event_in_transaction(
         .ok_or(AppError::GenerationJobCorruptPersistedData)?;
 
     Ok(GenerationJobEvent {
+        project_id: job.request["project_id"]
+            .as_str()
+            .ok_or(AppError::GenerationJobCorruptPersistedData)?
+            .into(),
+        client_request_id: job.client_request_id,
         job_id: job.id,
         generation_id: job.generation_id,
         conversation_id,
@@ -1443,7 +1456,7 @@ fn validate_job_projection(
     }
 }
 
-fn enqueue_result_for_validated_job(
+pub(crate) fn enqueue_result_for_validated_job(
     job: &GenerationJob,
 ) -> Result<EnqueueGenerationResult, AppError> {
     let request: GenerationJobRequest = serde_json::from_value(job.request.clone())
@@ -1825,7 +1838,9 @@ fn safe_error_code(value: &str) -> bool {
 pub(crate) fn terminal_message_for_code(code: &str) -> &'static str {
     match code {
         "provider_profile_missing" => "The selected provider profile is unavailable",
+        "provider_endpoint_changed" => "The provider endpoint changed after this request was queued. Review the connection before generating again.",
         "provider_configuration_invalid" => "The provider configuration is invalid",
+        "queue_record_invalid" => "The queued generation could not be verified",
         "source_image_invalid" => "A source image is unavailable or invalid",
         "image_parameters_rejected" => "The provider rejected the image settings. Reduce GIF frames, dimensions, or image count and retry.",
         "moderation_blocked" => "The image provider blocked this request under its moderation policy.",
@@ -1982,6 +1997,7 @@ impl GenerationJobSourceRef {
                 &source_ref.project_id,
             ]),
             Self::Canvas(source_ref) => source_reference_ids_valid([
+                &source_ref.source_generation_id,
                 &source_ref.id,
                 &source_ref.round_id,
                 &source_ref.canvas_round_id,
@@ -1994,13 +2010,17 @@ impl GenerationJobSourceRef {
                 &source_ref.project_id,
             ]),
         };
-        let version_valid = match &source_ref {
-            Self::GenerateEdit(source) => {
-                source.execution_version.is_none_or(|version| version == 1)
-            }
-            Self::Canvas(_) => true,
+        let (version, fingerprint) = match &source_ref {
+            Self::GenerateEdit(source) => (source.execution_version, &source.request_fingerprint),
+            Self::Canvas(source) => (source.execution_version, &source.request_fingerprint),
         };
-        if ids_valid && version_valid {
+        let fingerprint_valid = fingerprint.as_ref().is_none_or(|hash| {
+            hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        });
+        if ids_valid && version.is_none_or(|v| v == 1) && fingerprint_valid {
             Ok(source_ref)
         } else {
             Err(AppError::GenerationJobInvalidSnapshot)
@@ -2196,11 +2216,16 @@ fn existing_matches_prepared(existing: &GenerationJob, request: &PreparedGenerat
     let Ok(expected_request) = canonical_request(request, &identity) else {
         return false;
     };
-    let Ok(expected_source_ref) =
+    let Ok(mut expected_source_ref) =
         canonical_source_ref(&request.source_kind, &request.source_ref, Some(&identity))
     else {
         return false;
     };
+    if existing.source_ref.get("request_fingerprint").is_none() {
+        if let Some(fields) = expected_source_ref.as_object_mut() {
+            fields.remove("request_fingerprint");
+        }
+    }
     existing.parent_job_id == request.parent_job_id
         && existing.source_kind == request.source_kind
         && existing.source_ref == expected_source_ref
@@ -2473,6 +2498,15 @@ fn list_jobs_in_transaction_with_query_observer(
     filter: &GenerationJobFilter,
     observe_query: &mut dyn FnMut(),
 ) -> Result<GenerationJobPage, AppError> {
+    list_scoped_jobs(tx, filter, false, observe_query)
+}
+
+fn list_scoped_jobs(
+    tx: &Transaction<'_>,
+    filter: &GenerationJobFilter,
+    visible_only: bool,
+    observe_query: &mut dyn FnMut(),
+) -> Result<GenerationJobPage, AppError> {
     let limit = filter
         .limit
         .unwrap_or(DEFAULT_GENERATION_JOB_PAGE_LIMIT)
@@ -2480,6 +2514,20 @@ fn list_jobs_in_transaction_with_query_observer(
     let cursor = filter.cursor.as_deref().map(decode_cursor).transpose()?;
     let mut clauses = Vec::new();
     let mut values: Vec<SqlValue> = Vec::new();
+
+    if visible_only {
+        clauses.push("EXISTS (SELECT 1 FROM generations record JOIN conversations c ON c.id=record.conversation_id WHERE record.id=g.generation_id AND record.deleted_at IS NULL AND c.deleted_at IS NULL)".into());
+    }
+    for (field, value) in [
+        ("project_id", &filter.project_id),
+        ("conversation_id", &filter.conversation_id),
+        ("document_id", &filter.document_id),
+    ] {
+        if let Some(value) = value {
+            values.push(SqlValue::Text(value.clone()));
+            clauses.push(format!("json_extract(CASE WHEN json_valid(g.source_ref_json) THEN g.source_ref_json ELSE '{{}}' END, '$.{field}') = ?{}", values.len()));
+        }
+    }
 
     if let Some(statuses) = filter
         .statuses
@@ -2590,6 +2638,15 @@ pub(crate) fn list_jobs_in_transaction(
 ) -> Result<GenerationJobPage, AppError> {
     let mut no_query_observer = || {};
     list_jobs_in_transaction_with_query_observer(tx, filter, &mut no_query_observer)
+}
+
+pub(crate) fn list_visible_jobs(
+    conn: &Connection,
+    filter: &GenerationJobFilter,
+) -> Result<GenerationJobPage, AppError> {
+    with_generation_job_read_transaction(conn, "list visible", |tx| {
+        list_scoped_jobs(tx, filter, true, &mut || {})
+    })
 }
 
 pub(crate) fn list_jobs(
@@ -2852,6 +2909,43 @@ fn stored_job_from_row_offset(
         error_message: row.get(offset + 21)?,
         retryable: row.get(offset + 22)?,
     })
+}
+
+/// An exported queue is a historical copy. Its original owner may have sent
+/// these requests after the snapshot, so a restored library needs a new
+/// explicit submission. Include trashed rows to preserve this rule on restore.
+pub(crate) fn interrupt_imported_queue(conn: &Connection) -> Result<(), AppError> {
+    let tx = begin_generation_job_write_transaction_unchecked(conn)?;
+    let queued = {
+        let mut statement =
+            tx.prepare("SELECT id,generation_id FROM generation_jobs WHERE status='queued'")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let code = "provider_outcome_unknown";
+    let message = terminal_message_for_code(code);
+    let now = crate::current_timestamp();
+    for (id, generation_id) in queued {
+        // Never discard a saved provider response, even in an inconsistent archive.
+        validate_worker_recovery_for_stage(&tx, &generation_id, GenerationJobStage::Preparing)?;
+        let changed = tx.execute("UPDATE generation_jobs SET status='interrupted', stage='terminal',
+            started_at=MAX(queued_at,?1), last_heartbeat_at=MAX(queued_at,?1), finished_at=MAX(queued_at,?1),
+            error_code=?2, error_message=?3, retryable=1
+            WHERE id=?4 AND status='queued' AND stage='queued' AND cancel_requested_at IS NULL",
+            params![now,code,message,id])?;
+        let generation_changed = tx.execute("UPDATE generations SET status='interrupted', error_message=?1 WHERE id=?2 AND status='queued'", params![message,generation_id])?;
+        if changed != 1 || generation_changed != 1 {
+            return Err(AppError::GenerationJobCorruptPersistedData);
+        }
+        tx.execute(
+            "DELETE FROM generation_recoveries WHERE generation_id=?1",
+            [generation_id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 pub(crate) fn claim_next_job_with_event(
@@ -3332,6 +3426,44 @@ pub(crate) fn claim_job_in_transaction(
     claim_job_at_in_transaction(tx, job_id, &timestamp)
 }
 
+/// A readable receipt can still have an invalid provider-response binding.
+/// Retire only a validated job/generation pair. Keep the recovery evidence
+/// intact for an explicit local save attempt.
+pub(crate) fn retire_invalid_queue_record(
+    tx: &Transaction<'_>,
+    id: &str,
+) -> Result<GenerationJobEvent, AppError> {
+    let job = get_job_in_transaction(tx, id)?;
+    let has_response_binding: bool = tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM generation_recoveries WHERE generation_id=?1
+             AND (expected_response_file IS NOT NULL OR response_file IS NOT NULL
+                  OR response_size IS NOT NULL OR response_sha256 IS NOT NULL))",
+        [&job.generation_id],
+        |row| row.get(0),
+    )?;
+    let code = if has_response_binding {
+        "provider_outcome_unknown"
+    } else {
+        "queue_record_invalid"
+    };
+    // A clock adjustment can put an otherwise readable entry in the future.
+    let timestamp = crate::current_timestamp().max(job.queued_at);
+    claim_job_at_in_transaction(tx, id, &timestamp)?;
+    finish_job_in_transaction(
+        tx,
+        &GenerationJobTerminalUpdate {
+            job_id: id.into(),
+            expected_status: GenerationJobStatus::Running,
+            status: GenerationJobStatus::Failed,
+            finished_at: timestamp,
+            error_code: Some(code.into()),
+            error_message: None,
+            retryable: false,
+        },
+    )?;
+    get_job_event_in_transaction(tx, id)
+}
+
 fn claim_job_at_in_transaction(
     tx: &Transaction<'_>,
     job_id: &str,
@@ -3427,7 +3559,14 @@ pub(crate) fn load_generation_execution_snapshot_for_stage_in_transaction(
     let runtime_options = GptImageRequestOptions {
         advanced_options: request.options.advanced_options.clone(),
         prepared_overlay: None,
-        progress_context: Some((job.generation_id.clone(), job.client_request_id.clone())),
+        progress_context: Some(crate::models::GenerationProgressContext {
+            generation_id: job.generation_id.clone(),
+            client_request_id: job.client_request_id.clone(),
+            job_id: job.id.clone(),
+            conversation_id: request.conversation_id.clone(),
+            project_id: request.project_id.clone(),
+            document_id: job.source_ref["document_id"].as_str().map(str::to_owned),
+        }),
         aspect_ratio: request.options.aspect_ratio.clone(),
         resolution: request.options.resolution.clone(),
         size: generation.size.clone(),
@@ -3592,6 +3731,7 @@ pub(crate) fn request_cancel_with_event(
                 true
             }
         }
+        GenerationJobStatus::Cancelled => false,
         _ => return Err(AppError::GenerationJobInvalidTransition),
     };
     let job = get_job_in_transaction(&tx, id)?;

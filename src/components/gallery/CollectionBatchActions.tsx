@@ -1,14 +1,14 @@
 import ExportSelectionAction from "./ExportSelectionAction";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { addImageToFolders, deleteGeneration, getFolders } from "../../lib/api";
-import { runGenerationBatch, selectLoadedGenerations } from "../../lib/collectionBatch";
+import { addImageToFolders, deleteGeneration, getFolders, permanentlyDeleteGeneration, restoreGeneration } from "../../lib/api";
+import { runGenerationBatch, selectLoadedGenerations, type CollectionAction as Action } from "../../lib/collectionBatch";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
-import { emit } from "@tauri-apps/api/event";
+import { emitFavoritesChanged } from "../../features/collections/events";
 import type { Folder, GenerationResult } from "../../types";
 
-type Action = "delete" | "favorite";
 interface Props {
+  scope?: "active" | "trash";
   rows: GenerationResult[];
   selectionMode?: boolean;
   selectedIds: Set<string>;
@@ -17,7 +17,7 @@ interface Props {
   onSucceeded: (ids: string[], kind: Action) => void;
 }
 
-export default function CollectionBatchActions({ rows, selectionMode = false, selectedIds, onSelectLoaded, onClear, onSucceeded }: Props) {
+export default function CollectionBatchActions({ rows, scope = "active", selectionMode = false, selectedIds, onSelectLoaded, onClear, onSucceeded }: Props) {
   const { t } = useTranslation();
   const [action, setAction] = useState<Action | null>(null);
   const [targets, setTargets] = useState<GenerationResult[]>([]);
@@ -52,8 +52,14 @@ export default function CollectionBatchActions({ rows, selectionMode = false, se
     if (!action || busyRef.current || (action === "favorite" && (!folderIds.length || loadingFolders || folderError))) return;
     busyRef.current = true;
     setBusy(true);
-    const outcome = await runGenerationBatch(targets, action, action === "delete" ? deleteGeneration : (id) => addImageToFolders(id, folderIds), checkpoints.current);
-    if (action === "favorite" && checkpoints.current.size > 0) void emit("favorites:changed", {}).catch(() => {});
+    const operations: Record<Action, (id: string) => Promise<void>> = {
+      favorite: id => addImageToFolders(id, folderIds),
+      delete: id => deleteGeneration(id),
+      restore: id => restoreGeneration(id),
+      purge: id => permanentlyDeleteGeneration(id),
+    };
+    const outcome = await runGenerationBatch(targets, action, operations[action], checkpoints.current);
+    if (action === "favorite" && checkpoints.current.size > 0) emitFavoritesChanged();
     onSucceeded(outcome.succeeded, action);
     setTargets((current) => current.filter((row) => outcome.failed.includes(row.generation.id)));
     setFailedCount(outcome.failed.length);
@@ -62,22 +68,35 @@ export default function CollectionBatchActions({ rows, selectionMode = false, se
     if (!outcome.failed.length) setAction(null);
   }
 
+  const labels: Record<Action, string> = {
+    favorite: t("studio.collection.bulkFavorite", { defaultValue: "Add to folders" }),
+    delete: t("studio.collection.bulkDelete", { defaultValue: "Move to trash" }),
+    restore: t("trash.bulkRestore", { defaultValue: "Restore selected" }),
+    purge: t("trash.bulkPurge", { defaultValue: "Permanently delete selected" }),
+  };
+  const descriptions: Record<Action, string> = {
+    delete: t("studio.collection.deleteAllImages", { defaultValue: "All images in these generation records will move to trash." }),
+    favorite: t("studio.collection.favoriteAllImages", { defaultValue: "Add every image in these generation records to the selected folders." }),
+    restore: t("trash.bulkRestoreHint", { defaultValue: "Return these generation records and their images to the library." }),
+    purge: t("studio.trash.cannotUndo", { defaultValue: "These files will be removed from your device. This cannot be undone." }),
+  };
+  const available: Action[] = scope === "trash" ? ["restore", "purge"] : ["favorite", "delete"];
   const buttonClass = "studio-control focus-ring min-h-9 rounded-lg px-3 text-xs font-medium disabled:opacity-40";
   return <>
     {(selectionMode || selectedIds.size > 0) && <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle px-5 py-2">
       <button type="button" disabled={!rows.length} onClick={onSelectLoaded} className={buttonClass}>{t("studio.collection.selectVisible", { defaultValue: "Select all visible" })}</button>
       <span aria-live="polite" className="text-xs text-muted">{t("studio.collection.selectedCount", { count: selectedIds.size, defaultValue: "{{count}} generation record(s) selected" })}</span>
       {selectedIds.size > 0 && <>
-        <ExportSelectionAction rows={rows} selectedIds={selectedIds} />
-        <button type="button" onClick={() => begin("favorite")} className={buttonClass}>{t("studio.collection.bulkFavorite", { defaultValue: "Add to folders" })}</button>
-        <button type="button" onClick={() => begin("delete")} className={`${buttonClass} text-error`}>{t("studio.collection.bulkDelete", { defaultValue: "Move to trash" })}</button>
+        {scope === "active" && <ExportSelectionAction rows={rows} selectedIds={selectedIds} />}
+        {available.map(kind => <button type="button" key={kind} onClick={() => begin(kind)}
+          className={`${buttonClass} ${kind === "delete" || kind === "purge" ? "text-error" : ""}`}>{labels[kind]}</button>)}
         <button type="button" onClick={onClear} className={buttonClass}>{t("studio.collection.clearSelection", { defaultValue: "Clear selection" })}</button>
       </>}
     </div>}
     {action && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={action === "delete" ? t("studio.collection.bulkDelete", { defaultValue: "Move to trash" }) : t("studio.collection.bulkFavorite", { defaultValue: "Add to folders" })} aria-busy={busy} tabIndex={-1} className="studio-floating-panel flex max-h-[calc(100dvh-32px)] w-full max-w-sm flex-col rounded-xl p-5 outline-none">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={labels[action]} aria-busy={busy} tabIndex={-1} className="studio-floating-panel flex max-h-[calc(100dvh-32px)] w-full max-w-sm flex-col rounded-xl p-5 outline-none">
         <h2 className="text-base font-semibold text-foreground">{t("studio.collection.batchCount", { count: targets.length, defaultValue: "{{count}} generation record(s)" })}</h2>
-        <p className="mt-2 text-sm text-muted">{action === "delete" ? t("studio.collection.deleteAllImages", { defaultValue: "All images in these generation records will move to trash." }) : t("studio.collection.favoriteAllImages", { defaultValue: "Add every image in these generation records to the selected folders." })}</p>
+        <p className="mt-2 text-sm text-muted">{descriptions[action]}</p>
         {action === "favorite" && <div className="mt-4 min-h-0 overflow-y-auto">
           {loadingFolders && <p role="status" className="text-sm text-muted">{t("studio.folder.loading", { defaultValue: "Loading folders…" })}</p>}
           {folderError && <div role="alert"><p className="text-sm text-error">{t("studio.folder.loadFailed", { defaultValue: "Could not load folders. Retry to make changes." })}</p><button className={buttonClass} onClick={() => void loadFolders()}>{t("studio.folder.retry", { defaultValue: "Retry" })}</button></div>}

@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { cancelClose, enableCloseGuard, finishClose, onCanvasCloseRequest, type CloseRequest } from "../../features/canvas/close";
 import { useTranslation } from "react-i18next";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { flushCanvasSaves } from "../../lib/canvas/persistence";
 
-type CloseRequest = { request_id: string; action: "close" | "exit" | "restart" };
 
 // Lives above routing: saves queued by a page that just unmounted still block exit.
 export default function CanvasCloseGuard() {
@@ -28,7 +26,7 @@ export default function CanvasCloseGuard() {
     setFailed(false);
     try {
       await flushCanvasSaves(retry);
-      await invoke("finish_canvas_close", { requestId: next.request_id });
+      await finishClose(next.request_id);
       pending.current = null;
       setRequest(null);
     } catch {
@@ -42,7 +40,7 @@ export default function CanvasCloseGuard() {
   async function cancel() {
     if (working.current || !pending.current) return;
     try {
-      await invoke("cancel_canvas_close", { requestId: pending.current.request_id });
+      await cancelClose(pending.current.request_id);
       pending.current = null;
       setRequest(null);
     } catch { setFailed(true); }
@@ -53,12 +51,12 @@ export default function CanvasCloseGuard() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void (async () => {
-      const cleanup = await listen<CloseRequest>("canvas:close-requested", ({ payload }) => {
+      const cleanup = await onCanvasCloseRequest((payload) => {
         if (!disposed) void saveAndClose(payload);
       });
       if (disposed) { cleanup(); return; }
       unlisten = cleanup;
-      await invoke("enable_canvas_close_guard");
+      await enableCloseGuard();
       if (!disposed) setGuardError(false);
     })().catch(() => { if (!disposed) setGuardError(true); });
     return () => { disposed = true; unlisten?.(); };

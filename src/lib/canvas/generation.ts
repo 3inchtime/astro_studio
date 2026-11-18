@@ -8,6 +8,7 @@ export function failCanvasGeneration(
   error: string,
   status: "failed" | "cancelled" = "failed",
   generationId?: string,
+  errorCode?: string,
 ): CanvasDocumentContent {
   const request = content.generation_requests?.find(
     (r) => r.request_id === requestId,
@@ -15,7 +16,9 @@ export function failCanvasGeneration(
   if (
     !request ||
     (request.status !== "pending" &&
-      !(status === "cancelled" && request.status === "failed")) ||
+      !(request.status === "failed" && (
+        status === "cancelled" || (errorCode && errorCode !== request.error_code)
+      ))) ||
     (generationId && request.generation_id && request.generation_id !== generationId)
   )
     return content;
@@ -27,6 +30,7 @@ export function failCanvasGeneration(
             ...r,
             status,
             error,
+            error_code: errorCode ?? request.error_code,
             ...(generationId ? { generation_id: generationId } : {}),
           }
         : r,
@@ -101,6 +105,7 @@ export function completeCanvasGeneration(
             generation_id: generationId,
             status: "completed",
             error: undefined,
+            error_code: undefined,
             image_ids: unique.map((i) => i.id),
           }
         : r,

@@ -1,5 +1,11 @@
 {
+  "generate.cancelTask": "取消生成",
+  "generate.cancelledTask": "已取消生成",
+  "generate.cancelTaskFailed": "無法取消生成，請再試一次。",
   "trash": {
+    "bulkRestore": "還原所選記錄",
+    "bulkPurge": "永久刪除所選記錄",
+    "bulkRestoreHint": "將這些生成記錄及其圖片還原到資料庫。",
     "title": "回收站",
     "search": "搜尋已刪除提示詞...",
     "detail": "回收站詳細資訊",

@@ -9,8 +9,8 @@ const { lookup, listeners } = vi.hoisted(() => ({
 }));
 vi.mock("../api", () => ({
   getCanvasGenerationStatus: lookup,
-  onGenerationComplete: (cb: () => void) => {
-    listeners.push(cb);
+  onGenerationJob: (cb: (event: unknown) => void) => {
+    listeners.push(() => cb({ source_ref: { document_id: "doc" }, client_request_id: "req" }));
     return Promise.resolve(vi.fn());
   },
   onGenerationFailed: () => Promise.resolve(vi.fn()),

@@ -1,3 +1,4 @@
+use crate::storage::artifacts::{map_json_paths, transform_database_paths};
 use crate::{
     db::Database,
     operations::{OperationGuard, Operations},
@@ -59,7 +60,13 @@ impl Drop for TempDir {
 fn temporary(parent: &Path) -> Result<TempDir> {
     fs::create_dir_all(parent)?;
     let p = parent.join(format!(".backup-{}", uuid::Uuid::new_v4()));
-    fs::create_dir(&p)?;
+    let mut directory = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory.mode(0o700);
+    }
+    directory.create(&p)?;
     Ok(TempDir(p))
 }
 #[cfg(test)]
@@ -85,54 +92,29 @@ fn hash_file_checked(path: &Path, op: Option<&OperationGuard>) -> Result<(u64, S
     Ok((total, format!("{:x}", hash.finalize())))
 }
 fn safe_entry(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains(['\\', ':', '\0'])
-        && !name.starts_with('/')
-        && name
-            .split('/')
-            .all(|c| !c.is_empty() && c != "." && c != "..")
-}
-fn path_key(key: &str) -> bool {
-    matches!(
-        key,
-        "image_path"
-            | "source_image_path"
-            | "maskPath"
-            | "markupPath"
-            | "mask_path"
-            | "markup_path"
-            | "source_image_paths"
-    )
-}
-fn map_json_paths(value: &mut Value, f: &mut impl FnMut(&str) -> Result<String>) -> Result<()> {
-    match value {
-        Value::Object(map) => {
-            for (key, child) in map.iter_mut() {
-                if path_key(key) {
-                    if let Some(path) = child.as_str() {
-                        if !path.is_empty() {
-                            *child = Value::String(f(path)?);
-                        }
-                    } else if let Value::Array(items) = child {
-                        for item in items {
-                            if let Some(path) = item.as_str() {
-                                *item = Value::String(f(path)?);
-                            }
-                        }
-                    }
-                } else {
-                    map_json_paths(child, f)?;
-                }
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                map_json_paths(item, f)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
+    name.split('/').all(|part| {
+        let stem = part
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        let device = matches!(
+            stem.as_str(),
+            "CON" | "NUL" | "PRN" | "AUX" | "CONIN$" | "CONOUT$"
+        ) || ["COM", "LPT"].iter().any(|prefix| {
+            stem.strip_prefix(prefix).is_some_and(|n| {
+                matches!(
+                    n,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        });
+        !part.is_empty()
+            && !part.ends_with(['.', ' '])
+            && !device
+            && !part.contains(['\\', ':', '<', '>', '"', '|', '?', '*'])
+            && !part.chars().any(char::is_control)
+    })
 }
 fn credential_key(key: &str) -> bool {
     let key = key.to_lowercase().replace(['-', '_'], "");
@@ -205,104 +187,8 @@ fn scrub(value: &mut Value) {
         _ => {}
     }
 }
-fn json_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    f: &mut impl FnMut(&str) -> Result<String>,
-) -> Result<()> {
-    let rows = conn
-        .prepare(&format!(
-            "SELECT id,{column} FROM {table} WHERE {column} IS NOT NULL"
-        ))?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    for (id, text) in rows {
-        let mut value: Value = serde_json::from_str(&text)?;
-        if column == "source_image_paths" {
-            if let Value::Array(items) = &mut value {
-                for item in items {
-                    if let Some(p) = item.as_str() {
-                        *item = Value::String(f(p)?);
-                    }
-                }
-            }
-        } else {
-            map_json_paths(&mut value, f)?;
-        }
-        conn.execute(
-            &format!("UPDATE {table} SET {column}=?1 WHERE id=?2"),
-            params![serde_json::to_string(&value)?, id],
-        )?;
-    }
-    Ok(())
-}
-fn transform_database_paths(
-    conn: &Connection,
-    f: &mut impl FnMut(&str, bool) -> Result<String>,
-    document: &mut impl FnMut(&str, &str) -> Result<()>,
-) -> Result<()> {
-    for (table, column) in [
-        ("images", "file_path"),
-        ("canvas_assets", "file_path"),
-        ("images", "thumbnail_path"),
-        ("canvas_documents", "document_path"),
-        ("canvas_documents", "preview_path"),
-        ("prompt_extractions", "image_path"),
-    ] {
-        let rows = conn
-            .prepare(&format!(
-                "SELECT id,{column} FROM {table} WHERE {column} IS NOT NULL AND {column}<>''"
-            ))?
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        for (id, old) in rows {
-            let new = f(&old, false)?;
-            if column == "document_path" {
-                document(&old, &new)?;
-            }
-            conn.execute(
-                &format!("UPDATE {table} SET {column}=?1 WHERE id=?2"),
-                params![new, id],
-            )?;
-        }
-    }
-    for (table, column) in [
-        ("generations", "source_image_paths"),
-        ("generations", "request_metadata"),
-        ("generation_jobs", "request_json"),
-        ("generation_jobs", "source_ref_json"),
-    ] {
-        json_column(conn, table, column, &mut |p| f(p, false))?;
-    }
-    let rows = conn
-        .prepare(
-            "SELECT generation_id,response_file,expected_response_file FROM generation_recoveries",
-        )?
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    for (id, response, expected) in rows {
-        let response = response
-            .filter(|p| !p.is_empty())
-            .map(|p| f(&p, false))
-            .transpose()?;
-        // Expected paths may not have a file (the request never returned).
-        let expected = expected
-            .filter(|p| !p.is_empty())
-            .map(|p| f(&p, true))
-            .transpose()?;
-        conn.execute("UPDATE generation_recoveries SET response_file=?1,expected_response_file=?2 WHERE generation_id=?3",params![response,expected,id])?;
-    }
-    Ok(())
-}
 fn scrub_snapshot(conn: &Connection) -> Result<()> {
-    conn.execute_batch("PRAGMA secure_delete=ON;")?;
+    conn.execute_batch("PRAGMA secure_delete=ON; UPDATE canvas_assets SET external_source=NULL; DELETE FROM former_asset_roots;")?;
     conn.execute("DELETE FROM settings WHERE key IN ('credential_migration_pending','credential_cleanup_pending','credential_pending_deletes')", [])?;
     conn.execute("DELETE FROM logs", [])?;
     let rows = conn
@@ -552,7 +438,14 @@ fn create_archive(
     let temp = temporary(&paths.bootstrap)?;
     let snapshot = temp.0.join("library.db");
     {
-        let conn = db.conn.lock().map_err(|_| "Database unavailable")?;
+        // The maintenance permit excludes writers. A separate read connection
+        // keeps long snapshot copies off the mutex used by interactive reads.
+        let path = db
+            .connection()?
+            .path()
+            .ok_or("Library has no database path")?
+            .to_owned();
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut copy = Connection::open(&snapshot)?;
         let backup = rusqlite::backup::Backup::new(&conn, &mut copy)?;
         loop {
@@ -570,74 +463,73 @@ fn create_archive(
     }
     let conn = Connection::open(&snapshot)?;
     let overrides = prepare_snapshot_files(&conn, paths, &temp.0, op)?;
+    let former = crate::storage::assets::FormerRoots::read(&conn)?;
     scrub_snapshot(&conn)?;
+    crate::storage::assets::bind_root(&conn, Path::new("assets"))?;
     let mut files: BTreeMap<String, PathBuf> = BTreeMap::new();
     let mut mapping: HashMap<String, String> = HashMap::new();
     let mut documents = Vec::new();
+    let mut rewritten_documents = Vec::new();
     let root = paths.assets.canonicalize()?;
     {
         let mut map = |old: &str, optional: bool| -> Result<String> {
             op.checkpoint()?;
+            let resolved = former.resolve(&paths.assets, old)?;
+            let path = Path::new(&resolved);
+            let exists = path.is_file();
+            if !exists && !optional {
+                return Err(format!("Referenced file is missing: {}", path.display()).into());
+            }
             if let Some(mapped) = mapping.get(old) {
                 return Ok(mapped.clone());
             }
-            let p = Path::new(old);
-            let relative = if p.starts_with(&paths.assets) {
-                p.strip_prefix(&paths.assets)?
-                    .to_string_lossy()
-                    .replace('\\', "/")
+            let canonical = exists.then(|| path.canonicalize()).transpose()?;
+            if path.starts_with(&paths.assets)
+                && canonical.as_ref().is_some_and(|p| !p.starts_with(&root))
+            {
+                return Err("Asset symlink escapes library".into());
+            }
+            let relative = if let Some(relative) = canonical
+                .as_deref()
+                .and_then(|p| p.strip_prefix(&root).ok())
+                .or_else(|| path.strip_prefix(&paths.assets).ok())
+            {
+                relative.to_string_lossy().replace('\\', "/")
             } else {
-                let (_, sha) = hash_file_checked(p, Some(op))?;
+                let (_, sha) = hash_file_checked(path, Some(op))?;
                 format!(
                     "imports/{sha}.{}",
-                    p.extension().and_then(|s| s.to_str()).unwrap_or("bin")
+                    path.extension().and_then(|s| s.to_str()).unwrap_or("bin")
                 )
             };
             let name = format!("assets/{relative}");
             if !safe_entry(&name) {
                 return Err("Invalid referenced asset path".into());
             }
-            if p.is_file() {
-                let canonical = p.canonicalize()?;
-                if p.starts_with(&paths.assets) && !canonical.starts_with(&root) {
-                    return Err("Asset symlink escapes library".into());
-                }
-                files.insert(name.clone(), canonical);
-            } else if !optional {
-                return Err(format!("Referenced file is missing: {}", p.display()).into());
+            if let Some(source) = canonical {
+                files.insert(name.clone(), source);
             }
-            mapping.insert(old.into(), name.clone());
+            mapping.insert(old.to_owned(), name.clone());
             Ok(name)
         };
-        transform_database_paths(&conn, &mut map, &mut |old, new| {
-            documents.push((old.to_owned(), new.to_owned()));
-            Ok(())
-        })?;
+        transform_database_paths(
+            &conn,
+            &mut |p, optional, _| map(p, optional),
+            &mut |old, new| {
+                documents.push((old.to_owned(), new.to_owned()));
+                Ok(())
+            },
+        )?;
+        for (old, entry) in documents {
+            let mut content: Value = serde_json::from_slice(&fs::read(&old)?)?;
+            map_json_paths(&mut content, &mut |p| map(p, false))?;
+            let rewritten = temp.0.join(format!("{}.json", uuid::Uuid::new_v4()));
+            fs::write(&rewritten, serde_json::to_vec(&content)?)?;
+            rewritten_documents.push((entry, rewritten));
+            op.checkpoint()?;
+        }
     }
-    // Canvas paths are structured fields, never replacements in prompts or text objects.
-    for (old, new) in documents {
-        let mut content: Value = serde_json::from_slice(&fs::read(&old)?)?;
-        map_json_paths(&mut content, &mut |p| {
-            if !Path::new(p).is_file() {
-                return Err(format!("Referenced canvas asset is missing: {p}").into());
-            }
-            if let Some(mapped) = mapping.get(p) {
-                return Ok(mapped.clone());
-            }
-            let source = Path::new(p);
-            let (_, sha) = hash_file_checked(source, Some(op))?;
-            let name = format!(
-                "assets/imports/{sha}.{}",
-                source.extension().and_then(|e| e.to_str()).unwrap_or("bin")
-            );
-            files.insert(name.clone(), source.to_path_buf());
-            mapping.insert(p.into(), name.clone());
-            Ok(name)
-        })?;
-        let rewritten = temp.0.join(format!("{}.json", uuid::Uuid::new_v4()));
-        fs::write(&rewritten, serde_json::to_vec(&content)?)?;
-        files.insert(new, rewritten);
-    }
+    files.extend(rewritten_documents);
     conn.execute_batch("VACUUM;")?;
     let count = |table: &str| -> Result<i64> {
         Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?)
@@ -658,6 +550,15 @@ fn create_archive(
     drop(conn);
     files.extend(overrides);
     files.insert("library.db".into(), snapshot);
+    if files
+        .keys()
+        .map(|name| name.to_lowercase())
+        .collect::<HashSet<_>>()
+        .len()
+        != files.len()
+    {
+        return Err("Asset file names collide on a case-insensitive filesystem".into());
+    }
     if files.len() > MAX_FILES {
         return Err("Too many files for one backup".into());
     }
@@ -739,6 +640,7 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
         return Err("Archive has too many files".into());
     }
     let mut names = HashSet::new();
+    let mut portable_names = HashSet::new();
     let mut total = 0u64;
     for i in 0..zip.len() {
         if let Some(op) = op {
@@ -751,6 +653,7 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
                 || entry.name().starts_with("assets/"))
             || entry.is_dir()
             || entry.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000)
+            || !portable_names.insert(entry.name().to_lowercase())
             || !names.insert(entry.name().to_owned())
         {
             return Err("Unsafe or duplicate archive entry".into());
@@ -773,7 +676,7 @@ fn inspect_archive_checked(path: &Path, op: Option<&OperationGuard>) -> Result<B
     if manifest.version != 1 {
         return Err("Unsupported backup format version".into());
     }
-    if manifest.schema_version > 20 {
+    if manifest.schema_version > crate::db::LATEST_SCHEMA_VERSION {
         return Err("Backup was created by a newer application".into());
     }
     if manifest.files.len() + 1 != names.len() || !names.contains("library.db") {
@@ -850,6 +753,7 @@ fn restore_archive_manifest(
     }
     let destination = parent.join(uuid::Uuid::new_v4().to_string());
     fs::create_dir(&destination)?;
+    let destination = destination.canonicalize()?;
     let result = (|| -> Result<()> {
         let mut zip = ZipArchive::new(File::open(archive)?)?;
         for (i, file) in manifest.files.iter().enumerate() {
@@ -882,11 +786,11 @@ fn restore_archive_manifest(
         }
         fs::create_dir_all(destination.join("assets"))?;
         let database = Database::open(&destination.join("library.db"))?;
-        database.run_migrations()?;
+        database.run_library_migrations(Some(&destination.join("assets")))?;
         let conn = database.conn.lock().map_err(|_| "Database unavailable")?;
         let mut docs = Vec::new();
 
-        let mut map = |p: &str, optional: bool| -> Result<String> {
+        let map = |p: &str, optional: bool| -> Result<String> {
             if !safe_entry(p) || !p.starts_with("assets/") {
                 return Err("Backup contains an unmanaged file reference".into());
             }
@@ -899,15 +803,20 @@ fn restore_archive_manifest(
             }
             Ok(restored_path.to_string_lossy().into_owned())
         };
-        transform_database_paths(&conn, &mut map, &mut |_, new| {
-            docs.push(new.to_owned());
-            Ok(())
-        })?;
+        transform_database_paths(
+            &conn,
+            &mut |p, optional, _| map(p, optional),
+            &mut |_, new| {
+                docs.push(new.to_owned());
+                Ok(())
+            },
+        )?;
         for doc in docs {
             let mut value: Value = serde_json::from_slice(&fs::read(&doc)?)?;
             map_json_paths(&mut value, &mut |p| map(p, false))?;
             crate::storage::atomic_write(Path::new(&doc), &serde_json::to_vec(&value)?)?;
         }
+        crate::generation_jobs::interrupt_imported_queue(&conn)?;
         scrub_snapshot(&conn)?;
         let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
         if check != "ok" {
@@ -1193,6 +1102,15 @@ mod tests {
         assert!(!safe_entry("C:\\outside"));
         assert!(!safe_entry("assets/../../outside"));
         assert!(safe_entry("assets/images/example.png"));
+        for entry in [
+            "assets/NUL.png",
+            "assets/COM1.jpg",
+            "assets/a./b.jpg",
+            "assets/trailing ",
+            "assets/bad?.png",
+        ] {
+            assert!(!safe_entry(entry));
+        }
     }
 }
 

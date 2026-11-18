@@ -1,3 +1,4 @@
+import { useCollectionPages } from "../features/collections/useCollectionPages";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Search, Trash2 } from "lucide-react";
@@ -6,10 +7,12 @@ import {
   getTrashSettings,
   permanentlyDeleteGeneration,
   restoreGeneration,
-  searchGenerations,
 } from "../lib/api";
 import type { GenerationResult } from "../types";
 import ConfirmDialog from "../components/common/ConfirmDialog";
+import CollectionSelectionButton from "../components/gallery/CollectionSelectionButton";
+import CollectionBatchActions from "../components/gallery/CollectionBatchActions";
+import { useCollectionSelection } from "../components/gallery/useCollectionSelection";
 import CollectionStatus from "../components/gallery/CollectionStatus";
 import EmptyCollectionState from "../components/gallery/EmptyCollectionState";
 import GenerationDetailPanel from "../components/gallery/GenerationDetailPanel";
@@ -20,41 +23,24 @@ import { useLayoutContext } from "../components/layout/AppLayout";
 export default function TrashPage() {
   const { t } = useTranslation();
   const { refreshConversations } = useLayoutContext();
-  const [results, setResults] = useState<GenerationResult[]>([]);
+  const { results, total, page, pageSize, loading, loadError, loadPage } = useCollectionPages();
+  const selectable = results.filter(row => row.images.length > 0);
+  const selection = useCollectionSelection(selectable.map(row => row.generation.id));
+  const [selectionMode, setSelectionMode] = useState(false);
+  function clearSelection() { selection.clear(); setSelectionMode(false); }
   const [query, setQuery] = useState("");
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<GenerationResult | null>(null);
   const [retentionDays, setRetentionDays] = useState(30);
 
-  const requestIdRef = useRef(0);
   const appliedQueryRef = useRef("");
   const mutationBusyRef = useRef(false);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function loadTrash(p: number, q = query) {
-    const requestId = ++requestIdRef.current;
     appliedQueryRef.current = q;
-    setLoading(true);
-    setLoadError(false);
-    try {
-      const result = await searchGenerations(q.trim() || undefined, p, true);
-      if (requestId !== requestIdRef.current) return;
-      setResults(result.generations);
-      setTotal(result.total);
-      setPage(result.page);
-      setPageSize(result.page_size);
-      setSelected(null);
-    } catch {
-      if (requestId === requestIdRef.current) setLoadError(true);
-    } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
-    }
+    if (await loadPage({ kind: "trash", query: q }, p)) setSelected(null);
   }
 
   useEffect(() => {
@@ -62,12 +48,10 @@ export default function TrashPage() {
     getTrashSettings()
       .then((settings) => setRetentionDays(settings.retention_days))
       .catch(() => {});
-    return () => {
-      requestIdRef.current++;
-    };
   }, []);
 
   function handleSearch() {
+    clearSelection();
     void loadTrash(1, query);
   }
 
@@ -137,23 +121,31 @@ export default function TrashPage() {
             )}
           </div>
 
-          <div className="relative">
-            <Search
-              size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
-              strokeWidth={2}
-            />
-            <input
-              aria-label={t("trash.search")}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder={t("trash.search")}
-              className="studio-input focus-ring h-9 w-full sm:w-52 rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted"
-            />
+          <div className="flex items-center gap-2">
+            <CollectionSelectionButton active={selectionMode} disabled={!selectable.length && !selectionMode}
+              onClick={() => selectionMode ? clearSelection() : setSelectionMode(true)} />
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+                strokeWidth={2}
+              />
+              <input
+                aria-label={t("trash.search")}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                placeholder={t("trash.search")}
+                className="studio-input focus-ring h-9 w-full sm:w-52 rounded-[8px] pl-7 pr-3 text-sm placeholder:text-muted"
+              />
+            </div>
           </div>
         </div>
-
+        <CollectionBatchActions scope="trash" rows={selectable} selectionMode={selectionMode} selectedIds={selection.selectedIds}
+          onSelectLoaded={selection.selectLoaded} onClear={clearSelection} onSucceeded={ids => {
+            selection.remove(ids);
+            if (ids.length) { refreshConversations(); void loadTrash(1, appliedQueryRef.current); }
+          }} />
         <div className="border-b border-border-subtle bg-subtle/20 px-6 py-3">
           <div className="flex items-start gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center text-muted">
@@ -193,6 +185,7 @@ export default function TrashPage() {
             <GenerationGrid
               results={results}
               favoriteMode="hidden"
+              selectionMode={selectionMode} selectedIds={selection.selectedIds} onToggleSelection={selection.toggle}
               onSelect={setSelected}
             />
           )}
@@ -200,7 +193,7 @@ export default function TrashPage() {
           <PaginationControls
             page={page}
             totalPages={totalPages}
-            onPageChange={(p) => loadTrash(p, query)}
+            onPageChange={(p) => { clearSelection(); void loadTrash(p, appliedQueryRef.current); }}
           />
         </div>
       </div>

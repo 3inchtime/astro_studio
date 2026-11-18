@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { StrictMode } from "react";
 import GeneratePage from "./GeneratePage";
 
 const queryClient = new QueryClient({
@@ -39,7 +40,7 @@ const saveImageModel = vi.fn();
 const generateImage = vi.fn();
 const editImage = vi.fn();
 const pickSourceImages = vi.fn();
-const onGenerationComplete = vi.fn();
+const onGenerationJob = vi.fn();
 const onGenerationFailed = vi.fn();
 const onGenerationPartial = vi.fn().mockResolvedValue(() => {});
 const createPromptFavorite = vi.fn();
@@ -53,7 +54,8 @@ const acceptPromptAgentDraft = vi.fn();
 const cancelPromptAgentSession = vi.fn();
 const getPromptAgentSession = vi.fn();
 const consumePendingPrompt = vi.fn();
-const useLocation = vi.fn<() => { state: unknown; pathname?: string }>(() => ({ state: null }));
+const useLocation = vi.fn<() => { state: unknown; pathname?: string; key?: string }>(() => ({ state: null }));
+let activeProjectId: string | null = "project-1";
 let activeConversationId: string | null = "conversation-1";
 
 vi.mock("react-i18next", () => ({
@@ -164,7 +166,7 @@ vi.mock("../lib/api", () => ({
   cancelPromptAgentSession: (...args: unknown[]) =>
     cancelPromptAgentSession(...args),
   getPromptAgentSession: (...args: unknown[]) => getPromptAgentSession(...args),
-  onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
+  onGenerationJob: (...args: unknown[]) => onGenerationJob(...args),
   onGenerationPartial: (...args: unknown[]) => onGenerationPartial(...args),
   onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
@@ -205,7 +207,7 @@ vi.mock("react-router-dom", async () => {
 
 vi.mock("../components/layout/AppLayout", () => ({
   useLayoutContext: () => ({
-    activeProjectId: "project-1",
+    activeProjectId,
     activeConversationId,
     setActiveConversationId: vi.fn(),
     refreshConversations: vi.fn(),
@@ -311,6 +313,36 @@ function createDeferred<T>() {
 }
 
 describe("GeneratePage", () => {
+  it("restores each conversation's own unsent draft across navigation", async () => {
+    const view = render(<StrictMode><GeneratePage /></StrictMode>, { wrapper: TestWrapper });
+    const input = () => screen.getByPlaceholderText("Describe the image you want to generate...");
+    fireEvent.change(input(), { target: { value: "Draft for conversation one" } });
+    activeConversationId = "conversation-2";
+    view.rerender(<StrictMode><GeneratePage /></StrictMode>);
+    expect(input()).toHaveValue("");
+    fireEvent.change(input(), { target: { value: "Draft for conversation two" } });
+    activeConversationId = "conversation-1";
+    view.rerender(<StrictMode><GeneratePage /></StrictMode>);
+    await waitFor(() => expect(input()).toHaveValue("Draft for conversation one"));
+    expect(generateImage).not.toHaveBeenCalled();
+  });
+
+  it("consumes a regenerate navigation once even after the session remounts", async () => {
+    const state = { recipeGenerationId: "saved", recipeMode: "generate" };
+    useLocation.mockReturnValue({ key: "recipe-entry", state });
+    getGenerationRecipe.mockResolvedValue({ version: 1, generation_id: "saved", provenance: "job",
+      prompt: "Use saved parameters", model: "gpt-image-2", request_kind: "generate", provider_profile_id: "saved-profile",
+      source_image_paths: [], warnings: [], options: { size: "1024x1024", quality: "high", image_count: 1 } });
+    const mounted = render(<GeneratePage />, {wrapper: TestWrapper});
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1));
+    mounted.unmount();
+    useLocation.mockReturnValue({ key: "recipe-entry", state: { ...state } });
+    render(<GeneratePage />, {wrapper: TestWrapper});
+    await act(async () => {});
+    expect(getGenerationRecipe).toHaveBeenCalledTimes(1);
+    expect(generateImage).toHaveBeenCalledTimes(1);
+  });
+
   it("reviews persisted failed recipes before retrying an unknown provider outcome", async () => {
     getConversationGenerations.mockResolvedValue([{generation:{id:"failed-saved",prompt:"Saved failed prompt",engine:"gpt-image-2",status:"failed",size:"1024x1024",quality:"high",background:"auto",output_format:"png",moderation:"auto",input_fidelity:"high",image_count:1,source_image_paths:[],created_at:"2026-11-13",request_metadata:JSON.stringify({model:"gpt-image-2",project_id:"project-1",conversation_id:"conversation-1"})},images:[]}]);
     getGenerationRecipe.mockResolvedValue({version:1,generation_id:"failed-saved",provenance:"job",prompt:"Saved failed prompt",model:"gpt-image-2",request_kind:"generate",provider_profile_id:"saved-profile",source_image_paths:[],warnings:["provider_outcome_unknown"],options:{size:"1024x1024",quality:"high",image_count:1}});
@@ -353,7 +385,24 @@ describe("GeneratePage", () => {
     await waitFor(()=>expect(editImage).toHaveBeenCalledWith(expect.objectContaining({prompt:"Keep this draft",model:"gpt-image-2.6-flare",providerProfileId:"saved-profile",sourceGenerationId:"saved",sourceImagePaths:["/tmp/first.png","/tmp/second.png"],quality:"high",imageCount:2,outputCompression:73,advancedOptions:{markupPath:"/tmp/overlay.png",complexity:"high"}})));
   });
 
+  it("keeps a settings handoff in its originating project when another chat opens first", async () => {
+    getModelProviderProfiles.mockResolvedValue({ active_provider_id: "saved-profile", profiles: [] });
+    useLocation.mockReturnValue({ pathname: "/projects/project-1/chat/conversation-1", state: null });
+    const view = render(<GeneratePage />, { wrapper: TestWrapper });
+    fireEvent.change(await screen.findByPlaceholderText("Describe the image you want to generate..."), { target: { value: "Private draft for first project" } });
+    fireEvent.click(await screen.findByRole("button", { name: "generate.configureProvider" }));
+    view.unmount();
+    useLocation.mockReturnValue({ pathname: "/projects/project-2/chat/conversation-2", state: null });
+    const other = render(<GeneratePage />, { wrapper: TestWrapper });
+    expect(screen.getByPlaceholderText("Describe the image you want to generate...")).toHaveValue("");
+    other.unmount();
+    useLocation.mockReturnValue({ pathname: "/projects/project-1/chat/conversation-1", state: null });
+    render(<GeneratePage />, { wrapper: TestWrapper });
+    await screen.findByDisplayValue("Private draft for first project");
+  });
+
   it("restores the original conversation when returning from provider settings", async () => {
+    activeProjectId = null;
     getModelProviderProfiles.mockResolvedValue({ active_provider_id: "saved-profile", profiles: [] });
     useLocation.mockReturnValue({ pathname: "/generate", state: null });
     const view = render(<GeneratePage />, { wrapper: TestWrapper });
@@ -475,6 +524,7 @@ describe("GeneratePage", () => {
   });
 
   beforeEach(() => {
+    activeProjectId = "project-1";
     queryClient.clear();
     sessionStorage.clear();
     navigate.mockReset();
@@ -493,7 +543,7 @@ describe("GeneratePage", () => {
     generateImage.mockReset();
     editImage.mockReset();
     pickSourceImages.mockReset();
-    onGenerationComplete.mockReset();
+    onGenerationJob.mockReset();
     onGenerationFailed.mockReset();
     createPromptFavorite.mockReset();
     createPromptFavorite.mockImplementation(async (prompt: string) => ({
@@ -601,7 +651,7 @@ describe("GeneratePage", () => {
       images: [],
     });
     pickSourceImages.mockResolvedValue([]);
-    onGenerationComplete.mockResolvedValue(vi.fn());
+    onGenerationJob.mockResolvedValue(vi.fn());
     onGenerationFailed.mockResolvedValue(vi.fn());
     consumePendingPrompt.mockReturnValue(null);
   });
@@ -1211,8 +1261,8 @@ describe("GeneratePage", () => {
 
   it("reloads the active conversation when a generation completion event arrives", async () => {
     let completeHandler:
-      ((data: { generation_id: string; status: string }) => void) | undefined;
-    onGenerationComplete.mockImplementation((handler) => {
+      ((data: { generation_id: string; conversation_id: string; status: string }) => void) | undefined;
+    onGenerationJob.mockImplementation((handler) => {
       completeHandler = handler;
       return Promise.resolve(vi.fn());
     });
@@ -1239,10 +1289,13 @@ describe("GeneratePage", () => {
     render(<GeneratePage />, { wrapper: TestWrapper });
 
     await waitFor(() => {
-      expect(onGenerationComplete).toHaveBeenCalled();
+      expect(onGenerationJob).toHaveBeenCalled();
     });
 
+    completeHandler?.({ generation_id: "other", conversation_id: "other", status: "completed" });
+    expect(getConversationGenerations).toHaveBeenCalledTimes(1);
     completeHandler?.({
+      conversation_id: "conversation-1",
       generation_id: "generation-event",
       status: "completed",
     });
@@ -1929,7 +1982,9 @@ describe("GeneratePage", () => {
     await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));
     activeConversationId="conversation-2";view.rerender(<GeneratePage/>);
     await act(async()=>resolve({session:{id:"old-session"},messages:[]}));
-    expect(screen.getByRole("textbox")).toHaveValue("First conversation draft");
+    expect(screen.getByPlaceholderText("Describe the image you want to generate...")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Deep thinking" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Another conversation draft" } });
     await waitFor(()=>expect(screen.getByRole("button",{name:"Generate"})).toBeEnabled());
     fireEvent.click(screen.getByRole("button",{name:"Generate"}));
     await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
@@ -1945,7 +2000,8 @@ describe("GeneratePage", () => {
     fireEvent.click(screen.getByRole("button",{name:"Generate"}));
     await waitFor(()=>expect(screen.getByRole("textbox")).toHaveValue(""));
     activeConversationId="conversation-new";view.rerender(<GeneratePage/>);
-    fireEvent.change(screen.getByRole("textbox"),{target:{value:"New conversation"}});
+    fireEvent.click(screen.getByRole("button", { name: "Deep thinking" }));
+    fireEvent.change(screen.getByPlaceholderText("Describe the image you want to generate..."),{target:{value:"New conversation"}});
     fireEvent.click(screen.getByRole("button",{name:"Generate"}));
     await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(2));
     expect(sendPromptAgentMessage).not.toHaveBeenCalled();
@@ -1964,7 +2020,13 @@ describe("GeneratePage", () => {
     else {activeConversationId="conversation-new";view.rerender(<GeneratePage/>);}
     await act(async()=>resolve({id:"agent-session-1",status:"accepted",accepted_prompt:"Accepted draft"}));
     expect(generateImage).not.toHaveBeenCalled();expect(editImage).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox")).toHaveValue(change==="edit"?"A newer draft":"Existing draft");
+    if (change === "navigate") {
+      fireEvent.click(screen.getByRole("button", { name: "Deep thinking" }));
+      expect(screen.getByRole("textbox")).toHaveValue("");
+      fireEvent.change(screen.getByRole("textbox"), {target:{value:"New conversation draft"}});
+    } else {
+      expect(screen.getByRole("textbox")).toHaveValue("A newer draft");
+    }
     await waitFor(()=>expect(screen.getByRole("button",{name:"Generate"})).toBeEnabled());
     fireEvent.click(screen.getByRole("button",{name:"Generate"}));
     await waitFor(()=>expect(startPromptAgentSession).toHaveBeenCalledTimes(1));

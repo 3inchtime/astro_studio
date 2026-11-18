@@ -1,10 +1,12 @@
 import type { LlmConfig } from "../types";
 
+import manifest from "../../shared/model-catalog.v1.json";
+
 export type LlmConfigCapability = LlmConfig["capability"];
 
-export const MAX_ENABLED_TEXT_CONFIGS = 1;
-export const MAX_ENABLED_MULTIMODAL_CONFIGS = 2;
-export const MAX_ENABLED_LLM_CONFIGS = 2;
+export const MAX_ENABLED_TEXT_CONFIGS = manifest.llm.enabledLimits.text;
+export const MAX_ENABLED_MULTIMODAL_CONFIGS = manifest.llm.enabledLimits.multimodal;
+export const MAX_ENABLED_LLM_CONFIGS = manifest.llm.enabledLimits.total;
 
 export function enabledLlmConfigs(configs: LlmConfig[]): LlmConfig[] {
   return configs.filter((config) => config.enabled);

@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import {
   clearLogs,
+  editImage,
+  getGenerationJob,
+  cancelGenerationJob,
+  listGenerationJobs,
   onGenerationPartial,
   addPromptFavoriteToFolders,
   archiveConversation,
@@ -105,6 +109,35 @@ describe("api updater commands", () => {
       value: localStorageMock,
     });
     localStorageMock.clear();
+  });
+
+  it("acknowledges the durable canvas job before waiting for its images", async () => {
+    const ack = { job_id: "j", generation_id: "g", conversation_id: "c", status: "queued" };
+    const acknowledged = vi.fn();
+    tauriApi.invoke.mockImplementation(async (name) => {
+      if (name === "enqueue_generation") return ack;
+      expect(acknowledged).toHaveBeenCalledWith(ack);
+      return { generation_id: "g", conversation_id: "c", images: [] };
+    });
+    const params = { prompt: "Edit", sourceImagePaths: ["/fixture.png"], documentId: "canvas", clientRequestId: "request" };
+    const result = await editImage(params, acknowledged);
+    expect(tauriApi.invoke.mock.calls).toEqual([
+      ["enqueue_generation", { request: { ...params, kind: "edit" } }],
+      ["wait_generation_result", { jobId: "j" }],
+    ]);
+    expect(result.generation_id).toBe("g");
+  });
+
+  it("reads and cancels the persisted job by its own identity", async () => {
+    const filter = { conversation_id: "c", document_id: "d" };
+    await listGenerationJobs(filter);
+    await getGenerationJob("j");
+    await cancelGenerationJob("j");
+    expect(tauriApi.invoke.mock.calls).toEqual([
+      ["list_generation_jobs", { filter }],
+      ["get_generation_job", { jobId: "j" }],
+      ["cancel_generation_job", { jobId: "j" }],
+    ]);
   });
 
   it("does not subscribe to desktop generation events in a browser preview", async () => {

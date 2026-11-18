@@ -125,9 +125,10 @@ vi.mock("../lib/api", () => ({
   editImage: (...args: unknown[]) => editImage(...args),
   getCanvasGenerationStatus: (...args: unknown[]) =>
     getCanvasGenerationStatus(...args),
-  onGenerationComplete: (handler: () => void) => {
-    generationCompleteListeners.add(handler);
-    return Promise.resolve(() => generationCompleteListeners.delete(handler));
+  onGenerationJob: (handler: (event: unknown) => void) => {
+    const notify = () => handler({ source_ref: {document_id: "canvas-1"}, client_request_id: "recover-request" });
+    generationCompleteListeners.add(notify);
+    return Promise.resolve(() => generationCompleteListeners.delete(notify));
   },
   onGenerationPartial: () => Promise.resolve(() => {}),
   onGenerationFailed: () => Promise.resolve(() => {}),
@@ -641,6 +642,36 @@ describe("CanvasPage", () => {
     );
     await waitFor(() => expect(editImage).toHaveBeenCalled());
     expect(editImage.mock.calls[0][0].clientRequestId).not.toBe(firstId);
+  });
+
+  it("requires confirmation before resubmitting a reopened request with unknown provider outcome", async () => {
+    const document = canvasDocumentWithImage();
+    document.content.generation_requests = [{
+      request_id: "unconfirmed", project_id: "project-1", prompt: "original edit",
+      frame: { ...document.content.frame }, status: "failed", image_ids: [], created_at: "",
+      error: "Provider unavailable", source_image_path: "/tmp/original-export.png",
+    }];
+    getCanvasDocument.mockResolvedValueOnce(document);
+    getCanvasGenerationStatus.mockResolvedValue({
+      generation_id: "original", status: "interrupted", error: "Unconfirmed", error_code: "provider_outcome_unknown", images: [],
+    });
+    render(<CanvasPage />, { wrapper: TestWrapper });
+    await screen.findByText("Canvas objects: image-1");
+    await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith("canvas-1",
+      expect.objectContaining({ generation_requests: [expect.objectContaining({error_code: "provider_outcome_unknown"})] }),
+      expect.anything(), expect.any(Number)));
+    fireEvent.click(screen.getByRole("tab", { name: "Generation" }));
+    const retry = screen.getByRole("button", { name: "canvas.generationRetry" });
+    fireEvent.click(retry);
+    await screen.findByRole("dialog", { name: "generate.unknownRetryTitle" });
+    expect(editImage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("favorites.cancel"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(editImage).not.toHaveBeenCalled();
+    fireEvent.click(retry);
+    fireEvent.click(await screen.findByRole("button", { name: "generate.confirmUnknownRetry" }));
+    await waitFor(() => expect(editImage).toHaveBeenCalledTimes(1));
+    expect(editImage.mock.calls[0][0].clientRequestId).not.toBe("unconfirmed");
   });
 
   it("retries a saved request using its original export instead of the changed canvas", async () => {

@@ -1,0 +1,9 @@
+{
+  "fixture-seedream": {
+    "label": "Fixture Seedream",
+    "i18nKey": "models.fixtureSeedream",
+    "profile": "seedream-5",
+    "providerModelId": "provider-fixture-model",
+    "aliases": ["former-fixture-id"]
+  }
+}

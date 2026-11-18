@@ -11,7 +11,7 @@ import {
   diagnoseImageProvider,
   getProviderSmokePlan,
   runProviderSmokeTest,
-} from "../../lib/diagnosticsApi";
+} from "../../features/diagnostics/commands";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 const buttonClass =

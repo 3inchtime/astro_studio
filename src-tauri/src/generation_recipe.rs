@@ -1,9 +1,10 @@
+use crate::storage::artifacts::{ArtifactColumn, ArtifactKind};
 use crate::{
-    commands::settings,
     db::Database,
     error::AppError,
     generation_jobs::{self, GenerationJobOptions, GenerationJobRequest},
     models::*,
+    providers,
 };
 use rusqlite::OptionalExtension;
 use serde::Serialize;
@@ -111,10 +112,7 @@ pub(crate) fn validate_saved_recipe_options(
         || options.stream != sanitized.stream
         || options.partial_images != sanitized.partial_images
         || ((options.stream || options.partial_images > 0)
-            && !matches!(
-                model,
-                ENGINE_GPT_IMAGE_26_FLARE | ENGINE_GPT_IMAGE_26_SUNBURST
-            ))
+            && !crate::model_registry::supports_advanced_options(model))
         || (options.output_compression != 100
             && (crate::image_engines::provider_for_model(model)
                 != crate::image_engines::ImageProvider::OpenAi
@@ -137,7 +135,7 @@ pub(crate) fn load_recipe(
         conn.query_row(
             "SELECT * FROM generations WHERE id=?1 AND deleted_at IS NULL",
             [generation_id],
-            crate::gallery::row_to_generation,
+            crate::collections::images::row_to_generation,
         )
         .map_err(|_| invalid("Generation is unavailable"))?
     };
@@ -201,13 +199,8 @@ pub(crate) fn load_recipe(
             };
             recipe.provider_profile_id = Some(job.provider_profile_id.clone());
             recipe.endpoint_snapshot = Some(job.endpoint_snapshot.clone());
-            let profile = settings::read_model_provider_profiles_state(db, &recipe.model)
-                .ok()
-                .and_then(|s| {
-                    s.profiles
-                        .into_iter()
-                        .find(|p| p.id == job.provider_profile_id)
-                });
+            let profile =
+                providers::resolve_profile(db, &recipe.model, Some(&job.provider_profile_id)).ok();
             match profile {
                 None => recipe.warnings.push("provider_missing".into()),
                 Some(profile) => {
@@ -327,6 +320,33 @@ pub(crate) fn get_generation_recipe(
         _ => Err(invalid("Select exactly one generation or client request")),
     }
 }
+
+pub(crate) const RECIPES_ARTIFACTS: &[ArtifactColumn] = &[
+    ArtifactColumn::new(
+        "generations",
+        "id",
+        "source_image_paths",
+        ArtifactKind::PathList,
+    ),
+    ArtifactColumn::new(
+        "generations",
+        "id",
+        "request_metadata",
+        ArtifactKind::Structured,
+    ),
+    ArtifactColumn::new(
+        "generation_jobs",
+        "id",
+        "request_json",
+        ArtifactKind::Structured,
+    ),
+    ArtifactColumn::new(
+        "generation_jobs",
+        "id",
+        "source_ref_json",
+        ArtifactKind::Structured,
+    ),
+];
 
 #[cfg(test)]
 mod tests {

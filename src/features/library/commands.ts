@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { flushCanvasSaves } from "./canvas/persistence";
+import { flushCanvasSaves } from "../../lib/canvas/persistence";
 export interface BackupInspection {
   token: string;
   manifest: {

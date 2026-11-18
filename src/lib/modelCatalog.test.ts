@@ -87,3 +87,20 @@ it.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"])(
     ).toBe("gpt-image-2.5-flare");
   },
 );
+
+it("resolves a manifest-only extension, its aliases and existing protocol presets", async () => {
+  const { createImageCatalog } = await import("./modelCatalog");
+  const { default: fixture } = await import("../../shared/fixtures/image-model-extension.json");
+  const catalog = createImageCatalog(fixture);
+  const entry = catalog.find("former-fixture-id");
+  expect(entry).toBe(catalog.find("provider-fixture-model"));
+  expect(entry).toBe(catalog.find("fixture-seedream"));
+  expect(entry?.protocol).toBe("seedream-images");
+  expect(entry?.parameterCapabilities.outputFormats).toEqual(["png", "jpeg"]);
+  expect(entry?.connectionDefaults.generationUrl).toBe("https://ark.cn-beijing.volces.com/api/v3/images/generations");
+});
+
+it("resolves the same builtin aliases as the persisted provider profiles", () => {
+  expect(getImageModelCatalogEntry("gemini-3-pro-image-preview").id).toBe("nano-banana-pro");
+  expect(getImageModelCatalogEntry("gemini-2.5-flash-image").id).toBe("nano-banana");
+});

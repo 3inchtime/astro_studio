@@ -1,4 +1,4 @@
-import { isGptImage26 } from "./modelCatalog";
+import { supportsAdvancedImageOptions } from "./modelCatalog";
 import type { ImageAdvancedOptions } from "../types";
 export interface Image26ValidationInput {
   model: string;
@@ -13,7 +13,7 @@ export interface Image26ValidationInput {
 export function image26ValidationError(
   input: Image26ValidationInput,
 ): string | null {
-  if (!isGptImage26(input.model)) return null;
+  if (!supportsAdvancedImageOptions(input.model)) return null;
   const { format, size, count, background, editing, options } = input;
   if (
     ["jpeg", "webp"].includes(format) &&

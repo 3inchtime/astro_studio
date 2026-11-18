@@ -1,5 +1,5 @@
 import type { EndpointSettings, ImageModel } from "../types";
-import { getImageModelCatalogEntry } from "./modelCatalog";
+import { findImageModel, getImageModelCatalogEntry } from "./modelCatalog";
 
 export function defaultBaseUrlForModel(model: ImageModel): string {
   return getImageModelCatalogEntry(model).connectionDefaults.baseUrl;
@@ -41,15 +41,11 @@ export function normalizeEndpointSettings(
 ): EndpointSettings {
   const defaults = defaultEndpointSettingsForModel(model);
   let generationUrl = settings.generation_url.trim() || defaults.generation_url;
-  for (const [oldId, newId] of [
-    ["gemini-3.1-flash-image-preview", "gemini-3.1-flash-image"],
-    ["gemini-3-pro-image-preview", "gemini-3-pro-image"],
-  ]) {
-    if (
-      generationUrl ===
-      `https://generativelanguage.googleapis.com/v1beta/models/${oldId}:generateContent`
-    ) {
-      generationUrl = `https://generativelanguage.googleapis.com/v1beta/models/${newId}:generateContent`;
+  const match = generationUrl.match(/^(.*)\/([^/]+):generateContent$/);
+  if (match) {
+    const legacy = findImageModel(match[2]);
+    if (legacy?.protocol === "gemini-generate-content" && match[1] === legacy.connectionDefaults.baseUrl && match[2] !== legacy.id) {
+      generationUrl = legacy.connectionDefaults.generationUrl;
     }
   }
   const editUrl =

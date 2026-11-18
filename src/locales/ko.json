@@ -1,5 +1,11 @@
 {
+  "generate.cancelTask": "생성 취소",
+  "generate.cancelledTask": "생성이 취소되었습니다",
+  "generate.cancelTaskFailed": "생성을 취소할 수 없습니다. 다시 시도해 주세요.",
   "trash": {
+    "bulkRestore": "선택한 기록 복원",
+    "bulkPurge": "선택한 기록 영구 삭제",
+    "bulkRestoreHint": "생성 기록과 이미지를 라이브러리로 복원합니다.",
     "title": "휴지통",
     "search": "삭제된 프롬프트 검색...",
     "detail": "휴지통 상세",

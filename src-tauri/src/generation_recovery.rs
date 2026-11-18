@@ -22,6 +22,7 @@ use crate::generation_worker_lease::{
     renew_worker_lease_with_transaction_time, WorkerLeaseAcquireOutcome, WorkerTransitionAuthority,
 };
 use crate::models::{GenerationJobEvent, GenerationJobStage, GenerationJobStatus};
+use crate::storage::artifacts::{ArtifactColumn, ArtifactKind};
 use crate::storage::{MaintenanceGate, StoragePaths};
 use rusqlite::params;
 use serde::Serialize;
@@ -82,15 +83,27 @@ fn transition_error(error: WorkerTransitionError) -> AppError {
     }
 }
 
-fn emit(app: Option<&tauri::AppHandle>, event: &GenerationJobEvent) {
-    if let Some(app) = app {
-        let _ = app.emit("generation:job", event);
+pub(crate) trait RecoveryEvents: Send + Sync {
+    fn terminal(&self, event: &GenerationJobEvent);
+}
+
+impl<R: tauri::Runtime> RecoveryEvents for tauri::AppHandle<R> {
+    fn terminal(&self, event: &GenerationJobEvent) {
+        crate::generation_execution::publish(self, event);
         let name = if event.status == GenerationJobStatus::Completed {
             "generation:complete"
         } else {
             "generation:failed"
         };
-        let _ = app.emit(name, serde_json::json!({"generation_id":event.generation_id,"status":event.status,"error":event.error_message}));
+        let mut payload = serde_json::json!(event);
+        payload["error"] = serde_json::json!(event.error_message);
+        let _ = self.emit(name, payload);
+    }
+}
+
+fn emit(app: Option<&dyn RecoveryEvents>, event: &GenerationJobEvent) {
+    if let Some(app) = app {
+        app.terminal(event);
     }
 }
 
@@ -110,7 +123,7 @@ fn pending_ids(db: &Database, generation_id: Option<&str>) -> Result<Vec<String>
     let conn = db.conn.lock().map_err(|_| lock_error())?;
     let mut statement = conn.prepare(
         "SELECT j.id FROM generation_jobs j WHERE (?1 IS NULL OR j.generation_id=?1)
-         AND ((?1 IS NULL AND j.status IN ('running','queued'))
+         AND ((?1 IS NULL AND (j.status='running' OR (j.status='queued' AND COALESCE(json_extract(CASE WHEN json_valid(j.source_ref_json) THEN j.source_ref_json ELSE '{}' END,'$.execution_version'),0) != 1)))
               OR (j.status IN ('failed','interrupted') AND EXISTS (
                   SELECT 1 FROM generation_recoveries r WHERE r.generation_id=j.generation_id AND (r.request_state='response_ready' OR (r.request_state='requesting' AND r.expected_response_file IS NOT NULL)))))
          ORDER BY j.queued_at, j.rowid"
@@ -133,7 +146,7 @@ fn finish_failure(
     candidate: &ModernStartupCandidate,
     authority: &WorkerTransitionAuthority,
     preserve: bool,
-    app: Option<&tauri::AppHandle>,
+    app: Option<&dyn RecoveryEvents>,
 ) -> Result<GenerationJobStatus, AppError> {
     // Cancellation can arrive during response decoding or filesystem work.
     let cancelled = {
@@ -185,7 +198,7 @@ fn acknowledge_cancel(
     db: &Database,
     candidate: &ModernStartupCandidate,
     authority: &WorkerTransitionAuthority,
-    app: Option<&tauri::AppHandle>,
+    app: Option<&dyn RecoveryEvents>,
 ) -> Result<GenerationJobStatus, AppError> {
     let event = acknowledge_generation_cancellation_fenced_with_transaction_time(
         db,
@@ -204,7 +217,7 @@ async fn recover_candidate(
     root: &Path,
     mut candidate: ModernStartupCandidate,
     authority: &WorkerTransitionAuthority,
-    app: Option<&tauri::AppHandle>,
+    app: Option<&dyn RecoveryEvents>,
 ) -> Result<GenerationJobStatus, AppError> {
     if candidate.cancel_requested {
         return acknowledge_cancel(db, &candidate, authority, app);
@@ -320,7 +333,12 @@ async fn recover_candidate(
         authority,
         now_ms,
     ) {
-        Ok(FencedGenerationSuccessTransition::Completed { event, .. }) => {
+        Ok(FencedGenerationSuccessTransition::Completed { event, result }) => {
+            log::info!(
+                "Recovered {} images for generation {}",
+                result.images.len(),
+                result.generation_id
+            );
             emit(app, &event);
             Ok(GenerationJobStatus::Completed)
         }
@@ -512,12 +530,22 @@ pub(crate) async fn recover_pending(
     engine: &GptImageEngine,
     root: &Path,
     generation_id: Option<&str>,
-    app: Option<&tauri::AppHandle>,
+    app: Option<&dyn RecoveryEvents>,
 ) -> Result<RecoverySummary, AppError> {
     let ids = pending_ids(db, generation_id)?;
     if generation_id.is_some() && ids.is_empty() {
         return Err(AppError::GenerationJobNotRetryable);
     }
+    recover_ids(db, engine, root, &ids, app).await
+}
+
+pub(crate) async fn recover_ids(
+    db: &Database,
+    engine: &GptImageEngine,
+    root: &Path,
+    ids: &[String],
+    app: Option<&dyn RecoveryEvents>,
+) -> Result<RecoverySummary, AppError> {
     if ids.is_empty() {
         return Ok(RecoverySummary::default());
     }
@@ -545,7 +573,7 @@ pub(crate) async fn recover_pending(
         let normalized = with_recovery_lease(
             db,
             &lease.authority,
-            normalize_compatibility_recovery(db, root, &id, &lease.authority),
+            normalize_compatibility_recovery(db, root, id, &lease.authority),
         )
         .await;
         match normalized {
@@ -565,7 +593,7 @@ pub(crate) async fn recover_pending(
                 .map_err(|_| AppError::GenerationJobInvalidTransition)?;
             prepare_modern_recovery_candidate_with_transaction_time(
                 &conn,
-                &id,
+                id,
                 &lease.authority,
                 now_ms,
             )
@@ -584,7 +612,7 @@ pub(crate) async fn recover_pending(
                     // leaving the saved job running until another restart.
                     let cancelled = {
                         let conn = db.conn.lock().map_err(|_| lock_error())?;
-                        conn.query_row("SELECT status='running' AND cancel_requested_at IS NOT NULL FROM generation_jobs WHERE id=?1", [&id], |row| row.get::<_,bool>(0))?
+                        conn.query_row("SELECT status='running' AND cancel_requested_at IS NOT NULL FROM generation_jobs WHERE id=?1", [id], |row| row.get::<_,bool>(0))?
                     };
                     if cancelled {
                         acknowledge_cancel(db, &candidate, &lease.authority, app)
@@ -630,7 +658,7 @@ pub(crate) async fn startup_recover(
 }
 
 async fn startup_recover_inner(
-    app: Option<&tauri::AppHandle>,
+    app: Option<&dyn RecoveryEvents>,
     db: &Database,
     engine: &GptImageEngine,
     root: &Path,
@@ -656,6 +684,8 @@ pub(crate) async fn recover_generation(
     gate: State<'_, MaintenanceGate>,
     generation_id: String,
 ) -> Result<RecoverySummary, AppError> {
+    let runtime = app.state::<crate::generation_execution::GenerationRuntime>();
+    let _worker = runtime.execution.lock().await;
     let _permit = gate
         .write()
         .map_err(|message| AppError::Validation { message })?;
@@ -738,6 +768,21 @@ pub(crate) fn get_generation_recovery_summary(
         None => summary,
     })
 }
+pub(crate) const RECOVERIES_ARTIFACTS: &[ArtifactColumn] = &[
+    ArtifactColumn::new(
+        "generation_recoveries",
+        "generation_id",
+        "response_file",
+        ArtifactKind::File,
+    ),
+    ArtifactColumn::new(
+        "generation_recoveries",
+        "generation_id",
+        "expected_response_file",
+        ArtifactKind::Expected,
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -917,6 +962,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second.interrupted, 0);
+    }
+
+    #[tokio::test]
+    async fn local_save_recovery_announces_the_terminal_job_to_waiters() {
+        let fixture = Fixture::new();
+        fixture.save_response(true).await;
+        let app = tauri::test::mock_app();
+        app.manage(crate::generation_execution::GenerationRuntime::default());
+        let engine = GptImageEngine::new(&Default::default()).unwrap();
+        let result =
+            crate::generation_execution::await_result(app.handle(), &fixture.db, &fixture.job_id);
+        tokio::pin!(result);
+        tokio::select! {
+            biased;
+            _ = &mut result => panic!("running job cannot have delivered images"),
+            _ = std::future::ready(()) => {},
+        }
+        let summary = recover_pending(
+            &fixture.db,
+            &engine,
+            &fixture.root,
+            None,
+            Some(app.handle()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.recovered, 1);
+        let delivered = tokio::time::timeout(Duration::from_secs(1), result)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(delivered.generation_id, fixture.generation_id);
+        assert_eq!(delivered.images.len(), 1);
     }
 
     #[tokio::test]

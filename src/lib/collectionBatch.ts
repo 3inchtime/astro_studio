@@ -1,3 +1,5 @@
+export type CollectionAction = "delete" | "favorite" | "restore" | "purge";
+
 type BatchRecord = { generation: { id: string }; images: { id: string }[] };
 
 export function selectLoadedGenerations<T extends BatchRecord>(rows: T[], selected: Set<string>): T[] {
@@ -7,7 +9,7 @@ export function selectLoadedGenerations<T extends BatchRecord>(rows: T[], select
 /** Checkpoints are scoped to one confirmed action and survive partial-failure retries. */
 export async function runGenerationBatch(
   rows: BatchRecord[],
-  kind: "delete" | "favorite",
+  kind: CollectionAction,
   operation: (id: string) => Promise<void>,
   checkpoint: Set<string>,
 ): Promise<{ succeeded: string[]; failed: string[] }> {
@@ -15,7 +17,7 @@ export async function runGenerationBatch(
   const failed: string[] = [];
   for (const row of rows) {
     try {
-      const ids = kind === "delete" ? [row.generation.id] : row.images.map((image) => image.id);
+      const ids = kind === "favorite" ? row.images.map(image => image.id) : [row.generation.id];
       for (const id of ids) {
         if (checkpoint.has(id)) continue;
         await operation(id);

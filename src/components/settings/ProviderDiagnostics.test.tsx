@@ -12,8 +12,8 @@ import {
   diagnoseImageProvider,
   getProviderSmokePlan,
   runProviderSmokeTest,
-} from "../../lib/diagnosticsApi";
-vi.mock("../../lib/diagnosticsApi", () => ({
+} from "../../features/diagnostics/commands";
+vi.mock("../../features/diagnostics/commands", () => ({
   diagnoseImageProvider: vi.fn(),
   getProviderSmokePlan: vi.fn(),
   runProviderSmokeTest: vi.fn(),

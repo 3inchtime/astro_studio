@@ -1,3 +1,4 @@
+import { useCollectionPages } from "../features/collections/useCollectionPages";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
@@ -11,7 +12,6 @@ import {
   getConversations,
   pinProject,
   renameProject,
-  searchGenerations,
   unpinProject,
 } from "../lib/api";
 import { buildEditSource, savePendingEditSources } from "../lib/editSources";
@@ -59,10 +59,7 @@ export default function ProjectHomePage() {
       if (requestId === conversationRequestId.current) setConversationsLoading(false);
     }
   }, [projectId]);
-  const [results, setResults] = useState<GenerationResult[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const { results, total, page, pageSize, loading: imagesLoading, loadError: imagesError, loadPage, resetResults } = useCollectionPages();
   const [selectedImage, setSelectedImage] = useState<GenerationResult | null>(
     null,
   );
@@ -115,9 +112,6 @@ export default function ProjectHomePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [reloadVersion, setReloadVersion] = useState(0);
-  const [imagesLoading, setImagesLoading] = useState(false);
-  const [imagesError, setImagesError] = useState(false);
-  const imageRequestId = useRef(0);
   const projectEpoch = useRef(0);
   const activeSearch = useRef<{
     query: string;
@@ -130,31 +124,11 @@ export default function ProjectHomePage() {
       filters: GenerationSearchFilters,
       nextPage: number,
     ) => {
-      const requestId = ++imageRequestId.current;
+      if (!projectId) return;
       activeSearch.current = { query, filters };
-      setImagesLoading(true);
-      setImagesError(false);
-      try {
-        const result = await searchGenerations(
-          query.trim() || undefined,
-          nextPage,
-          false,
-          filters,
-          projectId,
-        );
-        if (requestId !== imageRequestId.current) return;
-        setResults(result.generations);
-        setTotal(result.total);
-        setPage(result.page);
-        setPageSize(result.page_size);
-        setSelectedImage(null);
-      } catch {
-        if (requestId === imageRequestId.current) setImagesError(true);
-      } finally {
-        if (requestId === imageRequestId.current) setImagesLoading(false);
-      }
+      if (await loadPage({ kind: "project", projectId, query, filters }, nextPage)) setSelectedImage(null);
     },
-    [projectId],
+    [projectId, loadPage],
   );
 
   useEffect(() => {
@@ -172,7 +146,7 @@ export default function ProjectHomePage() {
     setLoading(true);
     setLoadError(false);
     setProject(null);
-    setResults([]);
+    resetResults();
     setConversations([]);
     void loadConversations();
     setSelectedImage(null);
@@ -194,11 +168,10 @@ export default function ProjectHomePage() {
     void loadImages("", {}, 1);
     return () => {
       cancelled = true;
-      imageRequestId.current++;
       conversationRequestId.current++;
       projectEpoch.current++;
     };
-  }, [projectId, reloadVersion, loadImages, loadConversations]);
+  }, [projectId, reloadVersion, loadImages, loadConversations, resetResults]);
 
   async function handleRenameProject(name: string) {
     if (!project) return;

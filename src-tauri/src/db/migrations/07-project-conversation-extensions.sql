@@ -1,0 +1,11 @@
+ALTER TABLE projects ADD COLUMN deleted_at TEXT;
+ALTER TABLE conversations ADD COLUMN archived_at TEXT;
+ALTER TABLE conversations ADD COLUMN pinned_at TEXT;
+ALTER TABLE conversations ADD COLUMN deleted_at TEXT;
+UPDATE conversations SET project_id = 'default' WHERE project_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_project_id ON conversations(project_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_pinned_at ON conversations(pinned_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_archived_at ON conversations(archived_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_deleted_at ON conversations(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
+CREATE INDEX IF NOT EXISTS idx_projects_deleted_at ON projects(deleted_at);

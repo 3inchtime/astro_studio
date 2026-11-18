@@ -1,5 +1,6 @@
 use crate::config::ApiConfig;
-use crate::image_engines::{gemini, openai, provider_for_model, ImageProvider};
+use crate::image_engines::{gemini, openai};
+use crate::model_catalog::{ImageModelSpec, ImageProtocol, CATALOG};
 use crate::models::*;
 use reqwest::header;
 use reqwest::multipart::{Form, Part};
@@ -436,11 +437,9 @@ impl GptImageEngine {
                 .map_err(|_| EngineCallError::provider_outcome_unknown("stream read failed"))?
             {
                 for partial in decoder.push(&chunk)? {
-                    if let (Some(app), Some((generation_id, client_request_id))) =
-                        (self.app.get(), &options.progress_context)
-                    {
+                    if let (Some(app), Some(scope)) = (self.app.get(), &options.progress_context) {
                         use tauri::Emitter;
-                        let _ = app.emit("generation:partial", serde_json::json!({"generation_id":generation_id,"client_request_id":client_request_id,"partial_image_index":partial["partial_image_index"],"b64_json":partial["b64_json"],"output_format":options.output_format}));
+                        let _ = app.emit("generation:partial", serde_json::json!({"generation_id":scope.generation_id,"client_request_id":scope.client_request_id,"job_id":scope.job_id,"project_id":scope.project_id,"conversation_id":scope.conversation_id,"document_id":scope.document_id,"partial_image_index":partial["partial_image_index"],"b64_json":partial["b64_json"],"output_format":options.output_format}));
                     }
                 }
             }
@@ -472,17 +471,13 @@ impl GptImageEngine {
 
     async fn request_gemini_images(
         &self,
-        model: &str,
+        model: ImageModelSpec<'_>,
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
         source_images: &[PreparedEditImage],
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
-        if api_key.is_empty() {
-            return Err(EngineCallError::provider_configuration_invalid());
-        }
-
         let inline_images = source_images
             .iter()
             .map(|image| gemini::GeminiInlineImage {
@@ -494,7 +489,7 @@ impl GptImageEngine {
             })
             .collect::<Vec<_>>();
         let mut request_body = gemini::build_request_body(prompt, &inline_images, options);
-        if model == ENGINE_NANO_BANANA {
+        if model.profile.parameter_capabilities.resolutions.len() == 1 {
             if let Some(config) = request_body["generationConfig"]["imageConfig"].as_object_mut() {
                 config.remove("imageSize");
             }
@@ -514,21 +509,18 @@ impl GptImageEngine {
 
     async fn request_native_images(
         &self,
-        model: &str,
+        model: ImageModelSpec<'_>,
         api_key: &str,
         endpoint_url: &str,
         prompt: &str,
         sources: &[PreparedEditImage],
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
-        if api_key.is_empty() {
-            return Err(EngineCallError::provider_configuration_invalid());
-        }
-        crate::model_registry::validate_request_options(model, options, sources.len())
+        crate::model_registry::validate_model_options(model, options, sources.len())
             .map_err(|_| EngineCallError::request_rejected())?;
         let body = crate::image_engines::native::build_request(model, prompt, sources, options);
         let request = self.client.post(endpoint_url).json(&body);
-        let request = if model == ENGINE_NANO_BANANA_21 {
+        let request = if model.profile.protocol == ImageProtocol::GeminiInteractions {
             request.header("x-goog-api-key", api_key)
         } else {
             request.bearer_auth(api_key)
@@ -761,6 +753,61 @@ impl GptImageEngine {
     }
 }
 
+impl GptImageEngine {
+    async fn submit_images(
+        &self,
+        model: ImageModelSpec<'_>,
+        api_key: &str,
+        endpoint: &str,
+        prompt: &str,
+        sources: &[PreparedEditImage],
+        options: &GptImageRequestOptions,
+    ) -> Result<ProviderAttemptBody, EngineCallError> {
+        if api_key.is_empty() {
+            return Err(EngineCallError::provider_configuration_invalid());
+        }
+        match model.profile.protocol {
+            ImageProtocol::GeminiGenerateContent => {
+                return self
+                    .request_gemini_images(model, api_key, endpoint, prompt, sources, options)
+                    .await
+            }
+            ImageProtocol::GeminiInteractions
+            | ImageProtocol::XaiImages
+            | ImageProtocol::SeedreamImages => {
+                return self
+                    .request_native_images(model, api_key, endpoint, prompt, sources, options)
+                    .await
+            }
+            ImageProtocol::OpenaiImages => {}
+        }
+
+        let url = openai::image_endpoint_url(endpoint);
+        let request = if sources.is_empty() {
+            self.client
+                .post(url)
+                .json(&openai::build_generation_request_body(
+                    model.provider_model_id,
+                    prompt,
+                    options,
+                ))
+        } else {
+            self.edit_client.post(url).multipart(Self::build_edit_form(
+                model.provider_model_id,
+                prompt,
+                options,
+                sources,
+            )?)
+        };
+        let response = request
+            .bearer_auth(api_key)
+            .send()
+            .await
+            .map_err(|error| EngineCallError::from_send_error(&error))?;
+        self.read_attempt_response(response, options).await
+    }
+}
+
 #[async_trait::async_trait]
 impl ImageEngine for GptImageEngine {
     async fn generate(
@@ -771,39 +818,11 @@ impl ImageEngine for GptImageEngine {
         prompt: &str,
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
-        if matches!(
-            provider_for_model(model),
-            ImageProvider::Xai | ImageProvider::Seedream
-        ) || model == ENGINE_NANO_BANANA_21
-        {
-            return self
-                .request_native_images(model, api_key, endpoint_url, prompt, &[], options)
-                .await;
-        }
-        if provider_for_model(model) == ImageProvider::Unknown {
-            return Err(EngineCallError::request_rejected());
-        }
-        if provider_for_model(model) == ImageProvider::Gemini {
-            return self
-                .request_gemini_images(model, api_key, endpoint_url, prompt, &[], options)
-                .await;
-        }
-        if api_key.is_empty() {
-            return Err(EngineCallError::provider_configuration_invalid());
-        }
-
-        let response = self
-            .client
-            .post(openai::image_endpoint_url(endpoint_url))
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("Content-Type", "application/json")
-            .json(&openai::build_generation_request_body(
-                model, prompt, options,
-            ))
-            .send()
+        let model = CATALOG
+            .image_model(model)
+            .ok_or_else(EngineCallError::request_rejected)?;
+        self.submit_images(model, api_key, endpoint_url, prompt, &[], options)
             .await
-            .map_err(|error| EngineCallError::from_send_error(&error))?;
-        self.read_attempt_response(response, options).await
     }
 
     async fn edit(
@@ -815,46 +834,53 @@ impl ImageEngine for GptImageEngine {
         source_images: &[PreparedEditImage],
         options: &GptImageRequestOptions,
     ) -> Result<ProviderAttemptBody, EngineCallError> {
-        if api_key.is_empty() {
-            return Err(EngineCallError::provider_configuration_invalid());
-        }
-        if source_images.is_empty() {
+        let model = CATALOG
+            .image_model(model)
+            .ok_or_else(EngineCallError::request_rejected)?;
+        if source_images.is_empty() || !model.profile.supports_edit {
             return Err(EngineCallError::request_rejected());
         }
-
-        if matches!(
-            provider_for_model(model),
-            ImageProvider::Xai | ImageProvider::Seedream
-        ) || model == ENGINE_NANO_BANANA_21
-        {
-            return self
-                .request_native_images(model, api_key, endpoint_url, prompt, source_images, options)
-                .await;
-        }
-        if provider_for_model(model) == ImageProvider::Unknown {
-            return Err(EngineCallError::request_rejected());
-        }
-        if provider_for_model(model) == ImageProvider::Gemini {
-            return self
-                .request_gemini_images(model, api_key, endpoint_url, prompt, source_images, options)
-                .await;
-        }
-
-        let response = self
-            .edit_client
-            .post(openai::image_endpoint_url(endpoint_url))
-            .header("Authorization", format!("Bearer {api_key}"))
-            .multipart(Self::build_edit_form(
-                model,
-                prompt,
-                options,
-                source_images,
-            )?)
-            .send()
+        self.submit_images(model, api_key, endpoint_url, prompt, source_images, options)
             .await
-            .map_err(|error| EngineCallError::from_send_error(&error))?;
-        self.read_attempt_response(response, options).await
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn read_complete_http_request(stream: &mut tokio::net::TcpStream) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let mut request = Vec::new();
+        loop {
+            if let Some(header_end) = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|index| index + 4)
+            {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+                if content_length.is_some_and(|length| request.len() >= header_end + length) {
+                    return request;
+                }
+            }
+            if request.len() > 1024 * 1024 {
+                panic!("test HTTP request exceeded bound");
+            }
+            let mut chunk = [0_u8; 4096];
+            let read = stream.read(&mut chunk).await.expect("read HTTP request");
+            if read == 0 {
+                return request;
+            }
+            request.extend_from_slice(&chunk[..read]);
+        }
+    })
+    .await
+    .expect("complete request read timeout")
 }
 
 #[cfg(test)]
@@ -870,43 +896,6 @@ mod tests {
             .await
             .expect("request read timeout")
             .expect("read request");
-    }
-
-    async fn read_complete_http_request(stream: &mut tokio::net::TcpStream) -> Vec<u8> {
-        use tokio::io::AsyncReadExt;
-
-        tokio::time::timeout(Duration::from_secs(2), async {
-            let mut request = Vec::new();
-            loop {
-                if let Some(header_end) = request
-                    .windows(4)
-                    .position(|window| window == b"\r\n\r\n")
-                    .map(|index| index + 4)
-                {
-                    let headers = String::from_utf8_lossy(&request[..header_end]);
-                    let content_length = headers.lines().find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())
-                            .flatten()
-                    });
-                    if content_length.is_some_and(|length| request.len() >= header_end + length) {
-                        return request;
-                    }
-                }
-                if request.len() > 1024 * 1024 {
-                    panic!("test HTTP request exceeded bound");
-                }
-                let mut chunk = [0_u8; 4096];
-                let read = stream.read(&mut chunk).await.expect("read HTTP request");
-                if read == 0 {
-                    return request;
-                }
-                request.extend_from_slice(&chunk[..read]);
-            }
-        })
-        .await
-        .expect("complete request read timeout")
     }
 
     fn error_from_attempt(result: Result<ProviderAttemptBody, EngineCallError>) -> EngineCallError {
@@ -1489,6 +1478,57 @@ mod tests {
 
         assert!(result.is_err());
         assert!(checks.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[tokio::test]
+    async fn manifest_extension_uses_existing_adapter_and_provider_id() {
+        use crate::model_catalog::{ModelCatalog, MANIFEST_JSON};
+        use tokio::io::AsyncWriteExt;
+
+        let mut manifest: Value = serde_json::from_str(MANIFEST_JSON).unwrap();
+        let extension: Value = serde_json::from_str(include_str!(
+            "../../shared/fixtures/image-model-extension.json"
+        ))
+        .unwrap();
+        manifest["imageModels"]
+            .as_object_mut()
+            .unwrap()
+            .extend(extension.as_object().unwrap().clone());
+        let catalog = ModelCatalog::parse(&manifest.to_string()).unwrap();
+        let model = catalog.image_model("former-fixture-id").unwrap();
+        assert_eq!(model.id, "fixture-seedream");
+        let mut options = test_options(1);
+        options.output_format = "webp".into();
+        assert!(crate::model_registry::validate_model_options(model, &options, 1).is_err());
+        options.output_format = "jpeg".into();
+        assert!(crate::model_registry::validate_model_options(model, &options, 1).is_ok());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/images/generations",
+            listener.local_addr().unwrap()
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_complete_http_request(&mut socket).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .await
+                .unwrap();
+            let (_, body) = std::str::from_utf8(&request)
+                .unwrap()
+                .split_once("\r\n\r\n")
+                .unwrap();
+            serde_json::from_str::<Value>(body).unwrap()
+        });
+        local_test_engine(Some(2))
+            .submit_images(model, "fixture-key", &url, "fixture", &[], &options)
+            .await
+            .unwrap();
+        let body = server.await.unwrap();
+        assert_eq!(body["model"], "provider-fixture-model");
+        assert_eq!(body["size"], "2K");
+        assert_eq!(body["output_format"], "jpeg");
     }
 
     #[tokio::test]
