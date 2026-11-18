@@ -88,9 +88,15 @@ jobs:
       - name: Build local bundles
         if: needs.resolve.outputs.release != 'true'
         uses: tauri-apps/tauri-action@v0
+      - name: Retain Windows installers for acceptance
+        if: needs.resolve.outputs.release != 'true'
+        uses: actions/upload-artifact@v4
         with:
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: astro-studio-[platform]-[arch]-[bundle]
+          name: astro-studio-windows-x64-installers
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
       - name: Read release notes
         id: notes
         if: needs.resolve.outputs.release == 'true'
@@ -119,10 +125,7 @@ jobs:
           prerelease: ${{ contains(needs.resolve.outputs.tag, '-') }}
           generateReleaseNotes: true
           updaterJsonPreferNsis: true
-          uploadUpdaterJson: true
-          uploadUpdaterSignatures: true
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: astro-studio-[platform]-[arch]-[bundle]
+          includeUpdaterJson: true
       - name: Validate uploaded bytes and manifest
         if: needs.resolve.outputs.release == 'true'
         shell: bash
