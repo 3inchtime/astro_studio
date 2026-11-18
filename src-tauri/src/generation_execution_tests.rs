@@ -358,6 +358,13 @@ async fn exercise_generation_queue() {
             GenerationJobStage::Terminal
         ]
     );
+    // The mock runtime may retain app state beyond drop(app). Release the SQLite
+    // file handle before removing the fixture, as required by Windows.
+    let connection = std::mem::replace(
+        &mut *db.connection().unwrap(),
+        rusqlite::Connection::open_in_memory().unwrap(),
+    );
+    connection.close().unwrap();
     drop(app);
     std::fs::remove_dir_all(root).unwrap();
 }
