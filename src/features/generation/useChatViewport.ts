@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Message, PromptAgentMessage } from "../../types";
 
-export function useChatViewport(messages: Message[], promptAgentMessages: PromptAgentMessage[]) {
+export function useChatViewport(messages: Message[], promptAgentMessages: PromptAgentMessage[], visible: boolean) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
+  const readingPosition = useRef(0);
   const [chatViewportHeight, setChatViewportHeight] = useState(0);
   useLayoutEffect(() => {
-    if (autoScrollRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, promptAgentMessages, chatViewportHeight]);
+    const element = scrollRef.current;
+    if (visible && element) element.scrollTop = autoScrollRef.current ? element.scrollHeight : readingPosition.current;
+  }, [messages, promptAgentMessages, chatViewportHeight, visible]);
 
   useEffect(() => {
     const scrollElement = scrollRef.current;
@@ -37,11 +37,12 @@ export function useChatViewport(messages: Message[], promptAgentMessages: Prompt
     return () => {
       resizeObserver.disconnect();
     };
-  }, [messages.length, promptAgentMessages.length]);
+  }, [messages.length, promptAgentMessages.length, visible]);
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    readingPosition.current = scrollTop;
     autoScrollRef.current = scrollHeight - scrollTop - clientHeight < 100;
   }, []);
 

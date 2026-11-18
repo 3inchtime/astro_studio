@@ -9,6 +9,7 @@ import credentials from "./locales/credentials.en.json";
 import diagnostics from "./locales/diagnostics.en.json";
 import recovery from "./locales/recovery.en.json";
 import exportStrings from "./locales/export.en.json";
+import nodes from "./locales/nodes.en.json";
 import type { BackendModule } from "i18next";
 
 const localeFiles = import.meta.glob<{ default: Record<string, unknown> }>(["./locales/*.json", "!./locales/en.json", "!./locales/*.en.json"]);
@@ -20,10 +21,10 @@ async function loadTranslations(language: string) {
     if (!file) throw new Error(`Missing translations for ${name}`);
     return (await file()).default;
   };
-  const [base, backup, credentials, diagnostics, exportStrings, recovery] = await Promise.all([
-    load(), load("backup"), load("credentials"), load("diagnostics"), load("export"), load("recovery"),
+  const [base, backup, credentials, diagnostics, exportStrings, recovery, nodes] = await Promise.all([
+    load(), load("backup"), load("credentials"), load("diagnostics"), load("export"), load("recovery"), load("nodes"),
   ]);
-  return { ...base, backup, credentials, diagnostics, recovery, export: exportStrings };
+  return { ...base, backup, credentials, diagnostics, recovery, export: exportStrings, nodes };
 }
 
 const bundledLocales: BackendModule = {
@@ -39,7 +40,7 @@ i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    resources: { en: { translation: { ...en, backup, credentials, diagnostics, recovery, export: exportStrings } } },
+    resources: { en: { translation: { ...en, backup, credentials, diagnostics, recovery, export: exportStrings, nodes } } },
     partialBundledLanguages: true,
     load: "currentOnly",
     fallbackLng: "en",

@@ -89,6 +89,7 @@ Compared with browser tools, Astro Studio emphasizes stability, focus, and repea
 ## What You Can Do With It
 
 - Start image generation quickly from a prompt
+- Switch **Generate → Nodes** to connect prompts and reference images. Run an image generator, then choose **Create variation** on its result to branch into another edit. The conversation keeps its node layout on this device.
 - Connect your own third-party image generation APIs
 - Create one consistent entry point across services and models
 - Browse your full history and revisit past creative outputs

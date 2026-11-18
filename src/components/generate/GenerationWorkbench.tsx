@@ -3,15 +3,22 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   SlidersHorizontal,
+  Workflow,
+  MessageSquare,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { GenerationMode } from "../../features/generation/useGenerationMode";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useLayoutContext } from "../layout/AppLayout";
 
 /** A stable portal host keeps parameter drafts mounted through responsive changes. */
 export default function GenerationWorkbench({
   children,
+  mode = "traditional",
+  onModeChange,
 }: {
+  mode?: GenerationMode;
+  onModeChange?: (mode: GenerationMode) => void;
   children: (
     parametersTarget: HTMLElement | null,
     drawerOpen: boolean,
@@ -31,7 +38,7 @@ export default function GenerationWorkbench({
   const focusAfterDock = useRef(false);
   const [target, setTarget] = useState<HTMLDivElement | null>(null);
   const open =
-    !docked &&
+    mode === "traditional" && !docked &&
     (setWorkspaceDrawer ? activeWorkspaceDrawer === "parameters" : localDrawer);
   const close = () => {
     setLocalDrawer(false);
@@ -90,8 +97,24 @@ export default function GenerationWorkbench({
             <h1 className="text-base font-semibold tracking-tight">
               {t("nav.generate")}
             </h1>
+            {onModeChange && (
+              <div role="group" aria-label={t("nodes.modeLabel")} className="ml-1 flex items-center gap-0.5 rounded-lg border border-border-subtle bg-surface-muted p-0.5 sm:ml-3">
+                {(["traditional", "nodes"] as const).map((value) => {
+                  const active = mode === value;
+                  const Icon = value === "nodes" ? Workflow : MessageSquare;
+                  return (
+                    <button key={value} type="button" aria-pressed={active}
+                      onClick={() => { close(); onModeChange(value); }}
+                      className={`focus-ring inline-flex min-h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium sm:px-3 ${active ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>
+                      <Icon size={14} aria-hidden="true" className="hidden sm:block" />
+                      {t(value === "nodes" ? "nodes.nodeMode" : "nodes.traditional")}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <button
+          {mode === "traditional" && <button
             type="button"
             className="studio-control-subtle focus-ring inline-flex min-h-9 items-center gap-2 rounded-lg px-2 text-xs min-[1200px]:hidden"
             aria-expanded={open}
@@ -100,7 +123,7 @@ export default function GenerationWorkbench({
           >
             <SlidersHorizontal size={16} />
             {t("generate.parametersLabel")}
-          </button>
+          </button>}
         </div>
         {children(target, open || activeWorkspaceDrawer === "context")}
       </section>
@@ -111,7 +134,7 @@ export default function GenerationWorkbench({
           onClick={close}
         />
       )}
-      <aside
+      {mode === "traditional" && <aside
         ref={panelRef}
         id="generation-parameters"
         role={open ? "dialog" : "complementary"}
@@ -138,7 +161,7 @@ export default function GenerationWorkbench({
           )}
         </div>
         <div ref={setTarget} className="min-h-0 flex-1 overflow-y-auto" />
-      </aside>
+      </aside>}
     </div>
   );
 }

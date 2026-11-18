@@ -1,7 +1,7 @@
 {
   "name": "astro-studio",
   "private": true,
-  "version": "0.0.35",
+  "version": "0.0.36",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
+    "@xyflow/react": "^12.12.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
