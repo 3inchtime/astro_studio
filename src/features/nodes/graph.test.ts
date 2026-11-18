@@ -62,8 +62,9 @@ describe("generation inputs", () => {
   it("requires a nonempty prompt and an image from each connected image source", () => {
     let graph = initialGraph();
     const [text, target] = graph.nodes;
+    expectCode(() => resolveInputs({ ...graph, edges: [] }, target.id), "missingPrompt");
     text.text = "  ";
-    expectCode(() => resolveInputs(graph, target.id), "missingPrompt");
+    expectCode(() => resolveInputs(graph, target.id), "emptyPrompt");
     text.text = "landscape";
     for (const kind of ["reference", "generate"] as const) {
       const empty = makeNode(kind, 0, 0);

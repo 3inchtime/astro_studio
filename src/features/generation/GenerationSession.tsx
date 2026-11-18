@@ -1,3 +1,4 @@
+import type { Viewport } from "@xyflow/react";
 import { lazy, Suspense } from "react";
 import { useGenerationMode } from "./useGenerationMode";
 import { useChatViewport } from "./useChatViewport";
@@ -88,6 +89,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
 }) {
   const { t } = useTranslation();
   const [mode, selectMode] = useGenerationMode();
+  const nodeViewport = useRef<Viewport | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const draftRevision = useRef(0);
@@ -908,7 +910,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
     <GenerationWorkbench mode={mode} onModeChange={selectMode}>
       {(parametersTarget, drawerOpen) => mode === "nodes" ? (
         <Suspense fallback={<p role="status" className="p-5 text-sm text-muted">{t("nodes.loading")}</p>}>
-          <NodeWorkspace scope={scope} activeProjectId={activeProjectId} activeConversationId={activeConversationId} />
+          <NodeWorkspace viewportRef={nodeViewport} scope={scope} activeProjectId={activeProjectId} activeConversationId={activeConversationId} />
         </Suspense>
       ) : (
         <>

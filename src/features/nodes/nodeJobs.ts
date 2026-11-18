@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { getGenerationJob, listGenerationJobs, waitGenerationResult } from "../../lib/api";
 import { getGenerationRecipeForRequest } from "../../lib/recipeApi";
 import { conversationDraftKey } from "../../lib/providerSettingsDraft";
-import { connectNodes, readSavedGraph, removeGraph, saveGraph, type WorkflowGraph, type WorkflowNode } from "./graph";
+import { connectNodes, GraphError, readSavedGraph, removeGraph, saveGraph, type WorkflowGraph, type WorkflowNode } from "./graph";
 
 export interface NodeJob {
   scope: string;
@@ -28,9 +28,15 @@ function mergeAssignedDraft(source: WorkflowGraph, assigned: WorkflowGraph): Wor
   const nodes = new Map(source.nodes.map(node => [node.id, node]));
   for (const node of assigned.nodes) nodes.set(node.id, node);
   let merged = { ...assigned, nodes: Array.from(nodes.values()) };
+  const assignedIds = new Set(assigned.nodes.map(node => node.id));
   for (const edge of source.edges) {
-    if (!merged.edges.some(other => other.source === edge.source && other.target === edge.target)) {
+    // Shared nodes already have the user's chosen connections, including intentional disconnections.
+    if (assignedIds.has(edge.source) && assignedIds.has(edge.target)) continue;
+    try {
       merged = connectNodes(merged, edge.source, edge.target);
+    } catch (error) {
+      // An older path via a source-only node can conflict with a newer path in the assigned chat.
+      if (!(error instanceof GraphError) || error.code !== "cycle") throw error;
     }
   }
   return merged;

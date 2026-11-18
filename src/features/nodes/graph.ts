@@ -25,7 +25,7 @@ export interface WorkflowGraph {
 
 export type GraphErrorCode =
   | "missingNode" | "invalidTarget" | "self" | "duplicate" | "cycle"
-  | "missingPrompt" | "missingImage" | "unsupportedImages" | "tooManyImages";
+  | "missingPrompt" | "emptyPrompt" | "missingImage" | "unsupportedImages" | "tooManyImages";
 
 export class GraphError extends Error {
   constructor(public readonly code: GraphErrorCode) {
@@ -77,6 +77,7 @@ export function resolveInputs(graph: WorkflowGraph, target: string): { prompt: s
   if (!generator) throw new GraphError("missingNode");
   if (generator.kind !== "generate") throw new GraphError("invalidTarget");
 
+  let hasPromptNode = false;
   const prompts: string[] = [];
   const paths: string[] = [];
   for (const edge of graph.edges) {
@@ -84,6 +85,7 @@ export function resolveInputs(graph: WorkflowGraph, target: string): { prompt: s
     const input = nodes.get(edge.source);
     if (!input) throw new GraphError("missingNode");
     if (input.kind === "text") {
+      hasPromptNode = true;
       const text = input.text.trim();
       if (text) prompts.push(text);
     } else {
@@ -92,7 +94,7 @@ export function resolveInputs(graph: WorkflowGraph, target: string): { prompt: s
       paths.push(path);
     }
   }
-  if (!prompts.length) throw new GraphError("missingPrompt");
+  if (!prompts.length) throw new GraphError(hasPromptNode ? "emptyPrompt" : "missingPrompt");
   const model = getImageModelCatalogEntry(generator.model);
   if (paths.length && !model.supportsEdit) throw new GraphError("unsupportedImages");
   if (paths.length > (model.maxReferenceImages ?? 16)) throw new GraphError("tooManyImages");

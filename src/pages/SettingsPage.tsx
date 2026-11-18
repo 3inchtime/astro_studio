@@ -83,6 +83,18 @@ const SETTINGS_TABS = [
   },
 ] as const;
 
+function useSaveConfirmation() {
+  // Each save starts a fresh display interval, including a second save while the first is visible.
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    if (!revision) return;
+    const timer = window.setTimeout(() => setRevision(0), 2000);
+    return () => window.clearTimeout(timer);
+  }, [revision]);
+  const setVisible = (visible: boolean) => setRevision(previous => visible ? previous + 1 : 0);
+  return [revision > 0, setVisible] as const;
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [vaultUnavailable, setVaultUnavailable] = useState(false);
@@ -134,19 +146,19 @@ export default function SettingsPage() {
     );
   const [selectedProviderId, setSelectedProviderId] =
     useState(DEFAULT_PROVIDER_ID);
-  const [providerSaved, setProviderSaved] = useState(false);
+  const [providerSaved, setProviderSaved] = useSaveConfirmation();
   const [imageModel, setImageModel] = useState<ImageModel>(requestedModel ?? DEFAULT_MODEL);
-  const [modelSaved, setModelSaved] = useState(false);
+  const [modelSaved, setModelSaved] = useSaveConfirmation();
   const { t, i18n } = useTranslation();
   const [language, setLanguage] = useState<SupportedLanguage>(() =>
     normalizeLanguage(i18n.resolvedLanguage ?? i18n.language),
   );
   const [fontSize, setFontSize] = useState<AppFontSize>(getStoredAppFontSize());
-  const [fontSizeSaved, setFontSizeSaved] = useState(false);
+  const [fontSizeSaved, setFontSizeSaved] = useSaveConfirmation();
   const [trashSettings, setTrashSettings] = useState<TrashSettings>({
     retention_days: 30,
   });
-  const [trashSaved, setTrashSaved] = useState(false);
+  const [trashSaved, setTrashSaved] = useSaveConfirmation();
   const [updateChecking, setUpdateChecking] = useState(false);
   const [appVersion, setAppVersion] = useState("");
 
@@ -369,7 +381,6 @@ export default function SettingsPage() {
     );
     setShowKey(false);
     setProviderSaved(true);
-    setTimeout(() => setProviderSaved(false), 2000);
   }
 
   async function handleCreateProvider() {
@@ -440,7 +451,6 @@ export default function SettingsPage() {
     await saveImageModel(imageModel);
     setSavedImageModel(imageModel);
     setModelSaved(true);
-    setTimeout(() => setModelSaved(false), 2000);
   }
 
   async function handleCancelProviderEdit() {
@@ -493,7 +503,6 @@ export default function SettingsPage() {
     await saveTrashSettings(trashSettings.retention_days);
     setSavedTrashDays(trashSettings.retention_days);
     setTrashSaved(true);
-    setTimeout(() => setTrashSaved(false), 2000);
   }
 
   async function handleCheckUpdate() {
@@ -519,7 +528,6 @@ export default function SettingsPage() {
     applyAppFontSize(nextSize);
     await saveFontSize(nextSize);
     setFontSizeSaved(true);
-    setTimeout(() => setFontSizeSaved(false), 2000);
   }
 
   async function handleSelectLog(log: LogEntry) {
