@@ -6,7 +6,7 @@ import { initialGraph, loadGraph, makeNode, saveGraph, type WorkflowGraph } from
 import NodeWorkspace from "./NodeWorkspace";
 
 const api = vi.hoisted(() => ({
-  enqueueGeneration: vi.fn(), getGenerationJob: vi.fn(), listGenerationJobs: vi.fn(),
+  enqueueGeneration: vi.fn(), onGenerationJob: vi.fn(), getGenerationJob: vi.fn(), listGenerationJobs: vi.fn(),
   waitGenerationResult: vi.fn(), hasTauriRuntime: vi.fn(() => true), pickSourceImages: vi.fn(), importCanvasAsset: vi.fn(),
 }));
 const recipe = vi.hoisted(() => vi.fn());
@@ -67,6 +67,7 @@ describe("node workspace generation", () => {
     localStorage.clear();
     sessionStorage.clear();
     api.hasTauriRuntime.mockReturnValue(true);
+    api.onGenerationJob.mockResolvedValue(() => {});
     api.getGenerationJob.mockImplementation(() => new Promise(() => {}));
     recipe.mockResolvedValue(null);
   });
@@ -158,6 +159,107 @@ describe("node workspace generation", () => {
     mount(null);
     await waitFor(() => expect(layout.setActiveConversationId).toHaveBeenCalledWith("accepted"));
     expect(api.enqueueGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks immediately after a matching terminal event received during the first read", async () => {
+    const { graph, scope } = seed("accepted");
+    Object.assign(graph.nodes[1], { clientRequestId: "client", jobId: "job" });
+    saveGraph(scope, graph);
+    const firstRead = deferred<ReturnType<typeof completed>>();
+    api.getGenerationJob.mockReturnValueOnce(firstRead.promise).mockResolvedValue(completed("client"));
+    api.waitGenerationResult.mockResolvedValue({ images: [{ file_path: "/tmp/variation.png" }] });
+    mount("accepted");
+    await act(async () => {});
+    expect(api.getGenerationJob).toHaveBeenCalledTimes(1);
+    expect(api.onGenerationJob).toHaveBeenCalledOnce();
+    const notify = api.onGenerationJob.mock.calls[0][0];
+    const terminal = { client_request_id: "client", job_id: "job", status: "completed" };
+    await act(async () => {
+      notify(terminal);
+      notify(terminal);
+      expect(api.getGenerationJob).toHaveBeenCalledTimes(1);
+      firstRead.resolve({ ...completed("client"), status: "running" });
+    });
+    expect(api.getGenerationJob).toHaveBeenCalledTimes(2);
+    expect(loadGraph(scope).nodes[1].resultPath).toBe("/tmp/variation.png");
+    expect(api.enqueueGeneration).not.toHaveBeenCalled();
+  });
+
+  it("ignores other requests, job IDs and active statuses while waiting for its own terminal event", async () => {
+    const { graph, scope } = seed("accepted");
+    Object.assign(graph.nodes[1], { clientRequestId: "client", jobId: "job" });
+    saveGraph(scope, graph);
+    api.getGenerationJob.mockResolvedValue({ ...completed("client"), status: "running" });
+    mount("accepted");
+    await act(async () => {});
+    expect(api.onGenerationJob).toHaveBeenCalledOnce();
+    const notify = api.onGenerationJob.mock.calls[0][0];
+    await act(async () => {
+      notify({ client_request_id: "other", job_id: "job", status: "completed" });
+      notify({ client_request_id: "client", job_id: "other", status: "completed" });
+      notify({ client_request_id: "client", job_id: "job", status: "running" });
+    });
+    expect(api.getGenerationJob).toHaveBeenCalledTimes(1);
+    api.getGenerationJob.mockResolvedValue({ ...completed("client"), status: "failed", error_message: "fixture error" });
+    await act(async () => notify({ client_request_id: "client", job_id: "job", status: "failed" }));
+    expect(loadGraph(scope).nodes[1].error).toBe("fixture error");
+  });
+
+  it("matches the client request before a job ID has been recovered", async () => {
+    const { graph, scope } = seed("accepted");
+    graph.nodes[1].clientRequestId = "lost-receipt";
+    saveGraph(scope, graph);
+    const job = completed("lost-receipt");
+    api.getGenerationJob.mockResolvedValue(job);
+    api.waitGenerationResult.mockResolvedValue({ images: [{ file_path: "/tmp/recovered.png" }] });
+    mount("accepted");
+    await act(async () => {});
+    recipe.mockResolvedValue({ generation_id: "generation" });
+    api.listGenerationJobs.mockResolvedValue({ items: [job] });
+    await act(async () => api.onGenerationJob.mock.calls[0][0]({
+      client_request_id: "lost-receipt", job_id: "job", status: "completed",
+    }));
+    expect(loadGraph(scope).nodes[1].resultPath).toBe("/tmp/recovered.png");
+    expect(api.enqueueGeneration).not.toHaveBeenCalled();
+  });
+
+  it("continues polling when the desktop event subscription fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const { graph, scope } = seed("accepted");
+      Object.assign(graph.nodes[1], { clientRequestId: "client", jobId: "job" });
+      saveGraph(scope, graph);
+      api.onGenerationJob.mockRejectedValue(new Error("bridge unavailable"));
+      api.getGenerationJob.mockResolvedValueOnce({ ...completed("client"), status: "queued" })
+        .mockResolvedValue(completed("client"));
+      api.waitGenerationResult.mockResolvedValue({ images: [{ file_path: "/tmp/polled.png" }] });
+      mount("accepted");
+      await act(async () => {});
+      expect(api.getGenerationJob).toHaveBeenCalledTimes(1);
+      await act(async () => vi.advanceTimersByTimeAsync(2500));
+      expect(loadGraph(scope).nodes[1].resultPath).toBe("/tmp/polled.png");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("releases a late event subscription and ignores delivery after unmount", async () => {
+    const { graph, scope } = seed("accepted");
+    Object.assign(graph.nodes[1], { clientRequestId: "client", jobId: "job" });
+    saveGraph(scope, graph);
+    const release = vi.fn();
+    const registration = deferred<typeof release>();
+    api.onGenerationJob.mockReturnValue(registration.promise);
+    const view = mount("accepted");
+    expect(api.onGenerationJob).toHaveBeenCalledOnce();
+    const notify = api.onGenerationJob.mock.calls[0][0];
+    view.unmount();
+    const previousReads = api.getGenerationJob.mock.calls.length;
+    await act(async () => {
+      registration.resolve(release);
+      notify({ client_request_id: "client", job_id: "job", status: "completed" });
+    });
+    expect(release).toHaveBeenCalledOnce();
+    expect(api.getGenerationJob).toHaveBeenCalledTimes(previousReads);
+    expect(loadGraph(scope).nodes[1].clientRequestId).toBe("client");
   });
 
   it("keeps an unknown provider outcome locked across a remount", async () => {

@@ -159,13 +159,7 @@ fn snapshot(database: &Path, version: i64) -> Result<PathBuf, AppError> {
         message: "Missing library directory".into(),
     })?;
     let directory = parent.join("migration-backups");
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    match builder.create(&directory) {
+    match crate::storage::create_private_dir(&directory) {
         Ok(()) => {}
         Err(e)
             if e.kind() == std::io::ErrorKind::AlreadyExists
