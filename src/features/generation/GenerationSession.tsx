@@ -1,3 +1,5 @@
+import { lazy, Suspense } from "react";
+import { useGenerationMode } from "./useGenerationMode";
 import { useChatViewport } from "./useChatViewport";
 import { usePromptFavorites } from "./usePromptFavorites";
 import { consumeNavigationIntent } from "./navigationIntent";
@@ -77,12 +79,15 @@ import type {
 import { prepareSubmission, pendingMessages, dispatchSubmission } from "./submission";
 import { useTranslation } from "react-i18next";
 
+const NodeWorkspace = lazy(() => import("../nodes/NodeWorkspace"));
+
 export default function GenerationSession({ scope, activeProjectId, activeConversationId }: {
   scope: string;
   activeProjectId: string | null;
   activeConversationId: string | null;
 }) {
   const { t } = useTranslation();
+  const [mode, selectMode] = useGenerationMode();
   const location = useLocation();
   const navigate = useNavigate();
   const draftRevision = useRef(0);
@@ -231,7 +236,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
   const sendPromptAgentMessageMutation = useSendPromptAgentMessageMutation();
   const acceptPromptAgentDraftMutation = useAcceptPromptAgentDraftMutation();
 
-  const { scrollRef, autoScrollRef, chatViewportHeight, handleScroll } = useChatViewport(messages, promptAgentMessages);
+  const { scrollRef, autoScrollRef, chatViewportHeight, handleScroll } = useChatViewport(messages, promptAgentMessages, mode === "traditional");
   const { promptFavoriteByPrompt, handleTogglePromptFavorite } = usePromptFavorites();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageModelRef = useRef(imageModel);
@@ -261,6 +266,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
     const handoff = takeProviderSettingsDraft();
     let saved = readConversationDraft(scope);
     if (handoff) {
+      selectMode("traditional");
       const { projectId, conversationId } = handoff.request;
       // Older settings handoffs did not record either route field.
       const target = projectId === undefined && conversationId === undefined
@@ -308,12 +314,13 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
       textareaRef.current.style.height =
         Math.min(textareaRef.current.scrollHeight, 120) + "px";
     }
-  }, [prompt]);
+  }, [prompt, mode]);
 
   useEffect(() => {
     if (restoredIntentState.current === location.state) return;
     const pendingSources = consumePendingEditSources();
     if (pendingSources.length > 0) {
+      selectMode("traditional");
       markComposerDraftStarted();
       setEditSources((current) => mergeEditSources(current, pendingSources));
     }
@@ -324,6 +331,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
     if (navigationPendingPrompt) {
       if (!consumeNavigationIntent(location.key, location.state, "prompt")) return;
       markComposerDraftStarted();
+      selectMode("traditional");
       setPrompt(navigationPendingPrompt);
       return;
     }
@@ -332,6 +340,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
     if (!pendingPrompt) return;
 
     markComposerDraftStarted();
+    selectMode("traditional");
     setPrompt(pendingPrompt);
   }, [markComposerDraftStarted, navigationPendingPrompt, location.key, location.state]);
 
@@ -596,6 +605,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
       state?.recipeGenerationId &&
       consumeNavigationIntent(location.key, state, "recipe")
     ) {
+      selectMode("traditional");
       void handleReuseRecipe(
         state.recipeGenerationId,
         state.recipeMode ?? "edit",
@@ -895,8 +905,12 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
   }
 
   return (
-    <GenerationWorkbench>
-      {(parametersTarget, drawerOpen) => (
+    <GenerationWorkbench mode={mode} onModeChange={selectMode}>
+      {(parametersTarget, drawerOpen) => mode === "nodes" ? (
+        <Suspense fallback={<p role="status" className="p-5 text-sm text-muted">{t("nodes.loading")}</p>}>
+          <NodeWorkspace scope={scope} activeProjectId={activeProjectId} activeConversationId={activeConversationId} />
+        </Suspense>
+      ) : (
         <>
           <RecoveryNotice />
           <ConfirmDialog open={pendingUnknownRetry !== null} title={t("generate.unknownRetryTitle")} description={t("generate.unknownRetryDescription")} confirmLabel={t("generate.confirmUnknownRetry")} cancelLabel={t("favorites.cancel")} onCancel={() => setPendingUnknownRetry(null)} onConfirm={() => { const request = pendingUnknownRetry; setPendingUnknownRetry(null); if (request) void submitGenerationRequest(request); }} />

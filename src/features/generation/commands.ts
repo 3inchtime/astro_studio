@@ -72,10 +72,14 @@ export function onGenerationJob(handler: (event: GenerationJobEvent) => void) {
   return listenDesktopEvent("generation:job", handler);
 }
 
+export function waitGenerationResult(jobId: string): Promise<GenerateResponse> {
+  return invoke("wait_generation_result", { jobId });
+}
+
 async function submitGeneration(params: GenerationParams | EditGenerationParams, onEnqueued?: OnEnqueued): Promise<GenerateResponse> {
   const ack = await enqueueGeneration(params);
   onEnqueued?.(ack);
-  return invoke("wait_generation_result", { jobId: ack.job_id });
+  return waitGenerationResult(ack.job_id);
 }
 
 export function generateImage(params: GenerationParams, onEnqueued?: OnEnqueued): Promise<GenerateResponse> {

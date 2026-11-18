@@ -11,6 +11,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import GeneratePage from "./GeneratePage";
 
+vi.mock("../features/nodes/NodeWorkspace", () => ({ default: () => <section>test node workspace</section> }));
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
@@ -317,6 +319,17 @@ function createDeferred<T>() {
 }
 
 describe("GeneratePage", () => {
+  it("restores the traditional prompt after editing in node mode", async () => {
+    render(<GeneratePage />, { wrapper: TestWrapper });
+    const prompt = await screen.findByPlaceholderText("Describe the image you want to generate...");
+    fireEvent.change(prompt, { target: { value: "Keep my traditional draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "nodes.nodeMode" }));
+    expect(await screen.findByText("test node workspace")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Keep my traditional draft")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "nodes.traditional" }));
+    expect(screen.getByDisplayValue("Keep my traditional draft")).toBeInTheDocument();
+  });
+
   it("restores each conversation's own unsent draft across navigation", async () => {
     const view = render(<StrictMode><GeneratePage /></StrictMode>, { wrapper: TestWrapper });
     const input = () => screen.getByPlaceholderText("Describe the image you want to generate...");
