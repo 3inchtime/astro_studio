@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../../app/routes/contracts";
 import { useLayoutContext } from "../../components/layout/AppLayout";
-import { enqueueGeneration, hasTauriRuntime, importCanvasAsset, pickSourceImages } from "../../lib/api";
+import { enqueueGeneration, hasTauriRuntime, importCanvasAsset, onGenerationJob, pickSourceImages } from "../../lib/api";
 import { generationErrorMessage } from "../../lib/generationMessages";
 import { buildEditParams, buildGenerationParams } from "../../lib/generationRequests";
 import { defaultParameters } from "../generation/composerParameters";
@@ -24,22 +24,48 @@ function JobTracker({ scope, project, conversation, nodeId, requestId, jobId, on
   const { t } = useTranslation();
   useEffect(() => {
     let active = true;
+    let reading = false;
+    let recheck = false;
     let timer: ReturnType<typeof setTimeout>;
     const job = { scope, project, conversation, nodeId, requestId };
     async function check() {
-      try {
-        await reconcileNodeJob(job, jobId, t, () => active);
-      } catch {
-        if (active) {
-          try { updateNodeJob(job, { error: t("nodes.errors.uncertain") }); }
-          catch { onStorageFailure(); }
-        }
-      } finally {
-        if (active) timer = setTimeout(check, 2500);
+      if (!active) return;
+      clearTimeout(timer);
+      if (reading) {
+        recheck = true;
+        return;
       }
+      reading = true;
+      do {
+        recheck = false;
+        try {
+          await reconcileNodeJob(job, jobId, t, () => active);
+        } catch {
+          if (active) {
+            try { updateNodeJob(job, { error: t("nodes.errors.uncertain") }); }
+            catch { onStorageFailure(); }
+          }
+        }
+      } while (active && recheck);
+      reading = false;
+      if (active) timer = setTimeout(check, 2500);
     }
-    void check();
-    return () => { active = false; clearTimeout(timer); };
+
+    const subscription = onGenerationJob(event => {
+      if (event.client_request_id !== requestId || (jobId && event.job_id !== jobId)) return;
+      if (event.status !== "queued" && event.status !== "running") void check();
+    });
+    // Read after registration to cover events committed before the listener was ready.
+    // Poll independently if registration is slow or the desktop event bridge is unavailable.
+    timer = setTimeout(check, 2500);
+    void subscription.then(check, check);
+    window.addEventListener("focus", check);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      window.removeEventListener("focus", check);
+      void subscription.then(release => release()).catch(() => {});
+    };
   }, [scope, project, conversation, nodeId, requestId, jobId, t, onStorageFailure]);
   return null;
 }

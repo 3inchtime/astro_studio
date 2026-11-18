@@ -16,16 +16,20 @@ impl Drop for TempDir {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-pub(crate) fn temporary(parent: &Path, purpose: &str) -> std::io::Result<TempDir> {
-    fs::create_dir_all(parent)?;
-    let p = parent.join(format!(".{purpose}-{}", uuid::Uuid::new_v4()));
-    let mut directory = fs::DirBuilder::new();
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        directory.mode(0o700);
+        fs::DirBuilder::new().mode(0o700).create(path)
     }
-    directory.create(&p)?;
+    #[cfg(not(unix))]
+    fs::create_dir(path)
+}
+
+pub(crate) fn temporary(parent: &Path, purpose: &str) -> std::io::Result<TempDir> {
+    fs::create_dir_all(parent)?;
+    let p = parent.join(format!(".{purpose}-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&p)?;
     Ok(TempDir(p))
 }
 
