@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "astro-studio"
-version = "0.0.37"
+version = "0.0.38"
 dependencies = [
  "arboard",
  "async-trait",
