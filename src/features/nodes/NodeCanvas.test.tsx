@@ -42,6 +42,25 @@ describe("node canvas", () => {
     fireEvent.click(within(cards[0]).getByLabelText("nodes.remove"));
     expect(getGraph().edges).toEqual([]);
     expect(getGraph().nodes.map(node => node.id)).toEqual([target.id]);
+    const undo = screen.getByRole("button", { name: "nodes.undoRemove" });
+    expect(undo).toHaveFocus();
+    fireEvent.keyDown(undo, { key: "z", ctrlKey: true });
+    expect(getGraph().nodes[0]).toEqual({ ...prompt, text: "Midnight blue" });
+    expect(getGraph().edges).toEqual([{ source: prompt.id, target: target.id }]);
+    expect(undo).toBeDisabled();
+  });
+
+  it("keeps subsequent text edits when undoing deletion and preserves native text undo", () => {
+    const { container, getGraph, target } = renderCanvas();
+    const cards = container.querySelectorAll<HTMLElement>(".react-flow__node");
+    fireEvent.click(within(cards[1]).getByLabelText("nodes.remove"));
+    const prompt = within(cards[0]).getByRole("textbox", { hidden: true });
+    fireEvent.change(prompt, { target: { value: "A new description" } });
+    fireEvent.keyDown(prompt, { key: "z", metaKey: true });
+    expect(getGraph().nodes).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "nodes.undoRemove" }));
+    expect(getGraph().nodes[0].text).toBe("A new description");
+    expect(getGraph().nodes[1]).toEqual(target);
   });
 
   it("disables generation and editing on a busy node", () => {

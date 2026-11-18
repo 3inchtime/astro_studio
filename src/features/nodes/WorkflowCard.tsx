@@ -10,6 +10,7 @@ export const nodeIcons = { text: TextCursorInput, reference: ImagePlus, generate
 export type Port = { id: string; type: "source" | "target" };
 export type CardNode = Node<{
   node: WorkflowNode;
+  inputError?: string;
   busy: boolean;
   removable: boolean;
   pending: Port | null;
@@ -33,6 +34,7 @@ export function WorkflowImage({ path, alt }: { path: string; alt: string }) {
 export default function WorkflowCard({ data }: NodeProps<CardNode>) {
   const { t } = useTranslation();
   const { node, busy } = data;
+  const error = data.inputError || node.error;
   const title = t(`nodes.types.${node.kind}`);
   const Icon = nodeIcons[node.kind];
   const running = busy && Boolean(node.clientRequestId || node.jobId);
@@ -110,7 +112,7 @@ export default function WorkflowCard({ data }: NodeProps<CardNode>) {
       {path && <button type="button" className="workflow-secondary" disabled={busy} onClick={() => data.variation(node.id)}>
         <GitBranchPlus size={15} />{t("nodes.variation")}
       </button>}
-      {node.error && <p className="workflow-error nowheel" role="alert">{node.error}</p>}
+      {error && <p className="workflow-error nowheel" role="alert">{error}</p>}
     </div>
   </article>;
 }

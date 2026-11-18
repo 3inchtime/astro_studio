@@ -1,20 +1,23 @@
 import {
-  Background, BackgroundVariant, Panel, ReactFlow, ReactFlowProvider, useReactFlow, useViewport,
-  type Connection, type Edge, type NodeChange, type XYPosition,
+  Background, BackgroundVariant, Panel, ReactFlow, ReactFlowProvider, useReactFlow,
+  type Connection, type Edge, type NodeChange, type Viewport, type XYPosition,
 } from "@xyflow/react";
-import { Maximize, Minus, Plus, Unplug, X } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { Unplug, X } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { connectNodes, GraphError, makeNode, type NodeKind, type WorkflowGraph, type WorkflowNode } from "./graph";
-import WorkflowCard, { nodeIcons, WorkflowImage, type CardNode, type Port } from "./WorkflowCard";
+import WorkflowCard, { WorkflowImage, type CardNode, type Port } from "./WorkflowCard";
+import NodeToolbar, { dragFormat, fitOptions, kinds } from "./NodeToolbar";
 import "@xyflow/react/dist/style.css";
 import "./nodes.css";
 
 type Props = {
+  viewportRef?: RefObject<Viewport | null>;
+  inputErrors?: ReadonlyMap<string, string>;
   graph: WorkflowGraph;
-  onChange: (graph: WorkflowGraph) => void;
+  onChange: (graph: WorkflowGraph) => boolean | void;
   onRun: (id: string) => void;
   onPick: (id: string) => void;
   onDetach?: (id: string) => void;
@@ -23,32 +26,25 @@ type Props = {
 
 type Layout = Pick<CardNode, "measured" | "selected"> & { position?: XYPosition };
 const nodeTypes = { workflow: WorkflowCard };
-const kinds: NodeKind[] = ["text", "reference", "generate"];
-const dragFormat = "application/x-astro-workflow-node";
-const fitOptions = { padding: 0.25, maxZoom: 1 };
 const edgeId = (edge: Pick<Edge, "source" | "target">) => JSON.stringify([edge.source, edge.target]);
 
-function ZoomControls() {
-  const { t } = useTranslation();
-  const { zoomIn, zoomOut, fitView } = useReactFlow();
-  const { zoom } = useViewport();
-  return <Panel position="bottom-left" className="workflow-toolbar workflow-zoom">
-    <button aria-label={t("nodes.zoomOut")} title={t("nodes.zoomOut")} disabled={zoom <= 0.2} onClick={() => void zoomOut()}><Minus size={16} /></button>
-    <span>{Math.round(zoom * 100)}%</span>
-    <button aria-label={t("nodes.zoomIn")} title={t("nodes.zoomIn")} disabled={zoom >= 2} onClick={() => void zoomIn()}><Plus size={16} /></button>
-    <i aria-hidden="true" />
-    <button aria-label={t("nodes.fit")} title={t("nodes.fit")} onClick={() => void fitView(fitOptions)}><Maximize size={16} /></button>
-  </Panel>;
-}
-
-function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
+function Canvas({ viewportRef, inputErrors, graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
   const { t } = useTranslation();
   const { screenToFlowPosition, getZoom, setCenter } = useReactFlow();
+  const [initialViewport] = useState(() => viewportRef?.current ?? undefined);
   const container = useRef<HTMLDivElement>(null);
   const current = useRef(graph);
   current.current = graph;
   const [layout, setLayout] = useState<Record<string, Layout>>({});
-  const promptToFocus = useRef<string | null>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const [removed, setRemoved] = useState<{
+    node: WorkflowNode;
+    index: number;
+    links: { edge: WorkflowGraph["edges"][number]; index: number }[];
+  } | null>(null);
+  const undoAvailable = removed !== null && removed.links.every(({ edge }) =>
+    !busyIds.has(edge.source) && !busyIds.has(edge.target));
+  const nodeToFocus = useRef<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [pending, setPending] = useState<Port | null>(null);
   const [notice, setNotice] = useState("");
@@ -56,8 +52,9 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
   const dialog = useDialogFocus({ open: Boolean(preview), onClose: () => setPreview("") });
 
   function commit(next: WorkflowGraph) {
+    if (onChange(next) === false) return false;
     current.current = next;
-    onChange(next);
+    return true;
   }
 
   function update(id: string, edit: Partial<WorkflowNode>) {
@@ -66,16 +63,23 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
     commit({ ...next, nodes: next.nodes.map(node => node.id === id ? { ...node, ...edit } : node) });
   }
 
-  function canDelete(id: string) {
-    return !busyIds.has(id) && !current.current.edges.some(edge =>
-      (edge.source === id && busyIds.has(edge.target)) || (edge.target === id && busyIds.has(edge.source)));
+  const protectedNodes = new Set(busyIds);
+  if (busyIds.size) {
+    for (const { source, target } of graph.edges) {
+      if (busyIds.has(target)) protectedNodes.add(source);
+      if (busyIds.has(source)) protectedNodes.add(target);
+    }
   }
 
   function remove(id: string) {
-    if (!canDelete(id)) return;
+    if (protectedNodes.has(id)) return;
     const next = current.current;
-    commit({ ...next, nodes: next.nodes.filter(node => node.id !== id),
-      edges: next.edges.filter(edge => edge.source !== id && edge.target !== id) });
+    const index = next.nodes.findIndex(node => node.id === id);
+    if (index === -1) return;
+    const links = next.edges.flatMap((edge, index) => edge.source === id || edge.target === id ? [{ edge, index }] : []);
+    if (!commit({ ...next, nodes: next.nodes.filter(node => node.id !== id),
+      edges: next.edges.filter(edge => edge.source !== id && edge.target !== id) })) return;
+    setRemoved({ node: next.nodes[index], index, links });
     if (pending?.id === id) setPending(null);
     setLayout(previous => {
       const clean = { ...previous };
@@ -84,11 +88,30 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
     });
   }
 
+  useEffect(() => {
+    if (removed) undoButton.current?.focus({ preventScroll: true });
+  }, [removed]);
+
+  function undoRemoval() {
+    if (!removed || !undoAvailable) return;
+    const next = current.current;
+    if (next.nodes.some(node => node.id === removed.node.id)) return;
+    const nodes = [...next.nodes];
+    nodes.splice(removed.index, 0, removed.node);
+    // Topology edits retire this undo. Keep newer text, positions and completed jobs.
+    const edges = [...next.edges];
+    for (const { edge, index } of removed.links) edges.splice(index, 0, edge);
+    if (!commit({ ...next, nodes, edges })) return;
+    setRemoved(null);
+    selectNewNode(removed.node);
+  }
+
   function disconnect(id: string) {
     const next = current.current;
     const edge = next.edges.find(edge => edgeId(edge) === id);
     if (!edge || busyIds.has(edge.source) || busyIds.has(edge.target)) return;
-    commit({ ...next, edges: next.edges.filter(other => other !== edge) });
+    if (!commit({ ...next, edges: next.edges.filter(other => other !== edge) })) return;
+    setRemoved(null);
     setSelectedEdge(previous => previous === id ? null : previous);
   }
 
@@ -96,7 +119,8 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
     setPending(null);
     if (busyIds.has(source) || busyIds.has(target)) return;
     try {
-      commit(connectNodes(current.current, source, target));
+      if (!commit(connectNodes(current.current, source, target))) return;
+      setRemoved(null);
       setNotice("");
     } catch (error) {
       if (!(error instanceof GraphError)) throw error;
@@ -126,12 +150,12 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
   }
 
   useEffect(() => {
-    const id = promptToFocus.current;
+    const id = nodeToFocus.current;
     if (!id || !layout[id]?.measured) return;
     const card = Array.from(container.current?.querySelectorAll<HTMLElement>(".react-flow__node") ?? [])
       .find(element => element.dataset.id === id);
-    const input = card?.querySelector("textarea");
-    if (input) { input.focus({ preventScroll: true }); promptToFocus.current = null; }
+    const control = card?.querySelector("textarea") ?? card;
+    if (control) { control.focus({ preventScroll: true }); nodeToFocus.current = null; }
   }, [layout]);
 
   function variation(id: string) {
@@ -145,14 +169,19 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
     const generator = makeNode("generate", generatorPosition.x, generatorPosition.y);
     if (source.kind === "generate") generator.model = source.model;
     const branch = { ...next, nodes: [...next.nodes, prompt, generator] };
-    commit(connectNodes(connectNodes(branch, source.id, generator.id), prompt.id, generator.id));
-    promptToFocus.current = prompt.id;
+    if (!commit(connectNodes(connectNodes(branch, source.id, generator.id), prompt.id, generator.id))) return;
+    setRemoved(null);
+    selectNewNode(prompt);
+    void setCenter(prompt.x + 136, prompt.y + 105, { zoom: Math.max(getZoom(), 0.75) });
+  }
+
+  function selectNewNode(node: WorkflowNode) {
+    nodeToFocus.current = node.id;
     setLayout(previous => ({
       ...Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, { ...value, selected: false }])),
-      [prompt.id]: { selected: true },
+      [node.id]: { selected: true },
     }));
     setSelectedEdge(null);
-    void setCenter(prompt.x + 136, prompt.y + 105, { zoom: Math.max(getZoom(), 0.75) });
   }
 
   function add(kind: NodeKind, point?: XYPosition) {
@@ -162,7 +191,9 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
     const center = screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
     const position = point ?? openSpace(center.x - 136, center.y - 96, next.nodes);
     const node = makeNode(kind, position.x, position.y);
-    commit({ ...next, nodes: [...next.nodes, node] });
+    if (!commit({ ...next, nodes: [...next.nodes, node] })) return;
+    setRemoved(null);
+    selectNewNode(node);
     if (!point) void setCenter(node.x + 136, node.y + 110, { zoom: Math.max(getZoom(), 0.75) });
   }
 
@@ -202,7 +233,7 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
   const nodes: CardNode[] = graph.nodes.map(node => ({
     id: node.id, type: "workflow", ...layout[node.id], position: layout[node.id]?.position ?? { x: node.x, y: node.y },
     ariaLabel: t(`nodes.types.${node.kind}`), dragHandle: ".workflow-card-header", draggable: !busyIds.has(node.id),
-    data: { node, busy: busyIds.has(node.id), removable: canDelete(node.id), pending, update, remove,
+    data: { node, inputError: inputErrors?.get(node.id), busy: busyIds.has(node.id), removable: !protectedNodes.has(node.id), pending, update, remove,
       port: selectPort, run: onRun, pick: onPick, preview: setPreview, variation, detach: onDetach },
   }));
   const titles = new Map(nodes.map(node => [node.id, node.ariaLabel]));
@@ -213,8 +244,15 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
   const selected = edges.find(edge => edge.selected);
   const message = notice || (pending ? t(pending.type === "source" ? "nodes.pickInput" : "nodes.pickOutput") : "");
 
-  return <div className="workflow-stage" ref={container}
+  return <div className="workflow-stage"
     onKeyDown={event => {
+      if (undoAvailable && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
+        && event.key.toLowerCase() === "z" && event.target instanceof Element
+        && !event.target.closest("input, textarea, select, [contenteditable=true]")) {
+        event.preventDefault();
+        undoRemoval();
+        return;
+      }
       if (event.key === "Escape") { setPending(null); setNotice(""); }
       if ((event.key !== "Delete" && event.key !== "Backspace") || !(event.target instanceof Element)) return;
       if (event.target.matches(".react-flow__node")) {
@@ -227,48 +265,40 @@ function Canvas({ graph, onChange, onRun, onPick, onDetach, busyIds }: Props) {
         if (id) disconnect(id);
       }
     }}>
-    <ReactFlow<CardNode> nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={changeNodes}
-      onEdgesChange={changes => {
-        for (const change of changes) if (change.type === "select") {
-          setSelectedEdge(previous => change.selected ? change.id : previous === change.id ? null : previous);
-        }
-      }}
-      fitView fitViewOptions={fitOptions} minZoom={0.2} maxZoom={2} zoomOnDoubleClick={false}
-      deleteKeyCode={null} multiSelectionKeyCode={null} selectionKeyCode={null}
-      connectOnClick={false} onConnect={connect}
-      onPaneClick={() => { setPending(null); setNotice(""); }}
-      onDragOver={event => {
-        if (event.dataTransfer.types.includes(dragFormat)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
-      }} onDrop={drop}
-      aria-label={t("nodes.canvas")} ariaLabelConfig={{
-        "node.a11yDescription.default": t("nodes.nodeKeyboard"), "edge.a11yDescription.default": t("nodes.edgeKeyboard"),
-        "node.a11yDescription.ariaLiveMessage": ({ x, y }) => t("nodes.nodeMoved", { x, y }),
-      }}>
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="var(--color-control-border)" />
-      <Panel position="top-left" className="workflow-toolbar workflow-palette">
-        <div role="group" aria-label={t("nodes.add")}>
-          <span className="workflow-add-label"><Plus size={16} />{t("nodes.add")}</span>
-          {kinds.map(kind => {
-            const Icon = nodeIcons[kind];
-            const label = t(`nodes.types.${kind}`);
-            return <button key={kind} type="button" draggable aria-label={label} title={label}
-              onDragStart={event => { event.dataTransfer.setData(dragFormat, kind); event.dataTransfer.effectAllowed = "copy"; }}
-              onClick={() => add(kind)}><Icon size={16} /><span>{label}</span></button>;
-          })}
-        </div>
-      </Panel>
-      <ZoomControls />
-      {selected && <Panel position="bottom-center" className="workflow-toolbar workflow-edge-actions">
-        <button type="button" disabled={busyIds.has(selected.source) || busyIds.has(selected.target)}
-          onClick={() => disconnect(selected.id)}><Unplug size={15} />{t("nodes.disconnect")}</button>
-      </Panel>}
-      {graph.nodes.length === 0 && <p className="workflow-empty">{t("nodes.empty")}</p>}
-      {message && <div className="workflow-notice" role={notice ? "alert" : "status"}>
-        <span>{message}</span>
-        <button className="workflow-icon-button" aria-label={t(pending ? "nodes.cancelConnection" : "nodes.close")}
-          onClick={() => { setPending(null); setNotice(""); }}><X size={14} /></button>
-      </div>}
-    </ReactFlow>
+    <NodeToolbar onAdd={add} onUndo={undoRemoval} undoAvailable={undoAvailable} undoButton={undoButton} />
+    <div className="workflow-viewport" ref={container}>
+      <ReactFlow<CardNode> nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={changeNodes}
+        onEdgesChange={changes => {
+          for (const change of changes) if (change.type === "select") {
+            setSelectedEdge(previous => change.selected ? change.id : previous === change.id ? null : previous);
+          }
+        }}
+        defaultViewport={initialViewport} fitView={!initialViewport}
+        onViewportChange={viewport => { if (viewportRef) viewportRef.current = viewport; }}
+        fitViewOptions={fitOptions} minZoom={0.2} maxZoom={2} zoomOnDoubleClick={false}
+        deleteKeyCode={null} multiSelectionKeyCode={null} selectionKeyCode={null}
+        connectOnClick={false} onConnect={connect}
+        onPaneClick={() => { setPending(null); setNotice(""); }}
+        onDragOver={event => {
+          if (event.dataTransfer.types.includes(dragFormat)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
+        }} onDrop={drop}
+        aria-label={t("nodes.canvas")} ariaLabelConfig={{
+          "node.a11yDescription.default": t("nodes.nodeKeyboard"), "edge.a11yDescription.default": t("nodes.edgeKeyboard"),
+          "node.a11yDescription.ariaLiveMessage": ({ x, y }) => t("nodes.nodeMoved", { x, y }),
+        }}>
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="var(--color-control-border)" />
+        {selected && <Panel position="bottom-center" className="workflow-toolbar workflow-edge-actions">
+          <button type="button" disabled={busyIds.has(selected.source) || busyIds.has(selected.target)}
+            onClick={() => disconnect(selected.id)}><Unplug size={15} />{t("nodes.disconnect")}</button>
+        </Panel>}
+        {graph.nodes.length === 0 && <p className="workflow-empty">{t("nodes.empty")}</p>}
+        {message && <div className="workflow-notice" role={notice ? "alert" : "status"}>
+          <span>{message}</span>
+          <button className="workflow-icon-button" aria-label={t(pending ? "nodes.cancelConnection" : "nodes.close")}
+            onClick={() => { setPending(null); setNotice(""); }}><X size={14} /></button>
+        </div>}
+      </ReactFlow>
+    </div>
     {preview && createPortal(<div className="workflow-preview-backdrop bg-black/65" onClick={() => setPreview("")}>
       <div ref={dialog} className="workflow-preview-dialog" role="dialog" aria-modal="true"
         aria-label={t("nodes.result")} onClick={event => event.stopPropagation()}>

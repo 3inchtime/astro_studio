@@ -15,11 +15,12 @@ vi.mock("../../lib/api", () => api);
 vi.mock("../../lib/recipeApi", () => ({ getGenerationRecipeForRequest: recipe }));
 vi.mock("../../components/layout/AppLayout", () => ({ useLayoutContext: () => layout }));
 vi.mock("./NodeCanvas", () => ({
-  default: ({ graph, onRun, busyIds, onChange, onDetach, onPick }: {
-    graph: WorkflowGraph; onRun: (id: string) => void; busyIds: ReadonlySet<string>;
+  default: ({ graph, inputErrors, onRun, busyIds, onChange, onDetach, onPick }: {
+    graph: WorkflowGraph; inputErrors: ReadonlyMap<string, string>; onRun: (id: string) => void; busyIds: ReadonlySet<string>;
     onChange: (g: WorkflowGraph) => void; onDetach: (id: string) => void; onPick: (id: string) => void;
   }) => <>
     <output>{JSON.stringify(graph)}</output>
+    {[...inputErrors].map(([id, message]) => <p key={id} role="alert">{message}</p>)}
     {graph.nodes.filter(n => n.kind === "reference").map(n => <button key={n.id} onClick={() => onPick(n.id)}>pick</button>)}
     {graph.nodes.filter(n => n.error && n.clientRequestId).map(n => <button key={n.id} onClick={() => onDetach(n.id)}>detach</button>)}
     <button onClick={() => onChange({ ...graph, nodes: graph.nodes.map(n => n.kind === "text" ? { ...n, text: "later edit" } : n) })}>edit</button>
@@ -142,6 +143,30 @@ describe("node workspace generation", () => {
     expect(merged.edges).toEqual(expect.arrayContaining([...graph.edges, ...edited.edges]));
     expect(screen.getByRole("status")).toHaveTextContent("existing destination prompt");
     expect(layout.setActiveConversationId).not.toHaveBeenCalled();
+  });
+
+  it("honors rewired links in the assigned chat without stranding a delayed job receipt", async () => {
+    const { graph, id, scope } = seed(null);
+    const intermediate = makeNode("generate", 750, 120);
+    const end = makeNode("generate", 1100, 120);
+    graph.nodes.push(intermediate, end);
+    graph.edges.push({ source: id, target: intermediate.id }, { source: intermediate.id, target: end.id });
+    saveGraph(scope, graph);
+    const ack = deferred<typeof receipt>();
+    api.enqueueGeneration.mockReturnValue(ack.promise);
+    const first = mount(null);
+    fireEvent.click(screen.getByText(id));
+    first.unmount();
+
+    const destination = conversationDraftKey("project", "accepted");
+    // The user disconnected the prompt and reversed the direction between the shared generators.
+    const assigned = { ...graph, nodes: [graph.nodes[0], graph.nodes[1], end], edges: [{ source: end.id, target: id }] };
+    saveGraph(destination, assigned);
+    await act(async () => ack.resolve(receipt));
+    const restored = loadGraph(destination);
+    expect(restored.nodes.find(node => node.id === id)?.jobId).toBe(receipt.job_id);
+    expect(restored.nodes).toContainEqual(intermediate);
+    expect(restored.edges).toEqual([...assigned.edges, { source: id, target: intermediate.id }]);
   });
 
   it("reconciles a lost acknowledgment by its client request without enqueuing another job", async () => {
@@ -361,6 +386,19 @@ describe("node workspace generation", () => {
     fireEvent.click(screen.getByText("pick"));
     await waitFor(() => expect(loadGraph(scope).nodes[2].error).toBeTruthy());
     expect(loadGraph(scope).nodes[2].path).toBe("/tmp/source.png");
+  });
+
+  it("updates input feedback as the connected prompt is edited without saving a stale job error", () => {
+    const { scope, id, graph } = seed("accepted");
+    graph.nodes[0].text = " ";
+    saveGraph(scope, graph);
+    mount("accepted");
+    fireEvent.click(screen.getByText(id));
+    expect(screen.getByRole("alert")).toBeVisible();
+    expect(api.enqueueGeneration).not.toHaveBeenCalled();
+    expect(loadGraph(scope).nodes[1].error).toBeUndefined();
+    fireEvent.click(screen.getByText("edit"));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("prevents submission if the pending request cannot be saved", async () => {

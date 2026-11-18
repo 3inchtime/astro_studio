@@ -1,4 +1,6 @@
 .workflow-stage {
+  display: flex;
+  flex-direction: column;
   position: relative;
   isolation: isolate;
   container-type: inline-size;
@@ -11,6 +13,20 @@
   color: var(--color-foreground);
   background: var(--color-canvas);
 }
+.workflow-viewport { position: relative; flex: 1; min-height: 0; }
+.workflow-command-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+}
+.workflow-view-tools { display: flex; align-items: center; gap: 4px; color: var(--color-muted); }
+.workflow-command-bar .workflow-toolbar { padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.workflow-view-tools .workflow-zoom { border-left: 1px solid var(--color-border-subtle); padding-left: 6px; }
 .workflow-stage .react-flow {
   --xy-background-color: var(--color-canvas);
   --xy-edge-stroke: color-mix(in srgb, var(--color-primary) 58%, var(--color-muted));
@@ -22,7 +38,7 @@
   --xy-attribution-background-color: var(--color-canvas);
 }
 .workflow-stage .react-flow__background { opacity: .44; }
-.workflow-stage .react-flow__attribution a { color: var(--color-muted); }
+.workflow-stage .react-flow__attribution a { color: var(--color-muted); font-size: 11px; }
 .workflow-stage .react-flow__node:focus-visible,
 .workflow-stage .react-flow__edge:focus-visible .react-flow__edge-path {
   outline-color: var(--color-primary);
@@ -236,7 +252,7 @@
   position: absolute;
   z-index: 6;
   left: 15px;
-  top: 67px;
+  top: 12px;
   max-width: calc(100% - 30px);
   gap: 8px;
   padding-left: 12px;
@@ -260,11 +276,11 @@
 }
 .workflow-preview-dialog img { max-width: 90vw; max-height: 86vh; object-fit: contain; border-radius: 8px; }
 .workflow-preview-dialog button { position: absolute; top: 14px; right: 14px; background: var(--color-surface); }
-@container (max-width: 640px) {
+@container (max-width: 820px) {
   .workflow-add-label { display: none; }
 }
-@container (max-width: 420px) {
+@container (max-width: 670px) {
   .workflow-palette button span { display: none; }
   .workflow-palette button { width: 36px; }
-  .workflow-edge-actions { bottom: 52px; }
+
 }

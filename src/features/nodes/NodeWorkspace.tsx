@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Viewport } from "@xyflow/react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../../app/routes/contracts";
@@ -12,6 +13,7 @@ import { awaitingReceipt, graphChangeListeners, reconcileNodeJob, updateNodeJob,
 import NodeCanvas from "./NodeCanvas";
 
 interface WorkspaceProps {
+  viewportRef?: RefObject<Viewport | null>;
   scope: string;
   activeProjectId: string | null;
   activeConversationId: string | null;
@@ -70,7 +72,7 @@ function JobTracker({ scope, project, conversation, nodeId, requestId, jobId, on
   return null;
 }
 
-export default function NodeWorkspace({ scope, activeProjectId: project, activeConversationId: conversation }: WorkspaceProps) {
+export default function NodeWorkspace({ viewportRef, scope, activeProjectId: project, activeConversationId: conversation }: WorkspaceProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { setActiveConversationId, refreshConversations } = useLayoutContext();
@@ -79,6 +81,7 @@ export default function NodeWorkspace({ scope, activeProjectId: project, activeC
     catch { return { graph: initialGraph(), failed: true }; }
   });
   const [graph, setGraph] = useState(initial.graph);
+  const [invalidTargets, setInvalidTargets] = useState<ReadonlySet<string>>(() => new Set());
   const [storageFailed, setStorageFailed] = useState(initial.failed);
   const liveGraph = useRef(graph);
   const mounted = useRef(false);
@@ -149,9 +152,15 @@ export default function NodeWorkspace({ scope, activeProjectId: project, activeC
     let inputs;
     try { inputs = resolveInputs(current, id); }
     catch (error) {
-      patchNode(id, { error: t(error instanceof GraphError ? `nodes.errors.${error.code}` : "nodes.errors.generationFailed") });
+      if (!(error instanceof GraphError)) throw error;
+      setInvalidTargets(previous => new Set(previous).add(id));
       return;
     }
+    if (invalidTargets.has(id)) setInvalidTargets(previous => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
     if (!hasTauriRuntime()) {
       patchNode(id, { error: t("nodes.errors.desktopOnly") });
       return;
@@ -186,11 +195,21 @@ export default function NodeWorkspace({ scope, activeProjectId: project, activeC
     } finally { awaitingReceipt.delete(requestId); }
   }
 
+  // Derive validation from the current connections. Only job and provider errors belong in the saved graph.
+  const inputErrors = new Map<string, string>();
+  for (const node of graph.nodes) {
+    if (!invalidTargets.has(node.id)) continue;
+    try { resolveInputs(graph, node.id); }
+    catch (error) {
+      if (!(error instanceof GraphError)) throw error;
+      inputErrors.set(node.id, t(`nodes.errors.${error.code}`));
+    }
+  }
   const pending = graph.nodes.filter(n => n.clientRequestId);
   const busyIds = new Set((!conversation && pending.length ? graph.nodes.filter(n => n.kind === "generate") : pending).map(n => n.id));
   return <div className="relative flex min-h-0 flex-1 flex-col">
     {storageFailed && <p role="alert" className="px-4 py-2 text-sm text-red-600">{t("nodes.errors.saveFailed")}</p>}
-    <NodeCanvas graph={graph} busyIds={busyIds} onChange={changeGraph} onRun={run} onPick={pick} onDetach={detach} />
+    <NodeCanvas viewportRef={viewportRef} inputErrors={inputErrors} graph={graph} busyIds={busyIds} onChange={changeGraph} onRun={run} onPick={pick} onDetach={detach} />
     {pending.map(n => <JobTracker key={n.clientRequestId} scope={scope} project={project} conversation={conversation}
       nodeId={n.id} requestId={n.clientRequestId!} jobId={n.jobId} onStorageFailure={onStorageFailure} />)}
   </div>;
