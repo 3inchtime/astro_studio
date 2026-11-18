@@ -109,6 +109,22 @@ async fn exercise_generation_queue() {
         .unwrap()
         .to_string_lossy()
         .into_owned()];
+    {
+        let conn = db.connection().unwrap();
+        conn.execute(
+            "INSERT INTO projects (id,name) VALUES ('unrelated','Unrelated')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO conversations (id,project_id,title) VALUES ('unrelated-chat','unrelated','Other')", []).unwrap();
+    }
+    let mut mismatched = edit.clone();
+    mismatched.client_request_id = Some("cross-project-canvas".into());
+    mismatched.conversation_id = Some("unrelated-chat".into());
+    assert!(matches!(
+        submit(&db, mismatched),
+        Err(AppError::Validation { .. })
+    ));
     let second = submit(&db, edit.clone()).unwrap();
     let cancelled = submit(&db, request("third")).unwrap();
     let rejected =
@@ -252,6 +268,27 @@ async fn exercise_generation_queue() {
     ));
     drop(missing_waiter);
     drop(waiting);
+    let other_document =
+        crate::canvas::documents::create(&db, &root, Some("default"), Some("To delete")).unwrap();
+    let mut discarded = request("deleted canvas");
+    discarded.document_id = Some(other_document.id.clone());
+    let discarded = submit(&db, discarded).unwrap().value;
+    crate::commands::canvas::delete_canvas_document(
+        app.handle().clone(),
+        app.state::<Database>(),
+        other_document.id.clone(),
+    )
+    .unwrap();
+    assert!(matches!(
+        read_result(&db, &discarded.job_id),
+        Err(AppError::GenerationJobCancelled)
+    ));
+    let mut late_submission = request("deleted canvas submitted afterwards");
+    late_submission.document_id = Some(other_document.id);
+    assert!(matches!(
+        submit(&db, late_submission),
+        Err(AppError::Validation { .. })
+    ));
     let first_handle = app.handle().clone();
     let second_handle = app.handle().clone();
     let worker_one = tokio::spawn(async move { process_next(&first_handle).await });

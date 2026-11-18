@@ -1938,3 +1938,54 @@ fn v20_missing_assets_backfill_relative_locations_and_preserve_colliding_legacy_
     .unwrap()
     .is_none());
 }
+
+#[test]
+fn preflight_uses_committed_schema_after_interrupted_rollback_transaction() {
+    for (committed, uncommitted) in [(20, 999), (999, 20)] {
+        let path = test_db_path("astro-hot-journal");
+        let _cleanup = TestDatabaseDirectory(path.parent().unwrap().to_owned());
+        let writer = path.with_file_name("writer.db");
+        let conn = Connection::open(&writer).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode=DELETE; PRAGMA cache_size=3;
+            CREATE TABLE schema_migrations(version INTEGER);
+            CREATE TABLE content(payload BLOB);",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO schema_migrations VALUES(?1)", [committed])
+            .unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        conn.execute("UPDATE schema_migrations SET version=?1", [uncommitted])
+            .unwrap();
+        for _ in 0..100 {
+            conn.execute("INSERT INTO content VALUES(zeroblob(4096))", [])
+                .unwrap();
+        }
+        let journal = |db: &Path| {
+            let mut p = db.as_os_str().to_owned();
+            p.push("-journal");
+            std::path::PathBuf::from(p)
+        };
+        std::fs::copy(&writer, &path).unwrap();
+        std::fs::copy(journal(&writer), journal(&path)).unwrap();
+        drop(conn);
+        let before_db = std::fs::read(&path).unwrap();
+        let before_journal = std::fs::read(journal(&path)).unwrap();
+
+        let opened = Database::open(&path);
+        if committed == 20 {
+            let db = opened.unwrap();
+            assert_eq!(
+                schema::supported_version(&db.connection().unwrap()).unwrap(),
+                20
+            );
+        } else {
+            assert!(matches!(
+                opened,
+                Err(AppError::UnsupportedSchema { found: 999, .. })
+            ));
+            assert_eq!(std::fs::read(&path).unwrap(), before_db);
+            assert_eq!(std::fs::read(journal(&path)).unwrap(), before_journal);
+        }
+    }
+}

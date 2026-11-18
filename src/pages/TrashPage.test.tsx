@@ -181,6 +181,22 @@ describe("TrashPage", () => {
     expect(searchGenerations).toHaveBeenLastCalledWith("latest", 1, true);
   });
 
+  it("starts a fresh read after restoring while the same search is in flight", async () => {
+    render(<TrashPage />);
+    fireEvent.click(await screen.findByText("Select generation"));
+    let finishOld!: (value: unknown) => void;
+    searchGenerations.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    fireEvent.keyDown(screen.getByPlaceholderText("trash.search"), { key: "Enter" });
+    await waitFor(() => expect(searchGenerations).toHaveBeenCalledTimes(2));
+    searchGenerations.mockResolvedValue({ generations: [], total: 0, page: 1, page_size: 20 });
+    fireEvent.click(screen.getByText("Restore image"));
+    await screen.findByTestId("empty-state");
+    await act(async () => finishOld({
+      generations: [{ generation: { id: "generation-1" }, images: [] }], total: 1, page: 1, page_size: 20,
+    }));
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+  });
+
   it("refreshes the conversation history immediately after restoring", async () => {
     render(<TrashPage />);
 

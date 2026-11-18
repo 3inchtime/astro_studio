@@ -95,6 +95,7 @@ impl CompatibilityPreparationFixture {
 fn compatibility_request(model: &str) -> GenerationLifecycleRequest {
     GenerationLifecycleRequest {
         document_id: None,
+        confirmed_profile_fingerprint: None,
         provider_override_confirmed: false,
         provider_profile_id: None,
         source_generation_id: None,
@@ -256,6 +257,34 @@ fn recipe_failed_history_uses_parent_chain_and_does_not_rewrite_parent() {
         GenerationJobStatus::Failed
     );
     drop(conn);
+    // Before the durable dispatcher, a retry copied its parent's source ref.
+    // An exact replay after upgrade must still return that child's receipt.
+    use tauri::Manager;
+    let app = tauri::test::mock_app();
+    app.manage(crate::generation_execution::GenerationRuntime::default());
+    app.manage(crate::storage::MaintenanceGate::default());
+    request.client_request_id = Some(child.client_request_id.clone());
+    for conversation_id in [request.conversation_id.take(), None] {
+        request.conversation_id = conversation_id;
+        let replay = crate::generation_execution::enqueue_request(
+            app.handle(),
+            &fixture.db,
+            request.clone(),
+            |_| Ok(()),
+        )
+        .expect("replay the pre-dispatcher retry with an explicit or implicit conversation");
+        assert_eq!(replay.job_id, child.id);
+    }
+    request.prompt.push_str(" changed");
+    assert!(matches!(
+        crate::generation_execution::enqueue_request(
+            app.handle(),
+            &fixture.db,
+            request,
+            |_| Ok(())
+        ),
+        Err(AppError::GenerationJobIdempotencyConflict)
+    ));
     fixture.cleanup();
 }
 
@@ -1117,6 +1146,27 @@ async fn compatibility_executor_claims_exact_job_and_uses_current_key_for_snapsh
         }
     }
     drop(sink);
+    fixture.cleanup();
+}
+
+#[test]
+fn paid_test_cannot_enqueue_a_profile_changed_since_confirmation() {
+    let fixture = CompatibilityPreparationFixture::new();
+    let model = ENGINE_GPT_IMAGE_2;
+    let mut state = providers::read_model_provider_profiles_state(&fixture.db, model).unwrap();
+    state.profiles[0].api_key = "fixture-first-key".into();
+    fixture.save_profiles(model, state.clone());
+    let mut request = compatibility_request(model);
+    let saved = providers::resolve_profile(&fixture.db, model, None).unwrap();
+    request.confirmed_profile_fingerprint =
+        Some(crate::provider_diagnostics::profile_fingerprint(model, &saved).unwrap());
+    assert!(prepare_generation_job(&fixture.db, &request).is_ok());
+    state.profiles[0].endpoint_settings.base_url = "https://changed.example/v1".into();
+    fixture.save_profiles(model, state);
+    assert!(matches!(
+        prepare_generation_job(&fixture.db, &request),
+        Err(AppError::Validation { .. })
+    ));
     fixture.cleanup();
 }
 
@@ -7553,6 +7603,43 @@ async fn verified_response_decodes_then_stages_without_provider_submission() {
     assert!(staged.final_paths().iter().all(|path| !path.exists()));
     drop(staged);
     std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn cancellation_interrupts_a_stalled_result_download() {
+    struct StalledDownload(tokio::sync::Notify);
+    #[async_trait::async_trait]
+    impl ImageResponseDecoder for StalledDownload {
+        async fn decode_and_download(
+            &self,
+            _: &ProviderAttemptResponse,
+            _: &CancellationProbe,
+        ) -> Result<Vec<Vec<u8>>, GenerationExecutionError> {
+            self.0.notify_one();
+            std::future::pending().await
+        }
+    }
+    let decoder = StalledDownload(Default::default());
+    let cancellation = CancellationProbe::new();
+    let snapshot = fixture_execution_snapshot();
+    let response = ProviderAttemptResponse {
+        body_text: "{}".into(),
+        response_file: "/safe/response.json".into(),
+        response_size: 2,
+        response_sha256: "0".repeat(64),
+        requested_image_count: snapshot.runtime_options.image_count,
+    };
+    let file_store = LocalGenerationFileStore::new(std::env::temp_dir());
+    let run = resume_verified_response(&decoder, &file_store, &snapshot, &response, &cancellation);
+    tokio::pin!(run);
+    tokio::select! {
+        _ = &mut run => panic!("download must still be pending"),
+        _ = decoder.0.notified() => cancellation.cancel(),
+    };
+    let result = tokio::time::timeout(Duration::from_secs(1), run)
+        .await
+        .expect("cancellation must release the worker without waiting for the download");
+    assert!(matches!(result, Err(error) if error.code() == "cancelled_by_user"));
 }
 
 #[tokio::test]

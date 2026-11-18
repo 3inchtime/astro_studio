@@ -207,6 +207,14 @@ pub struct ProviderSmokePlan {
     pub aspect_ratio: Option<String>,
     pub output_format: String,
 }
+pub(crate) fn profile_fingerprint(
+    model: &str,
+    profile: &ModelProviderProfile,
+) -> Result<String, AppError> {
+    let bytes = serde_json::to_vec(&(normalize_image_model(model), profile))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
 fn smoke_plan(model: &str, profile: &ModelProviderProfile) -> Result<ProviderSmokePlan, AppError> {
     probe_target(model, profile)?;
     let endpoint = validated_url(&image_endpoint_url_for_model_settings(
@@ -221,13 +229,7 @@ fn smoke_plan(model: &str, profile: &ModelProviderProfile) -> Result<ProviderSmo
         provider_id: profile.id.clone(),
         provider_name: profile.name.clone(),
         endpoint_host: endpoint.host_str().unwrap_or("").into(),
-        fingerprint: format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&(model, profile))
-                    .map_err(|_| validation("Cannot prepare test."))?
-            )
-        ),
+        fingerprint: profile_fingerprint(model, profile)?,
         prompt: "A small blue circle on a plain white background.".into(),
         image_count: 1,
         size: (entry.profile.protocol == ImageProtocol::OpenaiImages).then(|| "1024x1024".into()),
@@ -290,6 +292,7 @@ pub async fn run_provider_smoke_test(
         &app,
         db.inner(),
         crate::generation_execution::GenerationExecutionRequest {
+            confirmed_profile_fingerprint: Some(plan.fingerprint),
             prompt: plan.prompt,
             model: Some(plan.model.clone()),
             provider_profile_id: Some(plan.provider_id),

@@ -95,6 +95,14 @@ pub(crate) fn transform_database_paths(
         crate::llm::prompts::EXTRACTIONS_ARTIFACTS,
         crate::generation_recipe::RECIPES_ARTIFACTS,
         crate::generation_recovery::RECOVERIES_ARTIFACTS,
+        // Portable exports remove logs before walking the snapshot. Native
+        // library moves retain them, including their local response files.
+        &[ArtifactColumn::new(
+            "logs",
+            "id",
+            "response_file",
+            ArtifactKind::Expected,
+        )],
     ]
     .into_iter()
     .flatten()

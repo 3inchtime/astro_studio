@@ -222,9 +222,8 @@ export default function FavoritesPage() {
   function handleImageFolderSelectorClose() {
     closeFolderSelector();
     reloadFolders();
-    loadImageFavorites(imagePage, imageQuery, selectedImageFolderId).catch(
-      () => {},
-    );
+    const { query, folderId } = appliedImageSearch.current;
+    void loadImageFavorites(1, query, folderId);
   }
 
   function handlePromptFolderSelectorClose() {
@@ -248,7 +247,7 @@ export default function FavoritesPage() {
   const activeQuery = activeKind === "images" ? imageQuery : promptQuery;
   const hasMoreImages = imageResults.length < imageTotal;
   const loadMoreImagesRef = useInfiniteScroll({
-    enabled: activeKind === "images" && imageResults.length > 0 && !imageLoadError && !lightbox,
+    enabled: activeKind === "images" && !imageLoadError && !lightbox,
     hasMore: hasMoreImages,
     isLoading: isLoadingImages,
     onLoadMore: () => {

@@ -727,8 +727,16 @@ fn moving_native_assets_rebases_gallery_recipes_and_unopened_canvas_before_expor
     f.add_generation("origin");
     f.add_generation("edit");
     f.add_image("image", "origin", &source, Some(&source));
+    let thumb = f.image("assets/images/thumb.png", [3, 7, 12, 255]);
+    f.db.connection()
+        .unwrap()
+        .execute(
+            "UPDATE images SET thumbnail_path=?1 WHERE id='image'",
+            [thumb.to_str().unwrap()],
+        )
+        .unwrap();
     let doc = f.paths.assets.join("board.json");
-    fs::write(&doc,serde_json::to_vec(&json!({"layers":[{"objects":[{"type":"image","id":"still-closed","image_path":source}]}], "generation_requests":[{"sourceImagePath":source}]})).unwrap()).unwrap();
+    fs::write(&doc,serde_json::to_vec(&json!({"layers":[{"objects":[{"type":"image","id":"still-closed","image_path":source},{"type":"image","id":"thumbnail-reference","image_path":thumb}]}], "generation_requests":[{"sourceImagePath":source}]})).unwrap()).unwrap();
     {
         let conn = f.db.connection().unwrap();
         conn.execute(
@@ -753,7 +761,10 @@ fn moving_native_assets_rebases_gallery_recipes_and_unopened_canvas_before_expor
             )
             .unwrap();
         assert_eq!(Path::new(&file), canonical);
-        assert_eq!(file, thumb);
+        assert_eq!(
+            Path::new(&thumb),
+            moved.join("images/thumb.png").canonicalize().unwrap()
+        );
         let inputs: String = conn
             .query_row(
                 "SELECT source_image_paths FROM generations WHERE id='edit'",
@@ -769,6 +780,7 @@ fn moving_native_assets_rebases_gallery_recipes_and_unopened_canvas_before_expor
         assert!(usages
             .iter()
             .any(|u| u.contains("Unopened board") && u.contains("still-closed")));
+        assert!(usages.iter().any(|u| u.contains("thumbnail-reference")));
     }
     let archive = f.archive();
     let root = restore_archive(&f.paths, &archive, &f.operation(), &|_, _, _| {}).unwrap();
@@ -798,4 +810,52 @@ fn moving_native_assets_rebases_gallery_recipes_and_unopened_canvas_before_expor
             .unwrap(),
         0
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn retiring_a_root_symlink_preserves_assets_and_response_logs() {
+    let mut f = Fixture::new();
+    let real = f.paths.assets.canonicalize().unwrap();
+    let alias = f._root.0.join("library-alias");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    f.db.run_library_migrations(Some(&alias)).unwrap();
+    let source = f.image("library-alias/images/source.png", [5, 11, 21, 255]);
+    f.add_generation("origin");
+    f.add_image("image", "origin", &source, Some(&source));
+    let response = alias.join("logs/responses/response.json");
+    fs::create_dir_all(response.parent().unwrap()).unwrap();
+    fs::write(&response, "{}").unwrap();
+    f.db.insert_log(
+        "provider",
+        "info",
+        "response",
+        None,
+        None,
+        response.to_str(),
+    )
+    .unwrap();
+    fs::remove_file(&alias).unwrap();
+    f.paths.assets = real.clone();
+    f.db.run_library_migrations(Some(&real)).unwrap();
+    let archive = f.archive();
+    assert!(archive.is_file());
+    assert!(f
+        .db
+        .response_file_exists(real.join("logs/responses/response.json").to_str().unwrap())
+        .unwrap());
+}
+
+#[test]
+fn relocation_into_former_root_preserves_current_asset_paths_on_export() {
+    let mut f = Fixture::new();
+    let source = f.image("assets/images/source.png", [5, 11, 21, 255]);
+    f.add_generation("origin");
+    f.add_image("image", "origin", &source, Some(&source));
+    let nested = f.paths.assets.join("library");
+    fs::create_dir(&nested).unwrap();
+    fs::rename(f.paths.assets.join("images"), nested.join("images")).unwrap();
+    f.paths.assets = nested;
+    f.db.run_library_migrations(Some(&f.paths.assets)).unwrap();
+    assert!(f.archive().is_file());
 }

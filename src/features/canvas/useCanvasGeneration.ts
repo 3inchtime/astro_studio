@@ -2,16 +2,55 @@ import { useEffect, useRef, useState } from "react";
 import { generationErrorMessage } from "../../lib/generationMessages";
 import { image26ValidationError } from "../../lib/image26Options";
 import { normalizeAdvancedOptions } from "../../lib/generationRequests";
-import { DEFAULT_IMAGE_MODEL, supportsAdvancedImageOptions } from "../../lib/modelCatalog";
+import { DEFAULT_IMAGE_MODEL, getImageModelCatalogEntry } from "../../lib/modelCatalog";
 import { useTranslation } from "react-i18next";
 import { editImage, getImageModel, getCanvasGenerationStatus, hasTauriRuntime, onGenerationPartial, saveCanvasExport } from "../../lib/api";
 import { completeCanvasGeneration, failCanvasGeneration } from "../../lib/canvas/generation";
 import { useCanvasGenerationRecovery } from "../../lib/canvas/useCanvasGenerationRecovery";
 import { cloneCanvasDocumentContent } from "../../lib/canvas/document";
 import { exportCanvasFrame } from "../../lib/canvas/export";
-import type { CanvasDocumentContent, ImageModel, GenerationParams } from "../../types";
+import type { CanvasDocumentContent, ImageModel, ImageModelCatalogEntry, GenerationParams } from "../../types";
 
 import type { useCanvasDocumentSession } from "./useCanvasDocumentSession";
+
+function basicCanvasParameters(
+  model: ImageModelCatalogEntry,
+  prompt: string,
+  saved?: GenerationParams,
+): GenerationParams {
+  const params: GenerationParams = { prompt, model: model.id };
+  if (!saved) return params;
+  // Earlier canvas versions persisted this editor preset even though they
+  // submitted only the prompt and model for basic providers.
+  if (
+    saved.prompt === "" && saved.size === "auto" && saved.quality === "auto" && saved.outputFormat === "png" &&
+    Object.keys(saved).every(key => ["model", "prompt", "size", "quality", "outputFormat"].includes(key))
+  ) {
+    return params;
+  }
+  const caps = model.parameterCapabilities;
+  if (saved.size && (model.protocol === "openai-images" || caps.sizes.includes(saved.size))) {
+    params.size = saved.size;
+  }
+  if (saved.quality && caps.qualities.includes(saved.quality)) params.quality = saved.quality;
+  if (saved.background && caps.backgrounds.includes(saved.background)) params.background = saved.background;
+  if (saved.outputFormat && caps.outputFormats.includes(saved.outputFormat)) params.outputFormat = saved.outputFormat;
+  if (model.protocol === "openai-images" && ["jpeg", "webp"].includes(params.outputFormat ?? "") &&
+    saved.outputCompression !== undefined) {
+    params.outputCompression = saved.outputCompression;
+  }
+  if (saved.moderation && (model.protocol === "openai-images" || caps.moderationLevels.includes(saved.moderation))) {
+    params.moderation = saved.moderation;
+  }
+  // The backend accepts some historical counts and aspect ratios beyond the
+  // current picker presets. Leave their exact validation to the registry.
+  if (saved.imageCount !== undefined && (caps.imageCounts.length > 1 || caps.imageCounts.includes(saved.imageCount))) {
+    params.imageCount = saved.imageCount;
+  }
+  if (saved.aspectRatio && caps.aspectRatios?.length) params.aspectRatio = saved.aspectRatio;
+  if (saved.resolution && caps.resolutions?.includes(saved.resolution)) params.resolution = saved.resolution;
+  return params;
+}
 
 export function useCanvasGeneration(session: ReturnType<typeof useCanvasDocumentSession>, activeProjectId: string | null) {
   const { t } = useTranslation();
@@ -136,23 +175,28 @@ export function useCanvasGeneration(session: ReturnType<typeof useCanvasDocument
     return isDocumentReady(documentId) && last?.request_id === requestId && (last.status === "failed" || last.status === "cancelled");
   }
 
-  async function retryGeneration() {
+  async function retryGeneration(unknownConfirmed = false) {
     const documentId = selectedDocumentId;
     const request = latestRequest;
     if (!documentId || !request || isGenerating || !retryIsCurrent(documentId, request.request_id)) return;
     let unknown = request.error_code === "provider_outcome_unknown";
-    if (!request.error_code) {
-      // A document saved by an earlier version can predate the durable error code.
-      try {
-        const saved = await getCanvasGenerationStatus(documentId, request.request_id);
-        if (saved && !["failed", "cancelled", "interrupted"].includes(saved.status)) return;
-        unknown = saved?.error_code === "provider_outcome_unknown";
-      } catch {
-        unknown = true;
+    try {
+      const saved = await getCanvasGenerationStatus(documentId, request.request_id);
+      if (!retryIsCurrent(documentId, request.request_id)) return;
+      if (saved?.status === "completed" || saved?.status === "succeeded") {
+        applyGenerationContent(documentId, completeCanvasGeneration(
+          historyPresentRef.current, request.request_id,
+          saved.generation_id ?? request.generation_id ?? "", saved.images, true,
+        ));
+        return;
       }
+      if (saved && !["failed", "cancelled", "interrupted"].includes(saved.status)) return;
+      unknown ||= saved?.error_code === "provider_outcome_unknown";
+    } catch {
+      unknown = true;
     }
     if (!retryIsCurrent(documentId, request.request_id)) return;
-    if (unknown) {
+    if (unknown && !unknownConfirmed) {
       setRetryReview({ documentId, requestId: request.request_id });
       return;
     }
@@ -162,7 +206,7 @@ export function useCanvasGeneration(session: ReturnType<typeof useCanvasDocument
   function confirmRetry() {
     setRetryReview(null);
     if (retryReview && latestRequest && retryIsCurrent(retryReview.documentId, retryReview.requestId)) {
-      void handleGenerate(latestRequest.prompt);
+      void retryGeneration(true);
     }
   }
 
@@ -180,10 +224,12 @@ export function useCanvasGeneration(session: ReturnType<typeof useCanvasDocument
     const retrySourcePath = retryPrompt
       ? latestRequest?.source_image_path
       : undefined;
-    const parameters =
-      retryPrompt && latestRequest?.parameters
-        ? latestRequest.parameters
-        : { ...generationParameters, model: imageModel };
+    const savedParameters = retryPrompt ? latestRequest?.parameters : undefined;
+    const model = savedParameters?.model ?? imageModel;
+    const catalog = getImageModelCatalogEntry(model);
+    const parameters = catalog.advancedOptions
+      ? savedParameters ?? { ...generationParameters, model }
+      : basicCanvasParameters(catalog, submittedPrompt, savedParameters);
     const snapshot = cloneCanvasDocumentContent(historyPresentRef.current);
     const requestId = crypto.randomUUID();
     const projectId =
@@ -217,7 +263,7 @@ export function useCanvasGeneration(session: ReturnType<typeof useCanvasDocument
     let submissionStarted = false;
     try {
       const invalid = image26ValidationError({
-        model: parameters.model ?? imageModel,
+        model,
         format: parameters.outputFormat ?? "png",
         size: parameters.size ?? "auto",
         count: parameters.imageCount ?? 1,
@@ -250,25 +296,21 @@ export function useCanvasGeneration(session: ReturnType<typeof useCanvasDocument
       if (!mountedRef.current || !isDocumentReady(documentId)) return;
       submissionStarted = true;
       const result = await editImage({
-        ...(supportsAdvancedImageOptions(parameters.model ?? imageModel)
-          ? {
-              ...parameters,
-              advancedOptions: normalizeAdvancedOptions(
-                parameters.advancedOptions ?? {},
-                parameters.outputFormat ?? "png",
-                true,
-              ),
-              outputCompression: ["jpeg", "webp"].includes(
-                parameters.outputFormat ?? "png",
-              )
-                ? parameters.outputCompression
-                : undefined,
-            }
-          : {}),
+        ...parameters,
+        ...(catalog.advancedOptions && {
+          advancedOptions: normalizeAdvancedOptions(
+            parameters.advancedOptions ?? {},
+            parameters.outputFormat ?? "png",
+            true,
+          ),
+          outputCompression: ["jpeg", "webp"].includes(parameters.outputFormat ?? "")
+            ? parameters.outputCompression
+            : undefined,
+        }),
         prompt: submittedPrompt,
         clientRequestId: requestId,
         documentId,
-        model: parameters.model ?? imageModel,
+        model,
         sourceImagePaths: [exportedPath],
         projectId,
       });

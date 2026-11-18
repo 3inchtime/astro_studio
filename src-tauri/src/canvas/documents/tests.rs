@@ -209,7 +209,12 @@ fn create_and_list_canvas_documents_for_project() {
     let loaded = load(&db, &root, &created.id).unwrap();
     assert_eq!(loaded.document.name, "Final");
     assert_eq!(loaded.content.version, 2);
-    delete(&db, &created.id).unwrap();
+    {
+        let mut conn = db.connection().unwrap();
+        let tx = conn.transaction().unwrap();
+        delete(&tx, &created.id).unwrap();
+        tx.commit().unwrap();
+    }
     assert!(list(&db, project).unwrap().is_empty());
     fs::remove_dir_all(root).unwrap();
     drop(db);

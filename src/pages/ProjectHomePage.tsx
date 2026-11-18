@@ -292,12 +292,15 @@ export default function ProjectHomePage() {
   }
 
   async function handleDeleteImage(id: string) {
+    const epoch = projectEpoch.current;
     await deleteGeneration(id);
+    if (epoch !== projectEpoch.current) return;
     await loadImages(
       activeSearch.current.query,
       activeSearch.current.filters,
       1,
     );
+    if (epoch !== projectEpoch.current) return;
     if (selectedImage?.generation.id === id) setSelectedImage(null);
     if (lightbox?.images.some((image) => image.generationId === id)) {
       closeLightbox();

@@ -104,6 +104,24 @@ pub(super) fn preflight(path: &Path) -> Result<(), AppError> {
     let vfs = "unix-none";
     let reader = Connection::open_with_flags_and_vfs(path, OpenFlags::SQLITE_OPEN_READ_ONLY, vfs)?;
     reader.execute_batch("PRAGMA locking_mode=EXCLUSIVE;")?;
+    let probe = reader.query_row("PRAGMA schema_version", [], |row| row.get::<_, i64>(0));
+    if let Err(rusqlite::Error::SqliteFailure(code, _)) = &probe {
+        if code.extended_code == rusqlite::ffi::SQLITE_READONLY_ROLLBACK {
+            // A hot rollback journal may contain the only committed version.
+            // Replay a private copy before authorizing recovery of the original.
+            drop(reader);
+            let temp = crate::storage::temporary(&std::env::temp_dir(), "astro-preflight")?;
+            let copy = temp.0.join("library.db");
+            let mut journal = path.as_os_str().to_owned();
+            journal.push("-journal");
+            fs::copy(path, &copy)?;
+            fs::copy(journal, temp.0.join("library.db-journal"))?;
+            let recovered = Connection::open(&copy)?;
+            supported_version(&recovered)?;
+            return Ok(());
+        }
+    }
+    probe?;
     supported_version(&reader)?;
     Ok(())
 }

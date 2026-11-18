@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
-import { getConversationGenerations, onGenerationJob, onGenerationPartial } from "../../lib/api";
+import { getConversationGenerations, onGenerationComplete, onGenerationJob, onGenerationPartial } from "../../lib/api";
 import { applyGenerationPartial, generationsToMessages } from "../../lib/generationMessages";
 import type { Message } from "../../types";
 
@@ -33,19 +33,25 @@ export function useConversationFeed(conversationId: string | null, refreshConver
       void reload().catch(() => {});
       refreshSidebar.current();
     });
+    // Recovery of a pre-queue saved response emits only this event, without a job ID.
+    const legacyCompletions = onGenerationComplete((event) => {
+      if (!active || event.job_id || !conversationId) return;
+      void reload().catch(() => {});
+      refreshSidebar.current();
+    });
     const partials = onGenerationPartial((event) => {
       if (active && (!event.conversation_id || conversationId === event.conversation_id)) {
         setMessages((current) => applyGenerationPartial(current, event));
       }
     });
     // Register first so a fast worker cannot finish between the read and subscribe.
-    void jobs.catch(() => {}).then(() => {
+    void Promise.allSettled([jobs, legacyCompletions]).then(() => {
       if (active) void reload().catch(() => {});
     });
     return () => {
       active = false;
       request.current++;
-      for (const listener of [jobs, partials]) void listener.then((release) => release()).catch(() => {});
+      for (const listener of [jobs, legacyCompletions, partials]) void listener.then((release) => release()).catch(() => {});
     };
   }, [conversationId, reload]);
 
@@ -56,5 +62,5 @@ export function useConversationFeed(conversationId: string | null, refreshConver
     return () => window.clearInterval(timer);
   }, [conversationId, processing, reload]);
 
-  return { messages, updateMessages, isGenerating: processing };
+  return { messages, updateMessages, reload, isGenerating: processing };
 }

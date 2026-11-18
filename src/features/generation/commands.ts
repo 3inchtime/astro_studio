@@ -101,7 +101,7 @@ export function onGenerationPartial(
 }
 
 export function onGenerationComplete(
-  handler: (data: { generation_id: string; status: string }) => void,
+  handler: (data: { generation_id: string; status: string; job_id?: string }) => void,
 ) {
   return listenDesktopEvent("generation:complete", handler);
 }

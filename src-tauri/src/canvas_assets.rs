@@ -174,16 +174,13 @@ pub(crate) fn generation_usages(
 ) -> Result<Vec<String>, String> {
     use std::collections::HashSet;
     let rows = conn
-        .prepare(
-            "SELECT id,file_path,thumbnail_path,managed_path FROM images WHERE generation_id=?1",
-        )
+        .prepare("SELECT id,file_path,thumbnail_path FROM images WHERE generation_id=?1")
         .map_err(|e| e.to_string())?
         .query_map([generation_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, Option<String>>(2)?,
-                r.get::<_, Option<String>>(3)?,
             ))
         })
         .map_err(|e| e.to_string())?
@@ -192,14 +189,11 @@ pub(crate) fn generation_usages(
     let mut paths = AssetPaths::default();
     let mut ids = HashSet::new();
     let former = crate::storage::assets::FormerRoots::read(conn).map_err(|e| e.to_string())?;
-    for (id, path, thumb, relative) in rows {
-        if let Some(relative) = relative {
-            former.extend_references(&mut paths, &relative);
-        }
+    for (id, path, thumb) in rows {
         ids.insert(id);
-        paths.insert(&path);
+        former.insert_references(&mut paths, &path);
         if let Some(t) = thumb {
-            paths.insert(&t);
+            former.insert_references(&mut paths, &t);
         }
     }
     let mut usages = Vec::new();

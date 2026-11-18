@@ -303,10 +303,9 @@ pub(crate) fn rename(db: &Database, id: &str, name: &str) -> Result<CanvasDocume
     read_canvas_document(&conn, id)
 }
 
-pub(crate) fn delete(db: &Database, id: &str) -> Result<(), AppError> {
+pub(crate) fn delete(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<(), AppError> {
     let timestamp = current_timestamp();
-    let conn = db.connection()?;
-    conn.execute(
+    tx.execute(
         "UPDATE canvas_documents SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
         params![timestamp, id],
     )

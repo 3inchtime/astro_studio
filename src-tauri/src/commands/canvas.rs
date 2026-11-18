@@ -102,9 +102,17 @@ pub(crate) fn rename_canvas_document(
 }
 
 #[tauri::command]
-pub(crate) fn delete_canvas_document(db: State<'_, Database>, id: String) -> Result<(), AppError> {
-    let _library_operation = crate::storage::write_operation::<AppError>()?;
-    documents::delete(&db, &id)
+pub(crate) fn delete_canvas_document<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db: State<'_, Database>,
+    id: String,
+) -> Result<(), AppError> {
+    crate::generation_execution::delete_with_jobs(
+        &app,
+        db.inner(),
+        crate::generation_execution::DeletionScope::CanvasDocument(&id),
+        |tx| documents::delete(tx, &id),
+    )
 }
 
 #[tauri::command]

@@ -15,65 +15,88 @@ fn portable_prefix(path: &str) -> String {
     path.replace('\\', "/").trim_end_matches('/').to_owned()
 }
 
-/// Immutable canvas revisions can contain legacy paths without IDs. Retain only
-/// previous library roots, so those paths remain locatable after a directory move.
-pub(crate) struct FormerRoots(Vec<String>);
+/// Current and previous root spellings for resolving paths in immutable canvas revisions.
+pub(crate) struct FormerRoots(Vec<(String, bool)>);
+
+enum PathUse {
+    Document,
+    RelocatedAsset,
+    RelocatedRecovery,
+}
 
 impl FormerRoots {
     pub(crate) fn read(conn: &Connection) -> Result<Self, AppError> {
-        let mut stmt =
-            conn.prepare("SELECT prefix FROM former_asset_roots ORDER BY length(prefix) DESC")?;
-        let values = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        // A moved library may sit inside a former root. Match the most specific
+        // spelling so a current path is never relocated a second time.
+        let mut stmt = conn.prepare(
+            "SELECT prefix, MAX(active) FROM (
+                SELECT prefix, 0 AS active FROM former_asset_roots
+                UNION ALL SELECT prefix, 1 FROM library_asset_roots
+            ) GROUP BY prefix ORDER BY length(prefix) DESC",
+        )?;
+        let values = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(Self(values.collect::<rusqlite::Result<_>>()?))
     }
 
     pub(crate) fn resolve(&self, root: &Path, path: &str) -> Result<String, AppError> {
-        self.locate(root, path, true)
+        self.locate(root, path, PathUse::Document)
     }
 
-    fn locate(&self, root: &Path, path: &str, canonical: bool) -> Result<String, AppError> {
-        if self.0.is_empty() {
-            return Ok(path.to_owned());
-        }
-        let normalized = path.replace('\\', "/");
-        for prefix in &self.0 {
+    fn relative_path<'a>(&self, normalized: &'a str) -> Option<(&'a str, bool)> {
+        for (prefix, active) in &self.0 {
             let Some(start) = normalized.get(..prefix.len()) else {
                 continue;
             };
             let windows = prefix.starts_with("//") || prefix.as_bytes().get(1) == Some(&b':');
-            if !(start == prefix || windows && start.eq_ignore_ascii_case(prefix)) {
-                continue;
-            }
-            let Some(relative) = normalized[prefix.len()..].strip_prefix('/') else {
-                continue;
-            };
-            let location = managed_location(root, relative)?;
-            // Source-aware retries bind to canonical absolute names when the file exists.
-            let resolved = match location.canonicalize() {
-                Ok(real) => {
-                    if !real.starts_with(root.canonicalize()?) {
-                        return Err(AppError::Validation {
-                            message: "Relocated asset symlink escapes library".into(),
-                        });
-                    }
-                    real
+            if start == prefix || windows && start.eq_ignore_ascii_case(prefix) {
+                if let Some(relative) = normalized[prefix.len()..].strip_prefix('/') {
+                    return Some((relative, *active));
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => location,
-                Err(error) => return Err(error.into()),
-            };
-            return Ok(if canonical {
-                resolved
-            } else {
-                root.join(relative)
             }
-            .to_string_lossy()
-            .into_owned());
         }
-        Ok(path.to_owned())
+        None
     }
 
-    pub(crate) fn extend_references(&self, paths: &mut AssetPaths, relative: &str) {
-        for prefix in &self.0 {
+    fn locate(&self, root: &Path, path: &str, purpose: PathUse) -> Result<String, AppError> {
+        let normalized = path.replace('\\', "/");
+        let Some((relative, active)) = self.relative_path(&normalized) else {
+            return Ok(path.to_owned());
+        };
+        if active && matches!(purpose, PathUse::Document) {
+            return Ok(path.to_owned());
+        }
+        let location = managed_location(root, relative)?;
+        // Source-aware retries bind to canonical absolute names when the file exists.
+        let resolved = match location.canonicalize() {
+            Ok(real) => {
+                if !real.starts_with(root.canonicalize()?) {
+                    return Err(AppError::Validation {
+                        message: "Relocated asset symlink escapes library".into(),
+                    });
+                }
+                real
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => location,
+            Err(error) => return Err(error.into()),
+        };
+        Ok(match purpose {
+            PathUse::RelocatedRecovery => root.join(relative),
+            _ => resolved,
+        }
+        .to_string_lossy()
+        .into_owned())
+    }
+
+    pub(crate) fn insert_references(&self, paths: &mut AssetPaths, absolute: &str) {
+        paths.insert(absolute);
+        let normalized = absolute.replace('\\', "/");
+        if let Some((relative, true)) = self.relative_path(&normalized) {
+            self.extend_references(paths, relative);
+        }
+    }
+
+    fn extend_references(&self, paths: &mut AssetPaths, relative: &str) {
+        for (prefix, _) in &self.0 {
             paths.insert(&format!("{prefix}/{relative}"));
         }
     }
@@ -112,12 +135,10 @@ pub(crate) fn bind_root(conn: &Connection, root: &Path) -> Result<(), AppError> 
     if existing == prefixes {
         return Ok(());
     }
-    let relocated = root.is_absolute()
-        && !existing.is_empty()
-        && !existing.contains("assets")
-        && prefixes.is_disjoint(&existing);
+    let relocated = root.is_absolute() && !existing.is_empty() && !existing.contains("assets");
+    let source_roots = relocated.then(|| FormerRoots::read(conn)).transpose()?;
     if relocated {
-        for prefix in &existing {
+        for prefix in existing.difference(&prefixes) {
             conn.execute(
                 "INSERT OR IGNORE INTO former_asset_roots(prefix) VALUES(?1)",
                 [prefix],
@@ -131,12 +152,16 @@ pub(crate) fn bind_root(conn: &Connection, root: &Path) -> Result<(), AppError> 
             [prefix],
         )?;
     }
-    if relocated {
-        let aliases = FormerRoots::read(conn)?;
+    if let Some(aliases) = source_roots {
         crate::storage::artifacts::transform_database_paths(
             conn,
             &mut |old, _, column| {
-                Ok(aliases.locate(root, old, column.table != "generation_recoveries")?)
+                let purpose = if column.table == "generation_recoveries" {
+                    PathUse::RelocatedRecovery
+                } else {
+                    PathUse::RelocatedAsset
+                };
+                Ok(aliases.locate(root, old, purpose)?)
             },
             &mut |_, _| Ok(()),
         )
@@ -228,6 +253,7 @@ fn path_key(path: &str) -> String {
     // Only apply Windows rules to unambiguously Windows file names.
     let bytes = path.as_bytes();
     if path.starts_with(r"\\")
+        || path.starts_with("//")
         || (bytes.len() > 2
             && bytes[0].is_ascii_alphabetic()
             && bytes[1] == b':'

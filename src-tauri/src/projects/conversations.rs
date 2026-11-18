@@ -56,44 +56,24 @@ fn resolve_conversation_id(
     let project_id = resolve_project_id(conn, project_id)?;
 
     if let Some(conv_id) = conversation_id.map(str::trim).filter(|id| !id.is_empty()) {
-        let exists = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND deleted_at IS NULL)",
-                params![conv_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|e| e.to_string())?
-            != 0;
-
-        if !exists {
-            return create_new_conversation(conn, prompt, &project_id);
-        }
-
-        let generation_count = conn
-            .query_row(
-                "SELECT COUNT(*) FROM generations WHERE conversation_id = ?1 AND deleted_at IS NULL",
-                params![conv_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .ok();
-
-        if let Some(count) = generation_count {
-            if count == 0 {
-                let timestamp = current_timestamp();
-                conn.execute(
-                    "UPDATE conversations SET title = CASE WHEN title = ?5 THEN ?1 ELSE title END, project_id = ?2, archived_at = NULL, updated_at = ?3 WHERE id = ?4",
-                    params![conversation_title_from_prompt(prompt), project_id, timestamp, conv_id, DEFAULT_CONVERSATION_TITLE],
-                )
-                .map_err(|e| e.to_string())?;
-                return Ok(conv_id.to_string());
-            }
-
-            let timestamp = current_timestamp();
-            conn.execute(
-                "UPDATE conversations SET archived_at = NULL, updated_at = ?1 WHERE id = ?2",
-                params![timestamp, conv_id],
+        let updated = conn
+            .execute(
+                "UPDATE conversations
+             SET title = CASE WHEN title = ?2 AND NOT EXISTS (
+                 SELECT 1 FROM generations WHERE conversation_id = ?1 AND deleted_at IS NULL
+             ) THEN ?3 ELSE title END,
+             project_id = COALESCE(project_id, ?4), archived_at = NULL, updated_at = ?5
+             WHERE id = ?1 AND deleted_at IS NULL",
+                params![
+                    conv_id,
+                    DEFAULT_CONVERSATION_TITLE,
+                    conversation_title_from_prompt(prompt),
+                    project_id,
+                    current_timestamp()
+                ],
             )
             .map_err(|e| e.to_string())?;
+        if updated != 0 {
             return Ok(conv_id.to_string());
         }
     }
@@ -420,7 +400,8 @@ mod title_tests {
         conn.execute_batch("CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT,created_at TEXT,updated_at TEXT,deleted_at TEXT);
             CREATE TABLE conversations(id TEXT,project_id TEXT,title TEXT,created_at TEXT,updated_at TEXT,archived_at TEXT,pinned_at TEXT,deleted_at TEXT);
             CREATE TABLE generations(id TEXT,conversation_id TEXT,deleted_at TEXT);
-            INSERT INTO conversations(id,project_id,title) VALUES ('test','default','Connection test · Saved provider'),('regular','default','New Conversation');").unwrap();
+            INSERT INTO projects(id,name) VALUES ('original-project','Original');
+            INSERT INTO conversations(id,project_id,title) VALUES ('test','default','Connection test · Saved provider'),('regular','original-project','New Conversation');").unwrap();
         let prompt = "A small blue circle on a plain white background.";
         for id in ["test", "regular"] {
             assert_eq!(
@@ -434,6 +415,14 @@ mod title_tests {
             })
             .unwrap()
         };
+        let project: String = conn
+            .query_row(
+                "SELECT project_id FROM conversations WHERE id='regular'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(project, "original-project");
         assert_eq!(title("test"), "Connection test · Saved provider");
         assert_eq!(title("regular"), conversation_title_from_prompt(prompt));
     }

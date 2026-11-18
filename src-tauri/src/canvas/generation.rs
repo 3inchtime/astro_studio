@@ -43,8 +43,12 @@ pub(crate) fn read_canvas_generation_status(
          FROM generation_jobs j
          JOIN generations g ON g.id = j.generation_id
          LEFT JOIN conversations c ON c.id = g.conversation_id
-         WHERE j.client_request_id = ?1 AND (j.source_kind != 'canvas' OR
-               COALESCE(json_extract(j.source_ref_json,'$.document_id'), json_extract(j.source_ref_json,'$.canvas_document_id'), ?2) = ?2)",
+         WHERE j.client_request_id = ?1 AND (
+             CASE WHEN json_type(j.source_ref_json, '$.request_fingerprint') IS NULL
+                  THEN COALESCE(json_extract(j.source_ref_json,'$.document_id'),
+                                json_extract(j.source_ref_json,'$.canvas_document_id'), ?2) = ?2
+                  ELSE j.source_kind = 'canvas' AND json_extract(j.source_ref_json,'$.document_id') = ?2
+             END)",
             params![request_id, document_id],
             |row| {
                 Ok((

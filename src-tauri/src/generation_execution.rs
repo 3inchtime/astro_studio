@@ -14,6 +14,9 @@ use tokio::sync::{watch, Notify};
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct GenerationExecutionRequest {
+    // Used only for the paid connection test, never serialized into a job.
+    #[serde(skip)]
+    pub(crate) confirmed_profile_fingerprint: Option<String>,
     #[serde(default)]
     pub(crate) provider_override_confirmed: bool,
     pub(crate) provider_profile_id: Option<String>,
@@ -67,6 +70,7 @@ pub(crate) enum DeletionScope<'a> {
     Generation(&'a str),
     Conversation(&'a str),
     Project(&'a str),
+    CanvasDocument(&'a str),
 }
 
 /// Stop work within the same write transaction that hides its parent. The
@@ -79,6 +83,10 @@ fn cancel_for_deletion(
         DeletionScope::Generation(id) => ("g.id", id),
         DeletionScope::Conversation(id) => ("c.id", id),
         DeletionScope::Project(id) => ("c.project_id", id),
+        DeletionScope::CanvasDocument(id) => (
+            "CASE WHEN j.source_kind='canvas' AND json_valid(j.source_ref_json) THEN COALESCE(json_extract(j.source_ref_json,'$.document_id'), json_extract(j.source_ref_json,'$.canvas_document_id')) END",
+            id,
+        ),
     };
     let mut query = tx.prepare(&format!("SELECT j.id FROM generation_jobs j JOIN generations g ON g.id=j.generation_id JOIN conversations c ON c.id=g.conversation_id WHERE {column}=?1 AND g.deleted_at IS NULL AND c.deleted_at IS NULL AND j.status IN ('queued','running')"))?;
     let ids = query
@@ -155,19 +163,26 @@ fn request_fingerprint(request: &GenerationExecutionRequest) -> Result<String, A
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
 }
 
-fn replay_receipt(
+fn reconcile_replay(
     conn: &Connection,
-    id: Option<&str>,
+    request: &mut GenerationExecutionRequest,
     fingerprint: &str,
 ) -> Result<Option<GenerationJobTransition<EnqueueGenerationResult>>, AppError> {
-    let Some(id) = id else {
+    let Some(id) = request.client_request_id.as_deref() else {
         return Ok(None);
     };
     let Some(job) = generation_jobs::find_job_by_client_request_id(conn, id)? else {
         return Ok(None);
     };
     let Some(original) = job.source_ref["request_fingerprint"].as_str() else {
-        // Pre-runtime jobs are compared against the validated historical request below.
+        // Old retries implicitly used their parent's conversation. Resolve this
+        // only for an existing receipt; a fresh request can start a new chat.
+        if job.parent_job_id.is_some()
+            && request.source_generation_id.is_some()
+            && request.conversation_id.is_none()
+        {
+            request.conversation_id = job.request["conversation_id"].as_str().map(str::to_owned);
+        }
         return Ok(None);
     };
     if original != fingerprint {
@@ -194,16 +209,18 @@ fn enqueue(
         });
     }
     let fingerprint = request_fingerprint(&request)?;
-    if let Some(receipt) = replay_receipt(
-        &*db.connection()?,
-        request.client_request_id.as_deref(),
-        &fingerprint,
-    )? {
+    if let Some(receipt) = reconcile_replay(&*db.connection()?, &mut request, &fingerprint)? {
         return Ok(receipt);
     }
     validate_sources(&mut request)?;
+    let mut prepared = prepare_generation_job(db, &request)?;
+    let mut conn = db.connection()?;
+    if let Some(receipt) = reconcile_replay(&conn, &mut request, &fingerprint)? {
+        return Ok(receipt);
+    }
+    // Keep the connection until insertion so a simultaneous canvas deletion
+    // either prevents this enqueue or cancels its committed job.
     if let Some(id) = &request.document_id {
-        let conn = db.connection()?;
         let project: String = conn
             .query_row(
                 "SELECT project_id FROM canvas_documents WHERE id=?1 AND deleted_at IS NULL",
@@ -222,14 +239,20 @@ fn enqueue(
                 message: "Canvas document belongs to another project.".into(),
             });
         }
-        request.project_id = Some(project);
-    }
-    let mut prepared = prepare_generation_job(db, &request)?;
-    let mut conn = db.connection()?;
-    if let Some(receipt) =
-        replay_receipt(&conn, request.client_request_id.as_deref(), &fingerprint)?
-    {
-        return Ok(receipt);
+        if let Some(conversation) = &request.conversation_id {
+            let outside_project: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM conversations
+                 WHERE id=?1 AND deleted_at IS NULL AND project_id != ?2)",
+                rusqlite::params![conversation.trim(), project],
+                |row| row.get(0),
+            )?;
+            if outside_project {
+                return Err(AppError::Validation {
+                    message: "Canvas conversation belongs to another project.".into(),
+                });
+            }
+        }
+        prepared.requested_project_id = Some(project);
     }
     prepared.source_ref["request_fingerprint"] = fingerprint.into();
     if let Some(parent) = prepared.parent_job_id.as_deref() {
@@ -243,7 +266,13 @@ fn enqueue(
             &tx,
             parent,
             &prepared.client_request_id,
-            Some(&prepared.source_ref),
+            // Fingerprinted receipts were replayed above. The previous
+            // dispatcher persisted a retry with the parent's exact source ref.
+            if exists {
+                None
+            } else {
+                Some(&prepared.source_ref)
+            },
         )?;
         let event = if exists {
             None

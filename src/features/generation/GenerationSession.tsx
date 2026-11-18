@@ -28,6 +28,7 @@ import { saveProviderSettingsDraft, takeProviderSettingsDraft, conversationDraft
 import {
   getImageModel,
   getModelProviderProfiles,
+  listGenerationJobs,
   saveImageModel,
   deleteGeneration,
   messageImageToEditSource,
@@ -96,7 +97,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
     setActiveConversationId,
     refreshConversations,
   } = useLayoutContext();
-  const { messages, updateMessages: setMessages, isGenerating } = useConversationFeed(activeConversationId, refreshConversations);
+  const { messages, updateMessages: setMessages, reload, isGenerating } = useConversationFeed(activeConversationId, refreshConversations);
   const [prompt, setPrompt] = useState("");
   const [parameters, setParameters] = useState(() => defaultParameters(DEFAULT_IMAGE_MODEL));
   const { size, quality, background, outputFormat, moderation, inputFidelity, imageCount, aspectRatio,
@@ -790,6 +791,28 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
         try {
           const saved = await getGenerationRecipeForRequest(clientRequestId);
           if (saved) {
+            // A lost IPC reply can leave a healthy job working or already finished.
+            const { items: [job] } = await listGenerationJobs({ generation_id: saved.generation_id, limit: 1 });
+            if (!agentMountedRef.current) return;
+            if (!job) {
+              setRecipeError(t("recipe.loadFailed"));
+              return;
+            }
+            if (job.status !== "failed" && job.status !== "interrupted") {
+              if (job.request.conversation_id === activeConversationId) {
+                await reload();
+              } else {
+                const { project_id, conversation_id } = job.request;
+                setActiveConversationId(conversation_id);
+                if (project_id === "default") {
+                  navigate(ROUTES.generate, { state: { activateConversationId: conversation_id } });
+                } else {
+                  navigate(ROUTES.projectChat(project_id, conversation_id));
+                }
+              }
+              refreshConversations();
+              return;
+            }
             await handleReuseRecipe(saved.generation_id, "generate", unknownOutcomes.current.has(clientRequestId));
             return;
           }
@@ -814,7 +837,7 @@ export default function GenerationSession({ scope, activeProjectId, activeConver
       if (!message.retryRequest) return;
       await submitGenerationRequest(message.retryRequest);
     },
-    [submitGenerationRequest, handleReuseRecipe, t],
+    [activeConversationId, reload, setActiveConversationId, navigate, refreshConversations, submitGenerationRequest, handleReuseRecipe, t],
   );
 
   const handleEditPrompt = useCallback(

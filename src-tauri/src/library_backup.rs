@@ -1,4 +1,6 @@
 use crate::storage::artifacts::{map_json_paths, transform_database_paths};
+#[cfg(test)]
+use crate::storage::TempDir;
 use crate::{
     db::Database,
     operations::{OperationGuard, Operations},
@@ -50,24 +52,6 @@ pub(crate) struct BackupInspections(Mutex<HashMap<String, (PathBuf, String, Back
 pub(crate) struct LibraryOperationResult {
     status: &'static str,
     path: Option<String>,
-}
-struct TempDir(PathBuf);
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-fn temporary(parent: &Path) -> Result<TempDir> {
-    fs::create_dir_all(parent)?;
-    let p = parent.join(format!(".backup-{}", uuid::Uuid::new_v4()));
-    let mut directory = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        directory.mode(0o700);
-    }
-    directory.create(&p)?;
-    Ok(TempDir(p))
 }
 #[cfg(test)]
 fn hash_file(path: &Path) -> Result<(u64, String)> {
@@ -435,7 +419,7 @@ fn create_archive(
     op: &OperationGuard,
     progress: &dyn Fn(&str, usize, usize),
 ) -> Result<BackupManifest> {
-    let temp = temporary(&paths.bootstrap)?;
+    let temp = crate::storage::temporary(&paths.bootstrap, "backup")?;
     let snapshot = temp.0.join("library.db");
     {
         // The maintenance permit excludes writers. A separate read connection

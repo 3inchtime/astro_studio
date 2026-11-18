@@ -22,6 +22,7 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 }
 
 const getConversationGenerations = vi.fn();
+const listGenerationJobs = vi.fn();
 const getImageModel = vi.fn();
 const getModelProviderProfiles = vi.fn();
 const navigate = vi.fn();
@@ -41,6 +42,7 @@ const generateImage = vi.fn();
 const editImage = vi.fn();
 const pickSourceImages = vi.fn();
 const onGenerationJob = vi.fn();
+const onGenerationComplete = vi.fn();
 const onGenerationFailed = vi.fn();
 const onGenerationPartial = vi.fn().mockResolvedValue(() => {});
 const createPromptFavorite = vi.fn();
@@ -145,6 +147,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../lib/api", () => ({
+  listGenerationJobs: (...args: unknown[]) => listGenerationJobs(...args),
   getModelProviderProfiles: (...args: unknown[]) => getModelProviderProfiles(...args),
   createPromptFavorite: (...args: unknown[]) => createPromptFavorite(...args),
   deleteGeneration: vi.fn(),
@@ -167,6 +170,7 @@ vi.mock("../lib/api", () => ({
     cancelPromptAgentSession(...args),
   getPromptAgentSession: (...args: unknown[]) => getPromptAgentSession(...args),
   onGenerationJob: (...args: unknown[]) => onGenerationJob(...args),
+  onGenerationComplete: (...args: unknown[]) => onGenerationComplete(...args),
   onGenerationPartial: (...args: unknown[]) => onGenerationPartial(...args),
   onGenerationFailed: (...args: unknown[]) => onGenerationFailed(...args),
   saveImageModel: (...args: unknown[]) => saveImageModel(...args),
@@ -447,6 +451,29 @@ describe("GeneratePage", () => {
     expect(generateImage.mock.calls[1][0]).toMatchObject({ prompt: "Edited prompt", sourceGenerationId: "failed-attempt" });
   });
 
+  it.each(["queued", "running", "completed", "cancelled"])(
+    "reconnects to a %s job when the original IPC reply was lost",
+    async (status) => {
+      getGenerationRecipeForRequest.mockResolvedValue({ generation_id: "saved-attempt" });
+      listGenerationJobs.mockResolvedValue({
+        items: [{ status, request: { conversation_id: "conversation-1", project_id: "project-1" } }],
+      });
+      generateImage.mockRejectedValueOnce(new Error("IPC reply lost"));
+      render(<GeneratePage />, { wrapper: TestWrapper });
+      fireEvent.change(await screen.findByPlaceholderText("Describe the image you want to generate..."), {
+        target: { value: "Only one provider request" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+      const retry = await screen.findByRole("button", { name: "Retry failed generation" });
+      const reads = getConversationGenerations.mock.calls.length;
+      fireEvent.click(retry);
+      await waitFor(() => expect(getConversationGenerations.mock.calls.length).toBeGreaterThan(reads));
+      expect(listGenerationJobs).toHaveBeenCalledWith({ generation_id: "saved-attempt", limit: 1 });
+      expect(getGenerationRecipe).not.toHaveBeenCalled();
+      expect(generateImage).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("keeps the duplicate-charge warning when an uncertain in-memory attempt has a persisted recipe", async () => {
     const failed = { version: 1, generation_id: "failed-network", provenance: "job", prompt: "Uncertain prompt", model: "gpt-image-2", request_kind: "generate", provider_profile_id: "saved-profile", source_image_paths: [], warnings: [], options: { size: "1024x1024", quality: "high", image_count: 1 } };
     getGenerationRecipeForRequest.mockResolvedValue(failed);
@@ -535,6 +562,7 @@ describe("GeneratePage", () => {
     getGenerationRecipe.mockReset();
     getGenerationRecipeForRequest.mockReset();
     getGenerationRecipeForRequest.mockResolvedValue(null);
+    listGenerationJobs.mockReset().mockResolvedValue({ items: [{ status: "failed" }] });
     listRecipeProviders.mockResolvedValue([
       { id: "saved-profile", name: "Saved Provider" },
       { id: "another", name: "Another Provider" },
@@ -544,6 +572,7 @@ describe("GeneratePage", () => {
     editImage.mockReset();
     pickSourceImages.mockReset();
     onGenerationJob.mockReset();
+    onGenerationComplete.mockReset().mockResolvedValue(vi.fn());
     onGenerationFailed.mockReset();
     createPromptFavorite.mockReset();
     createPromptFavorite.mockImplementation(async (prompt: string) => ({
@@ -1304,6 +1333,27 @@ describe("GeneratePage", () => {
       expect(getConversationGenerations).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByText("/tmp/event-generated.png")).toBeInTheDocument();
+  });
+
+  it("updates a failed legacy generation after local recovery without a job event", async () => {
+    const generation = {
+      id: "legacy-recovery", prompt: "Recovered locally", status: "failed",
+      created_at: "2026-04-26T00:00:00Z", source_image_paths: [],
+    };
+    getConversationGenerations
+      .mockResolvedValueOnce([{ generation, images: [] }])
+      .mockResolvedValueOnce([{ generation: { ...generation, status: "completed" }, images: [{
+        id: "recovered", generation_id: generation.id, file_path: "/tmp/legacy-recovered.png",
+        thumbnail_path: "/tmp/legacy-recovered.png",
+      }] }]);
+    render(<GeneratePage />, { wrapper: TestWrapper });
+    await screen.findByRole("button", { name: "Retry failed generation" });
+    const complete = onGenerationComplete.mock.calls[0]?.[0];
+    expect(complete).toBeTypeOf("function");
+    await act(async () => complete({ generation_id: generation.id, status: "completed", job_id: "modern" }));
+    expect(getConversationGenerations).toHaveBeenCalledTimes(1);
+    await act(async () => complete({ generation_id: generation.id, status: "completed" }));
+    expect(await screen.findByText("/tmp/legacy-recovered.png")).toBeInTheDocument();
   });
 
   it("resets parameters to selected model defaults and hides unsupported controls when switching models", async () => {

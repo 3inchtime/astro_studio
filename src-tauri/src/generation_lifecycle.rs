@@ -330,13 +330,17 @@ impl CancellationProbe {
         let _ = changes.wait_for(|cancelled| *cancelled).await;
     }
 
+    fn error(stage: &str) -> GenerationExecutionError {
+        GenerationExecutionError::Local {
+            code: "cancelled_by_user".to_string(),
+            sanitized_message: "The generation was cancelled".to_string(),
+            stage: stage.to_string(),
+        }
+    }
+
     pub(crate) fn checkpoint(&self, stage: &str) -> Result<(), GenerationExecutionError> {
         if self.is_cancelled() {
-            Err(GenerationExecutionError::Local {
-                code: "cancelled_by_user".to_string(),
-                sanitized_message: "The generation was cancelled".to_string(),
-                stage: stage.to_string(),
-            })
+            Err(Self::error(stage))
         } else {
             Ok(())
         }
@@ -383,11 +387,7 @@ impl ImageResponseDecoder for EngineImageResponseDecoder {
             .await
             .map_err(|_| {
                 if cancellation.is_cancelled() {
-                    GenerationExecutionError::Local {
-                        code: "cancelled_by_user".to_string(),
-                        sanitized_message: "The generation was cancelled".to_string(),
-                        stage: "response_decode".to_string(),
-                    }
+                    CancellationProbe::error("response_decode")
                 } else {
                     GenerationExecutionError::Local {
                         code: "response_decode_failed".to_string(),
@@ -2803,7 +2803,11 @@ pub(crate) async fn resume_verified_response(
         return Err(GenerationExecutionError::response_artifact());
     }
     cancellation.checkpoint("response_decode")?;
-    let images = decoder.decode_and_download(response, cancellation).await?;
+    let images = tokio::select! {
+        biased;
+        _ = cancellation.until_cancelled() => return Err(CancellationProbe::error("response_decode")),
+        result = decoder.decode_and_download(response, cancellation) => result?,
+    };
     cancellation.checkpoint("image_staging")?;
     file_store
         .stage_images(snapshot, images, cancellation)
@@ -3052,6 +3056,16 @@ pub(crate) fn prepare_generation_job(
     }
     let active_profile =
         providers::resolve_profile(db, &model, request.provider_profile_id.as_deref());
+    if let Some(expected) = &request.confirmed_profile_fingerprint {
+        let profile = active_profile.as_ref().map_err(|_| AppError::Validation {
+            message: "Confirmed test provider is unavailable.".into(),
+        })?;
+        if crate::provider_diagnostics::profile_fingerprint(&model, profile)? != *expected {
+            return Err(AppError::Validation {
+                message: "Provider changed. Review a new test plan before generating.".into(),
+            });
+        }
+    }
     let (provider_kind, provider_profile_id, endpoint_snapshot, status, finished_at, error_code) =
         match active_profile {
             Ok(profile) => {

@@ -62,6 +62,49 @@ fn canvas_generation_status_returns_exact_images_and_failure() {
 }
 
 #[test]
+fn canvas_generation_status_respects_the_source_of_new_jobs() {
+    let (db, db_path, document_path) = status_fixture();
+    {
+        let conn = db.conn.lock().unwrap();
+        insert_status_job(&conn, "running");
+        for (kind, source, expected) in [
+            ("edit", r#"{"request_fingerprint":"chat"}"#, false),
+            (
+                "canvas",
+                r#"{"document_id":"other-canvas","request_fingerprint":"new-job"}"#,
+                false,
+            ),
+            (
+                "canvas",
+                r#"{"document_id":"status-canvas","request_fingerprint":"new-job"}"#,
+                true,
+            ),
+            ("edit", "{}", true),
+            (
+                "edit",
+                r#"{"execution_version":1,"id":"canvas-request"}"#,
+                true,
+            ), // v20 saved canvas edits as unscoped jobs.
+        ] {
+            conn.execute(
+                "UPDATE generation_jobs SET source_kind=?1, source_ref_json=?2",
+                params![kind, source],
+            )
+            .unwrap();
+            assert_eq!(
+                read_canvas_generation_status(&conn, "status-canvas", "canvas-request")
+                    .unwrap()
+                    .is_some(),
+                expected
+            );
+        }
+    }
+    drop(db);
+    fs::remove_file(document_path).unwrap();
+    remove_temp_test_db(db_path);
+}
+
+#[test]
 fn canvas_generation_status_rejects_cross_project_results() {
     let (db, db_path, document_path) = status_fixture();
     {

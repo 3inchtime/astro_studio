@@ -153,7 +153,7 @@ export default function GalleryPage() {
 
   const hasMore = results.length < total;
   const loadMoreRef = useInfiniteScroll({
-    enabled: results.length > 0 && !loadError && !lightbox,
+    enabled: !loadError && !lightbox,
     hasMore,
     isLoading,
     onLoadMore: () => {
